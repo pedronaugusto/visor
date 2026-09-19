@@ -1,4 +1,4 @@
-# morse — the image ci/linux.sh runs the suite in.
+# visor — the image ci/linux.sh runs the suite in.
 #
 # Debian rather than Alpine because the Zig releases ziglang.org publishes are
 # glibc builds; nothing here is linked against anything else, so the base only

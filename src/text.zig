@@ -294,3 +294,23 @@ test "width never overflows on a very long string" {
     const long = "a" ** 1024;
     try testing.expectEqual(@as(u16, 1024), width(long, .wcwidth));
 }
+
+/// Whether the two width models disagree about a cluster.
+///
+/// One printable ASCII byte is one column under every model, which is the
+/// fast path and almost every cell. Beyond it, measuring by codepoint and
+/// measuring by cluster are compared: a cluster they disagree about is a
+/// cluster the terminal and this package may put in different columns, and a
+/// row holding one is repainted rather than diffed.
+pub fn disagrees(grapheme: []const u8) bool {
+    if (grapheme.len == 1 and grapheme[0] >= 0x20 and grapheme[0] < 0x7f) return false;
+    return graphemeWidth(grapheme, .wcwidth) != graphemeWidth(grapheme, .unicode);
+}
+
+test "the canonical disagreement is the warning sign with a presentation selector" {
+    // U+26A0 followed by VS16: a narrow dingbat and a zero-width combiner to
+    // one model, a wide emoji to the other.
+    try testing.expect(disagrees("\u{26a0}\u{fe0f}"));
+    try testing.expect(!disagrees("a"));
+    try testing.expect(!disagrees("\u{4e2d}"));
+}
