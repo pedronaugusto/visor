@@ -275,3 +275,37 @@ test "a month knows how many rows it needs" {
     // August 2026 starts on a Saturday, so it runs into a sixth week.
     try testing.expectEqual(@as(u16, 8), (Calendar{ .year = 2026, .month = 8 }).rowsNeeded());
 }
+
+test "every day of every month is drawn once and only once" {
+    var month: u8 = 1;
+    while (month <= 12) : (month += 1) {
+        for ([_]Weekday{ .monday, .sunday }) |starts_on| {
+            const c: Calendar = .{
+                .year = 2026,
+                .month = month,
+                .starts_on = starts_on,
+                .show_header = false,
+                .show_weekdays = false,
+            };
+            var h: Harness = try .init(testing.allocator, Calendar.columns, c.rowsNeeded());
+            defer h.deinit();
+            try c.draw(h.window());
+            const grid = try h.frame();
+
+            var seen: [32]u8 = @splat(0);
+            var it = std.mem.tokenizeAny(u8, grid, " \n");
+            while (it.next()) |word| {
+                const day = try std.fmt.parseInt(u8, word, 10);
+                seen[day] += 1;
+            }
+            var day: u8 = 1;
+            while (day <= daysInMonth(2026, month)) : (day += 1) {
+                try testing.expectEqual(@as(u8, 1), seen[day]);
+            }
+            var beyond: u8 = daysInMonth(2026, month) + 1;
+            while (beyond < seen.len) : (beyond += 1) {
+                try testing.expectEqual(@as(u8, 0), seen[beyond]);
+            }
+        }
+    }
+}

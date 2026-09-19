@@ -242,3 +242,36 @@ test "the columns are aligned where the table says" {
         \\
     );
 }
+
+test "whatever the window, the selected row is under the header and on screen" {
+    const many = [_]Row{
+        .{ .cells = &.{"0"} }, .{ .cells = &.{"1"} }, .{ .cells = &.{"2"} },
+        .{ .cells = &.{"3"} }, .{ .cells = &.{"4"} }, .{ .cells = &.{"5"} },
+    };
+    const t: Table = .{
+        .rows = &many,
+        .widths = &.{.{ .fill = 1 }},
+        .header = .{ .cells = &.{"n"} },
+    };
+    var window_rows: u16 = 2;
+    while (window_rows <= many.len + 2) : (window_rows += 1) {
+        var state: Table.State = .{};
+        for (0..many.len) |chosen| {
+            var h: Harness = try .init(testing.allocator, 4, window_rows);
+            defer h.deinit();
+            state.select(chosen);
+            try t.draw(h.window(), &state);
+            _ = try h.frame();
+
+            // The header keeps its row whatever the selection is.
+            try testing.expectEqualStrings("n", h.term.screen().textAt(0, 0));
+            try testing.expect(chosen >= state.offset);
+            try testing.expect(chosen < state.offset + window_rows - 1);
+            const row: u16 = @intCast(chosen - state.offset + 1);
+            try testing.expectEqualStrings(
+                many[chosen].cells[0],
+                h.term.screen().textAt(0, row),
+            );
+        }
+    }
+}
