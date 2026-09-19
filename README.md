@@ -127,9 +127,11 @@ One fetch. `morse` comes with it, re-exported as `visor.morse`, and is also
 available as `visor_dep.module("morse")` for a program that wants the writers
 on their own.
 
-Two dependencies, both pinned: [`morse`](https://github.com/pedronaugusto/morse)
-for every escape sequence written and every reply parsed, and `uucode` for
-grapheme segmentation and width. `uucode` builds its tables at build time, so
+Two dependencies: [`morse`](https://github.com/pedronaugusto/morse) for every
+escape sequence written and every reply parsed, and `uucode` for grapheme
+segmentation and width. `uucode` is pinned by commit. `morse` is a path
+dependency while 0.4.0 is unreleased, and becomes a pinned commit the day it
+is tagged. `uucode` builds its tables at build time, so
 visor asks for six fields and no more:
 
 | Field | For |
