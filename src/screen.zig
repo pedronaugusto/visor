@@ -109,6 +109,11 @@ pub const Screen = struct {
             s.damageAll();
             return;
         }
+        // Before anything is committed, so that a resize either happens or
+        // leaves the screen exactly as it was. The cells that survive carry
+        // the new offsets with them.
+        try s.compactPool(gpa);
+
         const cells = try gpa.alloc(Cell, size.area());
         errdefer gpa.free(cells);
         @memset(cells, .blank(.{}));
@@ -135,6 +140,49 @@ pub const Screen = struct {
             }
         }
         s.clampCursor();
+        s.damageAll();
+    }
+
+    /// Rebuilds the grapheme pool and the link table around what the grid
+    /// still shows, giving back the bytes of everything it does not.
+    ///
+    /// Interning keeps a grapheme for as long as the screen lives, which is
+    /// the promise that makes a cell's bytes valid for as long as the cell
+    /// is — and which means a program showing a stream of different emoji,
+    /// or any user-supplied text, grows the pool without bound. This is the
+    /// sweep, and `resize` does it for free because it was going to allocate
+    /// and damage everything anyway.
+    ///
+    /// It is a call, not a policy: `draw` never allocates and nothing is
+    /// freed behind a live cell.
+    pub fn compactPool(s: *Screen, gpa: Allocator) Allocator.Error!void {
+        s.sameAllocator(gpa);
+        var graphemes: pool.Graphemes = .{};
+        errdefer graphemes.deinit(gpa);
+        var links: pool.Links = .{};
+        errdefer links.deinit(gpa);
+
+        // Everything the grid still shows, into the new pools. Nothing is
+        // written back until this has succeeded, so a failure here leaves
+        // the screen exactly as it was.
+        for (s.cells) |*c| {
+            if (c.text.isPooled()) _ = try graphemes.intern(gpa, s.graphemes.slice(&c.text));
+            if (s.links.get(c.link)) |t| _ = try links.intern(gpa, t.uri, t.params);
+        }
+        // And now the cells, which cannot fail: everything they name is
+        // already in the new pools.
+        for (s.cells) |*c| {
+            if (c.text.isPooled()) {
+                c.text = graphemes.intern(gpa, s.graphemes.slice(&c.text)) catch unreachable;
+            }
+            if (s.links.get(c.link)) |t| {
+                c.link = links.intern(gpa, t.uri, t.params) catch unreachable;
+            }
+        }
+        s.graphemes.deinit(gpa);
+        s.links.deinit(gpa);
+        s.graphemes = graphemes;
+        s.links = links;
         s.damageAll();
     }
 
@@ -693,4 +741,58 @@ test "the screen survives every allocation failing in turn" {
             try s.resize(gpa, .{ .cols = 4, .rows = 2 });
         }
     }.run, .{});
+}
+
+test "compacting the pool keeps what is on screen and drops what is not" {
+    var s = try made(8, 2);
+    defer s.deinit(testing.allocator);
+
+    var buf: [24]u8 = undefined;
+    for (0..64) |i| {
+        const long = try std.fmt.bufPrint(&buf, "\u{1f468}\u{200d}{d:0>4}", .{i});
+        try s.write(0, 0, long, .{}, .none);
+        _ = try s.link(testing.allocator, long, "");
+    }
+    const kept = "\u{1f468}\u{200d}0063";
+    try testing.expectEqualStrings(kept, s.textAt(0, 0));
+    try testing.expect(s.graphemes.len() > kept.len);
+    try testing.expectEqual(@as(usize, 64), s.links.count());
+
+    try s.compactPool(testing.allocator);
+    try testing.expectEqualStrings(kept, s.textAt(0, 0));
+    try testing.expectEqual(@as(usize, kept.len), s.graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s.links.count());
+    try checkInvariants(&s);
+}
+
+test "compacting keeps the links cells still point at" {
+    var s = try made(8, 1);
+    defer s.deinit(testing.allocator);
+
+    const stale = try s.link(testing.allocator, "https://example.invalid", "id=0");
+    _ = stale;
+    const live = try s.link(testing.allocator, "https://ziglang.org", "id=1");
+    try s.write(0, 0, "z", .{}, live);
+    try testing.expectEqual(@as(usize, 2), s.links.count());
+
+    try s.compactPool(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), s.links.count());
+    const now = s.readCell(0, 0).?.link;
+    try testing.expectEqualStrings("https://ziglang.org", s.target(now).?.uri);
+    try testing.expectEqualStrings("id=1", s.target(now).?.params);
+}
+
+test "a resize rebuilds the pool rather than growing it forever" {
+    var s = try made(4, 1);
+    defer s.deinit(testing.allocator);
+
+    var buf: [24]u8 = undefined;
+    for (0..32) |i| {
+        const long = try std.fmt.bufPrint(&buf, "\u{1f468}\u{200d}{d:0>4}", .{i});
+        try s.write(0, 0, long, .{}, .none);
+    }
+    const before = s.graphemes.len();
+    try s.resize(testing.allocator, .{ .cols = 6, .rows = 2 });
+    try testing.expect(s.graphemes.len() < before);
+    try testing.expectEqualStrings("\u{1f468}\u{200d}0031", s.textAt(0, 0));
 }

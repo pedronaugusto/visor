@@ -193,3 +193,137 @@ fn rowsEqual(a: []const Cell, b: []const Cell, caps: Caps) bool {
     for (a, b) |x, y| if (!render.visible(x, caps).eql(y)) return false;
     return true;
 }
+
+const testing = std.testing;
+
+/// A screen and a renderer that have already agreed on a first frame.
+const Fixture = struct {
+    gpa: std.mem.Allocator,
+    screen: Screen,
+    renderer: Renderer,
+    out: std.Io.Writer.Allocating,
+    caps: Caps,
+
+    fn init(gpa: std.mem.Allocator, cols: u16, rows: u16) !Fixture {
+        const size: geomSize = .{ .cols = cols, .rows = rows };
+        var s: Screen = try .init(gpa, size);
+        errdefer s.deinit(gpa);
+        s.method = .unicode;
+        var r: Renderer = try .init(gpa, size);
+        errdefer r.deinit(gpa);
+        r.shown = false;
+        r.cursor = .{ .col = 0, .row = 0 };
+        return .{
+            .gpa = gpa,
+            .screen = s,
+            .renderer = r,
+            .out = .init(gpa),
+            .caps = .{ .width_method = .unicode, .osc8 = true, .scroll_detection = true },
+        };
+    }
+
+    fn deinit(f: *Fixture) void {
+        f.screen.deinit(f.gpa);
+        f.renderer.deinit(f.gpa);
+        f.out.deinit();
+    }
+
+    fn draw(f: *Fixture) !Renderer.Stats {
+        f.out.clearRetainingCapacity();
+        return f.renderer.draw(&f.out.writer, &f.screen, f.caps);
+    }
+
+    /// Numbers down the left of the screen, so a moved row is obvious.
+    fn number(f: *Fixture) !void {
+        var row: u16 = 0;
+        while (row < f.screen.size.rows) : (row += 1) {
+            var buf: [8]u8 = undefined;
+            const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
+            for (text, 0..) |c, i| try f.screen.write(@intCast(i), row, &.{c}, .{}, .none);
+        }
+    }
+};
+
+const geomSize = @import("geom.zig").Size;
+
+test "a whole screen scrolled up is one sequence and not a repaint" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    try f.number();
+    _ = try f.draw();
+
+    f.screen.scroll(.fromSize(f.screen.size), 1);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 12), stats.scrolled);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[1S") != null);
+    // No scrolling region: the band is the whole screen.
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), ";12r") == null);
+    try testing.expect(stats.bytes < 24);
+}
+
+test "a whole screen scrolled down is the mirror" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    try f.number();
+    _ = try f.draw();
+
+    f.screen.scroll(.fromSize(f.screen.size), -2);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 12), stats.scrolled);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[2T") != null);
+    try testing.expect(stats.bytes < 24);
+}
+
+test "a band of rows scrolled inside the screen sets a region and puts it back" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    try f.number();
+    _ = try f.draw();
+
+    f.screen.scroll(.{ .col = 0, .row = 2, .cols = 10, .rows = 8 }, 1);
+    const stats = try f.draw();
+    try testing.expect(stats.scrolled > 0);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[3;10r") != null);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[1S") != null);
+    try testing.expect(std.mem.endsWith(u8, f.out.written(), "\x1b[r") or
+        std.mem.indexOf(u8, f.out.written(), "\x1b[r") != null);
+}
+
+test "a frame that is not a scroll is not written as one" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    try f.number();
+    _ = try f.draw();
+
+    try f.screen.write(5, 3, "x", .{}, .none);
+    try f.screen.write(6, 7, "y", .{}, .none);
+    try f.screen.write(7, 9, "z", .{}, .none);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 0), stats.scrolled);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "S") == null);
+}
+
+test "the detector is off unless the caller asks for it" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    f.caps.scroll_detection = false;
+    try f.number();
+    _ = try f.draw();
+
+    f.screen.scroll(.fromSize(f.screen.size), 1);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 0), stats.scrolled);
+}
+
+test "a scroll the rows do not really make is refused" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    try f.number();
+    _ = try f.draw();
+
+    // Every row changes, but not by moving.
+    var row: u16 = 0;
+    while (row < 12) : (row += 1) try f.screen.write(6, row, "!", .{}, .none);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 0), stats.scrolled);
+}

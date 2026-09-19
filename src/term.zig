@@ -27,6 +27,7 @@ const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
 const Link = cellmod.Link;
 const Size = geom.Size;
+const Color = cellmod.Color;
 const Style = cellmod.Style;
 const Writer = std.Io.Writer;
 
@@ -920,4 +921,337 @@ fn colonColor(subs: []const []const u8) ?cellmod.Color {
         },
         else => return null,
     }
+}
+
+const testing = std.testing;
+
+/// A terminal of a size, with a helper for feeding it a string.
+fn made(cols: u16, rows: u16) !Term {
+    var t: Term = try .init(testing.allocator, .{ .cols = cols, .rows = rows });
+    t.setMethod(.unicode);
+    return t;
+}
+
+fn textAt(t: *const Term, col: u16, row: u16) []const u8 {
+    return t.screen().textAt(col, row);
+}
+
+fn rowText(t: *const Term, row: u16, buf: []u8) []const u8 {
+    var n: usize = 0;
+    var col: u16 = 0;
+    while (col < t.scr.size.cols) : (col += 1) {
+        const g = t.screen().textAt(col, row);
+        @memcpy(buf[n..][0..g.len], g);
+        n += g.len;
+    }
+    return buf[0..n];
+}
+
+test "plain text lands where the cursor is" {
+    var t = try made(8, 2);
+    defer t.deinit();
+    try t.feed("\x1b[2;3Hhi");
+    try testing.expectEqualStrings("h", textAt(&t, 2, 1));
+    try testing.expectEqualStrings("i", textAt(&t, 3, 1));
+}
+
+test "every movement this package writes is understood" {
+    var t = try made(20, 10);
+    defer t.deinit();
+    try t.feed("\x1b[5;5H");
+    try testing.expectEqual(@as(u16, 4), t.col);
+    try testing.expectEqual(@as(u16, 4), t.row);
+    try t.feed("\x1b[2A");
+    try testing.expectEqual(@as(u16, 2), t.row);
+    try t.feed("\x1b[3B");
+    try testing.expectEqual(@as(u16, 5), t.row);
+    try t.feed("\x1b[4C");
+    try testing.expectEqual(@as(u16, 8), t.col);
+    try testing.expectEqual(@as(u16, 5), t.row);
+    try t.feed("\x1b[2D");
+    try testing.expectEqual(@as(u16, 6), t.col);
+    try t.feed("\x1b[9G");
+    try testing.expectEqual(@as(u16, 8), t.col);
+    try t.feed("\x1b[3d");
+    try testing.expectEqual(@as(u16, 2), t.row);
+    try t.feed("\r");
+    try testing.expectEqual(@as(u16, 0), t.col);
+    try t.feed("\x1b[2E");
+    try testing.expectEqual(@as(u16, 4), t.row);
+    try t.feed("\x1b[1F");
+    try testing.expectEqual(@as(u16, 3), t.row);
+    try t.feed("ab\x08");
+    try testing.expectEqual(@as(u16, 1), t.col);
+}
+
+test "a movement past the edge is clamped rather than wrapped" {
+    var t = try made(4, 3);
+    defer t.deinit();
+    try t.feed("\x1b[99;99H");
+    try testing.expectEqual(@as(u16, 3), t.col);
+    try testing.expectEqual(@as(u16, 2), t.row);
+    try t.feed("\x1b[99A\x1b[99D");
+    try testing.expectEqual(@as(u16, 0), t.col);
+    try testing.expectEqual(@as(u16, 0), t.row);
+}
+
+test "every SGR this package writes comes back as the style it was" {
+    const cases = [_]struct { bytes: []const u8, style: Style }{
+        .{ .bytes = "\x1b[1m", .style = .{ .bold = true } },
+        .{ .bytes = "\x1b[2m", .style = .{ .dim = true } },
+        .{ .bytes = "\x1b[3m", .style = .{ .italic = true } },
+        .{ .bytes = "\x1b[4m", .style = .{ .underline = .single } },
+        .{ .bytes = "\x1b[4:3m", .style = .{ .underline = .curly } },
+        .{ .bytes = "\x1b[4:5m", .style = .{ .underline = .dashed } },
+        .{ .bytes = "\x1b[5m", .style = .{ .blink = true } },
+        .{ .bytes = "\x1b[7m", .style = .{ .reverse = true } },
+        .{ .bytes = "\x1b[8m", .style = .{ .hidden = true } },
+        .{ .bytes = "\x1b[9m", .style = .{ .strikethrough = true } },
+        .{ .bytes = "\x1b[53m", .style = .{ .overline = true } },
+        .{ .bytes = "\x1b[31m", .style = .{ .fg = .{ .ansi = .red } } },
+        .{ .bytes = "\x1b[96m", .style = .{ .fg = .{ .ansi = .bright_cyan } } },
+        .{ .bytes = "\x1b[44m", .style = .{ .bg = .{ .ansi = .blue } } },
+        .{ .bytes = "\x1b[102m", .style = .{ .bg = .{ .ansi = .bright_green } } },
+        .{ .bytes = "\x1b[38;5;137m", .style = .{ .fg = .{ .palette = 137 } } },
+        .{ .bytes = "\x1b[48;5;7m", .style = .{ .bg = .{ .palette = 7 } } },
+        .{ .bytes = "\x1b[38;2;1;2;3m", .style = .{ .fg = .{ .rgb = .{ .r = 1, .g = 2, .b = 3 } } } },
+        .{ .bytes = "\x1b[48;2;9;8;7m", .style = .{ .bg = .{ .rgb = .{ .r = 9, .g = 8, .b = 7 } } } },
+        .{ .bytes = "\x1b[58:5:12m", .style = .{ .underline_color = .{ .palette = 12 } } },
+        .{
+            .bytes = "\x1b[58:2::4:5:6m",
+            .style = .{ .underline_color = .{ .rgb = .{ .r = 4, .g = 5, .b = 6 } } },
+        },
+    };
+    for (cases) |case| {
+        var t = try made(4, 1);
+        defer t.deinit();
+        try t.feed(case.bytes);
+        try testing.expectEqual(case.style, t.style);
+        try t.feed("\x1b[0m");
+        try testing.expectEqual(Style{}, t.style);
+    }
+}
+
+test "a style diff with several parameters is read as one" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("\x1b[1;3;4:2;31;48;2;7;7;7m");
+    try testing.expectEqual(Style{
+        .bold = true,
+        .italic = true,
+        .underline = .double,
+        .fg = .{ .ansi = .red },
+        .bg = .{ .rgb = .{ .r = 7, .g = 7, .b = 7 } },
+    }, t.style);
+    try t.feed("\x1b[22;23;24;39;49m");
+    try testing.expectEqual(Style{}, t.style);
+}
+
+test "an erase to the end of a row leaves blanks and nothing else" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("abcdef\x1b[1;3H\x1b[0K");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("ab    ", rowText(&t, 0, &buf));
+}
+
+test "erase chars erases without moving anything" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("abcdef\x1b[1;2H\x1b[3X");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("a   ef", rowText(&t, 0, &buf));
+    try testing.expectEqual(@as(u16, 1), t.col);
+}
+
+test "an erase takes the background the terminal is writing in" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("\x1b[41m\x1b[2K");
+    for (0..4) |col| {
+        try testing.expectEqual(
+            Color{ .ansi = .red },
+            t.screen().readCell(@intCast(col), 0).?.style().bg,
+        );
+    }
+}
+
+test "a scroll region scrolls and the rest of the screen stays" {
+    var t = try made(4, 6);
+    defer t.deinit();
+    for (0..6) |r| {
+        try t.feed("\x1b[");
+        var buf: [8]u8 = undefined;
+        try t.feed(try std.fmt.bufPrint(&buf, "{d};1H", .{r + 1}));
+        try t.feed(&.{'a' + @as(u8, @intCast(r))});
+    }
+    try t.feed("\x1b[2;5r\x1b[1S\x1b[r");
+    try testing.expectEqualStrings("a", textAt(&t, 0, 0));
+    try testing.expectEqualStrings("c", textAt(&t, 0, 1));
+    try testing.expectEqualStrings("d", textAt(&t, 0, 2));
+    try testing.expectEqualStrings("e", textAt(&t, 0, 3));
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 4));
+    try testing.expectEqualStrings("f", textAt(&t, 0, 5));
+}
+
+test "scroll down is the mirror of scroll up" {
+    var t = try made(4, 4);
+    defer t.deinit();
+    try t.feed("a\x1b[2;1Hb\x1b[3;1Hc\x1b[4;1Hd");
+    try t.feed("\x1b[2T");
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 1));
+    try testing.expectEqualStrings("a", textAt(&t, 0, 2));
+    try testing.expectEqualStrings("b", textAt(&t, 0, 3));
+}
+
+test "insert and delete move a row sideways" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    var buf: [32]u8 = undefined;
+    try t.feed("abcdef\x1b[1;2H\x1b[2@");
+    try testing.expectEqualStrings("a  bcd", rowText(&t, 0, &buf));
+    try t.feed("\x1b[1;2H\x1b[2P");
+    try testing.expectEqualStrings("abcd  ", rowText(&t, 0, &buf));
+}
+
+test "insert and delete move rows up and down" {
+    var t = try made(4, 4);
+    defer t.deinit();
+    try t.feed("a\x1b[2;1Hb\x1b[3;1Hc\x1b[4;1Hd");
+    try t.feed("\x1b[2;1H\x1b[1L");
+    try testing.expectEqualStrings("a", textAt(&t, 0, 0));
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 1));
+    try testing.expectEqualStrings("b", textAt(&t, 0, 2));
+    try t.feed("\x1b[2;1H\x1b[1M");
+    try testing.expectEqualStrings("b", textAt(&t, 0, 1));
+}
+
+test "a wide grapheme takes two columns and the second one never draws" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("a\u{4e2d}b");
+    try testing.expectEqualStrings("a", textAt(&t, 0, 0));
+    try testing.expectEqualStrings("\u{4e2d}", textAt(&t, 1, 0));
+    try testing.expect(t.screen().readCell(2, 0).?.isTail());
+    try testing.expectEqualStrings("b", textAt(&t, 3, 0));
+}
+
+test "text past the last column wraps to the next row" {
+    var t = try made(3, 2);
+    defer t.deinit();
+    try t.feed("abcd");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("abc", rowText(&t, 0, &buf));
+    try testing.expectEqualStrings("d  ", rowText(&t, 1, &buf));
+}
+
+test "a wide grapheme that does not fit leaves a spacer and goes to the next row" {
+    var t = try made(4, 2);
+    defer t.deinit();
+    try t.feed("abc\u{4e2d}");
+    try testing.expectEqual(Cell.Kind.spacer_head, t.screen().readCell(3, 0).?.shape.kind);
+    try testing.expectEqualStrings("\u{4e2d}", textAt(&t, 0, 1));
+}
+
+test "a link opens and closes and its parameters come through" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\ab\x1b]8;;\x1b\\c");
+    const link = t.screen().readCell(0, 0).?.link;
+    try testing.expect(link != .none);
+    try testing.expectEqualStrings("https://ziglang.org", t.screen().target(link).?.uri);
+    try testing.expectEqualStrings("id=7", t.screen().target(link).?.params);
+    try testing.expectEqual(link, t.screen().readCell(1, 0).?.link);
+    try testing.expectEqual(cellmod.Link.none, t.screen().readCell(2, 0).?.link);
+}
+
+test "the cursor's visibility and shape are read off the wire" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("\x1b[?25h");
+    try testing.expect(t.screen().cursor.visible);
+    try t.feed("\x1b[?25l");
+    try testing.expect(!t.screen().cursor.visible);
+    try t.feed("\x1b[6 q");
+    try testing.expectEqual(morse.CursorShape.bar, t.screen().cursor.shape);
+}
+
+test "a graphics command is recorded and draws nothing" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("ab\x1b_Ga=p,i=1,p=1\x1b\\c");
+    try testing.expectEqual(@as(usize, 1), t.graphics.items.len);
+    try testing.expectEqualStrings("Ga=p,i=1,p=1", t.graphics.items[0]);
+    try testing.expectEqualStrings("c", textAt(&t, 2, 0));
+}
+
+test "a sequence split across two feeds is held until the rest arrives" {
+    var t = try made(8, 2);
+    defer t.deinit();
+    try t.feed("\x1b[2;");
+    try testing.expectEqual(@as(u16, 0), t.row);
+    try t.feed("3Hx");
+    try testing.expectEqualStrings("x", textAt(&t, 2, 1));
+}
+
+test "a codepoint split across two feeds is held until the rest arrives" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    const wide = "\u{4e2d}";
+    try t.feed(wide[0..1]);
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
+    try t.feed(wide[1..]);
+    try testing.expectEqualStrings(wide, textAt(&t, 0, 0));
+}
+
+test "an unrecognised sequence is dropped rather than guessed at" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    try t.feed("a\x1b[?1000h\x1b[>4;2mb\x1b]0;a title\x07c");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("abc     ", rowText(&t, 0, &buf));
+}
+
+test "a saved cursor comes back where it was" {
+    var t = try made(8, 2);
+    defer t.deinit();
+    try t.feed("\x1b[2;4H\x1b[1m\x1b7\x1b[1;1H\x1b[0m\x1b8x");
+    try testing.expectEqualStrings("x", textAt(&t, 3, 1));
+    try testing.expect(t.screen().readCell(3, 1).?.style().bold);
+}
+
+test "the dump is one row a line and a wide grapheme takes its two columns" {
+    var t = try made(4, 2);
+    defer t.deinit();
+    try t.feed("a\u{4e2d}b");
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try t.dump(&out.writer);
+    try testing.expectEqualStrings("a\u{4e2d}b\n    \n", out.written());
+}
+
+test "the style dump names every style it used" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("\x1b[31ma\x1b[0mb");
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try t.dumpStyles(&out.writer);
+    try testing.expectEqualStrings(
+        \\# 0 fg=red bg=default
+        \\# 1 fg=default bg=default
+        \\0111
+        \\
+    , out.written());
+}
+
+test "comparing two screens names the first cell that differs" {
+    var a: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 1 });
+    defer a.deinit(testing.allocator);
+    var b: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 1 });
+    defer b.deinit(testing.allocator);
+    try expectScreensEqual(&a, &b);
+    try a.write(1, 0, "x", .{}, .none);
+    try testing.expectError(error.TestExpectedEqual, expectScreensEqual(&a, &b));
 }

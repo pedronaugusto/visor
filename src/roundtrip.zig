@@ -1,13 +1,26 @@
 //! The property this package is built around: what `draw` writes, fed back
 //! through `Term`, is the screen it was given.
 //!
-//! Random grid operations, drawn, parsed by the emulator, compared. Then
-//! drawn again, and the second draw must write nothing at all, which is
-//! idempotence; then every row damaged by hand and drawn a third time, which
-//! must also write nothing, because the previous frame really is what the
-//! terminal holds and not merely what the damage map said. One generator
-//! covers the cursor arithmetic, the style diff, the wide graphemes, the
-//! links, the erases and the scrolls at once.
+//! Random grid operations, drawn, parsed by the emulator, compared. Four
+//! properties come out of the one generator, and each is a different bug:
+//!
+//! - **The terminal shows the screen.** Every cell, read by column and
+//!   including the covered column of a wide grapheme, because a dump of the
+//!   grid as a string is exactly where that column goes missing.
+//! - **Drawing again writes nothing.** Then every row damaged by hand and
+//!   drawn a third time, which must also write nothing: the previous frame
+//!   really is what the terminal holds, and not merely what the damage map
+//!   said.
+//! - **A repaint recovers from anything.** The previous frame is corrupted
+//!   on purpose and `repaint` called; the terminal must come back to the
+//!   screen. This is what makes the escape hatch worth having.
+//! - **Incremental equals a repaint.** A second terminal is given one full
+//!   repaint of the final screen, and the two terminals must agree.
+//!
+//! All four run twice, against a terminal measuring by codepoint and a
+//! terminal measuring by cluster, because the rule that repaints a drifting
+//! row exists for the case where two width models disagree, and a harness
+//! with one width model cannot produce the input it defends against.
 //!
 //! The same generator checks the grid's own invariants after every
 //! operation, so a damage map that under-reports fails here rather than once
@@ -18,22 +31,33 @@ const std = @import("std");
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const render = @import("render.zig");
+const textmod = @import("text.zig");
+const term = @import("term.zig");
 const Caps = @import("caps.zig").Caps;
 const Cell = cellmod.Cell;
 const Renderer = render.Renderer;
 const Screen = @import("screen.zig").Screen;
-const Term = @import("term.zig").Term;
-const term = @import("term.zig");
+const Term = term.Term;
 
 const Allocator = std.mem.Allocator;
 const Smith = std.testing.Smith;
 const testing = std.testing;
 
 /// The graphemes the generator draws from: ASCII, a combining pair, a wide
-/// one, and a cluster too long to live in a cell.
+/// one, a cluster too long to live in a cell, and the one the two width
+/// models disagree about.
 const alphabet = [_][]const u8{
-    "a",                          "b",                                           " ", "~", "\u{e9}", "e\u{301}", "\u{4e2d}", "\u{ff21}",
-    "\u{1f469}\u{200d}\u{1f680}", "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
+    "a",
+    "b",
+    " ",
+    "~",
+    "\u{e9}",
+    "e\u{301}",
+    "\u{4e2d}",
+    "\u{ff21}",
+    "\u{26a0}\u{fe0f}",
+    "\u{1f469}\u{200d}\u{1f680}",
+    "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
 };
 
 /// The styles it draws from: enough to exercise every arm of the colour
@@ -67,10 +91,10 @@ const Harness = struct {
     out: std.Io.Writer.Allocating,
     caps: Caps,
 
-    fn init(gpa: Allocator, size: geom.Size) !Harness {
+    fn init(gpa: Allocator, size: geom.Size, method: textmod.Method) !Harness {
         var s: Screen = try .init(gpa, size);
         errdefer s.deinit(gpa);
-        s.method = .unicode;
+        s.method = method;
         var r: Renderer = try .init(gpa, size);
         errdefer r.deinit(gpa);
         return .{
@@ -78,7 +102,13 @@ const Harness = struct {
             .screen = s,
             .renderer = r,
             .out = .init(gpa),
-            .caps = .{ .width_method = .unicode, .osc8 = true, .truecolor = true },
+            .caps = .{
+                .width_method = method,
+                .osc8 = true,
+                .truecolor = true,
+                .sync = true,
+                .scroll_detection = true,
+            },
         };
     }
 
@@ -90,7 +120,7 @@ const Harness = struct {
 
     /// One frame: draw, feed the bytes to a terminal that started blank and
     /// was fed every frame before it, and compare.
-    fn frame(h: *Harness, t: *Term) !render.Renderer.Stats {
+    fn frame(h: *Harness, t: *Term) !Renderer.Stats {
         h.out.clearRetainingCapacity();
         const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
         try testing.expectEqual(h.out.written().len, stats.bytes);
@@ -111,8 +141,7 @@ fn checkGrid(s: *const Screen) !void {
             try testing.expect(std.mem.allEqual(u8, &c._reserved, 0));
             if (c.isTail()) {
                 try testing.expect(col > 0);
-                const head = s.cells[s.index(col - 1, @intCast(r))];
-                try testing.expect(head.shape.kind == .wide);
+                try testing.expect(s.cells[s.index(col - 1, @intCast(r))].shape.kind == .wide);
             } else {
                 sum += c.width();
                 if (c.shape.kind == .wide) {
@@ -145,7 +174,8 @@ fn checkDamage(s: *const Screen, before: []const Cell) !void {
             var any = false;
             var c = sp.first;
             while (c <= sp.last) : (c += 1) {
-                if (!s.cells[s.index(c, @intCast(r))].eql(before[s.index(c, @intCast(r))])) any = true;
+                const i = s.index(c, @intCast(r));
+                if (!s.cells[i].eql(before[i])) any = true;
             }
             if (!any) return error.DamageOverReported;
         }
@@ -178,8 +208,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
         },
         5 => {
             const rect = randomRect(smith, cols, rows);
-            const n = smith.valueRangeAtMost(i32, -3, 3);
-            s.scroll(rect, n);
+            s.scroll(rect, smith.valueRangeAtMost(i32, -3, 3));
         },
         6 => {
             s.cursor.visible = smith.value(bool);
@@ -203,16 +232,18 @@ fn randomRect(smith: *Smith, cols: u16, rows: u16) geom.Rect {
     };
 }
 
-/// The property, once, over a generated sequence of frames.
-fn roundTrip(gpa: Allocator, smith: *Smith) !void {
-    const cols: u16 = @intCast(smith.valueRangeAtMost(u8, 1, 24));
-    const rows: u16 = @intCast(smith.valueRangeAtMost(u8, 1, 12));
+/// The four properties, once, over a generated sequence of frames.
+fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
+    const size: geom.Size = .{
+        .cols = @intCast(smith.valueRangeAtMost(u8, 1, 24)),
+        .rows = @intCast(smith.valueRangeAtMost(u8, 1, 12)),
+    };
 
-    var h: Harness = try .init(gpa, .{ .cols = cols, .rows = rows });
+    var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
-    var t: Term = try .init(gpa, .{ .cols = cols, .rows = rows });
+    var t: Term = try .init(gpa, size);
     defer t.deinit();
-    t.setMethod(.unicode);
+    t.setMethod(method);
 
     const before = try gpa.alloc(Cell, h.screen.cells.len);
     defer gpa.free(before);
@@ -229,22 +260,56 @@ fn roundTrip(gpa: Allocator, smith: *Smith) !void {
         try checkGrid(&h.screen);
         try checkDamage(&h.screen, before);
 
+        // The terminal shows the screen.
         _ = try h.frame(&t);
 
         // Drawn again with nothing changed: not one byte.
-        const again = try h.frame(&t);
-        try testing.expectEqual(@as(usize, 0), again.bytes);
+        try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
 
         // And again with every row claimed to have changed, which is the
         // stronger statement: the previous frame is what the terminal holds.
         h.screen.damageAll();
-        const forced = try h.frame(&t);
-        try testing.expectEqual(@as(usize, 0), forced.bytes);
+        try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
     }
+
+    // A repaint recovers from any state the renderer drifted into.
+    corrupt(&h.renderer, smith);
+    h.renderer.repaint();
+    _ = try h.frame(&t);
+    try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
+
+    // And a terminal given one full repaint of the final screen holds the
+    // same thing as the terminal that was given every frame.
+    var fresh: Term = try .init(gpa, size);
+    defer fresh.deinit();
+    fresh.setMethod(method);
+    var once: Renderer = try .init(gpa, size);
+    defer once.deinit(gpa);
+    once.repaint();
+    h.out.clearRetainingCapacity();
+    h.screen.damageAll();
+    _ = try once.draw(&h.out.writer, &h.screen, h.caps);
+    try fresh.feed(h.out.written());
+    try term.expectScreensEqual(t.screen(), fresh.screen());
 }
 
-/// How many generated inputs an ordinary `zig build test` runs.
-pub const corpus_len = 384;
+/// Puts the renderer's idea of the terminal out of step with it, the way a
+/// dropped write or a program writing to the terminal behind the renderer's
+/// back would.
+fn corrupt(r: *Renderer, smith: *Smith) void {
+    var i: usize = 0;
+    const count = smith.valueRangeAtMost(u8, 1, 8);
+    while (i < count and r.prev.len != 0) : (i += 1) {
+        r.prev[smith.index(r.prev.len)] = .blank(styles[smith.index(styles.len)]);
+    }
+    r.style = styles[smith.index(styles.len)];
+    r.cursor = null;
+    r.shown = null;
+}
+
+/// How many generated inputs an ordinary `zig build test` runs, per width
+/// model.
+pub const corpus_len = 256;
 /// How many bytes each of them steers the generator with.
 pub const corpus_entry_len = 192;
 
@@ -253,8 +318,7 @@ pub const corpus_entry_len = 192;
 /// `std.testing.fuzz` runs its corpus on every ordinary test run and searches
 /// beyond it only under `zig build test --fuzz`, so a corpus of one would
 /// make this a spot check rather than a gate. These are deterministic: the
-/// same inputs run in every optimize mode and on every machine, and a failure
-/// names the entry it came from.
+/// same inputs run in every optimize mode and on every machine.
 const corpus: [corpus_len][]const u8 = blk: {
     @setEvalBranchQuota(1 << 22);
     var data: [corpus_len][corpus_entry_len]u8 = undefined;
@@ -273,10 +337,47 @@ const corpus: [corpus_len][]const u8 = blk: {
     break :blk slices;
 };
 
-test "the round trip holds over random grids" {
+test "the round trip holds against a terminal measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith);
+            try roundTrip(gpa, smith, .wcwidth);
         }
     }.one, .{ .corpus = &corpus });
+}
+
+test "the round trip holds against a terminal measuring by cluster" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTrip(gpa, smith, .unicode);
+        }
+    }.one, .{ .corpus = &corpus });
+}
+
+test "every cluster written to the last row reaches the terminal" {
+    const gpa = testing.allocator;
+    const size: geom.Size = .{ .cols = 24, .rows = 4 };
+    var h: Harness = try .init(gpa, size, .unicode);
+    defer h.deinit();
+    var t: Term = try .init(gpa, size);
+    defer t.deinit();
+    t.setMethod(.unicode);
+
+    var col: u16 = 0;
+    var which: usize = 0;
+    while (col < size.cols) : (which += 1) {
+        const g = alphabet[which % alphabet.len];
+        const w = textmod.graphemeWidth(g, .unicode);
+        if (col + w > size.cols) break;
+        try h.screen.write(col, size.rows - 1, g, styles[which % styles.len], .none);
+        col += w;
+    }
+    _ = try h.frame(&t);
+
+    col = 0;
+    while (col < size.cols) : (col += 1) {
+        try testing.expectEqualStrings(
+            h.screen.textAt(col, size.rows - 1),
+            t.screen().textAt(col, size.rows - 1),
+        );
+    }
 }
