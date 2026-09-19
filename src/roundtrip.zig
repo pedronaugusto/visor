@@ -39,6 +39,9 @@ const Renderer = render.Renderer;
 const Screen = @import("screen.zig").Screen;
 const Term = term.Term;
 
+/// The inputs replayed on every run, shared with the conformance build.
+const corpus = @import("corpus");
+
 const Allocator = std.mem.Allocator;
 const Smith = std.testing.Smith;
 const testing = std.testing;
@@ -306,42 +309,12 @@ fn corrupt(r: *Renderer, smith: *Smith) void {
     r.shown = null;
 }
 
-/// How many generated inputs an ordinary `zig build test` runs, per width
-/// model.
-pub const corpus_len = 256;
-/// How many bytes each of them steers the generator with.
-pub const corpus_entry_len = 192;
-
-/// The corpus, generated here rather than kept as files.
-///
-/// `std.testing.fuzz` runs its corpus on every ordinary test run and searches
-/// beyond it only under `zig build test --fuzz`, so a corpus of one would
-/// make this a spot check rather than a gate. These are deterministic: the
-/// same inputs run in every optimize mode and on every machine.
-const corpus: [corpus_len][]const u8 = blk: {
-    @setEvalBranchQuota(1 << 22);
-    var data: [corpus_len][corpus_entry_len]u8 = undefined;
-    var x: u64 = 0x9e3779b97f4a7c15;
-    for (&data) |*entry| {
-        for (entry) |*b| {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            b.* = @truncate(x);
-        }
-    }
-    const frozen = data;
-    var slices: [corpus_len][]const u8 = undefined;
-    for (&slices, 0..) |*s, i| s.* = frozen[i][0..];
-    break :blk slices;
-};
-
 test "the round trip holds against a terminal measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
             try roundTrip(gpa, smith, .wcwidth);
         }
-    }.one, .{ .corpus = &corpus });
+    }.one, .{ .corpus = &corpus.entries });
 }
 
 test "the round trip holds against a terminal measuring by cluster" {
@@ -349,7 +322,7 @@ test "the round trip holds against a terminal measuring by cluster" {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
             try roundTrip(gpa, smith, .unicode);
         }
-    }.one, .{ .corpus = &corpus });
+    }.one, .{ .corpus = &corpus.entries });
 }
 
 test "every cluster written to the last row reaches the terminal" {

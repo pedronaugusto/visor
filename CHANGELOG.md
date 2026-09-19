@@ -38,4 +38,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`Caps`**, every field defaulting to what is safe on the oldest terminal,
   and `Caps.Probe`, which writes the questions and folds the answers in
   without reading an environment variable.
+- **`zig build conformance`**, the round trip run a second time against a
+  terminal emulator that is not this one's. The same four properties over the
+  same committed corpus, read by column -- every column's grapheme, width and
+  style, the covered column of a wide cluster included -- and twice, once with
+  the terminal measuring by codepoint and once with it in mode 2027. It is a
+  build of its own under `conformance/`, with its own manifest, so nothing
+  that builds a program on this package ever fetches a terminal emulator. CI
+  runs it on Linux and macOS.
+- **`src/corpus.zig`**, the generated inputs both round trips replay, as a
+  module of its own so the suite inside the package and the conformance build
+  outside it are given the same bytes.
 - **`visor.widgets`**, an empty second module the base never imports.

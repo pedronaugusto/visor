@@ -56,6 +56,31 @@ jobs:
       - name: Examples
         run: zig build examples
 
+  # The round trip again, against a terminal emulator that is not ours.
+  # `Term` ships with this package, so a property that compares the renderer
+  # with it compares two readings of the same specifications by the same
+  # hand. This job compares the renderer with the terminal inside a shipping
+  # emulator, read through its own grid, over the same committed corpus.
+  # Where the two disagree, the emulator is right.
+  #
+  # Its own build under conformance/, with its own manifest, so nothing that
+  # builds a program on visor ever fetches a terminal emulator. Not on
+  # Windows: the emulator's own build is not tested there.
+  conformance:
+    name: conformance (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build conformance
+
   # Every target the package claims, compiled from one host. A package with
   # no operating system calls outside `tty` still has to prove that `tty`
   # builds where it says it does.

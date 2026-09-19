@@ -52,6 +52,11 @@ pub fn build(b: *std.Build) void {
     // rather than fetching morse a second time.
     b.modules.put(b.allocator, b.dupe("morse"), morse.module("morse")) catch @panic("OOM");
 
+    // The inputs the round-trip properties replay. Its own module because
+    // the suite inside the package and the conformance build outside it
+    // have to replay the same bytes, and a file belongs to one module.
+    const corpus = b.addModule("corpus", .{ .root_source_file = b.path("src/corpus.zig") });
+
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
     // test block is what pulls every file in.
@@ -64,7 +69,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/visor.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &imports,
+            .imports = &(imports ++ [_]std.Build.Module.Import{
+                .{ .name = "corpus", .module = corpus },
+            }),
         }),
     });
     const test_step = b.step("test", "Run the visor tests");
@@ -98,6 +105,34 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&example.step);
     }
     test_step.dependOn(examples_step);
+
+    //=====================================================================
+    // Conformance against an emulator that is not ours.
+    //
+    // `Term` ships with this package, so a property that compares the
+    // renderer with it compares two readings of the same specifications by
+    // the same hand. This step runs the same four properties over the same
+    // committed corpus against the terminal inside a shipping emulator,
+    // read through its own grid. Where the two disagree, the emulator is
+    // right.
+    //
+    // The emulator is a build of its own, under `conformance/`, with its
+    // own manifest pinning it by commit. It is out of this package's
+    // dependency tree entirely, so a consumer of `visor` never fetches a
+    // terminal emulator to build a program -- which a lazy dependency here
+    // would not achieve, because a lazy dependency named in this file is
+    // fetched by whoever builds this file.
+    //=====================================================================
+
+    const conformance_step = b.step(
+        "conformance",
+        "Run the round trip against a second terminal emulator",
+    );
+    const conformance = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
+    conformance.setCwd(b.path("conformance"));
+    conformance.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
+    conformance.has_side_effects = true;
+    conformance_step.dependOn(&conformance.step);
 }
 
 /// Whether to hand this compilation to LLVM rather than to Zig's own

@@ -1,0 +1,23 @@
+.{
+    .name = .visor_conformance,
+    .version = "0.0.0",
+    // The round trip run a second time, against an emulator that is not
+    // ours. Its own build, with its own manifest, so the terminal emulator
+    // it pins is not in `visor`'s dependency tree and nobody who builds a
+    // program on `visor` fetches one.
+    .dependencies = .{
+        .visor = .{ .path = ".." },
+        // The tree at git commit b32f20f3e8d25bb925ec545c54498e93518e7ced.
+        .ghostty = .{
+            .url = "https://github.com/ghostty-org/ghostty/archive/b32f20f3e8d25bb925ec545c54498e93518e7ced.tar.gz",
+            .hash = "ghostty-1.3.2-dev-5UdBC464cgX-VbPn16E1sGGBjQa8BRM9Eprp1xin7uVV",
+        },
+    },
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x34e8282c84d67783,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "conformance.zig",
+    },
+}
