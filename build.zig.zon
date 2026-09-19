@@ -1,13 +1,14 @@
 .{
     .name = .visor,
-    .version = "0.0.0",
+    .version = "0.1.0",
     .dependencies = .{
-        // A path while morse 0.4.0 is unreleased; this becomes the git
-        // URL and hash the day it is tagged.
-        .morse = .{ .path = "../morse" },
         .uucode = .{
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
+        },
+        .morse = .{
+            .url = "git+https://github.com/pedronaugusto/morse?ref=v0.4.0#094598a70ea73b9a6684c3c67e7073e04f5c1381",
+            .hash = "morse-0.4.0-OKnGoT5qDQBO1v9vlm-nc-DibYRf0rMakXuRnOyxjfM1",
         },
     },
     .minimum_zig_version = "0.16.0",

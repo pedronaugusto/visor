@@ -139,11 +139,9 @@ program that wants the writers on their own.
 
 Two dependencies: [`morse`](https://github.com/pedronaugusto/morse) for every
 escape sequence written and every reply parsed, and `uucode` for grapheme
-segmentation and width. `morse` is a path dependency while 0.4.0 is
-unreleased, and becomes a pinned commit the day it is tagged; `uucode` is
-pinned by commit already. `uucode` builds its tables at build time, and visor
-asks for six fields and no more — `grapheme_break` and
-`grapheme_break_no_control` for where one cluster ends and the next begins,
+segmentation and width. Both are pinned by commit. `uucode` builds its tables
+at build time, and visor asks for six fields and no more — `grapheme_break`
+and `grapheme_break_no_control` for where one cluster ends and the next begins,
 `wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
 worth on its own and inside a cluster, and `is_emoji_modifier_base` and
 `is_emoji_vs_base` for skin tone and the presentation selector. That is one
