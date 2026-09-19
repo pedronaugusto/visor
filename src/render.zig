@@ -126,9 +126,9 @@ pub const Renderer = struct {
     /// What one `draw` cost, so a budget can be a test rather than a
     /// comment.
     ///
-    /// The pairs are elisions against emissions, in notcurses' sense: what
-    /// the diff did not have to write against what it did. A renderer that
-    /// gets worse moves them, and a test that pins them says so.
+    /// The counters come in pairs: what the diff did not have to write
+    /// against what it did. A renderer that gets worse moves them, and a
+    /// test that pins them says so.
     pub const Stats = struct {
         /// Cells whose grapheme was written out.
         cells: u32 = 0,
