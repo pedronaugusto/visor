@@ -3,7 +3,7 @@
 //!
 //! One allocator, taken at `init`. After that, `writeCell`, `fill`, `clear`
 //! and `scroll` never allocate; `write` and `intern` allocate only when a
-//! grapheme is longer than the seven bytes a cell holds inline and has not
+//! grapheme is longer than the six bytes a cell holds inline and has not
 //! been seen before. Resize allocates. Nothing else does.
 //!
 //! The grid keeps its own invariants rather than trusting a caller to. A wide
@@ -232,7 +232,7 @@ pub const Screen = struct {
 
     /// A grapheme measured, placed, and its tail written if it is wide.
     ///
-    /// Allocates only when the grapheme is longer than seven bytes and the
+    /// Allocates only when the grapheme is longer than six bytes and the
     /// screen has not seen it before. A grapheme that measures zero columns,
     /// and one that is or begins with a control character, is not written:
     /// neither is something a terminal would put in a cell.
@@ -343,7 +343,7 @@ pub const Screen = struct {
 
     /// The bytes of a cell's grapheme.
     ///
-    /// The cell is taken by pointer because a grapheme of seven bytes or
+    /// The cell is taken by pointer because a grapheme of six bytes or
     /// fewer lives inside it: what comes back borrows from the cell, and a
     /// cell read out by value would be gone before the bytes were used.
     pub fn textOf(s: *const Screen, c: *const Cell) []const u8 {

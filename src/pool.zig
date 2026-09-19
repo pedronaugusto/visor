@@ -71,7 +71,7 @@ pub const Graphemes = struct {
     /// A grapheme as a `Cell.Text`: in the cell when it fits, in the pool
     /// when it does not, and never twice in the pool.
     ///
-    /// Allocates only when the grapheme is longer than seven bytes and has
+    /// Allocates only when the grapheme is longer than six bytes and has
     /// not been seen before, which is never for ASCII and rare for anything
     /// else.
     pub fn intern(p: *Graphemes, gpa: Allocator, grapheme: []const u8) Allocator.Error!Text {

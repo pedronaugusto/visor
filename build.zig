@@ -195,9 +195,8 @@ const example_sources = [_][]const u8{
 /// The `uucode` fields this package builds into its tables.
 ///
 /// Grapheme segmentation needs the first two; measuring a cluster needs the
-/// rest. Nothing else is built, which is what keeps the tables to the
-/// seventy-odd kilobytes the README names. A consumer configuring uucode
-/// themselves keeps these and adds their own.
+/// rest. Nothing else is built, which is what keeps the tables small. A
+/// consumer configuring uucode themselves keeps these and adds their own.
 const uucode_fields = [_][]const u8{
     "grapheme_break",
     "grapheme_break_no_control",

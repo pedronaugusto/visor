@@ -4,11 +4,9 @@
 
 visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
-the terminal from the frame it is showing to the one it should be showing.
-
-A second module, `visor.widgets`, holds a layout solver and thirteen widgets
-drawn on that grid. It is fetched with the base and imported separately, and
-the base never imports it.
+the terminal from the frame it is showing to the one it should be showing. A
+second module, `visor.widgets`, holds a layout solver and thirteen widgets
+drawn on that grid, and the base never imports it.
 
 ## Usage
 
@@ -141,80 +139,46 @@ program that wants the writers on their own.
 
 Two dependencies: [`morse`](https://github.com/pedronaugusto/morse) for every
 escape sequence written and every reply parsed, and `uucode` for grapheme
-segmentation and width. `uucode` is pinned by commit. `morse` is a path
-dependency while 0.4.0 is unreleased, and becomes a pinned commit the day it
-is tagged. `uucode` builds its tables at build time, so
-visor asks for six fields and no more:
-
-| Field | For |
-| --- | --- |
-| `grapheme_break` | Where one cluster ends and the next begins |
-| `grapheme_break_no_control` | The same, with control characters out of the way |
-| `wcwidth_standalone` | A codepoint's width on its own |
-| `wcwidth_zero_in_grapheme` | Whether it adds width inside a cluster |
-| `is_emoji_modifier_base` | Skin tone and the cluster it joins |
-| `is_emoji_vs_base` | The presentation selector, which widens what it follows |
-
-That costs about 75 KB of read-only data and one slow first build; the tables
-are cached after it. A program that configures `uucode` itself should keep
-these six and add its own, or the two configurations build two sets of tables.
+segmentation and width. `morse` is a path dependency while 0.4.0 is
+unreleased, and becomes a pinned commit the day it is tagged; `uucode` is
+pinned by commit already. `uucode` builds its tables at build time, and visor
+asks for six fields and no more — `grapheme_break` and
+`grapheme_break_no_control` for where one cluster ends and the next begins,
+`wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
+worth on its own and inside a cluster, and `is_emoji_modifier_base` and
+`is_emoji_vs_base` for skin tone and the presentation selector. That is one
+slow first build and then a cached table. A program that configures `uucode`
+itself should keep these six and add its own, or the two configurations build
+two sets of tables.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
 After that the frame path takes none: `writeCell` does not allocate, `print`
-does not allocate, `draw` does not allocate. `Screen.write` allocates only
-for a grapheme longer than six bytes the screen has not seen before, and says
-so with a `try`. Resizing allocates.
+does not allocate, `draw` does not allocate. `Screen.write` allocates only for
+a grapheme longer than six bytes the screen has not seen before, and says so
+with a `try`. Resizing allocates.
 
 ## The API
 
-**The grid's contents.** `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`,
-`Style`, `Color`, `Underline`, `Link`, `Target`.
-
-**The grid.** `Screen` — `init`, `deinit`, `resize`, `writeCell`, `readCell`,
-`write`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`,
-`damageAll`, `window`, `textAt`, `textOf`, `target`, and the fields `cursor`,
-`pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`.
-
-**The views.** `Window` — `child`, `print`, `printSegment`, `writeCell`,
-`readCell`, `write`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`,
-`hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`,
-`Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`,
-`Window.Border`. `Rect`, `Point`, `Size`.
-
-**Measuring text.** `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`,
-`disagrees`, `wrap`, `Row`, `fit`.
-
-**The render pass.** `Renderer` — `init`, `deinit`, `resize`, `draw`,
-`repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`.
-
-**What the terminal can do.** `Caps`, `Caps.Probe`.
-
-**Pictures.** `Image`, `Layer`, `Layer.Order`, `Layers`.
-
-**This program's terminal.** `Tty` — `open`, `close`, `raw`, `restore`,
-`size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`.
-
-**Testing your own screens.** `Term` — `init`, `deinit`, `setMethod`, `feed`,
-`screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`,
-`dumpScreenStyles`.
-
-**Everything under it.** `visor.morse`, whole.
+| | |
+|---|---|
+| The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
+| The grid | `Screen` — `init`, `deinit`, `resize`, `writeCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
+| The views | `Window` — `child`, `print`, `printSegment`, `writeCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
+| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
+| The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`. |
+| What the terminal can do | `Caps`, `Caps.Probe`. |
+| Pictures | `Image`, `Layer`, `Layer.Order`, `Layers`. |
+| This program's terminal | `Tty` — `open`, `close`, `raw`, `restore`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. |
+| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
+| Everything under it | `visor.morse`, whole. |
 
 ### `visor.widgets`
 
-**Layout.** `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, and
-the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` —
-`fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`,
-`place`, `offset`.
-
-**The widgets.** `Block` (borders, titles, padding, and the window inside),
-`Paragraph` (wrap, alignment, scroll), `List` and `List.State`, `Table` and
-`Table.State`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`,
-`Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`. Beside
-them: `Item`, `Line`, `Row`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`.
-
-**The base, re-exported.** `widgets.visor`, so a file that draws does not
-need both imports.
+| | |
+|---|---|
+| Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
+| The widgets | `Block` (borders, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll), `List` and `List.State`, `Table` and `Table.State`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`. Beside them: `Item`, `Line`, `Row`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`. |
+| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
 ## Design
 
@@ -235,9 +199,7 @@ should. The grid fuzz checks both.
 
 **Changed cells go out as runs.** A contiguous run gets one cursor move and
 one style pen, and the run bridges up to four unchanged cells because
-printing them again is shorter than stepping over them. A move per changed
-cell costs more than repainting the whole screen, and at a hundred per cent
-changed it costs six times more.
+printing them again is shorter than stepping over them.
 
 **A row is written whole when the diff would cost more.** Both are priced by
 emitting them into a writer that counts and discards, so the answer is the
@@ -306,21 +268,12 @@ its own.
 
 ## Scope
 
-- **No widgets in the base.** They are a second module, which `visor` never
-  imports.
-- **No event loop and no threads.** A base layer that owns the loop cannot be
-  used by a program that already has one.
-- **No widget whose substance is keys, focus or a clock.** No text field, no
-  button, no spinner: those are three quarters event handling, and the
-  program has the loop.
-- **No constraint solver.** Splitting by fixed, percent, floor, ceiling and
-  share covers what a screen layer owes.
-- **No colour degraded to a profile.** A program that asks for sixteen colours
-  gets sixteen colours.
-- **No inline mode yet.** The alternate screen only; `enter` says so rather
-  than half doing it.
-- **One graphics protocol.** Kitty, as ordered layers. Sixel and the
-  half-block fallbacks are not here.
+- **No widgets in the base.** They are a second module, which `visor` never imports.
+- **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one.
+- **No widget whose substance is keys, focus or a clock.** Those are three quarters event handling, and the program has the loop.
+- **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
+- **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
+- **One graphics protocol.** The kitty protocol, as ordered layers; there is no second picture path.
 
 ## Platforms
 
@@ -331,15 +284,23 @@ its own.
 | Windows | `windows-latest` in CI, four optimize modes |
 
 Everything but `tty` is arithmetic and bytes, so the same source builds
-wherever Zig does; cross-compilation is checked for seven targets. `Tty` is
-the one file that calls an operating system, and its Windows half is compiled
-in CI but not yet exercised on a console.
+wherever Zig does; cross-compilation is checked for `x86_64-linux-gnu`,
+`aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
+`aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
+[`ci/linux.sh`](ci/linux.sh) runs the suite in Docker from any machine; it is
+a local script and no CI job calls it.
+
+`Tty` is the one file that calls an operating system. It is compiled on all
+three platforms in CI and opened by nothing in the suite, so no half of it has
+been run against a real terminal yet; the alternate screen, raw mode and the
+inline mode `enter` refuses are the work still open there.
 
 ## Testing
 
 `zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
-than the process, in Debug, ReleaseSafe, ReleaseFast and ReleaseSmall.
+than the process, and CI runs it in Debug, ReleaseSafe, ReleaseFast and
+ReleaseSmall on each of the three platforms.
 
 The headline test is a round trip. Random grid operations are drawn, the bytes
 are fed to the emulator this package ships, and the grid it rebuilt is
@@ -358,8 +319,8 @@ inputs, against a terminal emulator that is not this one's. `Term` ships with
 this package, so a property that compares the renderer with it compares two
 readings of the same specifications by the same hand; the conformance build
 compares the renderer with the terminal inside a shipping emulator, read
-through its own grid — every column's grapheme, its width and its style. It
-is a build of its own under `conformance/`, with its own manifest pinning the
+through its own grid — every column's grapheme, its width and its style. It is
+a build of its own under `conformance/`, with its own manifest pinning that
 emulator by commit, so nothing that builds a program on this package fetches
 one. CI runs it on Linux and macOS.
 
@@ -374,8 +335,9 @@ checks the invariants and the damage map after every operation, a
 `checkAllAllocationFailures` pass on `init`, `resize`, `intern` and
 `compactPool`, and budgets — a full repaint at 120×40 writes fewer than 8 100
 bytes, a frame in which one cell changed fewer than 64, and a frame in which
-nothing changed writes nothing, asserted rather than measured. The generated
-corpus runs on every push; `zig build test --fuzz` keeps searching beyond it.
+nothing changed writes nothing. The generated corpus in `src/corpus.zig` runs
+on every push, and both builds replay the same bytes; `zig build test --fuzz`
+keeps searching beyond it.
 
 ## Requirements
 
