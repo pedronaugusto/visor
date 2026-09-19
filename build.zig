@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
         .imports = &imports,
     });
 
-    _ = b.addModule("visor.widgets", .{
+    const widgets = b.addModule("visor.widgets", .{
         .root_source_file = b.path("src/widgets.zig"),
         .target = target,
         .optimize = optimize,
@@ -77,6 +77,23 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the visor tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    // The widgets are a second module and get a second test binary. Every
+    // widget's test draws it into a real grid, renders the frame, feeds the
+    // bytes to the emulator and compares the picture -- so the suite proves
+    // the widget and the renderer together, which is the only combination a
+    // user ever runs.
+    const widget_tests = b.addTest(.{
+        .name = "visor-widget-tests",
+        .use_llvm = needsLlvm(target, optimize),
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/widgets.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "visor", .module = module }},
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(widget_tests).step);
+
     //=====================================================================
     // Examples
     //
@@ -96,7 +113,10 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path(source),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{.{ .name = "visor", .module = module }},
+                .imports = &.{
+                    .{ .name = "visor", .module = module },
+                    .{ .name = "visor.widgets", .module = widgets },
+                },
             }),
         });
         examples_step.dependOn(&b.addRunArtifact(example).step);
@@ -156,6 +176,8 @@ fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMod
 /// directory is not reproducible from the manifest alone.
 const example_sources = [_][]const u8{
     "examples/usage.zig",
+    "examples/viewer.zig",
+    "examples/gallery.zig",
 };
 
 /// The `uucode` fields this package builds into its tables.

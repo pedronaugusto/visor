@@ -49,4 +49,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`src/corpus.zig`**, the generated inputs both round trips replay, as a
   module of its own so the suite inside the package and the conformance build
   outside it are given the same bytes.
-- **`visor.widgets`**, an empty second module the base never imports.
+- **`visor.widgets`**, the second module the base never imports, with the
+  widgets in it. Immediate mode: a widget is a value built where it is drawn,
+  handed a window, and gone by the end of the call; anything that survives the
+  frame is a struct the caller owns and passes by pointer. `Layout` splits a
+  rectangle by `fixed`, `percent`, `min`, `max` and `fill`, nested as deep as
+  wanted, in one pass and with no solver. Then `Block`, `Paragraph`, `List`,
+  `Table`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`,
+  `Scrollbar`, `Canvas` and `Calendar`. Every one of them is tested by drawing
+  it into a grid, rendering the frame, feeding the bytes to the emulator and
+  comparing the picture the terminal shows -- so the suite proves the widget
+  and the renderer together.
+- **Two more examples**, both built and run by `zig build examples`:
+  `examples/viewer.zig`, a file viewer with a sidebar, a scrollbar, a status
+  line and a resize, and `examples/gallery.zig`, every widget drawn once.
