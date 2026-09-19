@@ -1,0 +1,21 @@
+.{
+    .name = .visor,
+    .version = "0.0.0",
+    .dependencies = .{
+        .morse = .{
+            .url = "git+https://github.com/pedronaugusto/morse#b24b850810a5390dee04dd8cb4e1dbeacddd9652",
+            .hash = "morse-0.3.0-OKnGobMDBwBDH0-pvYe8ixQfzdbOMgNNrAqYPDy0hJJn",
+        },
+        .uucode = .{
+            .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
+            .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
+        },
+    },
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xfc47eb8a53109791,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
