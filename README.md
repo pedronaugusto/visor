@@ -6,6 +6,10 @@ visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
 the terminal from the frame it is showing to the one it should be showing.
 
+A second module, `visor.widgets`, holds a layout solver and thirteen widgets
+drawn on that grid. It is fetched with the base and imported separately, and
+the base never imports it.
+
 ## Usage
 
 The block below is a region of [`examples/usage.zig`](examples/usage.zig),
@@ -112,6 +116,11 @@ try visor.morse.mouse(&w, .{ .press = true, .sgr = true });
 ```
 <!-- END GENERATED -->
 
+Two more examples are built and run by the same command.
+[`examples/viewer.zig`](examples/viewer.zig) is a file viewer on the widgets —
+a sidebar, a scrollbar, a status line and a resize — and
+[`examples/gallery.zig`](examples/gallery.zig) draws every widget once.
+
 ## Install
 
 ```sh
@@ -121,11 +130,14 @@ zig fetch --save git+https://github.com/pedronaugusto/visor
 ```zig
 const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("visor", visor_dep.module("visor"));
+exe.root_module.addImport("visor.widgets", visor_dep.module("visor.widgets"));
 ```
 
-One fetch. `morse` comes with it, re-exported as `visor.morse`, and is also
-available as `visor_dep.module("morse")` for a program that wants the writers
-on their own.
+One fetch, three modules. `visor` is the grid and the renderer;
+`visor.widgets` is the layout solver and the widgets, and a program that wants
+only the base leaves the second line out. `morse` comes with it, re-exported
+as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
+program that wants the writers on their own.
 
 Two dependencies: [`morse`](https://github.com/pedronaugusto/morse) for every
 escape sequence written and every reply parsed, and `uucode` for grapheme
@@ -187,6 +199,22 @@ so with a `try`. Resizing allocates.
 `dumpScreenStyles`.
 
 **Everything under it.** `visor.morse`, whole.
+
+### `visor.widgets`
+
+**Layout.** `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, and
+the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` —
+`fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`,
+`place`, `offset`.
+
+**The widgets.** `Block` (borders, titles, padding, and the window inside),
+`Paragraph` (wrap, alignment, scroll), `List` and `List.State`, `Table` and
+`Table.State`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`,
+`Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`. Beside
+them: `Item`, `Line`, `Row`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`.
+
+**The base, re-exported.** `widgets.visor`, so a file that draws does not
+need both imports.
 
 ## Design
 
@@ -261,13 +289,32 @@ rather trust the environment sets the fields itself.
 flushes it, so batching is yours. `Stats.bytes` says how large the buffer
 wants to be.
 
+**A widget is a value, and the caller keeps what survives the frame.** It is
+built where it is drawn, handed a window, and gone by the end of the call.
+What has to be remembered between frames — a list's selection, a table's
+scroll, where a scrollbar is — is a separate struct the program owns and
+passes by pointer; the widget reads it, moves it when the selection would
+otherwise be off screen, and forgets it. There is no retained tree, no
+callback and no focus model, so there is nothing to keep in step with the
+program's own state.
+
+**Layout is splitting, not solving.** A rectangle is divided by fixed sizes,
+percentages, floors, ceilings and shares of what is left, in one pass over
+the constraints, with no allocation and no cache; splits nest because a part
+is a rectangle like any other. A general constraint solver is a package of
+its own.
+
 ## Scope
 
-- **No widgets.** `visor.widgets` is a second module in this repository, and
-  the base never imports it.
+- **No widgets in the base.** They are a second module, which `visor` never
+  imports.
 - **No event loop and no threads.** A base layer that owns the loop cannot be
   used by a program that already has one.
-- **No layout solver.** `Rect` splitting covers what a base layer owes.
+- **No widget whose substance is keys, focus or a clock.** No text field, no
+  button, no spinner: those are three quarters event handling, and the
+  program has the loop.
+- **No constraint solver.** Splitting by fixed, percent, floor, ceiling and
+  share covers what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours
   gets sixteen colours.
 - **No inline mode yet.** The alternate screen only; `enter` says so rather
@@ -290,7 +337,7 @@ in CI but not yet exercised on a console.
 
 ## Testing
 
-`zig build test` runs the suite and the examples under
+`zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
 than the process, in Debug, ReleaseSafe, ReleaseFast and ReleaseSmall.
 
@@ -305,6 +352,22 @@ final screen agrees with the terminal given every frame. All four run twice,
 against a terminal measuring by codepoint and a terminal measuring by cluster,
 because the rule that repaints a drifting row exists for the case where the
 two disagree.
+
+`zig build conformance` runs the same four properties again, over the same
+inputs, against a terminal emulator that is not this one's. `Term` ships with
+this package, so a property that compares the renderer with it compares two
+readings of the same specifications by the same hand; the conformance build
+compares the renderer with the terminal inside a shipping emulator, read
+through its own grid — every column's grapheme, its width and its style. It
+is a build of its own under `conformance/`, with its own manifest pinning the
+emulator by commit, so nothing that builds a program on this package fetches
+one. CI runs it on Linux and macOS.
+
+Every widget is tested the same way round: drawn into a grid, rendered to
+bytes, fed to the emulator, and the picture the terminal shows compared with
+the picture it should be — then drawn again, which must write nothing. A test
+that asserts on the cells a widget wrote has proved half of what a program
+runs.
 
 Beside it: byte-exact tests on what each mechanism writes, a grid fuzz that
 checks the invariants and the damage map after every operation, a
