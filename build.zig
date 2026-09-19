@@ -4,18 +4,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    //=====================================================================
+    // Dependencies.
+    //
+    // `morse` writes every escape sequence this package emits and parses
+    // every reply it reads. `uucode` is configured here with the six fields
+    // this package uses and no others: the field list is printed in the
+    // README so a consumer who configures uucode themselves knows which to
+    // keep.
+    //=====================================================================
+
     const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
     const uucode = b.dependency("uucode", .{
         .target = target,
         .optimize = optimize,
-        .fields = @as([]const []const u8, &.{
-            "grapheme_break",
-            "grapheme_break_no_control",
-            "wcwidth_standalone",
-            "wcwidth_zero_in_grapheme",
-            "is_emoji_modifier_base",
-            "is_emoji_vs_base",
-        }),
+        .fields = @as([]const []const u8, &uucode_fields),
     });
 
     const imports = [_]std.Build.Module.Import{
@@ -23,16 +26,40 @@ pub fn build(b: *std.Build) void {
         .{ .name = "uucode", .module = uucode.module("uucode") },
     };
 
+    //=====================================================================
+    // The modules.
+    //
+    // Two, in one repository and one fetch: the base, and the widgets that
+    // will be written on it. The base never imports the widgets, which is
+    // what keeps it a base.
+    //=====================================================================
+
     const module = b.addModule("visor", .{
         .root_source_file = b.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &imports,
     });
-    _ = module;
+
+    _ = b.addModule("visor.widgets", .{
+        .root_source_file = b.path("src/widgets.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "visor", .module = module }},
+    });
+
+    // A consumer who wants the writers separately gets them from here
+    // rather than fetching morse a second time.
+    b.modules.put(b.allocator, b.dupe("morse"), morse.module("morse")) catch @panic("OOM");
+
+    //=====================================================================
+    // Tests. The suite lives beside the code it tests, so the root module's
+    // test block is what pulls every file in.
+    //=====================================================================
 
     const tests = b.addTest(.{
         .name = "visor-tests",
+        .use_llvm = needsLlvm(target, optimize),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/visor.zig"),
             .target = target,
@@ -42,4 +69,71 @@ pub fn build(b: *std.Build) void {
     });
     const test_step = b.step("test", "Run the visor tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+
+    //=====================================================================
+    // Examples
+    //
+    // Built AND run, against the module a consumer gets. An example that is
+    // only compiled proves the names still resolve; running it is what
+    // proves the bytes are still the bytes. examples/usage.zig is also
+    // where README.md's Usage block comes from -- see ci/readme_usage.sh --
+    // so the snippet a reader copies cannot drift from code CI executes.
+    //=====================================================================
+
+    const examples_step = b.step("examples", "Build and run the examples");
+    for (example_sources) |source| {
+        const example = b.addExecutable(.{
+            .name = std.fs.path.stem(source),
+            .use_llvm = needsLlvm(target, optimize),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(source),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "visor", .module = module }},
+            }),
+        });
+        examples_step.dependOn(&b.addRunArtifact(example).step);
+        // `zig build` with a target and nothing else has to compile
+        // something, or a cross-compilation check checks nothing.
+        b.getInstallStep().dependOn(&example.step);
+    }
+    test_step.dependOn(examples_step);
 }
+
+/// Whether to hand this compilation to LLVM rather than to Zig's own
+/// backend.
+///
+/// Zig 0.16's self-hosted x86_64 backend cannot emit debug information for
+/// some of the error sets in `std.Io.File`, and fails with `DWARF TODO:
+/// 'InputOutput' while updating constant` on any Debug build that opens a
+/// file -- which `tty` does. Nothing in this package can avoid it, and the
+/// other backends and the other optimize modes are unaffected, so the one
+/// case that trips takes the other path. Delete this the release it is
+/// fixed.
+fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
+    if (optimize != .Debug) return null;
+    const result = target.result;
+    if (result.cpu.arch == .x86_64 and result.os.tag == .linux) return true;
+    return null;
+}
+
+/// Every example, listed rather than globbed: a build graph that scans a
+/// directory is not reproducible from the manifest alone.
+const example_sources = [_][]const u8{
+    "examples/usage.zig",
+};
+
+/// The `uucode` fields this package builds into its tables.
+///
+/// Grapheme segmentation needs the first two; measuring a cluster needs the
+/// rest. Nothing else is built, which is what keeps the tables to the
+/// seventy-odd kilobytes the README names. A consumer configuring uucode
+/// themselves keeps these and adds their own.
+const uucode_fields = [_][]const u8{
+    "grapheme_break",
+    "grapheme_break_no_control",
+    "wcwidth_standalone",
+    "wcwidth_zero_in_grapheme",
+    "is_emoji_modifier_base",
+    "is_emoji_vs_base",
+};

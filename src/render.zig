@@ -39,7 +39,7 @@ const Cell = cellmod.Cell;
 const Link = cellmod.Link;
 const Point = geom.Point;
 const Size = geom.Size;
-const Style = cellmod.Style;
+pub const Style = cellmod.Style;
 const Writer = std.Io.Writer;
 
 /// What a full-screen program takes on the way in.
@@ -153,6 +153,8 @@ pub const Renderer = struct {
         links: u32 = 0,
         /// Cursor moves written.
         moves: u32 = 0,
+        /// Graphics commands written, after the text pass.
+        placements: u32 = 0,
     };
 
     /// Allocates the previous frame.
@@ -226,7 +228,8 @@ pub const Renderer = struct {
         }
         r.method = caps.width_method;
 
-        const body = r.repaint_all or s.damage.any() or r.anyForced();
+        const body = r.repaint_all or s.damage.any() or r.anyForced() or
+            s.layers.declared.items.len != 0 or s.layers.count() != 0;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
             s.damage.clear();
@@ -250,6 +253,18 @@ pub const Renderer = struct {
             @memset(r.force, false);
             r.repaint_all = false;
         }
+        // Between frames the terminal carries no open link. It costs the
+        // seven bytes that close one on the frame that opened it, and it
+        // means a cell written next frame never pays for a link it has
+        // nothing to do with.
+        if (body) {
+            var ignored: Stats = .{};
+            try r.setLink(out, s, .none, caps, &ignored);
+        }
+        // After the text pass, never inside it: the rule this package exists
+        // to keep is that redrawing a cell cannot disturb a picture.
+        stats.placements = @intCast(try s.layers.emit(out, caps));
+        if (stats.placements != 0) r.cursor = null;
         try r.finishCursor(out, s);
 
         try frame.finish();
@@ -1080,7 +1095,7 @@ test "a link's parameters are part of it" {
     try f.screen.write(1, 0, "b", .{}, two);
     try f.expectBytes(
         "\x1b]8;id=1;https://ziglang.org\x1b\\a" ++
-            "\x1b]8;id=2;https://ziglang.org\x1b\\b",
+            "\x1b]8;id=2;https://ziglang.org\x1b\\b\x1b]8;;\x1b\\",
     );
 }
 

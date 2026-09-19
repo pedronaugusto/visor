@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  # The whole suite on every supported host. The steps are spelled out rather
+  # than looped so each one reports its own status.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Formatting
+        run: zig fmt --check build.zig build.zig.zon src examples
+
+      # Four optimize modes. The suite asserts on byte counts, which are the
+      # same in every mode, and on arithmetic that is checked in two of them
+      # and not in the other two.
+      - name: Test — Debug
+        run: zig build test -Doptimize=Debug
+
+      - name: Test — ReleaseSafe
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Test — ReleaseFast
+        run: zig build test -Doptimize=ReleaseFast
+
+      - name: Test — ReleaseSmall
+        run: zig build test -Doptimize=ReleaseSmall
+
+      # Built AND run, against the module a consumer gets.
+      - name: Examples
+        run: zig build examples
+
+  # Every target the package claims, compiled from one host. A package with
+  # no operating system calls outside `tty` still has to prove that `tty`
+  # builds where it says it does.
+  cross:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build -Dtarget=x86_64-linux-gnu
+      - run: zig build -Dtarget=aarch64-linux-gnu
+      - run: zig build -Dtarget=x86_64-linux-musl
+      - run: zig build -Dtarget=x86_64-windows-gnu
+      - run: zig build -Dtarget=aarch64-windows-gnu
+      - run: zig build -Dtarget=x86_64-macos
+      - run: zig build -Dtarget=aarch64-macos
+
+  # README.md's Usage block is a region of examples/usage.zig, which the job
+  # above runs. This is what keeps the two the same thing. No Zig needed.
+  readme:
+    name: README usage block
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/check-readme.sh

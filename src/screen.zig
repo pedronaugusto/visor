@@ -22,6 +22,7 @@ const morse = @import("morse");
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
+const layer = @import("layer.zig");
 const pool = @import("pool.zig");
 const textmod = @import("text.zig");
 const Damage = @import("damage.zig").Damage;
@@ -68,6 +69,8 @@ pub const Screen = struct {
     /// The shape the terminal should draw under the mouse, or null to leave
     /// it as the user set it.
     pointer: ?morse.PointerShape = null,
+    /// The pictures this frame shows.
+    layers: layer.Layers = .{},
     /// How this screen measures text. The caller sets it from `Caps`; this
     /// package never guesses and never reads an environment variable.
     method: textmod.Method = .wcwidth,
@@ -96,6 +99,7 @@ pub const Screen = struct {
         s.graphemes.deinit(gpa);
         s.links.deinit(gpa);
         s.damage.deinit(gpa);
+        s.layers.deinit(gpa);
         s.* = undefined;
     }
 
