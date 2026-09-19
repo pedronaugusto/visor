@@ -179,14 +179,21 @@ pub fn build(b: *std.Build) void {
 /// Whether to hand this compilation to LLVM rather than to Zig's own
 /// backend.
 ///
-/// Zig 0.16's self-hosted x86_64 backend cannot emit debug information for
-/// some of the error sets in `std.Io.File`, and fails with `DWARF TODO:
-/// 'InputOutput' while updating constant` on any Debug build that opens a
-/// file -- which `tty` does. Nothing in this package can avoid it, and the
-/// other backends and the other optimize modes are unaffected, so the one
-/// case that trips takes the other path. Delete this the release it is
-/// fixed.
-fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
+/// Zig 0.16's self-hosted x86_64 backend dies with SIGSEGV -- no message,
+/// no stack -- compiling this package in Debug. The smallest program that
+/// reproduces it is one `uucode.get` call and nothing else: the tables
+/// uucode generates are three stages of arrays indexed one into the next,
+/// and lowering a read through them is what the backend cannot do. Every
+/// file that reaches `text.zig` goes down with it, which is every file
+/// here. Nothing in this package can avoid it -- measuring a cluster is
+/// what the tables are for. The release modes are unaffected because they
+/// use LLVM already, and so is the aarch64 backend, which compiles the
+/// same call. So the one case that trips takes the other path. Delete this
+/// the release it is fixed.
+///
+/// `conformance/build.zig` builds the same package under the same backend
+/// and calls this too, which is why it is public.
+pub fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
     if (optimize != .Debug) return null;
     const result = target.result;
     if (result.cpu.arch == .x86_64 and result.os.tag == .linux) return true;
