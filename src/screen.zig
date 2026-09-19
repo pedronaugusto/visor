@@ -746,6 +746,7 @@ test "the screen survives every allocation failing in turn" {
             _ = try s.link(gpa, "https://ziglang.org", "id=1");
             try s.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none);
             try s.resize(gpa, .{ .cols = 12, .rows = 6 });
+            try s.compactPool(gpa);
             try s.resize(gpa, .{ .cols = 4, .rows = 2 });
         }
     }.run, .{});
