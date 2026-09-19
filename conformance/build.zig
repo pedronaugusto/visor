@@ -23,6 +23,11 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("conformance.zig"),
             .target = target,
             .optimize = optimize,
+            // Off for the same reason as the package's own test modules:
+            // Zig 0.16.0's test runner cannot compile a fuzzing binary with
+            // error tracing on, so `zig build test --fuzz` in this directory
+            // would not build. Delete this the release it is fixed.
+            .error_tracing = false,
             .imports = &.{
                 .{ .name = "visor", .module = visor.module("visor") },
                 .{ .name = "corpus", .module = visor.module("corpus") },
