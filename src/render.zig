@@ -239,10 +239,6 @@ pub const Renderer = struct {
         var frame: Frame = .init(w, r.buf, caps.sync and !caps.sync_unwanted);
         const out = &frame.writer;
 
-        if (body and r.shown != false) {
-            try morse.cursorVisible.set(out, false);
-            r.shown = false;
-        }
         if (r.repaint_all) try r.beginRepaint(out, caps);
         if (body) {
             if (caps.scroll_detection) {
@@ -413,9 +409,29 @@ pub const Renderer = struct {
         return r.shown != false;
     }
 
+    /// The cursor is hidden before the first byte a frame writes, and not
+    /// before.
+    ///
+    /// A frame that turns out to have nothing to write must write nothing at
+    /// all, and a damage map that named a row whose contents did not change
+    /// is the ordinary case rather than the odd one -- a program that marks
+    /// what it redrew rather than what it changed produces one every frame.
+    /// Hiding the cursor up front and showing it again at the end costs
+    /// twelve bytes on every one of them, and breaks the property the whole
+    /// package is checked against.
+    ///
+    /// Called by the render pass, including from the scroll detector; not
+    /// part of what a program using this package calls.
+    pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
+        if (r.shown == false) return;
+        try morse.cursorVisible.set(out, false);
+        r.shown = false;
+    }
+
     /// The terminal is in a state the renderer does not know, so it is put
     /// into one it does.
     fn beginRepaint(r: *Renderer, out: *Writer, caps: Caps) Error!void {
+        try r.hideForWrite(out);
         if (caps.osc8) try morse.hyperlinkEnd(out);
         r.link = .none;
         try morse.resetStyle(out);
@@ -436,7 +452,7 @@ pub const Renderer = struct {
 
             // A row the damage map named but nothing really changed in is
             // one whole-row comparison away from costing nothing.
-            if (!forced and cellmod.rowsEqual(s.rowAt(row), r.prevRow(row))) {
+            if (!forced and r.rowUnchanged(s, caps, row)) {
                 stats.skipped += cols;
                 continue;
             }
@@ -448,6 +464,7 @@ pub const Renderer = struct {
             const last = if (forced) cols - 1 else span.?.last;
             const whole = forced or drift or try r.paintIsCheaper(s, caps, row, first, last);
             if (whole) stats.repainted += 1;
+            try r.hideForWrite(out);
             try r.emitRow(out, s, caps, row, first, last, whole, stats);
             // An over-measured cluster runs past the margin and wraps, so
             // after a drifted row the cursor may be a row low as well as a
@@ -455,6 +472,21 @@ pub const Renderer = struct {
             if (drift and caps.width_method != .unicode) r.cursor = null;
             r.commitRow(s, caps, row);
         }
+    }
+
+    /// Whether a row holds what the terminal is already showing.
+    ///
+    /// One `memcmp` where the terminal has OSC 8, because the previous frame
+    /// then holds the cells as they were written. Where it does not, a link
+    /// is not a difference the terminal can show and the previous frame does
+    /// not record one, so the comparison has to strip it rather than find a
+    /// difference nothing could write.
+    fn rowUnchanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
+        if (caps.osc8) return cellmod.rowsEqual(s.rowAt(row), r.prevRow(row));
+        for (s.rowAt(row), r.prevRow(row)) |now, was| {
+            if (!visible(now, caps).eql(was)) return false;
+        }
+        return true;
     }
 
     /// Whether a row holds a grapheme whose width the terminal might not

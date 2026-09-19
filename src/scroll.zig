@@ -42,6 +42,7 @@ pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u
 
     // The vacated rows are filled with the terminal's current background, so
     // the style has to be the one a blank cell is in.
+    try r.hideForWrite(out);
     var ignored: Renderer.Stats = .{};
     try r.setStyle(out, .{}, &ignored);
     try r.setLink(out, s, .none, caps, &ignored);

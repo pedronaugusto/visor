@@ -60,7 +60,17 @@ pub fn build(b: *std.Build) void {
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
     // test block is what pulls every file in.
+    //
+    // `error_tracing` is off on the test modules because Zig 0.16.0's test
+    // runner cannot build a fuzzing binary with it on: it hands
+    // `@errorReturnTrace()` to `std.debug.writeStackTrace`, and the two
+    // `StackTrace` types do not match. The ordinary suite passes either way;
+    // with it on, `zig build test --fuzz` fails to compile after the suite
+    // has already run, which is a fuzz target nobody can reach. Delete this
+    // the release it is fixed.
     //=====================================================================
+
+    const fuzzable = false;
 
     const tests = b.addTest(.{
         .name = "visor-tests",
@@ -69,6 +79,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/visor.zig"),
             .target = target,
             .optimize = optimize,
+            .error_tracing = fuzzable,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
             }),
@@ -89,6 +100,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/widgets.zig"),
             .target = target,
             .optimize = optimize,
+            .error_tracing = fuzzable,
             .imports = &.{.{ .name = "visor", .module = module }},
         }),
     });

@@ -38,6 +38,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`Caps`**, every field defaulting to what is safe on the oldest terminal,
   and `Caps.Probe`, which writes the questions and folds the answers in
   without reading an environment variable.
+- **`zig build test --fuzz` builds and runs.** Zig 0.16.0's test runner cannot
+  compile a fuzzing binary with error tracing on, so the test modules turn it
+  off; the ordinary suite is unaffected. Two real failures came out of the
+  first search beyond the committed corpus, both fixed here.
+
+### Fixed
+
+- **A frame that had nothing to write wrote twelve bytes.** The cursor was
+  hidden before the text pass and shown again after it, so a frame whose
+  damage map named rows that had not really changed — which is every frame of
+  a program that marks what it redrew rather than what it changed — cost the
+  two mode sequences. The cursor is now hidden before the first byte the pass
+  writes and not before, and a row is compared as the terminal would see it,
+  so a link on a terminal with no OSC 8 is not a difference either.
+- **A split whose spacing did not fit put parts outside the area.** Four parts
+  with three cells between them in a rectangle two cells tall charged the
+  spacing anyway and placed the later parts past the edge. Positions are
+  clamped to the area, and a part with no room left is empty.
+
 - **`zig build conformance`**, the round trip run a second time against a
   terminal emulator that is not this one's. The same four properties over the
   same committed corpus, read by column -- every column's grapheme, width and

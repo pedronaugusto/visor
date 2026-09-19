@@ -353,3 +353,43 @@ test "every cluster written to the last row reaches the terminal" {
         );
     }
 }
+
+test "a frame the damage map named but nothing changed in writes nothing at all" {
+    // The cursor is the point: hiding it before a body pass that turns out
+    // to have nothing to write, and showing it again after, is twelve bytes
+    // on every frame of a program that marks what it redrew rather than what
+    // it changed -- and it is the property this package is checked against.
+    const gpa = testing.allocator;
+    const size: geom.Size = .{ .cols = 8, .rows = 3 };
+    var h: Harness = try .init(gpa, size, .wcwidth);
+    defer h.deinit();
+    var t: Term = try .init(gpa, size);
+    defer t.deinit();
+
+    try h.screen.write(0, 0, "a", .{ .bold = true }, .none);
+    h.screen.cursor.visible = true;
+    h.screen.cursor.col = 3;
+    _ = try h.frame(&t);
+
+    for (0..3) |_| {
+        h.screen.damageAll();
+        try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
+    }
+
+    // And the same on a terminal with no OSC 8, where a link is not a
+    // difference the terminal could show and the previous frame does not
+    // record one. Read off the renderer rather than through the terminal,
+    // because the two screens differ by exactly the link the terminal was
+    // never told about.
+    h.caps.osc8 = false;
+    h.renderer.repaint();
+    h.out.clearRetainingCapacity();
+    _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+
+    const link = try h.screen.link(gpa, "https://ziglang.org", "");
+    try h.screen.write(0, 0, "a", .{ .bold = true }, link);
+    h.screen.damageAll();
+    h.out.clearRetainingCapacity();
+    const after = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    try testing.expectEqual(@as(usize, 0), after.bytes);
+}

@@ -206,24 +206,37 @@ pub const Layout = struct {
         }
 
         // And where each part starts.
+        //
+        // Clamped to the end of the area, because the spacing between the
+        // parts is charged whether or not there was room for it: a split
+        // into four with three cells between them, in two cells, has
+        // nothing left for any part and must not put one past the edge.
+        const limit: u16 = switch (l.direction) {
+            .horizontal => @intCast(inner.right()),
+            .vertical => @intCast(inner.bottom()),
+        };
         var at: u16 = switch (l.direction) {
             .horizontal => inner.col,
             .vertical => inner.row,
         };
         for (out[0..n]) |*r| {
+            const start = @min(at, limit);
+            const size = @min(l.axisOf(r.*), limit - start);
             switch (l.direction) {
                 .horizontal => {
-                    r.col = at;
+                    r.col = start;
+                    r.cols = size;
                     r.row = inner.row;
                     r.rows = inner.rows;
                 },
                 .vertical => {
-                    r.row = at;
+                    r.row = start;
+                    r.rows = size;
                     r.col = inner.col;
                     r.cols = inner.cols;
                 },
             }
-            at +|= l.axisOf(r.*) +| l.spacing;
+            at = start +| size +| l.spacing;
             if (r.cols == 0 or r.rows == 0) {
                 r.cols = 0;
                 r.rows = 0;
@@ -457,7 +470,7 @@ fn splitHolds(smith: *std.testing.Smith) !void {
 
     var out: [8]Rect = @splat(.{});
     const parts = l.split(whole, out[0..n]);
-    try std_testing.expectEqual(@as(usize, n), parts.len);
+    if (parts.len != n) return error.WrongNumberOfParts;
 
     var claimed: u32 = 0;
     var edge: u32 = switch (l.direction) {
@@ -465,13 +478,14 @@ fn splitHolds(smith: *std.testing.Smith) !void {
         .vertical => whole.row,
     };
     for (parts) |r| {
-        try std_testing.expect(r.right() <= whole.right());
-        try std_testing.expect(r.bottom() <= whole.bottom());
+        if (r.right() > whole.right() or r.bottom() > whole.bottom()) {
+            return error.PartLeftTheArea;
+        }
         const start = switch (l.direction) {
             .horizontal => @as(u32, r.col),
             .vertical => @as(u32, r.row),
         };
-        try std_testing.expect(start >= edge);
+        if (start < edge) return error.PartsOverlap;
         edge = switch (l.direction) {
             .horizontal => r.right(),
             .vertical => r.bottom(),
@@ -482,7 +496,7 @@ fn splitHolds(smith: *std.testing.Smith) !void {
         .horizontal => l.margin.apply(whole).cols,
         .vertical => l.margin.apply(whole).rows,
     };
-    try std_testing.expect(claimed <= axis);
+    if (claimed > axis) return error.PartsClaimedMoreThanTheAxis;
 }
 
 test "a split of anything by anything stays inside what it was given" {
@@ -513,3 +527,15 @@ const corpus: [128][]const u8 = blk: {
     for (&slices, 0..) |*s, i| s.* = frozen[i][0..];
     break :blk slices;
 };
+
+test "spacing that does not fit leaves no part outside the area" {
+    const parts = (Layout{
+        .direction = .vertical,
+        .constraints = &.{ .{ .fill = 1 }, .{ .fill = 1 }, .{ .fill = 1 }, .{ .fill = 1 } },
+        .spacing = 3,
+    }).splitFixed(4, grid(4, 2));
+    for (parts) |r| {
+        try std_testing.expect(r.bottom() <= 2);
+        try std_testing.expect(r.isEmpty());
+    }
+}
