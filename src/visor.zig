@@ -8,6 +8,7 @@ pub const screen = @import("screen.zig");
 pub const caps = @import("caps.zig");
 pub const render = @import("render.zig");
 pub const scroll = @import("scroll.zig");
+pub const window = @import("window.zig");
 pub const term = @import("term.zig");
 const roundtrip = @import("roundtrip.zig");
 test {
@@ -20,6 +21,7 @@ test {
     _ = caps;
     _ = render;
     _ = scroll;
+    _ = window;
     _ = term;
     _ = roundtrip;
 }

@@ -630,7 +630,7 @@ pub const Renderer = struct {
                 stats.erased += blanks;
                 return;
             }
-            try r.setStyle(out, c.style(), stats);
+            try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
             try out.writeAll(s.textOf(&cells[col]));
             stats.cells += 1;
@@ -1050,7 +1050,7 @@ test "a style change mid-run writes only what changed" {
 
     try f.screen.write(0, 0, "a", .{ .bold = true }, .none);
     try f.screen.write(1, 0, "b", .{ .bold = true }, .none);
-    try f.screen.write(2, 0, "c", .{ .bold = true, .fg = .{ .ansi = .red } }, .none);
+    try f.screen.write(2, 0, "c", .{ .bold = true, .fg = .ansi(.red) }, .none);
     // Nothing beyond column two changed, so nothing beyond it is written:
     // the rest of the row was already blank on the terminal.
     try f.expectBytes("\x1b[1mab\x1b[31mc");
@@ -1198,7 +1198,7 @@ test "a small frame is not bracketed and a large one is" {
     for (0..40) |row| {
         for (0..120) |col| {
             try f.screen.write(@intCast(col), @intCast(row), "\u{e9}", .{
-                .fg = .{ .rgb = .{ .r = @intCast(col * 2 % 256), .g = 1, .b = 2 } },
+                .fg = .rgb(@intCast(col * 2 % 256), 1, 2),
             }, .none);
         }
     }

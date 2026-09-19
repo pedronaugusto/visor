@@ -244,8 +244,7 @@ pub const Term = struct {
     /// `Screen.scroll` blanks in the default style; a terminal blanks in the
     /// background colour it is currently writing in.
     fn blankVacated(t: *Term, rect: geom.Rect, n: i32) void {
-        const plain: Style = .{};
-        if (std.meta.eql(t.style.bg, plain.bg) and !t.style.reverse) return;
+        if (t.style.bg.kind == .default and !t.style.reverse) return;
         const distance: u32 = @min(@abs(n), rect.rows);
         const blank: Cell = .blank(.{ .bg = t.style.bg, .reverse = t.style.reverse });
         const first: u16 = if (n > 0)
@@ -564,11 +563,11 @@ pub const Term = struct {
             28 => t.style.hidden = false,
             29 => t.style.strikethrough = false,
             55 => t.style.overline = false,
-            30...37 => t.style.fg = .{ .ansi = @enumFromInt(code - 30) },
-            90...97 => t.style.fg = .{ .ansi = @enumFromInt(code - 90 + 8) },
+            30...37 => t.style.fg = .ansi(@enumFromInt(code - 30)),
+            90...97 => t.style.fg = .ansi(@enumFromInt(code - 90 + 8)),
             39 => t.style.fg = .default,
-            40...47 => t.style.bg = .{ .ansi = @enumFromInt(code - 40) },
-            100...107 => t.style.bg = .{ .ansi = @enumFromInt(code - 100 + 8) },
+            40...47 => t.style.bg = .ansi(@enumFromInt(code - 40)),
+            100...107 => t.style.bg = .ansi(@enumFromInt(code - 100 + 8)),
             49 => t.style.bg = .default,
             59 => t.style.underline_color = .default,
             else => {},
@@ -591,14 +590,14 @@ pub const Term = struct {
             5 => {
                 const n = byte(nextField(fields, &at) orelse return null) orelse return null;
                 i.* = at;
-                return .{ .palette = n };
+                return .palette(n);
             },
             2 => {
                 const r = byte(nextField(fields, &at) orelse return null) orelse return null;
                 const g = byte(nextField(fields, &at) orelse return null) orelse return null;
                 const b = byte(nextField(fields, &at) orelse return null) orelse return null;
                 i.* = at;
-                return .{ .rgb = .{ .r = r, .g = g, .b = b } };
+                return .rgb(r, g, b);
             },
             else => return null,
         }
@@ -679,9 +678,9 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) Writer.Error!void {
 
     // First pass: the legend, in the order the styles first appear.
     for (s.cells) |c| {
-        if (indexOfStyle(seen[0..count], c.style()) != null) continue;
+        if (indexOfStyle(seen[0..count], c.style) != null) continue;
         if (count == seen.len) continue;
-        seen[count] = c.style();
+        seen[count] = c.style;
         count += 1;
     }
     for (seen[0..count], 0..) |style, i| {
@@ -695,7 +694,7 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) Writer.Error!void {
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
             const c = s.cells[s.index(col, row)];
-            const i = indexOfStyle(seen[0..count], c.style());
+            const i = indexOfStyle(seen[0..count], c.style);
             try w.writeByte(if (i) |n| alphabet[n] else '?');
         }
         try w.writeByte('\n');
@@ -709,8 +708,7 @@ fn writeStyleName(w: *Writer, style: Style) Writer.Error!void {
     try w.writeAll(" bg=");
     try writeColorName(w, style.bg);
     if (style.underline != .none) try w.print(" ul={t}", .{style.underline});
-    const plain: Style = .{};
-    if (!std.meta.eql(style.underline_color, plain.underline_color)) {
+    if (style.underline_color.kind != .default) {
         try w.writeAll(" ulc=");
         try writeColorName(w, style.underline_color);
     }
@@ -726,17 +724,27 @@ fn writeStyleName(w: *Writer, style: Style) Writer.Error!void {
 
 /// A colour as a name.
 fn writeColorName(w: *Writer, c: cellmod.Color) Writer.Error!void {
-    switch (c) {
+    switch (c.kind) {
         .default => try w.writeAll("default"),
-        .ansi => |a| try w.print("{t}", .{a}),
-        .palette => |n| try w.print("palette:{d}", .{n}),
-        .rgb => |v| try w.print("#{x:0>2}{x:0>2}{x:0>2}", .{ v.r, v.g, v.b }),
+        .ansi => try w.print("{t}", .{c.toAnsi()}),
+        .palette => try w.print("palette:{d}", .{c.index()}),
+        .rgb => {
+            const v = c.toRgb();
+            try w.print("#{x:0>2}{x:0>2}{x:0>2}", .{ v.r, v.g, v.b });
+        },
     }
+}
+
+/// Whether two styles would write the same bytes.
+fn stylesEqual(a: Style, b: Style) bool {
+    const ca = cellmod.canonical(a);
+    const cb = cellmod.canonical(b);
+    return std.mem.eql(u8, std.mem.asBytes(&ca), std.mem.asBytes(&cb));
 }
 
 /// Where a style already is in the legend, or null.
 fn indexOfStyle(seen: []const Style, style: Style) ?usize {
-    for (seen, 0..) |s, i| if (std.meta.eql(s, style)) return i;
+    for (seen, 0..) |s, i| if (stylesEqual(s, style)) return i;
     return null;
 }
 
@@ -762,7 +770,7 @@ pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
             // `spacer_head` and a space are the same cell to it, and only
             // this package knows one was left by a wrap.
             if (same_text and same_link and
-                std.meta.eql(a.bits, b.bits) and
+                stylesEqual(a.style, b.style) and
                 a.width() == b.width() and
                 a.isTail() == b.isTail()) continue;
             try reportCell(want, got, col, row);
@@ -777,10 +785,10 @@ fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) !void
     const b = got.cells[got.index(col, row)];
     std.debug.print("cell {d},{d} differs\n", .{ col, row });
     std.debug.print("  want: \"{s}\" {any} link={any} shape={any}\n", .{
-        want.textAt(col, row), a.style(), want.target(a.link), a.shape,
+        want.textAt(col, row), a.style, want.target(a.link), a.shape,
     });
     std.debug.print("  have: \"{s}\" {any} link={any} shape={any}\n", .{
-        got.textAt(col, row), b.style(), got.target(b.link), b.shape,
+        got.textAt(col, row), b.style, got.target(b.link), b.shape,
     });
     std.debug.print("--- want ---\n", .{});
     printGrid(want);
@@ -908,16 +916,16 @@ fn colonColor(subs: []const []const u8) ?cellmod.Color {
     switch (kind) {
         5 => {
             if (subs.len < 2) return null;
-            return .{ .palette = byte(subs[1]) orelse return null };
+            return .palette(byte(subs[1]) orelse return null);
         },
         2 => {
             const rest = if (subs.len >= 5) subs[2..] else subs[1..];
             if (rest.len < 3) return null;
-            return .{ .rgb = .{
-                .r = byte(rest[0]) orelse return null,
-                .g = byte(rest[1]) orelse return null,
-                .b = byte(rest[2]) orelse return null,
-            } };
+            return .rgb(
+                byte(rest[0]) orelse return null,
+                byte(rest[1]) orelse return null,
+                byte(rest[2]) orelse return null,
+            );
         },
         else => return null,
     }
@@ -1008,18 +1016,18 @@ test "every SGR this package writes comes back as the style it was" {
         .{ .bytes = "\x1b[8m", .style = .{ .hidden = true } },
         .{ .bytes = "\x1b[9m", .style = .{ .strikethrough = true } },
         .{ .bytes = "\x1b[53m", .style = .{ .overline = true } },
-        .{ .bytes = "\x1b[31m", .style = .{ .fg = .{ .ansi = .red } } },
-        .{ .bytes = "\x1b[96m", .style = .{ .fg = .{ .ansi = .bright_cyan } } },
-        .{ .bytes = "\x1b[44m", .style = .{ .bg = .{ .ansi = .blue } } },
-        .{ .bytes = "\x1b[102m", .style = .{ .bg = .{ .ansi = .bright_green } } },
-        .{ .bytes = "\x1b[38;5;137m", .style = .{ .fg = .{ .palette = 137 } } },
-        .{ .bytes = "\x1b[48;5;7m", .style = .{ .bg = .{ .palette = 7 } } },
-        .{ .bytes = "\x1b[38;2;1;2;3m", .style = .{ .fg = .{ .rgb = .{ .r = 1, .g = 2, .b = 3 } } } },
-        .{ .bytes = "\x1b[48;2;9;8;7m", .style = .{ .bg = .{ .rgb = .{ .r = 9, .g = 8, .b = 7 } } } },
-        .{ .bytes = "\x1b[58:5:12m", .style = .{ .underline_color = .{ .palette = 12 } } },
+        .{ .bytes = "\x1b[31m", .style = .{ .fg = .ansi(.red) } },
+        .{ .bytes = "\x1b[96m", .style = .{ .fg = .ansi(.bright_cyan) } },
+        .{ .bytes = "\x1b[44m", .style = .{ .bg = .ansi(.blue) } },
+        .{ .bytes = "\x1b[102m", .style = .{ .bg = .ansi(.bright_green) } },
+        .{ .bytes = "\x1b[38;5;137m", .style = .{ .fg = .palette(137) } },
+        .{ .bytes = "\x1b[48;5;7m", .style = .{ .bg = .palette(7) } },
+        .{ .bytes = "\x1b[38;2;1;2;3m", .style = .{ .fg = .rgb(1, 2, 3) } },
+        .{ .bytes = "\x1b[48;2;9;8;7m", .style = .{ .bg = .rgb(9, 8, 7) } },
+        .{ .bytes = "\x1b[58:5:12m", .style = .{ .underline_color = .palette(12) } },
         .{
             .bytes = "\x1b[58:2::4:5:6m",
-            .style = .{ .underline_color = .{ .rgb = .{ .r = 4, .g = 5, .b = 6 } } },
+            .style = .{ .underline_color = .rgb(4, 5, 6) },
         },
     };
     for (cases) |case| {
@@ -1040,8 +1048,8 @@ test "a style diff with several parameters is read as one" {
         .bold = true,
         .italic = true,
         .underline = .double,
-        .fg = .{ .ansi = .red },
-        .bg = .{ .rgb = .{ .r = 7, .g = 7, .b = 7 } },
+        .fg = .ansi(.red),
+        .bg = .rgb(7, 7, 7),
     }, t.style);
     try t.feed("\x1b[22;23;24;39;49m");
     try testing.expectEqual(Style{}, t.style);
@@ -1069,10 +1077,7 @@ test "an erase takes the background the terminal is writing in" {
     defer t.deinit();
     try t.feed("\x1b[41m\x1b[2K");
     for (0..4) |col| {
-        try testing.expectEqual(
-            Color{ .ansi = .red },
-            t.screen().readCell(@intCast(col), 0).?.style().bg,
-        );
+        try testing.expect(Color.eql(.ansi(.red), t.screen().readCell(@intCast(col), 0).?.style.bg));
     }
 }
 
@@ -1218,7 +1223,7 @@ test "a saved cursor comes back where it was" {
     defer t.deinit();
     try t.feed("\x1b[2;4H\x1b[1m\x1b7\x1b[1;1H\x1b[0m\x1b8x");
     try testing.expectEqualStrings("x", textAt(&t, 3, 1));
-    try testing.expect(t.screen().readCell(3, 1).?.style().bold);
+    try testing.expect(t.screen().readCell(3, 1).?.style.bold);
 }
 
 test "the dump is one row a line and a wide grapheme takes its two columns" {

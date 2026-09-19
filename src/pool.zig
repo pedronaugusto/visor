@@ -239,9 +239,15 @@ test "a short grapheme never reaches the pool" {
     try testing.expectEqual(@as(usize, 0), p.len());
     try testing.expectEqualStrings("a", p.slice(&a));
 
-    const seven = try p.intern(testing.allocator, "1234567");
-    try testing.expect(!seven.isPooled());
+    const six = try p.intern(testing.allocator, "123456");
+    try testing.expect(!six.isPooled());
     try testing.expectEqual(@as(usize, 0), p.len());
+
+    // Seven is one too many, and the warning sign with its presentation
+    // selector -- the cluster the drift rule exists for -- is exactly six.
+    const seven = try p.intern(testing.allocator, "1234567");
+    try testing.expect(seven.isPooled());
+    try testing.expect(!(try p.intern(testing.allocator, "\u{26a0}\u{fe0f}")).isPooled());
 }
 
 test "a long grapheme is pooled once however often it is written" {

@@ -1,19 +1,16 @@
 //! What a grid holds: one cell, its grapheme, its style, its link.
 //!
 //! A cell is thirty-two bytes, has no padding and no indeterminate byte in
-//! it, and is therefore compared — a cell, or a whole row — with one
-//! `memcmp`. The grapheme lives in the cell when it is seven bytes or fewer,
-//! which covers every single-codepoint cluster, and in the screen's pool when
-//! it is longer; the link is an index into the screen's link table. Both are
-//! interned, so two cells showing the same thing hold the same bytes.
+//! it, and is therefore compared -- a cell, or a whole row -- with one
+//! `memcmp`. That is what `morse.Style` being an `extern` struct with a
+//! defined layout buys, and it is fourteen times faster than comparing the
+//! fields of every cell in a frame.
 //!
-//! The style is stored as `Style.Bits`, a mirror of `Style` with an `extern`
-//! layout and no union in it. The public type a caller writes and reads is
-//! always `Style`, which is morse's; the mirror exists because a union's
-//! unused payload bytes are not defined, so a comparison of the memory of a
-//! cell holding one would be a question about padding. `Cell.style()` and
-//! `Cell.setStyle` are the one conversion, and the mirror goes away the day
-//! morse's own style is `extern`.
+//! The grapheme lives in the cell when it is six bytes or fewer, which
+//! covers every single-codepoint cluster and every base-and-mark pair up to
+//! two three-byte codepoints, and in the screen's pool when it is longer.
+//! The link is an index into the screen's link table. Both are interned, so
+//! two cells showing the same thing hold the same bytes.
 //!
 //! This file never allocates, never writes a byte to a terminal, and never
 //! looks at a pool: it is the value type and nothing else. Resolving a
@@ -22,8 +19,7 @@
 const std = @import("std");
 const morse = @import("morse");
 
-/// Everything SGR can say about a cell. There is no second style type in
-/// this package's API.
+/// Everything SGR can say about a cell. There is no second style type here.
 pub const Style = morse.Style;
 /// A colour, in the forms SGR can spell.
 pub const Color = morse.Color;
@@ -50,48 +46,40 @@ pub const Link = enum(u16) {
     }
 };
 
-/// A colour with every byte defined: the form a cell stores.
+/// The attributes a cell with no glyph in it can still show.
 ///
-/// `Color` is a tagged union and the bytes its payload does not use are not
-/// specified, so two cells showing the same colour need not hold the same
-/// memory. Here the tag is a byte and the three payload bytes are zero
-/// wherever the form does not use them.
-pub const ColorBits = extern struct {
-    /// Which form the colour takes.
-    tag: Tag = .default,
-    /// The palette index for `.ansi` and `.palette`, red for `.rgb`.
-    a: u8 = 0,
-    /// Green for `.rgb`, zero otherwise.
-    b: u8 = 0,
-    /// Blue for `.rgb`, zero otherwise.
-    c: u8 = 0,
+/// What decides whether a column a wide grapheme vacated has to be written
+/// or can be left: a background, a reverse, a line through it or under it.
+/// A bold space and a plain space are the same space.
+pub fn showsOnBlank(style: Style) bool {
+    return style.bg.kind != .default or style.reverse or style.blink or
+        style.strikethrough or style.underline != .none;
+}
 
-    /// The forms SGR can spell.
-    pub const Tag = enum(u8) { default = 0, ansi = 1, palette = 2, rgb = 3 };
+/// A style whose colours hold nothing in the channels their form does not
+/// use, so that two styles are equal exactly when their memory is.
+///
+/// `Color.eql` is field by field and forgiving: a hand-written
+/// `.{ .kind = .default, .r = 9 }` is still the default colour. A cell
+/// compared as memory cannot be that forgiving, so every style that goes
+/// into a cell comes through here first.
+pub fn canonical(style: Style) Style {
+    var out = style;
+    out.fg = canonicalColor(style.fg);
+    out.bg = canonicalColor(style.bg);
+    out.underline_color = canonicalColor(style.underline_color);
+    return out;
+}
 
-    /// The terminal's own colour.
-    pub const default: ColorBits = .{};
-
-    /// A colour packed into its defined form.
-    pub fn from(color: Color) ColorBits {
-        return switch (color) {
-            .default => .{ .tag = .default },
-            .ansi => |v| .{ .tag = .ansi, .a = @intFromEnum(v) },
-            .palette => |n| .{ .tag = .palette, .a = n },
-            .rgb => |v| .{ .tag = .rgb, .a = v.r, .b = v.g, .c = v.b },
-        };
-    }
-
-    /// The colour back in the form the API speaks.
-    pub fn to(bits: ColorBits) Color {
-        return switch (bits.tag) {
-            .default => .default,
-            .ansi => .{ .ansi = @enumFromInt(bits.a & 0x0f) },
-            .palette => .{ .palette = bits.a },
-            .rgb => .{ .rgb = .{ .r = bits.a, .g = bits.b, .b = bits.c } },
-        };
-    }
-};
+/// One colour with its unused channels zeroed.
+fn canonicalColor(color: Color) Color {
+    return switch (color.kind) {
+        .default => .default,
+        .ansi => .ansi(color.toAnsi()),
+        .palette => .palette(color.index()),
+        .rgb => .fromRgb(color.toRgb()),
+    };
+}
 
 /// One cell: its grapheme, its style, its link, its width and its kind.
 pub const Cell = extern struct {
@@ -101,36 +89,41 @@ pub const Cell = extern struct {
     link: Link = .none,
     /// The grapheme, inline or pooled.
     text: Text = .space,
-    /// The style, in its defined form. Read it with `style()`.
-    bits: Bits = .{},
+    /// The style the grapheme draws in, canonical: build a cell with `init`
+    /// or `blank` and it is, and write one by hand and it must be.
+    style: Style = .{},
     /// How wide the grapheme is, whether this cell draws it, and whether the
     /// two width models disagree about it.
     shape: Shape = .{},
-    /// Zero, always. Room for what the text sizing protocol and the layers
-    /// will want, and the reason a cell compares as memory.
-    _reserved: [7]u8 = @splat(0),
 
-    /// The grapheme: up to seven bytes stored in the cell, an offset into the
+    /// The grapheme: up to six bytes stored in the cell, an offset into the
     /// screen's pool beyond.
     ///
-    /// `len` is the byte length when the grapheme is inline and `pooled` when
-    /// it is not; in the pooled case `buf` carries a `u32` offset and a `u16`
-    /// length, little-endian. Unused bytes are always zero, so two `Text`
-    /// values are equal exactly when the graphemes they name are.
+    /// `len` is the byte length when the grapheme is inline and `pooled`
+    /// when it is not; in the pooled case `buf` carries a `u32` offset and a
+    /// `u16` length, little-endian, which is exactly the six bytes. Unused
+    /// bytes are always zero, so two `Text` values are equal exactly when
+    /// the graphemes they name are.
+    ///
+    /// Six rather than seven because `morse.Style` is twenty-two bytes and
+    /// the cell is thirty-two. Six covers every single-codepoint cluster,
+    /// and a base and a combining mark of three bytes each -- the warning
+    /// sign with its presentation selector, which is the cluster this
+    /// package cares most about, is exactly six.
     pub const Text = extern struct {
-        /// The grapheme's bytes, or the offset and length of its place in the
-        /// pool.
-        buf: [7]u8,
+        /// The grapheme's bytes, or the offset and length of its place in
+        /// the pool.
+        buf: [6]u8,
         /// The inline byte length, or `pooled`.
         len: u8,
 
         /// The most bytes a grapheme can occupy inside a cell.
-        pub const max_inline = 7;
+        pub const max_inline = 6;
         /// The `len` value that says `buf` is an offset and a length.
         pub const pooled = std.math.maxInt(u8);
 
         /// A single space: what a blank cell holds.
-        pub const space: Text = .{ .buf = .{ ' ', 0, 0, 0, 0, 0, 0 }, .len = 1 };
+        pub const space: Text = .{ .buf = .{ ' ', 0, 0, 0, 0, 0 }, .len = 1 };
 
         /// A grapheme short enough to live in the cell. Asserts it fits.
         pub fn inlined(bytes: []const u8) Text {
@@ -177,7 +170,7 @@ pub const Cell = extern struct {
         }
 
         /// Whether the grapheme is one printable ASCII byte, which every
-        /// width model measures the same way. The drift scan asks this first.
+        /// width model measures the same way.
         pub fn isAscii(t: Text) bool {
             return t.len == 1 and t.buf[0] >= 0x20 and t.buf[0] < 0x7f;
         }
@@ -185,85 +178,7 @@ pub const Cell = extern struct {
         /// Whether two `Text` values name the same grapheme. True by
         /// construction: both forms are canonical and the spare bytes zero.
         pub fn eql(a: Text, b: Text) bool {
-            return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
-        }
-    };
-
-    /// A style with every byte defined: what a cell stores.
-    ///
-    /// The same information as `Style`, laid out so that a cell can be
-    /// compared as memory. `Style` stays the type the API speaks.
-    pub const Bits = extern struct {
-        /// The colour of the glyphs.
-        fg: ColorBits = .{},
-        /// The colour of the cell behind them.
-        bg: ColorBits = .{},
-        /// The colour of the underline, independent of `fg`.
-        underline_color: ColorBits = .{},
-        /// The SGR flags in the low eight bits and the underline style in
-        /// the next three.
-        attrs: u16 = 0,
-
-        const bold: u16 = 1 << 0;
-        const dim: u16 = 1 << 1;
-        const italic: u16 = 1 << 2;
-        const blink: u16 = 1 << 3;
-        const reverse: u16 = 1 << 4;
-        const hidden: u16 = 1 << 5;
-        const strikethrough: u16 = 1 << 6;
-        const overline: u16 = 1 << 7;
-        const underline_shift: u4 = 8;
-
-        /// The attributes a blank cell can still show, so that erasing a
-        /// wide grapheme has to repaint the column it covered rather than
-        /// leaving whatever was under it.
-        const visible_on_blank: u16 = reverse | hidden | blink | strikethrough |
-            (0b111 << underline_shift);
-
-        /// A style packed into its defined form.
-        pub fn from(from_style: Style) Bits {
-            var attrs: u16 = 0;
-            if (from_style.bold) attrs |= bold;
-            if (from_style.dim) attrs |= dim;
-            if (from_style.italic) attrs |= italic;
-            if (from_style.blink) attrs |= blink;
-            if (from_style.reverse) attrs |= reverse;
-            if (from_style.hidden) attrs |= hidden;
-            if (from_style.strikethrough) attrs |= strikethrough;
-            if (from_style.overline) attrs |= overline;
-            attrs |= @as(u16, @intFromEnum(from_style.underline)) << underline_shift;
-            return .{
-                .fg = .from(from_style.fg),
-                .bg = .from(from_style.bg),
-                .underline_color = .from(from_style.underline_color),
-                .attrs = attrs,
-            };
-        }
-
-        /// The style back in the form the API speaks.
-        pub fn to(b: Bits) Style {
-            return .{
-                .fg = b.fg.to(),
-                .bg = b.bg.to(),
-                .underline_color = b.underline_color.to(),
-                .bold = b.attrs & bold != 0,
-                .dim = b.attrs & dim != 0,
-                .italic = b.attrs & italic != 0,
-                .underline = @enumFromInt(@as(u3, @truncate(b.attrs >> underline_shift))),
-                .blink = b.attrs & blink != 0,
-                .reverse = b.attrs & reverse != 0,
-                .hidden = b.attrs & hidden != 0,
-                .strikethrough = b.attrs & strikethrough != 0,
-                .overline = b.attrs & overline != 0,
-            };
-        }
-
-        /// Whether anything about this style is still visible on a cell with
-        /// no glyph in it: a background, a reverse, a line through it. What
-        /// decides whether a column a wide grapheme vacated has to be
-        /// written or can be left.
-        pub fn showsOnBlank(b: Bits) bool {
-            return b.bg.tag != .default or b.attrs & visible_on_blank != 0;
+            return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
         }
     };
 
@@ -301,7 +216,7 @@ pub const Cell = extern struct {
 
     /// A space in a style. What erasing writes.
     pub fn blank(in: Style) Cell {
-        return .{ .text = .space, .bits = .from(in), .link = .none, .shape = .{} };
+        return .{ .text = .space, .style = canonical(in), .link = .none, .shape = .{} };
     }
 
     /// A cell holding a grapheme.
@@ -313,20 +228,15 @@ pub const Cell = extern struct {
     }) Cell {
         return .{
             .text = args.text,
-            .bits = .from(args.style),
+            .style = canonical(args.style),
             .link = args.link,
             .shape = args.shape,
         };
     }
 
-    /// The style the cell draws in.
-    pub fn style(c: Cell) Style {
-        return c.bits.to();
-    }
-
     /// Puts a style on the cell.
     pub fn setStyle(c: *Cell, to: Style) void {
-        c.bits = .from(to);
+        c.style = canonical(to);
     }
 
     /// Equality as the renderer means it: same glyph, same style, same link,
@@ -364,7 +274,8 @@ pub const Cell = extern struct {
         if (c.link != .none) return false;
         if (c.shape.kind != .narrow and c.shape.kind != .spacer_head) return false;
         if (!Text.eql(c.text, .space)) return false;
-        return std.mem.eql(u8, std.mem.asBytes(&c.bits), std.mem.asBytes(&Bits.from(in)));
+        const want = canonical(in);
+        return std.mem.eql(u8, std.mem.asBytes(&c.style), std.mem.asBytes(&want));
     }
 };
 
@@ -376,15 +287,15 @@ pub fn rowsEqual(a: []const Cell, b: []const Cell) bool {
 }
 
 comptime {
-    // The whole point of the two-tier grapheme and the mirrored style: a
-    // cell that fits in a cache line four times over, is copied rather than
-    // pointed at, and is compared without reading a byte no one wrote.
+    // The whole point of the two-tier grapheme and morse's defined style
+    // layout: a cell that fits in a cache line four times over, is copied
+    // rather than pointed at, and is compared without reading a byte no one
+    // wrote.
     std.debug.assert(@sizeOf(Cell) == 32);
     std.debug.assert(@bitSizeOf(Cell) == 32 * 8);
-    std.debug.assert(@sizeOf(Cell.Text) == 8);
-    std.debug.assert(@sizeOf(Cell.Bits) == 14);
+    std.debug.assert(@sizeOf(Cell.Text) == 7);
+    std.debug.assert(@sizeOf(Style) == 22);
     std.debug.assert(@sizeOf(Cell.Shape) == 1);
-    std.debug.assert(@sizeOf(ColorBits) == 4);
 }
 
 const testing = std.testing;
@@ -397,11 +308,11 @@ test "a cell is thirty-two bytes with no padding in it" {
 test "two cells built the same way are the same memory" {
     const a: Cell = .init(.{
         .text = .inlined("x"),
-        .style = .{ .fg = .{ .ansi = .red }, .bold = true },
+        .style = .{ .fg = .ansi(.red), .bold = true },
     });
     const b: Cell = .init(.{
         .text = .inlined("x"),
-        .style = .{ .fg = .{ .ansi = .red }, .bold = true },
+        .style = .{ .fg = .ansi(.red), .bold = true },
     });
     try testing.expectEqualSlices(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
     try testing.expect(a.eql(b));
@@ -412,23 +323,23 @@ test "a style survives the trip through the cell's own form" {
         .{},
         .{ .bold = true, .dim = true, .italic = true, .blink = true },
         .{ .reverse = true, .hidden = true, .strikethrough = true, .overline = true },
-        .{ .fg = .{ .ansi = .bright_magenta }, .bg = .{ .palette = 231 } },
-        .{ .fg = .{ .rgb = .{ .r = 1, .g = 2, .b = 3 } } },
-        .{ .underline = .curly, .underline_color = .{ .rgb = .{ .r = 9, .g = 8, .b = 7 } } },
-        .{ .underline = .dashed, .underline_color = .{ .ansi = .green } },
+        .{ .fg = .ansi(.bright_magenta), .bg = .palette(231) },
+        .{ .fg = .rgb(1, 2, 3) },
+        .{ .underline = .curly, .underline_color = .rgb(9, 8, 7) },
+        .{ .underline = .dashed, .underline_color = .ansi(.green) },
     };
     for (cases) |style| {
         var c: Cell = .blank(style);
-        try testing.expectEqual(style, c.style());
+        try testing.expectEqual(style, c.style);
         c.setStyle(style);
-        try testing.expectEqual(style, c.style());
+        try testing.expectEqual(style, c.style);
     }
 }
 
 test "colours that differ only by their form are different cells" {
     const d: Cell = .blank(.{ .fg = .default });
-    const p: Cell = .blank(.{ .fg = .{ .palette = 0 } });
-    const n: Cell = .blank(.{ .fg = .{ .ansi = .black } });
+    const p: Cell = .blank(.{ .fg = .palette(0) });
+    const n: Cell = .blank(.{ .fg = .ansi(.black) });
     try testing.expect(!d.eql(p));
     try testing.expect(!d.eql(n));
     try testing.expect(!p.eql(n));
@@ -475,12 +386,12 @@ test "a link is an index and none is the zero value" {
 }
 
 test "a blank is a space in the style it was given" {
-    const c: Cell = .blank(.{ .bg = .{ .ansi = .blue } });
+    const c: Cell = .blank(.{ .bg = .ansi(.blue) });
     try testing.expectEqualStrings(" ", c.text.slice(""));
     try testing.expectEqual(@as(u2, 1), c.width());
     try testing.expect(!c.isTail());
     try testing.expect(c.isHead());
-    try testing.expect(c.eql(.blank(.{ .bg = .{ .ansi = .blue } })));
+    try testing.expect(c.eql(.blank(.{ .bg = .ansi(.blue) })));
     try testing.expect(!c.eql(.blank(.{})));
 }
 
@@ -492,16 +403,22 @@ test "width comes from the kind and needs no field of its own" {
 }
 
 test "what is still visible on a cell with no glyph in it" {
-    const plain: Cell.Bits = .from(.{});
-    try testing.expect(!plain.showsOnBlank());
-    try testing.expect(!(Cell.Bits.from(.{ .bold = true })).showsOnBlank());
-    try testing.expect(!(Cell.Bits.from(.{ .italic = true })).showsOnBlank());
-    try testing.expect(!(Cell.Bits.from(.{ .fg = .{ .ansi = .red } })).showsOnBlank());
-    try testing.expect((Cell.Bits.from(.{ .bg = .{ .ansi = .red } })).showsOnBlank());
-    try testing.expect((Cell.Bits.from(.{ .reverse = true })).showsOnBlank());
-    try testing.expect((Cell.Bits.from(.{ .underline = .single })).showsOnBlank());
-    try testing.expect((Cell.Bits.from(.{ .strikethrough = true })).showsOnBlank());
-    try testing.expect((Cell.Bits.from(.{ .blink = true })).showsOnBlank());
+    try testing.expect(!showsOnBlank(.{}));
+    try testing.expect(!showsOnBlank(.{ .bold = true }));
+    try testing.expect(!showsOnBlank(.{ .italic = true }));
+    try testing.expect(!showsOnBlank(.{ .fg = .ansi(.red) }));
+    try testing.expect(showsOnBlank(.{ .bg = .ansi(.red) }));
+    try testing.expect(showsOnBlank(.{ .reverse = true }));
+    try testing.expect(showsOnBlank(.{ .underline = .single }));
+    try testing.expect(showsOnBlank(.{ .strikethrough = true }));
+    try testing.expect(showsOnBlank(.{ .blink = true }));
+}
+
+test "a style with rubbish in the channels a colour does not use is still that colour" {
+    const odd: Style = .{ .fg = .{ .kind = .default, .r = 9, .g = 8, .b = 7 } };
+    const plain: Cell = .blank(.{});
+    try testing.expect(plain.eql(.blank(odd)));
+    try testing.expect(plain.isBlankIn(odd));
 }
 
 test "a row is compared with one memcmp" {

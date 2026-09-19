@@ -67,12 +67,12 @@ const styles = [_]cellmod.Style{
     .{ .bold = true },
     .{ .dim = true },
     .{ .bold = true, .dim = true },
-    .{ .fg = .{ .ansi = .red } },
-    .{ .fg = .{ .ansi = .bright_cyan }, .bg = .{ .ansi = .black } },
-    .{ .fg = .{ .palette = 137 } },
-    .{ .fg = .{ .rgb = .{ .r = 0x1c, .g = 0x2e, .b = 0xff } } },
-    .{ .bg = .{ .rgb = .{ .r = 9, .g = 9, .b = 9 } }, .italic = true },
-    .{ .underline = .curly, .underline_color = .{ .rgb = .{ .r = 1, .g = 2, .b = 3 } } },
+    .{ .fg = .ansi(.red) },
+    .{ .fg = .ansi(.bright_cyan), .bg = .ansi(.black) },
+    .{ .fg = .palette(137) },
+    .{ .fg = .rgb(0x1c, 0x2e, 0xff) },
+    .{ .bg = .rgb(9, 9, 9), .italic = true },
+    .{ .underline = .curly, .underline_color = .rgb(1, 2, 3) },
     .{ .reverse = true },
     .{ .strikethrough = true, .overline = true, .blink = true },
     .{ .hidden = true },
@@ -138,7 +138,6 @@ fn checkGrid(s: *const Screen) !void {
         while (col < s.size.cols) : (col += 1) {
             const c = s.cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
-            try testing.expect(std.mem.allEqual(u8, &c._reserved, 0));
             if (c.isTail()) {
                 try testing.expect(col > 0);
                 try testing.expect(s.cells[s.index(col - 1, @intCast(r))].shape.kind == .wide);

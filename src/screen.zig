@@ -134,7 +134,7 @@ pub const Screen = struct {
             for (0..size.rows) |r| {
                 const last = r * size.cols + size.cols - 1;
                 if (s.cells[last].shape.kind == .wide) {
-                    s.cells[last] = .blank(s.cells[last].style());
+                    s.cells[last] = .blank(s.cells[last].style);
                     s.cells[last].shape.kind = .spacer_head;
                 }
             }
@@ -205,12 +205,12 @@ pub const Screen = struct {
         const i = s.index(col, row);
 
         var put = c;
-        if (put.shape.kind == .spacer_tail) put = .blank(c.style());
+        if (put.shape.kind == .spacer_tail) put = .blank(c.style);
         if (put.shape.kind == .wide and col + 1 >= s.size.cols) {
             // There is one column left and the grapheme wants two. The cell
             // is a spacer, not a space: the diff has to be able to tell it
             // from something the caller asked for.
-            put = .blank(put.style());
+            put = .blank(put.style);
             put.shape.kind = .spacer_head;
         }
 
@@ -247,7 +247,7 @@ pub const Screen = struct {
         const t = try s.graphemes.intern(s.gpa, grapheme);
         s.writeCell(col, row, .{
             .text = t,
-            .bits = .from(style),
+            .style = cellmod.canonical(style),
             .link = to,
             .shape = .{
                 .kind = if (w == 2) .wide else .narrow,
@@ -358,6 +358,11 @@ pub const Screen = struct {
         return s.links.get(l);
     }
 
+    /// The whole grid as a window.
+    pub fn window(s: *Screen) @import("window.zig").Window {
+        return .{ .screen = s, .rect = .fromSize(s.size) };
+    }
+
     /// Everything dirty: the next draw writes the whole grid.
     pub fn damageAll(s: *Screen) void {
         s.damage.markAll(s.size.cols);
@@ -400,9 +405,9 @@ pub const Screen = struct {
         const i = s.index(col, row_n);
         const c = s.cells[i];
         if (c.isTail()) {
-            if (col > 0) s.place(i - 1, .blank(s.cells[i - 1].style()));
+            if (col > 0) s.place(i - 1, .blank(s.cells[i - 1].style));
         } else if (c.shape.kind == .wide and col + 1 < s.size.cols) {
-            s.place(i + 1, .blank(s.cells[i + 1].style()));
+            s.place(i + 1, .blank(s.cells[i + 1].style));
         }
     }
 
@@ -414,8 +419,8 @@ pub const Screen = struct {
         const left = s.cells[i - 1];
         const here = s.cells[i];
         const paired = left.shape.kind == .wide and here.isTail();
-        if (here.isTail() and !paired) s.place(i, .blank(here.style()));
-        if (left.shape.kind == .wide and !paired) s.place(i - 1, .blank(left.style()));
+        if (here.isTail() and !paired) s.place(i, .blank(here.style));
+        if (left.shape.kind == .wide and !paired) s.place(i - 1, .blank(left.style));
     }
 
     /// Copies a run of cells from one row to another, marking what changed.
@@ -465,7 +470,6 @@ fn checkInvariants(s: *const Screen) !void {
         while (col < s.size.cols) : (col += 1) {
             const c = s.cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
-            try testing.expect(std.mem.allEqual(u8, &c._reserved, 0));
             if (c.isTail()) {
                 // A tail never stands alone, and never in the first column.
                 try testing.expect(col > 0);
@@ -578,7 +582,7 @@ test "a wide grapheme with one column left becomes a blank" {
     try s.write(2, 0, "\u{4e2d}", .{ .bold = true }, .none);
     const c = s.readCell(2, 0).?;
     try testing.expectEqualStrings(" ", s.textAt(2, 0));
-    try testing.expect(c.style().bold);
+    try testing.expect(c.style.bold);
     try checkInvariants(&s);
 }
 
@@ -603,15 +607,15 @@ test "a fill covers only the rectangle and clips to the grid" {
     var s = try made(6, 4);
     defer s.deinit(testing.allocator);
 
-    s.fill(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 }, .blank(.{ .bg = .{ .ansi = .blue } }));
+    s.fill(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 }, .blank(.{ .bg = .ansi(.blue) }));
     try testing.expect(s.readCell(0, 1).?.eql(.blank(.{})));
-    try testing.expect(s.readCell(1, 1).?.eql(.blank(.{ .bg = .{ .ansi = .blue } })));
-    try testing.expect(s.readCell(3, 2).?.eql(.blank(.{ .bg = .{ .ansi = .blue } })));
+    try testing.expect(s.readCell(1, 1).?.eql(.blank(.{ .bg = .ansi(.blue) })));
+    try testing.expect(s.readCell(3, 2).?.eql(.blank(.{ .bg = .ansi(.blue) })));
     try testing.expect(s.readCell(4, 2).?.eql(.blank(.{})));
     try testing.expect(s.readCell(1, 3).?.eql(.blank(.{})));
 
     s.fill(.{ .col = 4, .row = 3, .cols = 99, .rows = 99 }, .blank(.{ .bold = true }));
-    try testing.expect(s.readCell(5, 3).?.style().bold);
+    try testing.expect(s.readCell(5, 3).?.style.bold);
     try checkInvariants(&s);
 }
 
