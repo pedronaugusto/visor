@@ -77,22 +77,22 @@ pub const Tty = struct {
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
         if (is_windows) {
-            const input = windows.kernel32.CreateFileW(
+            const input = CreateFileW(
                 std.unicode.utf8ToUtf16LeStringLiteral("CONIN$"),
-                windows.GENERIC_READ | windows.GENERIC_WRITE,
-                windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
                 null,
-                windows.OPEN_EXISTING,
+                OPEN_EXISTING,
                 0,
                 null,
             );
             if (input == windows.INVALID_HANDLE_VALUE) return error.NotATerminal;
-            const output = windows.kernel32.CreateFileW(
+            const output = CreateFileW(
                 std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"),
-                windows.GENERIC_READ | windows.GENERIC_WRITE,
-                windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
                 null,
-                windows.OPEN_EXISTING,
+                OPEN_EXISTING,
                 0,
                 null,
             );
@@ -126,10 +126,10 @@ pub const Tty = struct {
         if (is_windows) {
             var input_mode: windows.DWORD = 0;
             var output_mode: windows.DWORD = 0;
-            if (windows.kernel32.GetConsoleMode(t.input.handle, &input_mode) == 0) {
+            if (GetConsoleMode(t.input.handle, &input_mode) == .FALSE) {
                 return error.NotATerminal;
             }
-            if (windows.kernel32.GetConsoleMode(t.file.handle, &output_mode) == 0) {
+            if (GetConsoleMode(t.file.handle, &output_mode) == .FALSE) {
                 return error.NotATerminal;
             }
             const saved: Saved = .{
@@ -144,8 +144,8 @@ pub const Tty = struct {
             want_in |= ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
             var want_out = output_mode;
             want_out |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
-            if (windows.kernel32.SetConsoleMode(t.input.handle, want_in) == 0) return error.Unexpected;
-            if (windows.kernel32.SetConsoleMode(t.file.handle, want_out) == 0) return error.Unexpected;
+            if (SetConsoleMode(t.input.handle, want_in) == .FALSE) return error.Unexpected;
+            if (SetConsoleMode(t.file.handle, want_out) == .FALSE) return error.Unexpected;
             t.saved = saved;
             open_tty = saved;
             return;
@@ -191,8 +191,8 @@ pub const Tty = struct {
     /// rather than out of band and after the fact.
     pub fn size(t: *Tty) SizeError!Size {
         if (is_windows) {
-            var info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
-            if (windows.kernel32.GetConsoleScreenBufferInfo(t.file.handle, &info) == 0) {
+            var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+            if (GetConsoleScreenBufferInfo(t.file.handle, &info) == .FALSE) {
                 return error.NotATerminal;
             }
             const cols = info.srWindow.Right - info.srWindow.Left + 1;
@@ -288,15 +288,18 @@ pub const Panic = std.debug.FullPanic(struct {
 /// The way back, from whatever remembered it.
 fn restoreSaved(was: Saved) void {
     if (is_windows) {
-        _ = windows.kernel32.SetConsoleMode(was.input, was.input_mode);
-        _ = windows.kernel32.SetConsoleMode(was.output, was.output_mode);
+        _ = SetConsoleMode(was.input, was.input_mode);
+        _ = SetConsoleMode(was.output, was.output_mode);
         return;
     }
     std.posix.tcsetattr(was.handle, .FLUSH, was.mode) catch {};
 }
 
 //=========================================================================
-// The console modes, which `std.os.windows` does not name.
+// The console, which `std.os.windows` carries the types for and not the
+// entry points. Everything here is an `extern` declaration against the
+// system import library, in the same style as `std.os.windows.kernel32`; no
+// C is involved. Nothing below is reached off Windows.
 //=========================================================================
 
 const ENABLE_PROCESSED_INPUT: windows.DWORD = 0x0001;
@@ -308,6 +311,52 @@ const ENABLE_QUICK_EDIT_MODE: windows.DWORD = 0x0040;
 const ENABLE_VIRTUAL_TERMINAL_INPUT: windows.DWORD = 0x0200;
 const ENABLE_VIRTUAL_TERMINAL_PROCESSING: windows.DWORD = 0x0004;
 const DISABLE_NEWLINE_AUTO_RETURN: windows.DWORD = 0x0008;
+
+const GENERIC_READ: windows.DWORD = 0x80000000;
+const GENERIC_WRITE: windows.DWORD = 0x40000000;
+const FILE_SHARE_READ: windows.DWORD = 0x00000001;
+const FILE_SHARE_WRITE: windows.DWORD = 0x00000002;
+const OPEN_EXISTING: windows.DWORD = 3;
+
+const SMALL_RECT = extern struct {
+    Left: windows.SHORT,
+    Top: windows.SHORT,
+    Right: windows.SHORT,
+    Bottom: windows.SHORT,
+};
+
+const CONSOLE_SCREEN_BUFFER_INFO = extern struct {
+    dwSize: windows.COORD,
+    dwCursorPosition: windows.COORD,
+    wAttributes: windows.WORD,
+    srWindow: SMALL_RECT,
+    dwMaximumWindowSize: windows.COORD,
+};
+
+extern "kernel32" fn CreateFileW(
+    lpFileName: windows.LPCWSTR,
+    dwDesiredAccess: windows.DWORD,
+    dwShareMode: windows.DWORD,
+    lpSecurityAttributes: ?*windows.SECURITY_ATTRIBUTES,
+    dwCreationDisposition: windows.DWORD,
+    dwFlagsAndAttributes: windows.DWORD,
+    hTemplateFile: ?windows.HANDLE,
+) callconv(.winapi) windows.HANDLE;
+
+extern "kernel32" fn GetConsoleMode(
+    hConsoleHandle: windows.HANDLE,
+    lpMode: *windows.DWORD,
+) callconv(.winapi) windows.BOOL;
+
+extern "kernel32" fn SetConsoleMode(
+    hConsoleHandle: windows.HANDLE,
+    dwMode: windows.DWORD,
+) callconv(.winapi) windows.BOOL;
+
+extern "kernel32" fn GetConsoleScreenBufferInfo(
+    hConsoleOutput: windows.HANDLE,
+    lpConsoleScreenBufferInfo: *CONSOLE_SCREEN_BUFFER_INFO,
+) callconv(.winapi) windows.BOOL;
 
 const testing = std.testing;
 

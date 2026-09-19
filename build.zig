@@ -88,6 +88,16 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the visor tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    // Compiling without running is what a target this host cannot execute can
+    // still be held to, and it is also the default step, so a bare
+    // `zig build -Dtarget=...` is the same check under another name. Both
+    // test binaries and every example are in it; the conformance build under
+    // `conformance/` is not, being a build of its own with an emulator to
+    // fetch.
+    const check_step = b.step("check", "Compile the tests and the examples without running them");
+    check_step.dependOn(&tests.step);
+    b.getInstallStep().dependOn(check_step);
+
     // The widgets are a second module and get a second test binary. Every
     // widget's test draws it into a real grid, renders the frame, feeds the
     // bytes to the emulator and compares the picture -- so the suite proves
@@ -105,6 +115,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     test_step.dependOn(&b.addRunArtifact(widget_tests).step);
+    check_step.dependOn(&widget_tests.step);
 
     //=====================================================================
     // Examples
@@ -132,9 +143,7 @@ pub fn build(b: *std.Build) void {
             }),
         });
         examples_step.dependOn(&b.addRunArtifact(example).step);
-        // `zig build` with a target and nothing else has to compile
-        // something, or a cross-compilation check checks nothing.
-        b.getInstallStep().dependOn(&example.step);
+        check_step.dependOn(&example.step);
     }
     test_step.dependOn(examples_step);
 

@@ -284,7 +284,8 @@ its own.
 | Windows | `windows-latest` in CI, four optimize modes |
 
 Everything but `tty` is arithmetic and bytes, so the same source builds
-wherever Zig does; cross-compilation is checked for `x86_64-linux-gnu`,
+wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
+the examples without running them, and CI does that for `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
 `aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
 [`ci/linux.sh`](ci/linux.sh) runs the suite in Docker from any machine; it is

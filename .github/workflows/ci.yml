@@ -83,23 +83,30 @@ jobs:
 
   # Every target the package claims, compiled from one host. A package with
   # no operating system calls outside `tty` still has to prove that `tty`
-  # builds where it says it does.
+  # builds where it says it does — and most of `tty`'s Windows half is
+  # reached from a test and from nowhere else, so the step is `check`, which
+  # compiles both test binaries and every example and runs none of them.
   cross:
-    name: cross-compile
+    name: cross (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+          - x86_64-linux-musl
+          - x86_64-windows-gnu
+          - aarch64-windows-gnu
+          - x86_64-macos
+          - aarch64-macos
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      - run: zig build -Dtarget=x86_64-linux-gnu
-      - run: zig build -Dtarget=aarch64-linux-gnu
-      - run: zig build -Dtarget=x86_64-linux-musl
-      - run: zig build -Dtarget=x86_64-windows-gnu
-      - run: zig build -Dtarget=aarch64-windows-gnu
-      - run: zig build -Dtarget=x86_64-macos
-      - run: zig build -Dtarget=aarch64-macos
+      - run: zig build check -Dtarget=${{ matrix.target }}
 
   # README.md's Usage block is a region of examples/usage.zig, which the job
   # above runs. This is what keeps the two the same thing. No Zig needed.
