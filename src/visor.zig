@@ -150,6 +150,8 @@ pub const Panic = tty_mod.Panic;
 pub const Term = term_mod.Term;
 /// Two screens compared cell by cell, naming the first that differs.
 pub const expectScreensEqual = term_mod.expectScreensEqual;
+/// The first cell two screens disagree about, read by column, or null.
+pub const firstDifference = term_mod.firstDifference;
 /// A screen as text, one row a line.
 pub const dumpScreen = term_mod.dumpScreen;
 /// A screen's styles as one identifier a cell, with the legend above.

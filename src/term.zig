@@ -758,25 +758,33 @@ pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
         );
         return error.TestExpectedEqual;
     }
+    const where = firstDifference(want, got) orelse return;
+    try reportCell(want, got, where.col, where.row);
+    return error.TestExpectedEqual;
+}
+
+/// The first cell two screens disagree about, read by column, or null.
+///
+/// The kind is not compared, only what the terminal can show: a spacer left
+/// by a wrap and a space someone asked for are the same cell to it, and only
+/// this package knows the difference.
+pub fn firstDifference(want: *const Screen, got: *const Screen) ?geom.Point {
+    if (!std.meta.eql(want.size, got.size)) return .{ .col = 0, .row = 0 };
     var row: u16 = 0;
     while (row < want.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < want.size.cols) : (col += 1) {
             const a = want.cells[want.index(col, row)];
             const b = got.cells[got.index(col, row)];
-            const same_text = std.mem.eql(u8, want.textAt(col, row), got.textAt(col, row));
-            const same_link = linksEqual(want, got, a.link, b.link);
-            // The kind is not compared, only what the terminal can show: a
-            // `spacer_head` and a space are the same cell to it, and only
-            // this package knows one was left by a wrap.
-            if (same_text and same_link and
+            if (std.mem.eql(u8, want.textAt(col, row), got.textAt(col, row)) and
+                linksEqual(want, got, a.link, b.link) and
                 stylesEqual(a.style, b.style) and
                 a.width() == b.width() and
                 a.isTail() == b.isTail()) continue;
-            try reportCell(want, got, col, row);
-            return error.TestExpectedEqual;
+            return .{ .col = col, .row = row };
         }
     }
+    return null;
 }
 
 /// Says what differs at one cell, then prints both grids whole.
@@ -1252,11 +1260,23 @@ test "the style dump names every style it used" {
 }
 
 test "comparing two screens names the first cell that differs" {
-    var a: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 1 });
+    var a: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 2 });
     defer a.deinit(testing.allocator);
-    var b: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 1 });
+    var b: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 2 });
     defer b.deinit(testing.allocator);
     try expectScreensEqual(&a, &b);
-    try a.write(1, 0, "x", .{}, .none);
-    try testing.expectError(error.TestExpectedEqual, expectScreensEqual(&a, &b));
+    try testing.expectEqual(@as(?geom.Point, null), firstDifference(&a, &b));
+
+    // Read by column, so the covered column of a wide grapheme is compared
+    // rather than lost in a dump.
+    try a.write(1, 1, "x", .{}, .none);
+    try testing.expectEqual(geom.Point{ .col = 1, .row = 1 }, firstDifference(&a, &b).?);
+    try b.write(1, 1, "x", .{ .bold = true }, .none);
+    try testing.expectEqual(geom.Point{ .col = 1, .row = 1 }, firstDifference(&a, &b).?);
+    try b.write(1, 1, "x", .{}, .none);
+    try testing.expectEqual(@as(?geom.Point, null), firstDifference(&a, &b));
+
+    try a.write(0, 0, "\u{4e2d}", .{}, .none);
+    try b.write(0, 0, "\u{ff21}", .{}, .none);
+    try testing.expectEqual(geom.Point{ .col = 0, .row = 0 }, firstDifference(&a, &b).?);
 }
