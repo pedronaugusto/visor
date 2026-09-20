@@ -38,6 +38,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the last frame still showing. Scroll detection is off inline. The
   round trip runs for inline screens, and `examples/progress.zig` is one.
 
+- The conformance build compares every column's link with the second
+  emulator's, URI and `id` both, where before it compared the grapheme, the
+  width and the style and let a link go unchecked.
+
 ### Removed
 
 - `error.InlineModeUnsupported`, which `Renderer.enter` no longer returns.

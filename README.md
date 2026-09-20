@@ -355,8 +355,9 @@ inputs, against a terminal emulator that is not this one's. `Term` ships with
 this package, so a property that compares the renderer with it compares two
 readings of the same specifications by the same hand; the conformance build
 compares the renderer with the terminal inside a shipping emulator, read
-through its own grid — every column's grapheme, its width and its style. It is
-a build of its own under `conformance/`, with its own manifest pinning that
+through its own grid — every column's grapheme, its width, its style and its
+link, with two links that differ only by their `id` being two links. It is a
+build of its own under `conformance/`, with its own manifest pinning that
 emulator by commit, so nothing that builds a program on this package fetches
 one. CI runs it on Linux and macOS.
 

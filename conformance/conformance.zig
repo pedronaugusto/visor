@@ -12,7 +12,8 @@
 //! committed corpus, read by column:
 //!
 //! - **The terminal shows the screen.** Every column, the covered column of
-//!   a wide cluster included, its grapheme, its width and its style.
+//!   a wide cluster included, its grapheme, its width, its style and its
+//!   link.
 //! - **Drawing again writes nothing.**
 //! - **A repaint recovers from anything.**
 //! - **Incremental equals a repaint.**
@@ -92,6 +93,16 @@ const Oracle = struct {
         wide: vt.Cell.Wide,
         /// The style the terminal has on it.
         style: vt.Style,
+        /// The link on it, or null. Borrowed from the terminal's own page,
+        /// so read before the next byte is fed.
+        link: ?Hyperlink,
+    };
+
+    /// An OSC 8 target as the terminal keeps it: the URI, and the `id`
+    /// parameter when one was given.
+    const Hyperlink = struct {
+        uri: []const u8,
+        id: ?[]const u8,
     };
 
     fn init(gpa: Allocator, size: visor.Size, method: visor.Method) !*Oracle {
@@ -145,9 +156,44 @@ const Oracle = struct {
                 }
             }
         }
-        return .{ .text = buf[0..n], .wide = found.cell.wide, .style = found.style() };
+        const page = found.node.page();
+        const link: ?Hyperlink = if (page.lookupHyperlink(found.cell)) |id| blk: {
+            const entry = page.hyperlink_set.get(page.memory, id);
+            break :blk .{
+                .uri = entry.uri.slice(page.memory),
+                .id = switch (entry.id) {
+                    .explicit => |s| s.slice(page.memory),
+                    .implicit => null,
+                },
+            };
+        } else null;
+        return .{ .text = buf[0..n], .wide = found.cell.wide, .style = found.style(), .link = link };
     }
 };
+
+/// The `id` in an OSC 8 parameter list, or null when there is none or it is
+/// empty, which a terminal treats as none.
+fn idOf(list: []const u8) ?[]const u8 {
+    var it = std.mem.splitScalar(u8, list, ':');
+    while (it.next()) |pair| {
+        if (!std.mem.startsWith(u8, pair, "id=")) continue;
+        const value = pair[3..];
+        return if (value.len == 0) null else value;
+    }
+    return null;
+}
+
+/// Whether the terminal's link is the one this package drew: the same URI,
+/// and the same `id` or none on both sides. An implicit id is the
+/// terminal's own number and is not compared.
+fn linkAgrees(want: ?visor.Target, got: ?Oracle.Hyperlink) bool {
+    const mine = want orelse return got == null;
+    const theirs = got orelse return false;
+    if (!std.mem.eql(u8, mine.uri, theirs.uri)) return false;
+    const my_id = idOf(mine.params);
+    if (my_id == null or theirs.id == null) return my_id == null and theirs.id == null;
+    return std.mem.eql(u8, my_id.?, theirs.id.?);
+}
 
 /// How this package's kinds read on the other terminal.
 ///
@@ -230,6 +276,14 @@ fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
                     .{ col, row, mine.style, theirs.style },
                 );
                 return error.StyleDisagrees;
+            }
+
+            if (!linkAgrees(screen.target(mine.link), theirs.link)) {
+                std.debug.print(
+                    "column {d},{d}: link disagrees\n  drawn: {?any}\n  shown: {?any}\n",
+                    .{ col, row, screen.target(mine.link), theirs.link },
+                );
+                return error.LinkDisagrees;
             }
         }
     }
@@ -412,6 +466,34 @@ test "the second emulator agrees, measuring by cluster" {
             try roundTrip(gpa, smith, .unicode);
         }
     }.one, .{ .corpus = &corpus.entries });
+}
+
+test "two links that differ only by their id are two links to the second emulator" {
+    const gpa = testing.allocator;
+    const size: visor.Size = .{ .cols = 8, .rows = 1 };
+    var h: Harness = try .init(gpa, size, .unicode);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, size, .unicode);
+    defer o.deinit();
+
+    const one = try h.screen.link(gpa, "https://ziglang.org", "id=one");
+    const two = try h.screen.link(gpa, "https://ziglang.org", "id=two");
+    const bare = try h.screen.link(gpa, "https://ziglang.org", "");
+    try h.screen.write(0, 0, "a", .{}, one);
+    try h.screen.write(1, 0, "b", .{}, two);
+    try h.screen.write(2, 0, "c", .{}, bare);
+    try h.screen.write(3, 0, "d", .{}, .none);
+    _ = try h.frame(o);
+
+    var buf: [64]u8 = undefined;
+    try testing.expectEqualStrings("one", (try o.read(0, 0, &buf)).link.?.id.?);
+    try testing.expectEqualStrings("two", (try o.read(1, 0, &buf)).link.?.id.?);
+    try testing.expectEqual(@as(?[]const u8, null), (try o.read(2, 0, &buf)).link.?.id);
+    try testing.expectEqual(@as(?Oracle.Hyperlink, null), (try o.read(3, 0, &buf)).link);
+
+    // And a drawn link the terminal did not get is a failure, not a pass.
+    try h.screen.write(3, 0, "d", .{}, one);
+    try testing.expectError(error.LinkDisagrees, expectAgrees(&h.screen, o));
 }
 
 test "every cluster written to the last row reaches the second emulator" {
