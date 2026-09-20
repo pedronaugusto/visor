@@ -30,6 +30,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   layers to be enabled from the terminal's reply.
 - Paragraph wrapping, alignment, horizontal scrolling, and row counts use the
   screen's configured width method; `rowCount` now takes that method.
+- Canvas lines are clipped to the mark grid before rasterization, so distant
+  off-canvas endpoints cannot leave gaps in the visible segment.
 
 ## [0.1.0] - 2026-09-19
 

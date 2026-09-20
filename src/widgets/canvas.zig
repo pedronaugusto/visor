@@ -104,17 +104,13 @@ pub const Painter = struct {
 
     /// A straight line between two places, by the oldest algorithm there is.
     pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: Style) std.mem.Allocator.Error!void {
-        const a = p.locate(x1, y1);
-        const b = p.locate(x2, y2);
-        if (a == null or b == null) {
-            // A line with an end outside the plane is still drawn, by
-            // stepping along it and dropping the marks that fall off.
-            return p.lineByPoints(x1, y1, x2, y2, style);
-        }
-        var x: i64 = a.?.x;
-        var y: i64 = a.?.y;
-        const tx: i64 = b.?.x;
-        const ty: i64 = b.?.y;
+        const clipped = clipSegment(x1, y1, x2, y2, p.canvas.x_bounds, p.canvas.y_bounds) orelse return;
+        const a = p.locate(clipped[0], clipped[1]) orelse return;
+        const b = p.locate(clipped[2], clipped[3]) orelse return;
+        var x: i64 = a.x;
+        var y: i64 = a.y;
+        const tx: i64 = b.x;
+        const ty: i64 = b.y;
         const dx = @abs(tx - x);
         const dy = @abs(ty - y);
         const sx: i64 = if (x < tx) 1 else -1;
@@ -157,25 +153,6 @@ pub const Painter = struct {
         for (points[1..], 0..) |b, i| {
             const a = points[i];
             try p.line(a[0], a[1], b[0], b[1], style);
-        }
-    }
-
-    /// A line stepped in the plane's own numbers, for a line that leaves it.
-    fn lineByPoints(
-        p: Painter,
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-        style: Style,
-    ) std.mem.Allocator.Error!void {
-        const across: f64 = @floatFromInt(@as(u32, p.win.cols()) * p.canvas.marker.across());
-        const down: f64 = @floatFromInt(@as(u32, p.win.rows()) * p.canvas.marker.down());
-        const steps: usize = @intFromFloat(@max(across, down) * 2 + 2);
-        var i: usize = 0;
-        while (i <= steps) : (i += 1) {
-            const t = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(steps));
-            try p.point(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, style);
         }
     }
 
@@ -231,6 +208,43 @@ pub const Painter = struct {
         return win.screen.textAt(win.rect.col + col, win.rect.row + row);
     }
 };
+
+/// Clips a segment to the canvas rectangle before it is quantized to marks.
+fn clipSegment(x1: f64, y1: f64, x2: f64, y2: f64, xb: [2]f64, yb: [2]f64) ?[4]f64 {
+    if (!std.math.isFinite(x1) or !std.math.isFinite(y1) or
+        !std.math.isFinite(x2) or !std.math.isFinite(y2)) return null;
+    const xmin = @min(xb[0], xb[1]);
+    const xmax = @max(xb[0], xb[1]);
+    const ymin = @min(yb[0], yb[1]);
+    const ymax = @max(yb[0], yb[1]);
+    if (xmax <= xmin or ymax <= ymin) return null;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    var interval: [2]f64 = .{ 0, 1 };
+    if (!clipEdge(-dx, x1 - xmin, &interval)) return null;
+    if (!clipEdge(dx, xmax - x1, &interval)) return null;
+    if (!clipEdge(-dy, y1 - ymin, &interval)) return null;
+    if (!clipEdge(dy, ymax - y1, &interval)) return null;
+    return .{
+        std.math.clamp(x1 + interval[0] * dx, xmin, xmax),
+        std.math.clamp(y1 + interval[0] * dy, ymin, ymax),
+        std.math.clamp(x1 + interval[1] * dx, xmin, xmax),
+        std.math.clamp(y1 + interval[1] * dy, ymin, ymax),
+    };
+}
+
+fn clipEdge(p: f64, q: f64, interval: *[2]f64) bool {
+    if (p == 0) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+        if (r > interval[1]) return false;
+        interval[0] = @max(interval[0], r);
+    } else {
+        if (r < interval[0]) return false;
+        interval[1] = @min(interval[1], r);
+    }
+    return true;
+}
 
 /// Where a number falls in a range, as a mark index, or null outside it.
 fn place(value: f64, bounds: [2]f64, marks: u32) ?u32 {
@@ -334,6 +348,21 @@ test "a line with one end off the plane still draws the part that is on it" {
     try p.line(-10, 0.5, 1.5, 0.5, .{});
     try h.expectFrame(
         \\██
+        \\
+    );
+}
+
+test "a very long line is clipped before every visible mark is rasterized" {
+    var h: Harness = try .init(testing.allocator, 4, 1);
+    defer h.deinit();
+    const p = (Canvas{
+        .x_bounds = .{ 0, 4 },
+        .y_bounds = .{ 0, 1 },
+        .marker = .block,
+    }).painter(h.window());
+    try p.line(-1e9, 0.5, 1e9, 0.5, .{});
+    try h.expectFrame(
+        \\████
         \\
     );
 }
