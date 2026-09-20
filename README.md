@@ -382,6 +382,18 @@ nothing changed writes nothing. The generated corpus in `src/corpus.zig` runs
 on every push, and both builds replay the same bytes; `zig build test --fuzz`
 keeps searching beyond it.
 
+What a frame costs, measured here on a 200 by 50 grid of 10,000 cells, ReleaseFast
+on an Apple M3 Max, best of five passes of a thousand frames each:
+
+| Frame | Time | Bytes |
+|---|---|---|
+| The whole grid repainted | 170 µs | 43,404 |
+| 100 cells changed at random | 69 µs | 4,047 |
+| The grid scrolled one row, repainted | 267 µs | 43,304 |
+| The same, with `Caps.scroll_detection` | 154 µs | 878 |
+| A page of widgets drawn into a blank grid | 257 µs | 2,445 |
+| Nothing changed | 0 | 0 |
+
 ## Requirements
 
 Zig 0.16.0.
