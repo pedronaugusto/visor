@@ -45,6 +45,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Calendar weekday calculation covers the complete public `i32` year range.
 - Layout splitting clips rectangles that cross the `u16` coordinate edge
   instead of trapping while narrowing their endpoints.
+- The exported package version reports `0.1.0`, matching the manifest and
+  released changelog.
 
 ## [0.1.0] - 2026-09-19
 

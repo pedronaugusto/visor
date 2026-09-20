@@ -8,7 +8,7 @@
 //! `*std.Io.Writer` the caller owns and flushes.
 //!
 //! One allocator, taken at `Screen.init` and `Renderer.init`. After that,
-//! the frame path allocates nothing: `writeCell` does not, `print` does not,
+//! the frame path allocates nothing: `print` does not,
 //! `draw` does not. `Screen.write` allocates only for a grapheme longer than
 //! six bytes that the screen has not seen before.
 //!
@@ -45,7 +45,7 @@ const window_mod = @import("window.zig");
 pub const morse = @import("morse");
 
 /// The semantic version of this package, as a string.
-pub const version = "0.0.0";
+pub const version = "0.1.0";
 
 //=========================================================================
 // The grid's contents.
@@ -173,4 +173,8 @@ test {
     _ = window_mod;
     _ = @import("roundtrip.zig");
     _ = @import("bench.zig");
+}
+
+test "the exported version matches the released package" {
+    try std.testing.expectEqualStrings("0.1.0", version);
 }

@@ -150,8 +150,8 @@ itself should keep these six and add its own, or the two configurations build
 two sets of tables.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
-After that the frame path takes none: `writeCell` does not allocate, `print`
-does not allocate, `draw` does not allocate. `Screen.write` allocates only for
+After that the frame path takes none: `print` does not allocate and `draw`
+does not allocate. `Screen.write` allocates only for
 a grapheme longer than six bytes the screen has not seen before, and says so
 with a `try`. Resizing allocates.
 
