@@ -28,7 +28,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   emulator draws the block, and the round trip's generator writes scaled
   text. `Cell.width` now returns the columns a cell covers at its scale, as a
   `u4`; `Cell.glyphWidth` is the width before scaling.
-
 - Inline mode. `Renderer.enter` with `Mode.inline` takes the screen's rows
   from the row the cursor is on, the terminal scrolling for the ones that do
   not fit, and saves an origin there; every move after that is relative to
@@ -37,7 +36,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a blank screen at the origin, and `leave` puts the cursor on the row below
   with the last frame still showing. Scroll detection is off inline. The
   round trip runs for inline screens, and `examples/progress.zig` is one.
-
 - The conformance build compares every column's link with the second
   emulator's, URI and `id` both, where before it compared the grapheme, the
   width and the style and let a link go unchecked.
