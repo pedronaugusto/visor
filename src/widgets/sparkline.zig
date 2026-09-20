@@ -58,7 +58,7 @@ pub const Sparkline = struct {
                 .left_to_right => @intCast(i),
                 .right_to_left => @intCast(shown.len - 1 - i),
             };
-            const scaled = @as(u64, @min(value, top)) * rows * 8 / top;
+            const scaled: u64 = @intCast(@as(u128, @min(value, top)) * rows * 8 / top);
             var row: u16 = rows;
             var left = scaled;
             while (row > 0) : (row -= 1) {
@@ -101,6 +101,17 @@ test "a taller window draws each point as a column of blocks" {
     try h.expectFrame(
         \\  █
         \\▄██
+        \\
+    );
+}
+
+test "a maximum u64 point scales without overflow" {
+    var h: Harness = try .init(testing.allocator, 1, 2);
+    defer h.deinit();
+    try (Sparkline{ .data = &.{std.math.maxInt(u64)} }).draw(h.window());
+    try h.expectFrame(
+        \\█
+        \\█
         \\
     );
 }

@@ -83,7 +83,7 @@ pub const BarChart = struct {
         var col: u16 = 0;
         for (c.bars) |b| {
             if (col >= win.cols()) return;
-            const scaled = @min(b.value, top) * rows * 8 / top;
+            const scaled: u64 = @intCast(@as(u128, @min(b.value, top)) * rows * 8 / top);
             var thick: u16 = 0;
             while (thick < c.bar_width and col + thick < win.cols()) : (thick += 1) {
                 var row: u16 = rows;
@@ -112,7 +112,7 @@ pub const BarChart = struct {
         var row: u16 = 0;
         for (c.bars) |b| {
             if (row >= win.rows()) return;
-            const scaled = @min(b.value, top) * cols * 8 / top;
+            const scaled: u64 = @intCast(@as(u128, @min(b.value, top)) * cols * 8 / top);
             const whole: u16 = @intCast(@min(scaled / 8, cols));
             const part: u16 = @intCast(scaled % 8);
             var thick: u16 = 0;
@@ -200,6 +200,20 @@ test "a bar wider than one cell is drawn as many" {
     try h.expectFrame(
         \\███ ███
         \\███ ███
+        \\
+    );
+}
+
+test "a maximum u64 bar scales without overflow" {
+    var h: Harness = try .init(testing.allocator, 1, 2);
+    defer h.deinit();
+    try (BarChart{
+        .bars = &.{.{ .value = std.math.maxInt(u64) }},
+        .show_values = false,
+    }).draw(h.window());
+    try h.expectFrame(
+        \\█
+        \\█
         \\
     );
 }

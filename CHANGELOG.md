@@ -32,6 +32,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   screen's configured width method; `rowCount` now takes that method.
 - Canvas lines are clipped to the mark grid before rasterization, so distant
   off-canvas endpoints cannot leave gaps in the visible segment.
+- Sparkline and bar-chart scaling handles the full `u64` value range without
+  intermediate overflow.
 
 ## [0.1.0] - 2026-09-19
 
