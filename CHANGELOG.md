@@ -18,6 +18,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output console fails.
 - `Renderer.leave` unwinds terminal modes even when `Renderer.enter` stopped
   on a partial output write.
+- Inserting an image layer re-places unchanged layers whose sorted z-position
+  moved, preserving the declared stacking order.
 
 ## [0.1.0] - 2026-09-19
 

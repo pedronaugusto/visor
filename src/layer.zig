@@ -227,8 +227,9 @@ pub const Layers = struct {
         // Here: a placement command, which replaces whatever was at the same
         // image and placement id without flicker.
         for (l.declared.items, 0..) |now, i| {
-            if (findSame(l.shown.items, now)) |before| {
-                if (before.eql(now) and zOf(now, i) == zOf(before, i)) continue;
+            if (findSameIndex(l.shown.items, now)) |before_i| {
+                const before = l.shown.items[before_i];
+                if (before.eql(now) and zOf(now, i) == zOf(before, before_i)) continue;
             }
             try l.writePlace(w, now, zOf(now, i));
             written += 1;
@@ -321,6 +322,13 @@ fn lessThan(_: void, a: Layer, b: Layer) bool {
 fn findSame(list: []const Layer, layer: Layer) ?Layer {
     for (list) |held| {
         if (held.sameAs(layer)) return held;
+    }
+    return null;
+}
+
+fn findSameIndex(list: []const Layer, layer: Layer) ?usize {
+    for (list, 0..) |held, i| {
+        if (held.sameAs(layer)) return i;
     }
     return null;
 }
@@ -510,6 +518,27 @@ test "layers are stacked in the order their tuples give" {
     try testing.expect(first < second);
     try testing.expect(std.mem.indexOf(u8, bytes, "z=-1000000") != null);
     try testing.expect(std.mem.indexOf(u8, bytes, "z=-999999") != null);
+}
+
+test "inserting a layer re-places unchanged layers at their new z positions" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+
+    const a: Layer = .{ .image = 1, .rect = .{ .cols = 2, .rows = 2 }, .order = .{ .layer = 1 } };
+    const b: Layer = .{ .image = 2, .rect = .{ .col = 3, .cols = 2, .rows = 2 }, .order = .{ .layer = 2 } };
+    try f.screen.layers.declare(testing.allocator, a);
+    try f.screen.layers.declare(testing.allocator, b);
+    _ = try f.draw();
+
+    try f.screen.layers.declare(testing.allocator, .{
+        .image = 3,
+        .rect = .{ .col = 6, .cols = 2, .rows = 2 },
+        .order = .{ .layer = 0 },
+    });
+    try f.screen.layers.declare(testing.allocator, a);
+    try f.screen.layers.declare(testing.allocator, b);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 3), stats.placements);
 }
 
 test "a layer over the text gets a z at or above zero" {
