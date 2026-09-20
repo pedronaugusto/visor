@@ -574,13 +574,14 @@ pub const Renderer = struct {
 
     /// Whether a row holds what the terminal is already showing.
     ///
-    /// One `memcmp` where the terminal has OSC 8, because the previous frame
-    /// then holds the cells as they were written. Where it does not, a link
-    /// is not a difference the terminal can show and the previous frame does
-    /// not record one, so the comparison has to strip it rather than find a
-    /// difference nothing could write.
+    /// One `memcmp` where every cell is shown as it is held, because the
+    /// previous frame then holds the cells as they were written. Where the
+    /// terminal has no OSC 8 or no scaled text, a link or a scale is not a
+    /// difference it can show and the previous frame does not record one, so
+    /// the comparison has to strip it rather than find a difference nothing
+    /// could write.
     fn rowUnchanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
-        if (caps.osc8) return cellmod.rowsEqual(s.rowAt(row), r.prevRow(row));
+        if (shownAsHeld(caps)) return cellmod.rowsEqual(s.rowAt(row), r.prevRow(row));
         for (s.rowAt(row), r.prevRow(row)) |now, was| {
             if (!visible(now, caps).eql(was)) return false;
         }
@@ -894,7 +895,7 @@ pub const Renderer = struct {
     fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16) void {
         const cells = s.rowAt(row);
         const old = r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
-        if (caps.osc8) {
+        if (shownAsHeld(caps)) {
             @memcpy(old, cells);
             return;
         }
@@ -1028,6 +1029,13 @@ pub const Renderer = struct {
 /// What `CSI n X` costs before it starts saving: the introducer, one digit
 /// and the final byte. A blank run longer than this is cheaper erased.
 const erase_cost = 4;
+
+/// Whether every cell is shown exactly as the grid holds it, so a row can be
+/// compared and remembered as memory rather than cell by cell through
+/// `visible`.
+pub fn shownAsHeld(caps: Caps) bool {
+    return caps.osc8 and caps.scaled_text;
+}
 
 /// A cell as the terminal will actually show it.
 ///
@@ -1823,6 +1831,21 @@ test "on a terminal without the protocol a scaled grapheme is drawn at its own s
     // stepped past nothing: every cell of the block is written.
     try f.expectBytes("\x1b[1ma \x1b[1E  \x1b[0mc");
     try f.expectBytes("");
+}
+
+test "a scaled grapheme on a terminal without the protocol is remembered as it was shown" {
+    var f: Fixture = try .init(testing.allocator, 8, 3);
+    defer f.deinit();
+    try testing.expect(try f.screen.writeScaled(1, 0, "a", .{}, .none, 2));
+    _ = try f.draw();
+    try f.expectBytes("");
+    f.screen.damageAll();
+    try f.expectBytes("");
+    // A change elsewhere on the row does not bring the head with it.
+    try f.screen.write(6, 0, "x", .{}, .none);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 1), stats.cells);
+    try f.expectBytesAgain("\x1b[7Gx");
 }
 
 test "a scaled grapheme reaches the emulator as the block it is" {

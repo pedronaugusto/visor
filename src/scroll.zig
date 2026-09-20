@@ -177,7 +177,7 @@ fn longestBand(now: []const u64, was: []const u64, offset: i32) ?struct { first:
 /// A row's contents as one number, so two frames can be compared row by row
 /// before they are compared cell by cell.
 fn hashRow(cells: []const Cell, caps: Caps) u64 {
-    if (caps.osc8) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
+    if (render.shownAsHeld(caps)) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
     var h: std.hash.Wyhash = .init(0);
     for (cells) |c| {
         const seen = render.visible(c, caps);
@@ -190,7 +190,7 @@ fn hashRow(cells: []const Cell, caps: Caps) u64 {
 /// checked against.
 fn rowsEqual(a: []const Cell, b: []const Cell, caps: Caps) bool {
     if (a.len != b.len) return false;
-    if (caps.osc8) return cellmod.rowsEqual(a, b);
+    if (render.shownAsHeld(caps)) return cellmod.rowsEqual(a, b);
     for (a, b) |x, y| if (!render.visible(x, caps).eql(y)) return false;
     return true;
 }
