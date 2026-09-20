@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   earlier break.
 - The terminal emulator clamps large CSI scroll counts to the active region
   instead of trapping during signed conversion.
+- Capability probing uses `Tc` and `RGB` for truecolour instead of treating a
+  256-colour palette as direct RGB support.
+- Capability probing sends a harmless kitty graphics query, allowing image
+  layers to be enabled from the terminal's reply.
 
 ## [0.1.0] - 2026-09-19
 

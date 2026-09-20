@@ -115,8 +115,10 @@ pub const Caps = struct {
             try morse.queryMode(w, morse.unicodeCore.number);
             try morse.queryMode(w, morse.inBandResize.number);
             try morse.kittyKeyboardQuery(w);
-            try morse.queryCapability(w, "Co");
+            try morse.queryCapability(w, "Tc");
+            try morse.queryCapability(w, "RGB");
             try morse.queryVersion(w);
+            try morse.queryGraphics(w, 31);
             try morse.queryDeviceAttributes(w);
         }
 
@@ -150,12 +152,12 @@ pub const Caps = struct {
                 var it = reply.iterator();
                 while (it.next()) |capability| {
                     var name: [8]u8 = undefined;
-                    var value: [16]u8 = undefined;
                     const n = capability.decodeName(&name) catch continue;
-                    const v = capability.decodeValue(&value) catch continue;
-                    if (!std.mem.eql(u8, n, "Co")) continue;
-                    const count = std.fmt.parseInt(u32, v, 10) catch continue;
-                    if (count >= 256) p.caps.truecolor = true;
+                    if (reply.known and
+                        (std.mem.eql(u8, n, "Tc") or std.mem.eql(u8, n, "RGB")))
+                    {
+                        p.caps.truecolor = true;
+                    }
                 }
                 return;
             }
@@ -201,6 +203,9 @@ test "the probe asks its questions and ends with the one always answered" {
     try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2026$p") != null);
     try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2027$p") != null);
     try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2048$p") != null);
+    try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q5463\x1b\\") != null);
+    try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q524742\x1b\\") != null);
+    try testing.expect(std.mem.indexOf(u8, asked, "\x1b_G") != null);
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
 }
 
@@ -234,9 +239,15 @@ test "an unrecognised reply changes nothing" {
     try testing.expect(!p.settled());
 }
 
-test "a colour count of 256 or more is truecolor worth asking for" {
+test "a 256-colour count is not evidence of truecolor" {
     var p: Caps.Probe = .{};
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
     p.feed("\x1bP1+r436f=323536\x1b\\");
+    try testing.expect(!p.caps.truecolor);
+}
+
+test "a truecolor-specific capability enables truecolor" {
+    var p: Caps.Probe = .{};
+    p.feed("\x1bP1+r5463\x1b\\");
     try testing.expect(p.caps.truecolor);
 }
