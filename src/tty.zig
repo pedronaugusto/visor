@@ -87,6 +87,7 @@ pub const Tty = struct {
                 null,
             );
             if (input == windows.INVALID_HANDLE_VALUE) return error.NotATerminal;
+            errdefer windows.CloseHandle(input);
             const output = CreateFileW(
                 std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"),
                 GENERIC_READ | GENERIC_WRITE,

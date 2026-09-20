@@ -36,6 +36,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   intermediate overflow.
 - The terminal emulator reports OSC 8 allocation failures without consuming
   the link or silently writing following cells as unlinked text.
+- Windows terminal opening closes the input console handle when opening the
+  output console fails.
 
 ## [0.1.0] - 2026-09-19
 
