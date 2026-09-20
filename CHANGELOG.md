@@ -34,6 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   off-canvas endpoints cannot leave gaps in the visible segment.
 - Sparkline and bar-chart scaling handles the full `u64` value range without
   intermediate overflow.
+- The terminal emulator reports OSC 8 allocation failures without consuming
+  the link or silently writing following cells as unlinked text.
 
 ## [0.1.0] - 2026-09-19
 

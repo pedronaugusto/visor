@@ -609,7 +609,7 @@ pub const Term = struct {
     }
 
     /// `ESC ] ... ST`, of which only OSC 8 changes a cell.
-    fn operatingSystemCommand(t: *Term, bytes: []const u8) usize {
+    fn operatingSystemCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const body = stringBody(bytes, 2) orelse return 0;
         const payload = bytes[2..body.end];
         if (std.mem.startsWith(u8, payload, "8;")) {
@@ -620,7 +620,7 @@ pub const Term = struct {
             t.link = if (uri.len == 0)
                 .none
             else
-                t.scr.link(t.gpa, uri, params) catch .none;
+                try t.scr.link(t.gpa, uri, params);
         }
         return body.len;
     }
@@ -1190,6 +1190,24 @@ test "a link opens and closes and its parameters come through" {
     try testing.expectEqualStrings("id=7", t.screen().target(link).?.params);
     try testing.expectEqual(link, t.screen().readCell(1, 0).?.link);
     try testing.expectEqual(cellmod.Link.none, t.screen().readCell(2, 0).?.link);
+}
+
+test "a hyperlink allocation failure is reported and can be retried" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
+    const failed_gpa = failing.allocator();
+    t.gpa = failed_gpa;
+    t.scr.gpa = failed_gpa;
+    try testing.expectError(error.OutOfMemory, t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\"));
+    t.gpa = testing.allocator;
+    t.scr.gpa = testing.allocator;
+    try testing.expectEqual(Link.none, t.link);
+
+    try t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\x");
+    const link = t.screen().readCell(0, 0).?.link;
+    try testing.expect(link != .none);
+    try testing.expectEqualStrings("https://ziglang.org", t.screen().target(link).?.uri);
 }
 
 test "the cursor's visibility and shape are read off the wire" {
