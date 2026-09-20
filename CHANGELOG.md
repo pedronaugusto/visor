@@ -45,6 +45,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   first graphics command, and that a deletion happens only for a picture that
   left and names it alone.
 
+### Changed
+
+- Built on morse 0.5.0.
+
 ### Removed
 
 - `error.InlineModeUnsupported`, which `Renderer.enter` no longer returns.
