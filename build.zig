@@ -1,4 +1,5 @@
 const std = @import("std");
+const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -72,6 +73,11 @@ pub fn build(b: *std.Build) void {
 
     const fuzzable = false;
 
+    // The manifest's version, handed to the suite so the exported constant
+    // is compared with the released one and not with a literal beside it.
+    const manifest_options = b.addOptions();
+    manifest_options.addOption([]const u8, "version", manifest.version);
+
     const tests = b.addTest(.{
         .name = "visor-tests",
         .use_llvm = needsLlvm(target, optimize),
@@ -82,6 +88,7 @@ pub fn build(b: *std.Build) void {
             .error_tracing = fuzzable,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
+                .{ .name = "manifest", .module = manifest_options.createModule() },
             }),
         }),
     });

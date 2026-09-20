@@ -45,7 +45,7 @@ const window_mod = @import("window.zig");
 pub const morse = @import("morse");
 
 /// The semantic version of this package, as a string.
-pub const version = "0.1.0";
+pub const version = "0.2.1";
 
 //=========================================================================
 // The grid's contents.
@@ -176,5 +176,5 @@ test {
 }
 
 test "the exported version matches the released package" {
-    try std.testing.expectEqualStrings("0.1.0", version);
+    try std.testing.expectEqualStrings(@import("manifest").version, version);
 }
