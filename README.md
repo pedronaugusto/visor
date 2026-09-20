@@ -189,11 +189,11 @@ field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
 
-**Damage is exact in both directions.** A write marks a cell only when it
-changes it, so a row is dirty exactly when its contents differ from what was
-drawn. A map that under-reports is a rendering bug you see once a week and
-cannot reproduce; one that over-reports is a frame that cost more than it
-should. The grid fuzz checks both.
+**Damage is conservative.** A write marks a cell only when it changes it. If
+another write restores the displayed value before drawing, the mark remains:
+the screen does not duplicate the renderer's previous-frame baseline. The
+renderer compares every named row with that baseline and emits nothing when
+the row was restored. The grid fuzz checks that damage never under-reports.
 
 **Changed cells go out as runs.** A contiguous run gets one cursor move and
 one style pen, and the run bridges up to four unchanged cells because

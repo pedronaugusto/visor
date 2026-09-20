@@ -47,6 +47,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of trapping while narrowing their endpoints.
 - The exported package version reports `0.1.0`, matching the manifest and
   released changelog.
+- Damage is documented as a conservative change hint; restoring a cell before
+  drawing is filtered against the renderer's previous-frame baseline.
 
 ## [0.1.0] - 2026-09-19
 

@@ -160,8 +160,8 @@ fn checkGrid(s: *const Screen) !void {
     }
 }
 
-/// That the damage map names every cell that changed and no cell that did
-/// not, checked against a copy taken before the operations.
+/// That the conservative damage map names every cell that changed, checked
+/// against a copy taken before the operations.
 fn checkDamage(s: *const Screen, before: []const Cell) !void {
     for (0..s.size.rows) |r| {
         const span = s.damage.row(@intCast(r));
@@ -171,15 +171,6 @@ fn checkDamage(s: *const Screen, before: []const Cell) !void {
             const changed = !s.cells[i].eql(before[i]);
             const named = if (span) |sp| col >= sp.first and col <= sp.last else false;
             if (changed and !named) return error.DamageUnderReported;
-        }
-        if (span) |sp| {
-            var any = false;
-            var c = sp.first;
-            while (c <= sp.last) : (c += 1) {
-                const i = s.index(c, @intCast(r));
-                if (!s.cells[i].eql(before[i])) any = true;
-            }
-            if (!any) return error.DamageOverReported;
         }
     }
 }

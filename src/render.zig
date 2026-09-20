@@ -1353,6 +1353,19 @@ test "a row with one cell changed is not written whole" {
     try testing.expectEqual(@as(u32, 1), stats.cells);
 }
 
+test "restoring a cell leaves conservative damage but writes nothing" {
+    var f: Fixture = try .init(testing.allocator, 8, 1);
+    defer f.deinit();
+
+    try f.screen.write(3, 0, "x", .{}, .none);
+    try f.screen.write(3, 0, " ", .{}, .none);
+    try testing.expect(f.screen.damage.any());
+
+    const stats = try f.draw();
+    try testing.expectEqual(@as(usize, 0), stats.bytes);
+    try testing.expect(!f.screen.damage.any());
+}
+
 test "a cluster the two width models disagree about makes its row drift" {
     var f: Fixture = try .init(testing.allocator, 12, 2);
     defer f.deinit();

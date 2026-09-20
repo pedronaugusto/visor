@@ -4,11 +4,12 @@
 //! nothing touched is empty and the renderer skips it without reading a cell,
 //! which is what keeps a frame that changed one cell from scanning the grid.
 //!
-//! The map is exact in both directions. Marking is done by `Screen` only when
-//! a write actually changes a cell, so a row is dirty exactly when its
-//! contents differ from what was last drawn. Under-reporting is a rendering
-//! bug that shows up once a week and cannot be reproduced; over-reporting is
-//! a frame that costs more than it should. Both are caught by the grid fuzz.
+//! The map is conservative. Marking is done by `Screen` only when a write
+//! changes a cell, but a later write that restores the displayed value cannot
+//! remove the mark because the screen deliberately does not keep a previous
+//! frame. The renderer owns that baseline and drops unchanged rows before it
+//! writes. Under-reporting is a rendering bug; harmless over-reporting costs
+//! only a row comparison. The grid fuzz checks that damage never under-reports.
 //!
 //! This file never allocates on the write path: the spans are sized once, at
 //! `init` and at `resize`.
