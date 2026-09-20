@@ -1,6 +1,6 @@
 .{
     .name = .visor,
-    .version = "0.2.0",
+    .version = "0.2.1",
     .dependencies = .{
         .uucode = .{
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
