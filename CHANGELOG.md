@@ -22,6 +22,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moved, preserving the declared stacking order.
 - Word wrapping keeps the measured width of a word prefix consumed after an
   earlier break.
+- The terminal emulator clamps large CSI scroll counts to the active region
+  instead of trapping during signed conversion.
 
 ## [0.1.0] - 2026-09-19
 

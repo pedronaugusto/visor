@@ -340,11 +340,16 @@ pub const Term = struct {
             '@' => t.insertChars(atLeastOne(params)),
             'P' => t.deleteChars(atLeastOne(params)),
             'X' => t.eraseChars(atLeastOne(params)),
-            'S' => t.scrollRegion(@intCast(atLeastOne(params))),
-            'T' => t.scrollRegion(-@as(i32, @intCast(atLeastOne(params)))),
+            'S' => t.scrollRegion(t.scrollCount(params)),
+            'T' => t.scrollRegion(-t.scrollCount(params)),
             'r' => t.setScrollRegion(params),
             else => {},
         }
+    }
+
+    fn scrollCount(t: *const Term, params: []const u8) i32 {
+        const rows: u32 = t.scroll_bottom - t.scroll_top + 1;
+        return @intCast(@min(atLeastOne(params), rows));
     }
 
     /// `CSI ? n h` and `CSI ? n l`: the modes this package switches.
@@ -1116,6 +1121,14 @@ test "scroll down is the mirror of scroll up" {
     try testing.expectEqualStrings(" ", textAt(&t, 0, 1));
     try testing.expectEqualStrings("a", textAt(&t, 0, 2));
     try testing.expectEqualStrings("b", textAt(&t, 0, 3));
+}
+
+test "scroll counts larger than i32 saturate to the region" {
+    var t = try made(4, 4);
+    defer t.deinit();
+    try t.feed("a\x1b[2;1Hb\x1b[3;1Hc\x1b[4;1Hd");
+    try t.feed("\x1b[2147483648S");
+    for (0..4) |row| try testing.expectEqualStrings(" ", textAt(&t, 0, @intCast(row)));
 }
 
 test "insert and delete move a row sideways" {
