@@ -635,7 +635,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const run_end = runEnd(cells, old, caps, col, last);
+            const run_end = try r.runEnd(s, caps, row, col, last);
 
             // A run that reaches the end of the row and ends in default
             // blanks is erased rather than painted.
@@ -702,6 +702,104 @@ pub const Renderer = struct {
             col += c.width();
             r.advance(col, row);
         }
+    }
+
+    /// Writes a range literally, without replacing a trailing blank run by
+    /// an erase. Run planning uses this so both ways across an unchanged gap
+    /// arrive at the first changed cell in the same terminal state.
+    fn writeLiteralCells(
+        r: *Renderer,
+        out: *Writer,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        from: u16,
+        to: u16,
+        stats: *Stats,
+    ) Error!void {
+        const cells = s.rowAt(row);
+        var col = from;
+        while (col <= to) {
+            const c = cells[col];
+            if (c.isTail()) {
+                col += 1;
+                continue;
+            }
+            try r.setStyle(out, c.style, stats);
+            try r.setLink(out, s, c.link, caps, stats);
+            try out.writeAll(s.textOf(&cells[col]));
+            stats.cells += 1;
+            col += c.width();
+            r.advance(col, row);
+        }
+    }
+
+    /// The last column of the run starting at `col`.
+    ///
+    /// At every unchanged gap, both continuing the run and moving to the
+    /// next changed cell are emitted into counting writers. Including that
+    /// changed cell makes the two candidates meet with the same style, link
+    /// and cursor, so the cheaper choice cannot make a later choice dearer.
+    fn runEnd(
+        r: *Renderer,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        col: u16,
+        last: u16,
+    ) Error!u16 {
+        const State = struct { style: Style, link: Link, cursor: ?Point };
+        const cells = s.rowAt(row);
+        const old = r.prevRow(row);
+        const saved: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        defer {
+            r.style = saved.style;
+            r.link = saved.link;
+            r.cursor = saved.cursor;
+        }
+
+        var simulated: Writer.Discarding = .init(&.{});
+        var ignored: Stats = .{};
+        try r.moveTo(&simulated.writer, col, row, &ignored);
+
+        var end = col;
+        var scan: u32 = @as(u32, col) + 1;
+        while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
+        try r.writeLiteralCells(&simulated.writer, s, caps, row, col, end, &ignored);
+
+        while (scan <= last) {
+            const gap: u16 = @intCast(scan);
+            while (scan <= last and visible(cells[scan], caps).eql(old[scan])) : (scan += 1) {}
+            if (scan > last) break;
+            const next: u16 = @intCast(scan);
+            const before: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+
+            var bridged: Writer.Discarding = .init(&.{});
+            var bridge_stats: Stats = .{};
+            try r.writeLiteralCells(&bridged.writer, s, caps, row, gap, next, &bridge_stats);
+            const after_bridge: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+
+            r.style = before.style;
+            r.link = before.link;
+            r.cursor = before.cursor;
+            var moved: Writer.Discarding = .init(&.{});
+            var move_stats: Stats = .{};
+            try r.moveTo(&moved.writer, next, row, &move_stats);
+            try r.writeLiteralCells(&moved.writer, s, caps, row, next, next, &move_stats);
+
+            if (bridged.fullCount() > moved.fullCount()) return end;
+            r.style = after_bridge.style;
+            r.link = after_bridge.link;
+            r.cursor = after_bridge.cursor;
+            end = next;
+            if (next == last) return end;
+            scan = @as(u32, next) + 1;
+
+            const more: u16 = @intCast(scan);
+            while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
+            if (scan > more) try r.writeLiteralCells(&simulated.writer, s, caps, row, more, end, &ignored);
+        }
+        return end;
     }
 
     /// Copies a row of the screen into the previous frame.
@@ -844,29 +942,6 @@ fn blankRunLen(cells: []const Cell, col: u16, to: u16) u16 {
     var i = col;
     while (i <= to and cells[i].isBlankIn(.{})) : (i += 1) n += 1;
     return n;
-}
-
-/// The last column of the run starting at `col`.
-///
-/// A run keeps going across cells that did not change when writing them costs
-/// fewer bytes than moving over them would, which is the shortest cursor move
-/// by another name: the cheapest way past four unchanged cells is to print
-/// them again.
-fn runEnd(cells: []const Cell, old: []const Cell, caps: Caps, col: u16, last: u16) u16 {
-    const bridge = 4;
-    var end = col;
-    var i = col + 1;
-    var same: u16 = 0;
-    while (i <= last) : (i += 1) {
-        if (visible(cells[i], caps).eql(old[i])) {
-            same += 1;
-            if (same > bridge) break;
-        } else {
-            same = 0;
-            end = i;
-        }
-    }
-    return end;
 }
 
 /// How many decimal digits a number takes as a parameter.
@@ -1326,6 +1401,25 @@ test "cells changed in every other column are one run, not twenty" {
     try testing.expectEqual(@as(u32, 1), stats.runs);
     try testing.expectEqual(@as(u32, 1), stats.moves);
     try testing.expect(stats.bytes <= 48);
+}
+
+test "an expensive unchanged grapheme is moved over instead of bridged" {
+    var f: Fixture = try .init(testing.allocator, 8, 1);
+    defer f.deinit();
+
+    const long = "a\u{301}\u{302}\u{303}\u{304}\u{305}\u{306}\u{307}\u{308}\u{309}\u{30a}";
+    try f.screen.write(0, 0, "a", .{}, .none);
+    try f.screen.write(1, 0, long, .{}, .none);
+    try f.screen.write(2, 0, "a", .{}, .none);
+    _ = try f.draw();
+
+    try f.screen.write(0, 0, "b", .{}, .none);
+    try f.screen.write(2, 0, "b", .{}, .none);
+    const stats = try f.draw();
+
+    try testing.expectEqual(@as(u32, 2), stats.runs);
+    try testing.expectEqual(@as(u32, 2), stats.cells);
+    try testing.expect(std.mem.indexOf(u8, f.written(), long) == null);
 }
 
 test "both ways of writing a row are priced in the bytes they really cost" {

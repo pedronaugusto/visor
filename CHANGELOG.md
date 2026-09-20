@@ -49,6 +49,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   released changelog.
 - Damage is documented as a conservative change hint; restoring a cell before
   drawing is filtered against the renderer's previous-frame baseline.
+- Diff runs bridge unchanged cells only when their actual text, style, and
+  link bytes cost no more than moving the cursor over them.
 
 ## [0.1.0] - 2026-09-19
 

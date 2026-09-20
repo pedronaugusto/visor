@@ -196,8 +196,10 @@ renderer compares every named row with that baseline and emits nothing when
 the row was restored. The grid fuzz checks that damage never under-reports.
 
 **Changed cells go out as runs.** A contiguous run gets one cursor move and
-one style pen, and the run bridges up to four unchanged cells because
-printing them again is shorter than stepping over them.
+one style pen. Across an unchanged gap, the renderer counts the bytes for its
+text, style and link transitions through the next changed cell and compares
+them with the shortest cursor move; the cheaper path decides whether the run
+continues.
 
 **A row is written whole when the diff would cost more.** Both are priced by
 emitting them into a writer that counts and discards, so the answer is the
