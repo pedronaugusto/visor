@@ -287,19 +287,28 @@ pub const Renderer = struct {
     /// is large enough to be worth it.
     pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode) Error!void {
         if (mode == .@"inline") return error.InlineModeUnsupported;
+        // Record every mode before it may have reached a partially failing
+        // writer. Disabling a mode that never arrived is harmless; omitting
+        // one that did arrive leaves the caller's terminal changed.
+        r.entered = .{
+            .mode = mode,
+            .in_band_resize = false,
+            .unicode_core = false,
+        };
         try morse.altScreen.set(w, true);
-        if (caps.in_band_resize) try morse.inBandResize.set(w, true);
-        if (caps.width_method == .unicode) try morse.unicodeCore.set(w, true);
+        if (caps.in_band_resize) {
+            r.entered.?.in_band_resize = true;
+            try morse.inBandResize.set(w, true);
+        }
+        if (caps.width_method == .unicode) {
+            r.entered.?.unicode_core = true;
+            try morse.unicodeCore.set(w, true);
+        }
         try morse.resetStyle(w);
         try morse.clearScreen(w, .all);
         try morse.cursorTo(w, 1, 1);
         try morse.cursorVisible.set(w, false);
 
-        r.entered = .{
-            .mode = mode,
-            .in_band_resize = caps.in_band_resize,
-            .unicode_core = caps.width_method == .unicode,
-        };
         @memset(r.prev, .blank(.{}));
         @memset(r.force, false);
         @memset(r.drifted, false);
@@ -1253,6 +1262,19 @@ test "entering asks the terminal to measure clusters when it was told to" {
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
     try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2027l") != null);
+}
+
+test "leaving unwinds a partially written enter" {
+    var f: Fixture = try .init(testing.allocator, 4, 2);
+    defer f.deinit();
+
+    var short: [8]u8 = undefined;
+    var failing: Writer = .fixed(&short);
+    try testing.expectError(error.WriteFailed, f.renderer.enter(&failing, .{}, .alt));
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?1049l") != null);
 }
 
 test "a small frame is not bracketed and a large one is" {

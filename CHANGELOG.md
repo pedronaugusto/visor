@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when growing that pool moves its backing allocation.
 - Windows raw-mode setup restores the input console mode when configuring the
   output console fails.
+- `Renderer.leave` unwinds terminal modes even when `Renderer.enter` stopped
+  on a partial output write.
 
 ## [0.1.0] - 2026-09-19
 
