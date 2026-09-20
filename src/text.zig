@@ -80,10 +80,14 @@ pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
 
 /// The columns a string takes, by `method`.
 pub fn width(str: []const u8, method: Method) u16 {
+    return @intCast(@min(widthWide(str, method), std.math.maxInt(u16)));
+}
+
+fn widthWide(str: []const u8, method: Method) usize {
     var total: usize = 0;
     var it: Graphemes = .init(str);
     while (it.next()) |g| total += graphemeWidth(g, method);
-    return std.math.cast(u16, total) orelse std.math.maxInt(u16);
+    return total;
 }
 
 /// One row a wrap produced: the byte range of the string it covers, and the
@@ -125,7 +129,7 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
             continue;
         }
         const w = graphemeWidth(g, method);
-        if (row.columns + w > cols) {
+        if (@as(u32, row.columns) + w > cols) {
             if (mode == .none) {
                 // Everything to the end of this line is dropped, but a
                 // newline still starts a row.
@@ -180,14 +184,14 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
 /// a cluster boundary when it does not; the caller writes `ellipsis` itself,
 /// because this allocates nothing and joins nothing.
 pub fn fit(str: []const u8, cols: u16, ellipsis: []const u8, method: Method) []const u8 {
-    if (width(str, method) <= cols) return str;
+    if (widthWide(str, method) <= cols) return str;
     const room = cols -| width(ellipsis, method);
     var used: u16 = 0;
     var end: usize = 0;
     var it: Graphemes = .init(str);
     while (it.nextAt()) |found| {
         const w = graphemeWidth(found.bytes, method);
-        if (used + w > room) break;
+        if (@as(u32, used) + w > room) break;
         used += w;
         end = found.start + found.bytes.len;
     }
@@ -307,6 +311,18 @@ test "fit keeps what fits and leaves room for the ellipsis" {
 test "width never overflows on a very long string" {
     const long = "a" ** 1024;
     try testing.expectEqual(@as(u16, 1024), width(long, .wcwidth));
+}
+
+test "saturated width does not make fit or wrap accept an overlong string" {
+    const long = "a" ** 65536;
+    try testing.expectEqual(std.math.maxInt(u16), width(long, .unicode));
+    try testing.expectEqual(@as(usize, 65534), fit(long, std.math.maxInt(u16), "…", .unicode).len);
+
+    var rows: [2]Row = undefined;
+    const n = wrap(long, std.math.maxInt(u16), .grapheme, .unicode, &rows);
+    try testing.expectEqual(@as(usize, 2), n);
+    try testing.expectEqual(@as(u16, std.math.maxInt(u16)), rows[0].columns);
+    try testing.expectEqual(@as(u16, 1), rows[1].columns);
 }
 
 /// Whether the two width models disagree about a cluster.

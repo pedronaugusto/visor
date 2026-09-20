@@ -38,6 +38,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the link or silently writing following cells as unlinked text.
 - Windows terminal opening closes the input console handle when opening the
   output console fails.
+- Text fitting and wrapping compare exact internal widths, so strings beyond
+  65,535 columns neither pass a saturated fit check nor overflow arithmetic.
 
 ## [0.1.0] - 2026-09-19
 
