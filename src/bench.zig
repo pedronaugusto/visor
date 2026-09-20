@@ -86,6 +86,37 @@ const Bench = struct {
             }
         }
     }
+
+    /// A frame of panels: borders, rules, gauges and padding, which is what
+    /// a dashboard looks like and where runs of one glyph come from.
+    fn paintPanels(b: *Bench) !void {
+        const root = b.screen.window();
+        const cols = b.screen.size.cols / 2;
+        const rows = b.screen.size.rows / 2;
+        for (0..2) |y| {
+            for (0..2) |x| {
+                const n: u16 = @intCast(y * 2 + x);
+                const panel = root.child(.{
+                    .col = @intCast(x * cols),
+                    .row = @intCast(y * rows),
+                    .cols = cols,
+                    .rows = rows,
+                    .border = .{ .where = .all, .glyphs = .rounded, .style = .{ .dim = true } },
+                });
+                _ = try panel.print(&.{
+                    .{ .text = "load", .style = .{ .bold = true } },
+                    .{ .text = " over the last hour", .style = .{ .dim = true } },
+                }, .{ .col = 1 });
+                const filled = panel.cols() * (n + 1) / 5;
+                var col: u16 = 0;
+                while (col < panel.cols()) : (col += 1) {
+                    const glyph: []const u8 = if (col < filled) "\u{2588}" else "\u{2591}";
+                    try panel.write(col, 2, glyph, .{ .fg = .ansi(.cyan) }, .none);
+                    try panel.write(col, 4, "\u{2500}", .{ .dim = true }, .none);
+                }
+            }
+        }
+    }
 };
 
 /// What the whole suite is allowed to cost, in bytes a frame. Each of these
@@ -103,6 +134,9 @@ const budget = struct {
     const restyle_120x40 = 8_100;
     /// A frame with a wide grapheme every third cell, drawn once.
     const wide_120x40 = 6_700;
+    /// A frame of four bordered panels with a title, a gauge and a rule
+    /// each, on a terminal with `REP`.
+    const panels_120x40 = 1_500;
 };
 
 test "a full repaint at 120x40 stays inside its budget" {
@@ -201,6 +235,22 @@ test "a frame with a wide grapheme every third cell stays inside its budget" {
     try expectUnder("wide 120x40", stats, budget.wide_120x40);
     // Every row holds a wide grapheme, so every row is written whole.
     try testing.expectEqual(@as(u32, 40), stats.repainted);
+}
+
+test "a frame of panels stays inside its budget and REP is what keeps it there" {
+    var plain: Bench = try .init(testing.allocator, 120, 40);
+    defer plain.deinit();
+    try plain.paintPanels();
+    const without = try plain.draw();
+
+    var b: Bench = try .init(testing.allocator, 120, 40);
+    defer b.deinit();
+    b.caps.rep = true;
+    try b.paintPanels();
+    const with = try b.draw();
+    try expectUnder("panels 120x40", with, budget.panels_120x40);
+    try testing.expect(with.bytes < without.bytes);
+    try testing.expect(with.repeated > 0);
 }
 
 test "the draw path allocates nothing at all" {

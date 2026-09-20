@@ -209,6 +209,12 @@ real byte count rather than a model of one.
 bytes whatever the width; a blank run longer than the sequence that erases it
 is `ECH`, which leaves the cursor where it was.
 
+**A run of one glyph is the glyph and a count.** Where the terminal has `REP`,
+a rule, a gauge or a row of padding goes out as one glyph and a repeat, when
+the count saves more than it costs. A cluster of more than one codepoint is
+never repeated, because what a terminal repeats after one is its last
+codepoint.
+
 **The cursor move is a search.** Every candidate is costed in bytes — the
 absolute move, the column, the row, the four relative moves, the carriage
 return, and backspaces — and the shortest wins, with the absolute move as the

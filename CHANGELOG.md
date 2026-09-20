@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `Caps.rep` is read: on a terminal with `REP`, a run of one narrow
+  single-codepoint glyph in one style is written as the glyph and a repeat
+  count, and `Stats.repeated` counts the cells it stood for. The emulator
+  understands the sequence.
+
 ### Fixed
 
 - A failed frame write is retried as a complete repaint without losing text,

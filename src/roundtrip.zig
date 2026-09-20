@@ -111,6 +111,7 @@ const Harness = struct {
                 .truecolor = true,
                 .sync = true,
                 .scroll_detection = true,
+                .rep = true,
             },
         };
     }

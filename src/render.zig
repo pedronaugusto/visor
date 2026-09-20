@@ -147,6 +147,9 @@ pub const Renderer = struct {
         scrolled: u32 = 0,
         /// Cells erased with one sequence rather than painted as spaces.
         erased: u32 = 0,
+        /// Cells drawn by repeating the one before them rather than written
+        /// out, where the terminal has `REP`.
+        repeated: u32 = 0,
         /// Style changes written.
         styles: u32 = 0,
         /// Link changes written.
@@ -605,7 +608,7 @@ pub const Renderer = struct {
         }
         try r.moveTo(out, 0, row, stats);
         stats.runs += 1;
-        try r.writeCells(out, s, caps, row, 0, erase_from - 1, stats);
+        try r.writeCells(out, s, caps, row, 0, erase_from - 1, stats, true);
         if (erase_from < cols) {
             try r.moveTo(out, erase_from, row, stats);
             try r.eraseToEnd(out, s, caps, stats, cols - erase_from);
@@ -645,7 +648,7 @@ pub const Renderer = struct {
             try r.moveTo(out, col, row, stats);
             if (paint_to > col) {
                 stats.runs += 1;
-                try r.writeCells(out, s, caps, row, col, paint_to - 1, stats);
+                try r.writeCells(out, s, caps, row, col, paint_to - 1, stats, true);
             }
             if (erase_from <= run_end) {
                 try r.moveTo(out, erase_from, row, stats);
@@ -666,6 +669,18 @@ pub const Renderer = struct {
 
     /// Writes cells `from` to `to`, both ends inside, assuming the cursor is
     /// already at `from`.
+    ///
+    /// With `erase_tail`, a run of default blanks at the end of the range is
+    /// erased rather than painted: it costs fewer bytes and leaves the cursor
+    /// where it is, which the next move knows. Run planning turns that off so
+    /// both ways across an unchanged gap arrive at the first changed cell in
+    /// the same terminal state.
+    ///
+    /// Where the terminal has `REP`, a run of one narrow single-codepoint
+    /// glyph in one style is the glyph once and a repeat count. The count
+    /// has to save more than its own bytes, and it never spans a grapheme
+    /// that is more than one codepoint, because what a terminal repeats
+    /// after one of those is the last codepoint and not the cluster.
     fn writeCells(
         r: *Renderer,
         out: *Writer,
@@ -675,6 +690,7 @@ pub const Renderer = struct {
         from: u16,
         to: u16,
         stats: *Stats,
+        erase_tail: bool,
     ) Error!void {
         const cells = s.rowAt(row);
         var col = from;
@@ -684,52 +700,31 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            // A run of default blanks at the end of what is being written
-            // costs fewer bytes as an erase than as spaces, and the erase
-            // leaves the cursor where it is, which the next move knows.
-            const blanks = blankRunLen(cells, col, to);
-            if (blanks > erase_cost and col + blanks > to) {
-                try r.setStyle(out, .{}, stats);
-                try r.setLink(out, s, .none, caps, stats);
-                try morse.eraseChars(out, blanks);
-                stats.erased += blanks;
-                return;
+            if (erase_tail) {
+                const blanks = blankRunLen(cells, col, to);
+                if (blanks > erase_cost and col + blanks > to) {
+                    try r.setStyle(out, .{}, stats);
+                    try r.setLink(out, s, .none, caps, stats);
+                    try morse.eraseChars(out, blanks);
+                    stats.erased += blanks;
+                    return;
+                }
             }
             try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
-            try out.writeAll(s.textOf(&cells[col]));
+            const text = s.textOf(&cells[col]);
+            try out.writeAll(text);
             stats.cells += 1;
             col += c.width();
-            r.advance(col, row);
-        }
-    }
-
-    /// Writes a range literally, without replacing a trailing blank run by
-    /// an erase. Run planning uses this so both ways across an unchanged gap
-    /// arrive at the first changed cell in the same terminal state.
-    fn writeLiteralCells(
-        r: *Renderer,
-        out: *Writer,
-        s: *Screen,
-        caps: Caps,
-        row: u16,
-        from: u16,
-        to: u16,
-        stats: *Stats,
-    ) Error!void {
-        const cells = s.rowAt(row);
-        var col = from;
-        while (col <= to) {
-            const c = cells[col];
-            if (c.isTail()) {
-                col += 1;
-                continue;
+            if (caps.rep and repeatable(c, text)) {
+                const same = sameRunLen(cells, col, to, visible(c, caps), caps);
+                if (@as(usize, same) > 3 + digits(same)) {
+                    try morse.repeatChar(out, same);
+                    stats.cells += same;
+                    stats.repeated += same;
+                    col += same;
+                }
             }
-            try r.setStyle(out, c.style, stats);
-            try r.setLink(out, s, c.link, caps, stats);
-            try out.writeAll(s.textOf(&cells[col]));
-            stats.cells += 1;
-            col += c.width();
             r.advance(col, row);
         }
     }
@@ -765,7 +760,7 @@ pub const Renderer = struct {
         var end = col;
         var scan: u32 = @as(u32, col) + 1;
         while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
-        try r.writeLiteralCells(&simulated.writer, s, caps, row, col, end, &ignored);
+        try r.writeCells(&simulated.writer, s, caps, row, col, end, &ignored, false);
 
         while (scan <= last) {
             const gap: u16 = @intCast(scan);
@@ -776,7 +771,7 @@ pub const Renderer = struct {
 
             var bridged: Writer.Discarding = .init(&.{});
             var bridge_stats: Stats = .{};
-            try r.writeLiteralCells(&bridged.writer, s, caps, row, gap, next, &bridge_stats);
+            try r.writeCells(&bridged.writer, s, caps, row, gap, next, &bridge_stats, false);
             const after_bridge: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
 
             r.style = before.style;
@@ -785,7 +780,7 @@ pub const Renderer = struct {
             var moved: Writer.Discarding = .init(&.{});
             var move_stats: Stats = .{};
             try r.moveTo(&moved.writer, next, row, &move_stats);
-            try r.writeLiteralCells(&moved.writer, s, caps, row, next, next, &move_stats);
+            try r.writeCells(&moved.writer, s, caps, row, next, next, &move_stats, false);
 
             if (bridged.fullCount() > moved.fullCount()) return end;
             r.style = after_bridge.style;
@@ -797,7 +792,7 @@ pub const Renderer = struct {
 
             const more: u16 = @intCast(scan);
             while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
-            if (scan > more) try r.writeLiteralCells(&simulated.writer, s, caps, row, more, end, &ignored);
+            if (scan > more) try r.writeCells(&simulated.writer, s, caps, row, more, end, &ignored, false);
         }
         return end;
     }
@@ -941,6 +936,22 @@ fn blankRunLen(cells: []const Cell, col: u16, to: u16) u16 {
     var n: u16 = 0;
     var i = col;
     while (i <= to and cells[i].isBlankIn(.{})) : (i += 1) n += 1;
+    return n;
+}
+
+/// Whether `REP` may stand in for further copies of a cell: one column, one
+/// codepoint, and measured the same way by every width model.
+fn repeatable(c: Cell, text: []const u8) bool {
+    if (c.width() != 1 or c.shape.drift) return false;
+    const len = std.unicode.utf8ByteSequenceLength(text[0]) catch return false;
+    return len == text.len;
+}
+
+/// How many cells from `col` show exactly `same`, stopping at `to`.
+fn sameRunLen(cells: []const Cell, col: u16, to: u16, same: Cell, caps: Caps) u16 {
+    var n: u16 = 0;
+    var i: u32 = col;
+    while (i <= to and visible(cells[i], caps).eql(same)) : (i += 1) n += 1;
     return n;
 }
 
@@ -1401,6 +1412,70 @@ test "cells changed in every other column are one run, not twenty" {
     try testing.expectEqual(@as(u32, 1), stats.runs);
     try testing.expectEqual(@as(u32, 1), stats.moves);
     try testing.expect(stats.bytes <= 48);
+}
+
+test "a run of one glyph is the glyph and a repeat where the terminal has REP" {
+    var f: Fixture = try .init(testing.allocator, 40, 1);
+    defer f.deinit();
+    f.caps.rep = true;
+
+    for (0..40) |i| try f.screen.write(@intCast(i), 0, "x", .{ .bold = true }, .none);
+    const stats = try f.draw();
+    try f.expectBytesAgain("\x1b[1mx\x1b[39b");
+    try testing.expectEqual(@as(u32, 40), stats.cells);
+    try testing.expectEqual(@as(u32, 39), stats.repeated);
+}
+
+test "a terminal without REP is given every glyph" {
+    var f: Fixture = try .init(testing.allocator, 12, 1);
+    defer f.deinit();
+    for (0..12) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
+    try f.expectBytes("xxxxxxxxxxxx");
+}
+
+test "a repeat that would not save its own bytes is not written" {
+    var f: Fixture = try .init(testing.allocator, 12, 1);
+    defer f.deinit();
+    f.caps.rep = true;
+    // Four repeats cost four bytes and save four; five save five.
+    for (0..5) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
+    try f.expectBytes("xxxxx");
+    for (0..6) |i| try f.screen.write(@intCast(i), 0, "y", .{}, .none);
+    try f.expectBytes("\ry\x1b[5b");
+}
+
+test "a repeat never crosses a style change or a different glyph" {
+    var f: Fixture = try .init(testing.allocator, 24, 1);
+    defer f.deinit();
+    f.caps.rep = true;
+    for (0..8) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
+    for (8..16) |i| try f.screen.write(@intCast(i), 0, "x", .{ .bold = true }, .none);
+    for (16..24) |i| try f.screen.write(@intCast(i), 0, "y", .{ .bold = true }, .none);
+    try f.expectBytes("x\x1b[7b\x1b[1mx\x1b[7by\x1b[7b");
+}
+
+test "a repeat never stands for a cluster of more than one codepoint" {
+    var f: Fixture = try .init(testing.allocator, 8, 1);
+    defer f.deinit();
+    f.caps.rep = true;
+    // What a terminal repeats after a base and a mark is the mark.
+    for (0..8) |i| try f.screen.write(@intCast(i), 0, "e\u{301}", .{}, .none);
+    try f.expectBytes("e\u{301}" ** 8);
+    // A single non-ASCII codepoint is repeated like any other glyph. The
+    // first row filled its last column, so the move is an absolute one.
+    for (0..8) |i| try f.screen.write(@intCast(i), 0, "\u{2500}", .{}, .none);
+    try f.expectBytes("\x1b[1;1H\u{2500}\x1b[7b");
+}
+
+test "a repeated run that reaches the margin leaves the cursor untrusted" {
+    var f: Fixture = try .init(testing.allocator, 10, 2);
+    defer f.deinit();
+    f.caps.rep = true;
+    for (0..10) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
+    _ = try f.draw();
+    try testing.expectEqual(@as(?Point, null), f.renderer.cursor);
+    try f.screen.write(0, 1, "y", .{}, .none);
+    try f.expectBytes("\x1b[2;1Hy");
 }
 
 test "an expensive unchanged grapheme is moved over instead of bridged" {

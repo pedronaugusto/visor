@@ -7,8 +7,8 @@
 //! built on this package needs exactly the same check.
 //!
 //! It is as complete as the renderer's output and no more: the cursor
-//! movements, the erases, the scrolls, SGR, OSC 8 and the modes this package
-//! writes. A graphics command is recorded rather than drawn, which is what
+//! movements, the erases, the scrolls, the repeat, SGR, OSC 8 and the modes
+//! this package writes. A graphics command is recorded rather than drawn, which is what
 //! lets the rule that the text pass never deletes a placement be a test.
 //!
 //! What this file will never be: a terminal emulator for general use. It has
@@ -60,6 +60,8 @@ pub const Term = struct {
     graphics: std.ArrayList([]const u8) = .empty,
     /// The saved cursor, DECSC.
     saved: ?struct { col: u16, row: u16, style: Style } = null,
+    /// The last codepoint printed, which is what `REP` repeats.
+    previous: ?u21 = null,
 
     /// A terminal of a size, showing nothing.
     pub fn init(gpa: Allocator, size: Size) Allocator.Error!Term {
@@ -209,11 +211,22 @@ pub const Term = struct {
             t.lineFeed();
         }
         try t.scr.write(t.col, t.row, grapheme, t.style, t.link);
+        t.previous = lastCodepoint(grapheme);
         t.col += w;
         if (t.col >= cols) {
             t.col = cols - 1;
             t.wrap_pending = true;
         }
+    }
+
+    /// `CSI n b`, REP: the last codepoint printed, printed again `n` times,
+    /// wrapping and scrolling exactly as printing it would.
+    fn repeat(t: *Term, n: u32) Allocator.Error!void {
+        const cp = t.previous orelse return;
+        var buf: [4]u8 = undefined;
+        const len = std.unicode.utf8Encode(cp, &buf) catch return;
+        var i: u32 = 0;
+        while (i < n) : (i += 1) try t.put(buf[0..len]);
     }
 
     /// Down one row, scrolling the region when there is nowhere to go.
@@ -267,7 +280,7 @@ pub const Term = struct {
     fn escape(t: *Term, bytes: []const u8) Allocator.Error!usize {
         if (bytes.len < 2) return 0;
         return switch (bytes[1]) {
-            '[' => t.controlSequence(bytes),
+            '[' => try t.controlSequence(bytes),
             ']' => t.operatingSystemCommand(bytes),
             '_' => try t.applicationCommand(bytes),
             '7' => blk: {
@@ -291,7 +304,7 @@ pub const Term = struct {
     }
 
     /// `CSI ... final`.
-    fn controlSequence(t: *Term, bytes: []const u8) usize {
+    fn controlSequence(t: *Term, bytes: []const u8) Allocator.Error!usize {
         var i: usize = 2;
         var private: u8 = 0;
         if (i < bytes.len and bytes[i] >= 0x3c and bytes[i] <= 0x3f) {
@@ -306,12 +319,12 @@ pub const Term = struct {
         const intermediates = bytes[intermediate_start..i];
         if (i >= bytes.len) return 0;
         const final = bytes[i];
-        t.dispatch(private, params, intermediates, final);
+        try t.dispatch(private, params, intermediates, final);
         return i + 1;
     }
 
     /// One complete control sequence, acted on.
-    fn dispatch(t: *Term, private: u8, params: []const u8, intermediates: []const u8, final: u8) void {
+    fn dispatch(t: *Term, private: u8, params: []const u8, intermediates: []const u8, final: u8) Allocator.Error!void {
         if (private == '?') {
             t.privateMode(params, final);
             return;
@@ -343,6 +356,7 @@ pub const Term = struct {
             'S' => t.scrollRegion(t.scrollCount(params)),
             'T' => t.scrollRegion(-t.scrollCount(params)),
             'r' => t.setScrollRegion(params),
+            'b' => try t.repeat(atLeastOne(params)),
             else => {},
         }
     }
@@ -851,6 +865,14 @@ fn incompleteTail(run: []const u8) usize {
     return 0;
 }
 
+/// The last codepoint of a grapheme, or null when the bytes are not UTF-8.
+fn lastCodepoint(grapheme: []const u8) ?u21 {
+    var last: ?u21 = null;
+    var it: std.unicode.Utf8Iterator = .{ .bytes = grapheme, .i = 0 };
+    while (it.nextCodepoint()) |cp| last = cp;
+    return last;
+}
+
 /// Where a run of printable bytes ends.
 fn runEnd(bytes: []const u8, from: usize) usize {
     var i = from;
@@ -1255,6 +1277,31 @@ test "an unrecognised sequence is dropped rather than guessed at" {
     try t.feed("a\x1b[?1000h\x1b[>4;2mb\x1b]0;a title\x07c");
     var buf: [32]u8 = undefined;
     try testing.expectEqualStrings("abc     ", rowText(&t, 0, &buf));
+}
+
+test "a repeat prints the last codepoint again and wraps as printing would" {
+    var t = try made(4, 2);
+    defer t.deinit();
+    try t.feed("x\x1b[5b");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("xxxx", rowText(&t, 0, &buf));
+    try testing.expectEqualStrings("xx  ", rowText(&t, 1, &buf));
+    try testing.expectEqual(@as(u16, 2), t.col);
+}
+
+test "a repeat after a cluster repeats its last codepoint, as a terminal does" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("e\u{301}\x1b[2b");
+    try testing.expectEqualStrings("e\u{301}", textAt(&t, 0, 0));
+    try testing.expectEqual(@as(?u21, 0x301), t.previous);
+}
+
+test "a repeat with nothing printed yet prints nothing" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    try t.feed("\x1b[3b");
+    try testing.expect(!t.scr.damage.any());
 }
 
 test "a saved cursor comes back where it was" {
