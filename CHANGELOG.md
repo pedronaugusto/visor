@@ -40,6 +40,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output console fails.
 - Text fitting and wrapping compare exact internal widths, so strings beyond
   65,535 columns neither pass a saturated fit check nor overflow arithmetic.
+- Scrollbar thumb sizing and positioning accepts the full public `usize`
+  state range without intermediate overflow.
 
 ## [0.1.0] - 2026-09-19
 

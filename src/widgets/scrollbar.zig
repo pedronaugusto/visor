@@ -49,11 +49,11 @@ pub const Scrollbar = struct {
         pub fn thumbIn(s: State, len: u16) struct { start: u16, len: u16 } {
             if (len == 0 or s.content == 0) return .{ .start = 0, .len = 0 };
             if (s.viewport >= s.content) return .{ .start = 0, .len = len };
-            const size: u16 = @intCast(@max(1, s.viewport * len / s.content));
+            const size: u16 = @intCast(@max(1, @as(u128, s.viewport) * len / s.content));
             const room = len - size;
             const most = s.content - s.viewport;
             const at = @min(s.position, most);
-            return .{ .start = @intCast(at * room / most), .len = size };
+            return .{ .start = @intCast(@as(u128, at) * room / most), .len = size };
         }
     };
 
@@ -164,6 +164,25 @@ test "the thumb arithmetic is the same one a drag has to invert" {
     try testing.expectEqual(@as(u16, 2), t.len);
     try testing.expectEqual(@as(u16, 9), t.start);
     try testing.expectEqual(@as(u16, 18), s.thumbIn(20).start + 9);
+}
+
+test "thumb arithmetic accepts the full usize state range" {
+    const almost_whole: Scrollbar.State = .{
+        .content = std.math.maxInt(usize),
+        .viewport = std.math.maxInt(usize) - 1,
+        .position = std.math.maxInt(usize),
+    };
+    try testing.expectEqual(@as(u16, 19), almost_whole.thumbIn(20).len);
+    try testing.expectEqual(@as(u16, 1), almost_whole.thumbIn(20).start);
+
+    const at_end: Scrollbar.State = .{
+        .content = std.math.maxInt(usize),
+        .viewport = 1,
+        .position = std.math.maxInt(usize),
+    };
+    const thumb = at_end.thumbIn(std.math.maxInt(u16));
+    try testing.expectEqual(@as(u16, 1), thumb.len);
+    try testing.expectEqual(@as(u16, std.math.maxInt(u16) - 1), thumb.start);
 }
 
 test "the thumb stays inside the track and reaches both ends exactly once" {
