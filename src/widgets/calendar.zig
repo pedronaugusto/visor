@@ -60,11 +60,11 @@ pub fn isLeapYear(year: i32) bool {
 /// Sakamoto's method, which is a table and two divisions and is exact for
 /// every year the proleptic Gregorian calendar covers.
 pub fn weekdayOf(d: Date) Weekday {
-    const shift = [12]i32{ 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
-    var y = d.year;
+    const shift = [12]i64{ 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    var y: i64 = d.year;
     if (d.month < 3) y -= 1;
     const era = @divFloor(y, 4) - @divFloor(y, 100) + @divFloor(y, 400);
-    const sunday_based = @mod(y + era + shift[d.month - 1] + @as(i32, d.day), 7);
+    const sunday_based = @mod(y + era + shift[d.month - 1] + @as(i64, d.day), 7);
     // Sakamoto counts from Sunday; this calendar counts from Monday.
     return @enumFromInt(@as(u3, @intCast(@mod(sunday_based + 6, 7))));
 }
@@ -200,6 +200,18 @@ pub const Calendar = struct {
 
 const testing = std.testing;
 const Harness = @import("harness.zig").Harness;
+
+test "weekday calculation covers the extreme i32 years" {
+    const cases = [_]Date{
+        .{ .year = std.math.minInt(i32), .month = 1, .day = 1 },
+        .{ .year = std.math.maxInt(i32), .month = 12, .day = 31 },
+    };
+    for (cases) |date| {
+        var equivalent = date;
+        equivalent.year = @intCast(2000 + @mod(@as(i64, date.year), 400));
+        try testing.expectEqual(weekdayOf(equivalent), weekdayOf(date));
+    }
+}
 
 test "a month starts in the column its first day falls in" {
     var h: Harness = try .init(testing.allocator, 20, 8);

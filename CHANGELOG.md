@@ -42,6 +42,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   65,535 columns neither pass a saturated fit check nor overflow arithmetic.
 - Scrollbar thumb sizing and positioning accepts the full public `usize`
   state range without intermediate overflow.
+- Calendar weekday calculation covers the complete public `i32` year range.
 
 ## [0.1.0] - 2026-09-19
 
