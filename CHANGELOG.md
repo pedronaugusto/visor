@@ -20,6 +20,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on a partial output write.
 - Inserting an image layer re-places unchanged layers whose sorted z-position
   moved, preserving the declared stacking order.
+- Word wrapping keeps the measured width of a word prefix consumed after an
+  earlier break.
 
 ## [0.1.0] - 2026-09-19
 

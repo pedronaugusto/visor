@@ -155,8 +155,10 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
             row = .{ .start = resume_at, .end = resume_at, .columns = 0 };
             break_at = null;
             if (resume_at > at) continue;
-            // Re-measure this cluster at the start of the new row.
-            row.columns = w;
+            // The iterator has already consumed the word prefix between the
+            // earlier break and this overflowing cluster. It belongs to the
+            // new row and must be measured with the cluster.
+            row.columns = width(str[resume_at .. at + g.len], method);
             row.end = at + g.len;
             continue;
         }
@@ -251,6 +253,18 @@ test "a word longer than the row is cut anyway" {
     try testing.expectEqualStrings("aaaaa", str[rows[0].start..rows[0].end]);
     try testing.expectEqualStrings("aaaaa", str[rows[1].start..rows[1].end]);
     try testing.expectEqualStrings("aa b", str[rows[2].start..rows[2].end]);
+}
+
+test "word wrapping measures the prefix consumed past the previous break" {
+    const str = "a abcdef";
+    var rows: [8]Row = undefined;
+    const n = wrap(str, 5, .word, .unicode, &rows);
+    try testing.expectEqual(@as(usize, 3), n);
+    try testing.expectEqualStrings("a", str[rows[0].start..rows[0].end]);
+    try testing.expectEqualStrings("abcde", str[rows[1].start..rows[1].end]);
+    try testing.expectEqual(@as(u16, 5), rows[1].columns);
+    try testing.expectEqualStrings("f", str[rows[2].start..rows[2].end]);
+    try testing.expectEqual(@as(u16, 1), rows[2].columns);
 }
 
 test "a newline ends a row in every mode" {
