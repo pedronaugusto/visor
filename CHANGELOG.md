@@ -14,6 +14,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names the source screen and safely re-interns pooled graphemes and links.
 - Interning text or link targets borrowed from the same pool remains valid
   when growing that pool moves its backing allocation.
+- Windows raw-mode setup restores the input console mode when configuring the
+  output console fails.
 
 ## [0.1.0] - 2026-09-19
 

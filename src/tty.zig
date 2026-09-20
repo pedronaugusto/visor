@@ -144,9 +144,10 @@ pub const Tty = struct {
             want_in |= ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
             var want_out = output_mode;
             want_out |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+            t.saved = saved;
+            errdefer t.restore();
             if (SetConsoleMode(t.input.handle, want_in) == .FALSE) return error.Unexpected;
             if (SetConsoleMode(t.file.handle, want_out) == .FALSE) return error.Unexpected;
-            t.saved = saved;
             open_tty = saved;
             return;
         }
