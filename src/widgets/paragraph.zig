@@ -47,11 +47,11 @@ pub const Paragraph = struct {
     /// What a scrollbar's content length is, and what a caller clamps its
     /// own scroll against. Counts every row, which costs one pass over the
     /// text and no memory.
-    pub fn rowCount(p: Paragraph, cols: u16) usize {
+    pub fn rowCount(p: Paragraph, cols: u16, method: visor.Method) usize {
         if (cols == 0) return 0;
         var total: usize = 0;
         for (p.lines) |line| {
-            var it: Rows = .init(skipColumns(line.text, p.scroll_columns), cols, p.wrap);
+            var it: Rows = .init(skipColumns(line.text, p.scroll_columns, method), cols, p.wrap, method);
             while (it.next()) |_| total += 1;
         }
         return total;
@@ -66,8 +66,9 @@ pub const Paragraph = struct {
             // The columns come off before the wrap, because a row that was
             // cut to the window's width and then shifted left would be a
             // window on a window.
-            const body = skipColumns(line.text, p.scroll_columns);
-            var it: Rows = .init(body, win.cols(), p.wrap);
+            const method = win.screen.method;
+            const body = skipColumns(line.text, p.scroll_columns, method);
+            var it: Rows = .init(body, win.cols(), p.wrap, method);
             while (it.next()) |r| {
                 if (produced < p.scroll) {
                     produced += 1;
@@ -76,7 +77,7 @@ pub const Paragraph = struct {
                 produced += 1;
                 if (row >= win.rows()) return;
                 const text = body[r.start..r.end];
-                const taken = @min(visor.width(text, .unicode), win.cols());
+                const taken = @min(visor.width(text, method), win.cols());
                 _ = try win.printSegment(.{
                     .text = text,
                     .style = line.style,
@@ -102,6 +103,7 @@ const Rows = struct {
     text: []const u8,
     cols: u16,
     mode: visor.Wrap,
+    method: visor.Method,
     base: usize = 0,
     buf: [32]visor.Row = undefined,
     have: usize = 0,
@@ -109,14 +111,14 @@ const Rows = struct {
     /// Whether the last refill saw the end of the text.
     last: bool = false,
 
-    fn init(text: []const u8, cols: u16, mode: visor.Wrap) Rows {
-        return .{ .text = text, .cols = cols, .mode = mode };
+    fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) Rows {
+        return .{ .text = text, .cols = cols, .mode = mode, .method = method };
     }
 
     fn next(it: *Rows) ?visor.Row {
         if (it.at == it.have) {
             if (it.last) return null;
-            it.have = visor.wrap(it.text[it.base..], it.cols, it.mode, .unicode, &it.buf);
+            it.have = visor.wrap(it.text[it.base..], it.cols, it.mode, it.method, &it.buf);
             it.at = 0;
             if (it.have == 0) return null;
             if (it.have < it.buf.len) {
@@ -142,13 +144,13 @@ const Rows = struct {
 };
 
 /// What is left of a row after `n` columns are skipped off its left.
-fn skipColumns(text: []const u8, n: u16) []const u8 {
+fn skipColumns(text: []const u8, n: u16, method: visor.Method) []const u8 {
     if (n == 0) return text;
     var used: u16 = 0;
     var it: visor.Graphemes = .init(text);
     while (it.nextAt()) |found| {
         if (used >= n) return text[found.start..];
-        used += visor.graphemeWidth(found.bytes, .unicode);
+        used += visor.graphemeWidth(found.bytes, method);
     }
     return text[text.len..];
 }
@@ -178,7 +180,7 @@ test "a paragraph scrolls by rows and counts them" {
         .lines = &.{ .{ .text = "one" }, .{ .text = "two" }, .{ .text = "three" }, .{ .text = "four" } },
         .scroll = 2,
     };
-    try testing.expectEqual(@as(usize, 4), p.rowCount(6));
+    try testing.expectEqual(@as(usize, 4), p.rowCount(6, h.screen.method));
     try p.draw(h.window());
     try h.expectFrame(
         \\three
@@ -199,6 +201,17 @@ test "a paragraph aligns each row in the window's width" {
         \\    three
         \\
     );
+}
+
+test "a paragraph measures with its screen's width method" {
+    var h: Harness = try .init(testing.allocator, 3, 1);
+    defer h.deinit();
+    h.screen.method = .wcwidth;
+    try (Paragraph{
+        .lines = &.{.{ .text = "\u{26a0}\u{fe0f}" }},
+        .where = .right,
+    }).draw(h.window());
+    try testing.expectEqualStrings("\u{26a0}\u{fe0f}", h.screen.textAt(2, 0));
 }
 
 test "a paragraph scrolled sideways drops the columns off its left" {
@@ -235,7 +248,7 @@ test "the rows of a long line come out in order whatever the buffer holds" {
     // Longer than the thirty-two rows the iterator refills from, so the
     // refill path is the one under test.
     const text = "a " ** 200;
-    var it: Rows = .init(text, 4, .word);
+    var it: Rows = .init(text, 4, .word, .unicode);
     var count: usize = 0;
     var last_end: usize = 0;
     while (it.next()) |r| {
@@ -267,7 +280,7 @@ test "a paragraph scrolled by n shows what the whole one shows n rows down" {
     const cols: u16 = 8;
 
     // The whole thing, in a window tall enough for all of it.
-    const total = (Paragraph{ .lines = &lines, .wrap = .word }).rowCount(cols);
+    const total = (Paragraph{ .lines = &lines, .wrap = .word }).rowCount(cols, .unicode);
     var whole: Harness = try .init(testing.allocator, cols, @intCast(total));
     defer whole.deinit();
     try (Paragraph{ .lines = &lines, .wrap = .word }).draw(whole.window());

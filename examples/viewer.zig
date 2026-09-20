@@ -151,7 +151,7 @@ const Viewer = struct {
             .lines = &.{.{ .text = file.body }},
             .scroll = v.scroll,
         };
-        v.rows = paragraph.rowCount(text_window.cols());
+        v.rows = paragraph.rowCount(text_window.cols(), text_window.screen.method);
         v.page = text_window.rows();
         try paragraph.draw(text_window);
 

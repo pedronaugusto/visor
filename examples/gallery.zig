@@ -256,7 +256,7 @@ fn drawSpark(win: visor.Window) !void {
     };
     try paragraph.draw(child(text, columns[0]));
     try (widgets.Scrollbar{}).draw(child(text, columns[1]), .{
-        .content = paragraph.rowCount(columns[0].cols),
+        .content = paragraph.rowCount(columns[0].cols, text.screen.method),
         .viewport = columns[0].rows,
         .position = 0,
     });

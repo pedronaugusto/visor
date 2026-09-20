@@ -28,6 +28,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   256-colour palette as direct RGB support.
 - Capability probing sends a harmless kitty graphics query, allowing image
   layers to be enabled from the terminal's reply.
+- Paragraph wrapping, alignment, horizontal scrolling, and row counts use the
+  screen's configured width method; `rowCount` now takes that method.
 
 ## [0.1.0] - 2026-09-19
 
