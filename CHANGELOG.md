@@ -29,6 +29,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   text. `Cell.width` now returns the columns a cell covers at its scale, as a
   `u4`; `Cell.glyphWidth` is the width before scaling.
 
+- Inline mode. `Renderer.enter` with `Mode.inline` takes the screen's rows
+  from the row the cursor is on, the terminal scrolling for the ones that do
+  not fit, and saves an origin there; every move after that is relative to
+  the cursor or to the restored origin, whichever is cheaper. `resize` takes
+  more rows or gives them back blank on the next draw, a repaint starts from
+  a blank screen at the origin, and `leave` puts the cursor on the row below
+  with the last frame still showing. Scroll detection is off inline. The
+  round trip runs for inline screens, and `examples/progress.zig` is one.
+
+### Removed
+
+- `error.InlineModeUnsupported`, which `Renderer.enter` no longer returns.
+
 ### Fixed
 
 - A failed frame write is retried as a complete repaint without losing text,

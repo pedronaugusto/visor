@@ -206,6 +206,7 @@ const example_sources = [_][]const u8{
     "examples/usage.zig",
     "examples/viewer.zig",
     "examples/gallery.zig",
+    "examples/progress.zig",
 };
 
 /// The `uucode` fields this package builds into its tables.

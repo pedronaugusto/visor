@@ -42,13 +42,24 @@ const Size = geom.Size;
 pub const Style = cellmod.Style;
 const Writer = std.Io.Writer;
 
-/// What a full-screen program takes on the way in.
+/// Where a program's screen goes on the way in.
 pub const Mode = enum {
     /// The alternate screen: the whole terminal, and the user's scrollback
     /// untouched underneath.
     alt,
-    /// Growing in place above the prompt. Not implemented yet; `enter` says
-    /// so rather than half doing it.
+    /// The main screen, at the cursor. The screen's rows are taken from the
+    /// row the cursor is on, the terminal scrolling to make room for the
+    /// ones that do not fit, and on the way out the last frame is left
+    /// showing with the cursor on the row below it. Growing takes more rows
+    /// the same way; shrinking gives them back blank.
+    ///
+    /// No row of the terminal is known by number here, so every move is
+    /// relative: to the cursor, or to an origin saved with `DECSC` at the
+    /// first row and restored when the cursor is not trusted. Scroll
+    /// detection is off, because a scrolling region is an absolute thing.
+    /// After the terminal itself is resized the origin is wherever the
+    /// terminal put the saved cursor, which is the most anything can know
+    /// without asking.
     @"inline",
 };
 
@@ -56,8 +67,6 @@ pub const Mode = enum {
 pub const Error = Writer.Error || error{
     /// The screen is not the size the renderer was made or resized to.
     SizeMismatch,
-    /// `Mode.inline` is not implemented yet.
-    InlineModeUnsupported,
 };
 
 /// The frame size at or below which the synchronised-output bracket is not
@@ -112,6 +121,10 @@ pub const Renderer = struct {
     repaint_all: bool = false,
     /// What `enter` turned on, so `leave` turns off exactly that.
     entered: ?Entered = null,
+    /// In inline mode, how many rows of the terminal are the screen's,
+    /// counted from the saved origin; null in the alternate screen. The next
+    /// repaint takes or gives back rows when this and `size.rows` differ.
+    region: ?u16 = null,
 
     /// The modes `enter` switched, remembered so `leave` is its mirror.
     pub const Entered = struct {
@@ -255,7 +268,7 @@ pub const Renderer = struct {
 
         if (r.repaint_all) try r.beginRepaint(out, caps);
         if (body) {
-            if (caps.scroll_detection) {
+            if (caps.scroll_detection and r.region == null) {
                 if (try scroll_detect.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
             }
             try r.drawRows(out, s, caps, &stats);
@@ -294,7 +307,6 @@ pub const Renderer = struct {
     /// tightest of them. `draw` writes the bracket, and only when the frame
     /// is large enough to be worth it.
     pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode) Error!void {
-        if (mode == .@"inline") return error.InlineModeUnsupported;
         // Record every mode before it may have reached a partially failing
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
@@ -303,7 +315,8 @@ pub const Renderer = struct {
             .in_band_resize = false,
             .unicode_core = false,
         };
-        try morse.altScreen.set(w, true);
+        r.region = if (mode == .@"inline") r.size.rows else null;
+        if (mode == .alt) try morse.altScreen.set(w, true);
         if (caps.in_band_resize) {
             r.entered.?.in_band_resize = true;
             try morse.inBandResize.set(w, true);
@@ -313,8 +326,17 @@ pub const Renderer = struct {
             try morse.unicodeCore.set(w, true);
         }
         try morse.resetStyle(w);
-        try morse.clearScreen(w, .all);
-        try morse.cursorTo(w, 1, 1);
+        switch (mode) {
+            .alt => {
+                try morse.clearScreen(w, .all);
+                try morse.cursorTo(w, 1, 1);
+            },
+            .@"inline" => {
+                // From the start of the row the prompt left the cursor on.
+                try w.writeByte('\r');
+                try r.reserve(w, r.size.rows);
+            },
+        }
         try morse.cursorVisible.set(w, false);
 
         @memset(r.prev, .blank(.{}));
@@ -351,8 +373,45 @@ pub const Renderer = struct {
         r.shown = true;
         if (was.unicode_core) try morse.unicodeCore.set(w, false);
         if (was.in_band_resize) try morse.inBandResize.set(w, false);
-        try morse.altScreen.set(w, false);
+        switch (was.mode) {
+            .alt => try morse.altScreen.set(w, false),
+            .@"inline" => {
+                // The last frame stays. The cursor goes to the origin, down
+                // the screen's rows, and one line feed further, which is the
+                // row below when there is one and a scroll when there is not.
+                try morse.cursorRestore(w);
+                const rows = r.region orelse r.size.rows;
+                if (rows > 1) try morse.cursorDown(w, rows - 1);
+                try w.writeByte('\n');
+                try w.writeByte('\r');
+            },
+        }
+        r.region = null;
         r.entered = null;
+    }
+
+    /// In inline mode, makes the rows from the cursor's row the screen's,
+    /// `rows` of them: the terminal scrolls for the ones that do not fit, the
+    /// origin is saved on the first, and everything from there down is
+    /// erased. The cursor is at the start of a row when this is called and
+    /// at the origin when it returns.
+    fn reserve(r: *Renderer, w: *Writer, rows: u16) Error!void {
+        if (rows > 1) {
+            try w.splatByteAll('\n', rows - 1);
+            try morse.cursorUp(w, rows - 1);
+        }
+        try morse.cursorSave(w);
+        if (rows > 0) try morse.clearScreen(w, .to_end);
+        r.region = rows;
+        r.cursor = .{ .col = 0, .row = 0 };
+    }
+
+    /// Back to the saved origin, which also puts the style back to the
+    /// default it was saved in.
+    fn home(r: *Renderer, out: *Writer) Error!void {
+        try morse.cursorRestore(out);
+        r.cursor = .{ .col = 0, .row = 0 };
+        r.style = .{};
     }
 
     //=====================================================================
@@ -464,6 +523,19 @@ pub const Renderer = struct {
         r.style = .{};
         r.cursor = null;
         @memset(r.force, true);
+        // Inline, a repaint starts from the origin with the screen's rows
+        // taken or given back if the size changed, and everything from the
+        // origin down erased: the previous frame is then exactly blank,
+        // which is the one state a repaint can be sure of.
+        if (r.region) |had| {
+            try r.home(out);
+            if (had != r.size.rows) {
+                try r.reserve(out, r.size.rows);
+            } else {
+                try morse.clearScreen(out, .to_end);
+            }
+            @memset(r.prev, .blank(.{}));
+        }
     }
 
     /// Every row that changed, in order.
@@ -890,12 +962,35 @@ pub const Renderer = struct {
         const there: Point = .{ .col = col, .row = row };
         if (r.cursor) |at| {
             if (at.col == col and at.row == row) return;
+        }
+        if (r.region != null) {
+            try r.moveWithin(out, there);
+        } else if (r.cursor) |at| {
             try writeMove(out, at, there);
         } else {
             try morse.cursorTo(out, row + 1, col + 1);
         }
         r.cursor = there;
         stats.moves += 1;
+    }
+
+    /// A move in inline mode, where no row of the terminal is known by
+    /// number: the cheaper of a relative move from where the cursor is and a
+    /// restore to the saved origin followed by a relative move from there.
+    fn moveWithin(r: *Renderer, out: *Writer, to: Point) Error!void {
+        const origin: Point = .{ .col = 0, .row = 0 };
+        const from_origin = plan(origin, to, .region);
+        const via_origin: usize = if (to.col == 0 and to.row == 0) 2 else 2 + from_origin.cost;
+        if (r.cursor) |at| {
+            const direct = plan(at, to, .region);
+            if (direct.cost <= via_origin) {
+                try emitMove(out, at, to, direct.choice);
+                return;
+            }
+        }
+        try r.home(out);
+        if (to.col == 0 and to.row == 0) return;
+        try emitMove(out, origin, to, from_origin.choice);
     }
 
     /// The cursor, its shape and its visibility, settled at the end of the
@@ -1024,14 +1119,29 @@ fn absoluteCost(to: Point) usize {
     return 2 + digits(@as(u32, to.row) + 1) + 1 + digits(@as(u32, to.col) + 1) + 1;
 }
 
-/// Writes the cheapest sequence that moves the cursor from `at` to `to`.
+/// Writes the cheapest sequence that moves the cursor from `at` to `to` on
+/// a screen whose rows are known by number.
 ///
 /// Every candidate is costed in bytes and the shortest wins; an absolute move
 /// is the tie-break, because it is the one that is right whatever the
 /// terminal did with the last one.
 fn writeMove(out: *Writer, at: Point, to: Point) Writer.Error!void {
-    var best = absoluteCost(to);
+    try emitMove(out, at, to, plan(at, to, .screen).choice);
+}
+
+/// What the cursor's rows are counted against.
+const Addressing = enum {
+    /// The terminal's own rows, so an absolute move is available.
+    screen,
+    /// A saved origin, so only relative moves and absolute columns are.
+    region,
+};
+
+/// The cheapest move from `at` to `to`, and what it costs.
+fn plan(at: Point, to: Point, addressing: Addressing) struct { choice: Move, cost: usize } {
+    var best: usize = std.math.maxInt(usize);
     var choice: Move = .absolute;
+    if (addressing == .screen) best = absoluteCost(to);
 
     if (at.row == to.row) {
         if (to.col == 0) best = pick(&choice, .carriage_return, 1, best);
@@ -1043,7 +1153,9 @@ fn writeMove(out: *Writer, at: Point, to: Point) Writer.Error!void {
             best = pick(&choice, .backspace, at.col - to.col, best);
         }
     } else if (at.col == to.col) {
-        best = pick(&choice, .row, 2 + digits(@as(u32, to.row) + 1) + 1, best);
+        if (addressing == .screen) {
+            best = pick(&choice, .row, 2 + digits(@as(u32, to.row) + 1) + 1, best);
+        }
         if (to.row > at.row) {
             best = pick(&choice, .down, 2 + digits(to.row - at.row) + 1, best);
         } else {
@@ -1055,8 +1167,21 @@ fn writeMove(out: *Writer, at: Point, to: Point) Writer.Error!void {
         } else {
             best = pick(&choice, .prev_line, 2 + digits(at.row - to.row) + 1, best);
         }
+    } else if (addressing == .region) {
+        // No absolute move to fall back on, so the move is two: the row,
+        // then the column, by whichever pair is shorter.
+        const down = to.row > at.row;
+        const vertical = 2 + digits(if (down) to.row - at.row else at.row - to.row) + 1;
+        const column = 2 + digits(@as(u32, to.col) + 1) + 1;
+        const right = 2 + digits(to.col) + 1;
+        best = pick(&choice, if (down) .down_then_column else .up_then_column, vertical + column, best);
+        best = pick(&choice, if (down) .next_line_then_right else .prev_line_then_right, vertical + right, best);
     }
+    return .{ .choice = choice, .cost = best };
+}
 
+/// Writes one planned move.
+fn emitMove(out: *Writer, at: Point, to: Point, choice: Move) Writer.Error!void {
     switch (choice) {
         .absolute => try morse.cursorTo(out, to.row + 1, to.col + 1),
         .carriage_return => try out.writeByte('\r'),
@@ -1069,6 +1194,22 @@ fn writeMove(out: *Writer, at: Point, to: Point) Writer.Error!void {
         .down => try morse.cursorDown(out, to.row - at.row),
         .next_line => try morse.cursorNextLine(out, to.row - at.row),
         .prev_line => try morse.cursorPrevLine(out, at.row - to.row),
+        .down_then_column => {
+            try morse.cursorDown(out, to.row - at.row);
+            try morse.cursorColumn(out, to.col + 1);
+        },
+        .up_then_column => {
+            try morse.cursorUp(out, at.row - to.row);
+            try morse.cursorColumn(out, to.col + 1);
+        },
+        .next_line_then_right => {
+            try morse.cursorNextLine(out, to.row - at.row);
+            try morse.cursorRight(out, to.col);
+        },
+        .prev_line_then_right => {
+            try morse.cursorPrevLine(out, at.row - to.row);
+            try morse.cursorRight(out, to.col);
+        },
     }
 }
 
@@ -1085,6 +1226,10 @@ const Move = enum {
     down,
     next_line,
     prev_line,
+    down_then_column,
+    up_then_column,
+    next_line_then_right,
+    prev_line_then_right,
 };
 
 /// Takes `candidate` when it is strictly cheaper than what is held.
@@ -1684,7 +1829,6 @@ test "a scaled grapheme reaches the emulator as the block it is" {
     var f: Fixture = try .init(testing.allocator, 8, 3);
     defer f.deinit();
     f.caps.scaled_text = true;
-    const Term = @import("term.zig").Term;
     var t: Term = try .init(testing.allocator, f.screen.size);
     defer t.deinit();
     t.setMethod(.unicode);
@@ -1725,13 +1869,245 @@ test "a screen of the wrong size is refused rather than drawn" {
     try testing.expectError(error.SizeMismatch, f.draw());
 }
 
-test "inline mode says it is not implemented rather than half doing it" {
-    var f: Fixture = try .init(testing.allocator, 4, 2);
+const Term = @import("term.zig").Term;
+
+/// A terminal with a prompt's worth of lines already on it, so the cursor is
+/// somewhere down the screen the way it is when a program starts.
+fn promptedTerm(cols: u16, rows: u16, lines: u16) !Term {
+    var t: Term = try .init(testing.allocator, .{ .cols = cols, .rows = rows });
+    errdefer t.deinit();
+    t.setMethod(.unicode);
+    var i: u16 = 0;
+    while (i < lines) : (i += 1) {
+        var buf: [16]u8 = undefined;
+        try t.feed(try std.fmt.bufPrint(&buf, "line {d}\r\n", .{i}));
+    }
+    return t;
+}
+
+fn expectRowText(t: *const Term, row: u16, want: []const u8) !void {
+    var buf: [256]u8 = undefined;
+    var n: usize = 0;
+    var col: u16 = 0;
+    while (col < t.screen().size.cols) : (col += 1) {
+        const g = t.screen().textAt(col, row);
+        @memcpy(buf[n..][0..g.len], g);
+        n += g.len;
+    }
+    try testing.expectEqualStrings(want, std.mem.trimEnd(u8, buf[0..n], " "));
+}
+
+test "entering inline mode takes the rows at the cursor and leaves the prompt above" {
+    var f: Fixture = try .init(testing.allocator, 10, 3);
     defer f.deinit();
-    try testing.expectError(
-        error.InlineModeUnsupported,
-        f.renderer.enter(&f.out.writer, .{}, .@"inline"),
-    );
+    var t = try promptedTerm(10, 8, 2);
+    defer t.deinit();
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try testing.expectEqualStrings("\x1b[?2027h\x1b[0m\r\n\n\x1b[2A\x1b7\x1b[0J\x1b[?25l", f.written());
+    try t.feed(f.written());
+    try testing.expectEqual(@as(u16, 2), t.row);
+    try testing.expectEqual(@as(u16, 2), t.saved.?.row);
+
+    try f.screen.write(0, 0, "a", .{}, .none);
+    try f.screen.write(4, 2, "b", .{ .bold = true }, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try expectRowText(&t, 0, "line 0");
+    try expectRowText(&t, 1, "line 1");
+    try expectRowText(&t, 2, "a");
+    try expectRowText(&t, 4, "    b");
+    try testing.expect(t.screen().readCell(4, 4).?.style.bold);
+
+    // Nothing changed: nothing written, even with every row claimed.
+    try f.expectBytes("");
+    f.screen.damageAll();
+    try f.expectBytes("");
+}
+
+test "an inline screen at the bottom of the terminal scrolls it to make room" {
+    var f: Fixture = try .init(testing.allocator, 10, 3);
+    defer f.deinit();
+    var t = try promptedTerm(10, 4, 3);
+    defer t.deinit();
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try t.feed(f.written());
+    // Two lines scrolled off; the third is the row above the screen.
+    try expectRowText(&t, 0, "line 2");
+    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+
+    try f.screen.write(0, 2, "x", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try expectRowText(&t, 3, "x");
+    try f.expectBytes("");
+}
+
+test "the cursor is moved relative to the saved origin in inline mode" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+
+    // Down and across from the origin is two moves; there is no absolute one.
+    try f.screen.write(3, 2, "x", .{}, .none);
+    try f.expectBytes("\x1b[2B\x1b[4Gx");
+    // Back to the origin, restoring it is two bytes and the shortest.
+    try f.screen.write(0, 0, "y", .{}, .none);
+    try f.expectBytes("\x1b8y");
+    // Along a row, the column is absolute and allowed.
+    try f.screen.write(3, 0, "w", .{}, .none);
+    try f.expectBytes("\x1b[4Gw");
+    // With the cursor untrusted, the origin is restored and the move made
+    // from there.
+    f.renderer.cursor = null;
+    try f.screen.write(5, 5, "z", .{}, .none);
+    try f.expectBytes("\x1b8\x1b[5B\x1b[6Gz");
+    try testing.expect(std.mem.indexOf(u8, f.written(), "H") == null);
+}
+
+test "growing an inline screen takes more rows and keeps what was above" {
+    var f: Fixture = try .init(testing.allocator, 10, 2);
+    defer f.deinit();
+    var t = try promptedTerm(10, 5, 2);
+    defer t.deinit();
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try t.feed(f.written());
+    try f.screen.write(0, 0, "a", .{}, .none);
+    try f.screen.write(0, 1, "b", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+
+    // Four rows from row 2 of a five-row terminal: one row scrolls off.
+    try f.screen.resize(testing.allocator, .{ .cols = 10, .rows = 4 });
+    try f.renderer.resize(testing.allocator, .{ .cols = 10, .rows = 4 });
+    try f.screen.write(0, 3, "d", .{}, .none);
+    _ = try f.draw();
+    try testing.expect(std.mem.startsWith(u8, f.written(), "\x1b]8;;\x1b\\\x1b[0m\x1b8\n\n\n\x1b[3A\x1b7\x1b[0J"));
+    try t.feed(f.written());
+    try expectRowText(&t, 0, "line 1");
+    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+    try expectRowText(&t, 1, "a");
+    try expectRowText(&t, 2, "b");
+    try expectRowText(&t, 3, "");
+    try expectRowText(&t, 4, "d");
+    try f.expectBytes("");
+}
+
+test "shrinking an inline screen gives its rows back blank" {
+    var f: Fixture = try .init(testing.allocator, 10, 4);
+    defer f.deinit();
+    var t = try promptedTerm(10, 8, 1);
+    defer t.deinit();
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try t.feed(f.written());
+    for (0..4) |row| try f.screen.write(0, @intCast(row), "x", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try expectRowText(&t, 4, "x");
+
+    try f.screen.resize(testing.allocator, .{ .cols = 10, .rows = 2 });
+    try f.renderer.resize(testing.allocator, .{ .cols = 10, .rows = 2 });
+    _ = try f.draw();
+    try t.feed(f.written());
+    try expectRowText(&t, 0, "line 0");
+    try expectRowText(&t, 1, "x");
+    try expectRowText(&t, 2, "x");
+    try expectRowText(&t, 3, "");
+    try expectRowText(&t, 4, "");
+    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+    try f.expectBytes("");
+}
+
+test "a repaint in inline mode starts from a blank screen at the origin" {
+    var f: Fixture = try .init(testing.allocator, 10, 3);
+    defer f.deinit();
+    var t = try promptedTerm(10, 6, 1);
+    defer t.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try t.feed(f.written());
+    try f.screen.write(2, 1, "x", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+
+    // The terminal is written to behind the renderer's back.
+    try t.feed("\x1b[3;1Hjunk");
+    f.renderer.repaint();
+    _ = try f.draw();
+    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b8\x1b[0J") != null);
+    try t.feed(f.written());
+    try expectRowText(&t, 1, "");
+    try expectRowText(&t, 2, "  x");
+    try expectRowText(&t, 3, "");
+    try f.expectBytes("");
+}
+
+test "inline mode never writes a scrolling region" {
+    var f: Fixture = try .init(testing.allocator, 10, 12);
+    defer f.deinit();
+    f.caps.scroll_detection = true;
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    for (0..12) |row| {
+        var buf: [8]u8 = undefined;
+        const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
+        for (text, 0..) |c, i| try f.screen.write(@intCast(i), @intCast(row), &.{c}, .{}, .none);
+    }
+    _ = try f.draw();
+    f.screen.scroll(.fromSize(f.screen.size), 1);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 0), stats.scrolled);
+    try testing.expect(std.mem.indexOf(u8, f.written(), "r") == null);
+    try testing.expect(std.mem.indexOf(u8, f.written(), "S") == null);
+}
+
+test "leaving inline mode puts the cursor below the screen and keeps the frame" {
+    var f: Fixture = try .init(testing.allocator, 10, 3);
+    defer f.deinit();
+    var t = try promptedTerm(10, 8, 1);
+    defer t.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try t.feed(f.written());
+    try f.screen.write(0, 2, "x", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    try testing.expectEqualStrings("\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2027l\x1b8\x1b[2B\n\r", f.written());
+    try t.feed(f.written());
+    try testing.expectEqual(@as(u16, 4), t.row);
+    try testing.expectEqual(@as(u16, 0), t.col);
+    try expectRowText(&t, 3, "x");
+    try testing.expect(t.screen().cursor.visible);
+
+    // At the bottom of the terminal the line feed scrolls, and the frame
+    // moves up with everything else.
+    var g: Fixture = try .init(testing.allocator, 10, 2);
+    defer g.deinit();
+    var u = try promptedTerm(10, 3, 1);
+    defer u.deinit();
+    g.out.clearRetainingCapacity();
+    try g.renderer.enter(&g.out.writer, g.caps, .@"inline");
+    try u.feed(g.written());
+    try g.screen.write(0, 1, "y", .{}, .none);
+    _ = try g.draw();
+    try u.feed(g.written());
+    g.out.clearRetainingCapacity();
+    try g.renderer.leave(&g.out.writer);
+    try u.feed(g.written());
+    try testing.expectEqual(@as(u16, 2), u.row);
+    try expectRowText(&u, 1, "y");
+    try expectRowText(&u, 2, "");
 }
 
 test "the shortest cursor move is the one written" {

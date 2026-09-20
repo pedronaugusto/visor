@@ -17,6 +17,11 @@
 //! - **Incremental equals a repaint.** A second terminal is given one full
 //!   repaint of the final screen, and the two terminals must agree.
 //!
+//! The first three run again for an inline screen: rows of a taller
+//! terminal taken at a cursor the prompt left somewhere down it, growing and
+//! shrinking between frames, with the rows above it and the cursor below it
+//! at the end checked too.
+//!
 //! All four run three times: against a terminal measuring by codepoint, a
 //! terminal measuring by cluster, and a terminal measuring by codepoint that
 //! is told the width of every cluster it could measure differently. The rule
@@ -347,6 +352,125 @@ test "the round trip holds against a terminal told every width" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
             try roundTrip(gpa, smith, .explicit);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+/// The rows of a terminal the inline screen occupies, compared with the
+/// screen cell by cell the way `expectScreensEqual` does, from the row the
+/// saved origin names.
+fn expectRegionEqual(want: *const Screen, t: *const Term) !void {
+    const got = t.screen();
+    const origin = (t.saved orelse return error.NoOrigin).row;
+    try testing.expect(origin + want.size.rows <= got.size.rows);
+    var row: u16 = 0;
+    while (row < want.size.rows) : (row += 1) {
+        var col: u16 = 0;
+        while (col < want.size.cols) : (col += 1) {
+            const a = want.cells[want.index(col, row)];
+            const b = got.cells[got.index(col, origin + row)];
+            const same = std.mem.eql(u8, want.textAt(col, row), got.textAt(col, origin + row)) and
+                std.mem.eql(u8, std.mem.asBytes(&a.style), std.mem.asBytes(&b.style)) and
+                a.width() == b.width() and a.isTail() == b.isTail() and
+                linksEqual(want, got, a.link, b.link);
+            if (!same) {
+                std.debug.print("inline cell {d},{d} (terminal row {d}) differs\n", .{ col, row, origin + row });
+                return error.TestExpectedEqual;
+            }
+        }
+    }
+}
+
+fn linksEqual(want: *const Screen, got: *const Screen, a: cellmod.Link, b: cellmod.Link) bool {
+    const ta = want.target(a);
+    const tb = got.target(b);
+    if (ta == null or tb == null) return (ta == null) == (tb == null);
+    return std.mem.eql(u8, ta.?.uri, tb.?.uri) and std.mem.eql(u8, ta.?.params, tb.?.params);
+}
+
+/// The properties again for an inline screen: rows of a taller terminal,
+/// taken at a cursor the prompt left somewhere down it, the screen growing
+/// and shrinking between frames, and the cursor left below it at the end.
+fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
+    const cols: u16 = @intCast(smith.valueRangeAtMost(u8, 1, 24));
+    const terminal_rows = smith.valueRangeAtMost(u8, 2, 16);
+    const prompt = smith.valueRangeAtMost(u8, 0, terminal_rows - 1);
+    var size: geom.Size = .{ .cols = cols, .rows = smith.valueRangeAtMost(u8, 1, terminal_rows) };
+
+    var t: Term = try .init(gpa, .{ .cols = cols, .rows = terminal_rows });
+    defer t.deinit();
+    t.setMethod(terminalMethod(method));
+    var i: u8 = 0;
+    while (i < prompt) : (i += 1) try t.feed("$\r\n");
+
+    var h: Harness = try .init(gpa, size, method);
+    defer h.deinit();
+    h.caps.scroll_detection = false;
+    try h.renderer.enter(&h.out.writer, h.caps, .@"inline");
+    try t.feed(h.out.written());
+    try expectRegionEqual(&h.screen, &t);
+
+    var frames: usize = 0;
+    while (frames < 6 and !smith.eos()) : (frames += 1) {
+        // Now and then the screen changes size, in rows or in columns; the
+        // terminal is the same terminal.
+        if (smith.valueRangeAtMost(u8, 0, 3) == 0) {
+            size = .{
+                .cols = @intCast(smith.valueRangeAtMost(u8, 1, 24)),
+                .rows = smith.valueRangeAtMost(u8, 1, terminal_rows),
+            };
+            try h.screen.resize(gpa, size);
+            try h.renderer.resize(gpa, size);
+        }
+        var ops: usize = 0;
+        const count = smith.valueRangeAtMost(u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, smith);
+        try checkGrid(&h.screen);
+
+        h.out.clearRetainingCapacity();
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        try testing.expectEqual(h.out.written().len, stats.bytes);
+        try testing.expectEqual(@as(u32, 0), stats.scrolled);
+        try t.feed(h.out.written());
+        try expectRegionEqual(&h.screen, &t);
+
+        h.out.clearRetainingCapacity();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+        h.screen.damageAll();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+    }
+
+    // A repaint recovers, from the origin.
+    corrupt(&h.renderer, smith);
+    h.renderer.repaint();
+    h.out.clearRetainingCapacity();
+    _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    try t.feed(h.out.written());
+    try expectRegionEqual(&h.screen, &t);
+    h.out.clearRetainingCapacity();
+    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+
+    // And the way out leaves the frame and puts the cursor below it.
+    const origin = t.saved.?.row;
+    h.out.clearRetainingCapacity();
+    try h.renderer.leave(&h.out.writer);
+    try t.feed(h.out.written());
+    try testing.expectEqual(@as(u16, 0), t.col);
+    try testing.expectEqual(@min(origin + size.rows, @as(u16, terminal_rows) - 1), t.row);
+}
+
+test "the round trip holds for an inline screen measuring by codepoint" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTripInline(gpa, smith, .wcwidth);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the round trip holds for an inline screen measuring by cluster" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTripInline(gpa, smith, .unicode);
         }
     }.one, .{ .corpus = &corpus.entries });
 }

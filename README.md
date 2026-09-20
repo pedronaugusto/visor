@@ -114,10 +114,13 @@ try visor.morse.mouse(&w, .{ .press = true, .sgr = true });
 ```
 <!-- END GENERATED -->
 
-Two more examples are built and run by the same command.
+Three more examples are built and run by the same command.
 [`examples/viewer.zig`](examples/viewer.zig) is a file viewer on the widgets —
-a sidebar, a scrollbar, a status line and a resize — and
-[`examples/gallery.zig`](examples/gallery.zig) draws every widget once.
+a sidebar, a scrollbar, a status line and a resize —
+[`examples/gallery.zig`](examples/gallery.zig) draws every widget once, and
+[`examples/progress.zig`](examples/progress.zig) is a screen of two rows at
+the prompt, in inline mode, that grows to three and leaves its last frame in
+the history.
 
 ## Install
 
@@ -246,6 +249,15 @@ one sequence and never touches the block; and on a terminal without the
 protocol the grapheme is drawn at its own size with the rest of the block
 blank.
 
+**Inline mode addresses nothing by row number.** A screen entered inline
+takes its rows from the row the cursor is on, the terminal scrolling for the
+ones that do not fit, and saves an origin there with `DECSC`. Every move after
+that is relative — to the cursor, or to the origin restored when the cursor
+is not trusted — and the cheaper of the two is what is written. Growing
+takes more rows the same way, shrinking gives them back blank, and `leave`
+puts the cursor on the row below with the last frame still showing. A
+scrolling region is an absolute thing, so scroll detection is off.
+
 **Synchronised output brackets a frame, not a session.** Mode 2026 left on for
 a program's lifetime makes the terminal repaint at whatever timeout it
 invented, which is ten frames a second on the tightest of them. `draw` writes
@@ -292,6 +304,7 @@ its own.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
 - **One graphics protocol.** The kitty protocol, as ordered layers; there is no second picture path.
+- **Two places for a screen.** The alternate screen, or inline at the prompt. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
 
 ## Platforms
 
@@ -311,8 +324,8 @@ a local script and no CI job calls it.
 
 `Tty` is the one file that calls an operating system. It is compiled on all
 three platforms in CI and opened by nothing in the suite, so no half of it has
-been run against a real terminal yet; the alternate screen, raw mode and the
-inline mode `enter` refuses are the work still open there.
+been run against a real terminal yet; the alternate screen, raw mode and
+inline mode against a real terminal are the work still open there.
 
 ## Testing
 
@@ -332,7 +345,10 @@ final screen agrees with the terminal given every frame. All four run three
 times: against a terminal measuring by codepoint, a terminal measuring by
 cluster, and a terminal measuring by codepoint that is told every width,
 because the rule that repaints a drifting row exists for the case where the
-two disagree, and the protocol is the other way to settle it.
+two disagree, and the protocol is the other way to settle it. The first three
+run again for an inline screen, taken at a cursor the prompt left somewhere
+down a taller terminal and growing and shrinking between frames, with the
+rows above it and the cursor below it at the end checked too.
 
 `zig build conformance` runs the same four properties again, over the same
 inputs, against a terminal emulator that is not this one's. `Term` ships with
