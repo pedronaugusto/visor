@@ -258,6 +258,10 @@ const Harness = struct {
             .screen = s,
             .renderer = r,
             .out = .init(gpa),
+            // Not `explicit_width` and not `scaled_text`: the emulator at
+            // the pinned commit parses OSC 66 and acts on none of it, so a
+            // frame that used the protocol would show nothing where the text
+            // went, and the package's own emulator is what checks that path.
             .caps = .{
                 .width_method = method,
                 .osc8 = true,

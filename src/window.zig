@@ -243,6 +243,26 @@ pub const Window = struct {
         try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, style, link);
     }
 
+    /// A grapheme drawn `scale` cells tall and `scale` times its width
+    /// across, in this window's coordinates. The block has to fit inside
+    /// the window, or nothing is written and the answer is false.
+    pub fn writeScaled(
+        w: Window,
+        col: u16,
+        row: u16,
+        grapheme: []const u8,
+        style: Style,
+        link: Link,
+        scale: u3,
+    ) std.mem.Allocator.Error!bool {
+        const tall: u16 = @max(scale, 1);
+        const wide: u16 = textmod.graphemeWidth(grapheme, w.screen.method);
+        if (col >= w.rect.cols or row >= w.rect.rows) return false;
+        if (@as(u32, col) + @as(u32, wide) * tall > w.rect.cols) return false;
+        if (@as(u32, row) + tall > w.rect.rows) return false;
+        return w.screen.writeScaled(w.rect.col + col, w.rect.row + row, grapheme, style, link, scale);
+    }
+
     /// A rectangle of one cell, in this window's coordinates.
     pub fn fill(w: Window, rect: Rect, c: Cell) void {
         const inside = rect.intersect(.fromSize(w.size()));

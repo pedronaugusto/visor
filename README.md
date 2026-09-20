@@ -160,8 +160,8 @@ with a `try`. Resizing allocates.
 | | |
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
-| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
+| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
+| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
@@ -236,6 +236,15 @@ width of everything but ASCII, and the terminal's own tables stop mattering.
 cluster is a head and a covered column, always adjacent; overwriting either
 repairs the other; one with a single column left becomes a spacer, which the
 diff can tell from a space someone asked for.
+
+**Scaled text is a block the grid knows about.** `writeScaled` draws a
+grapheme at up to seven cells' height through the text sizing protocol: the
+head and a block of covered cells, as many rows tall as the scale and as many
+columns wide as the scale times the width. Writing into any cell of the block
+clears the whole of it, as a terminal does; the renderer writes the head as
+one sequence and never touches the block; and on a terminal without the
+protocol the grapheme is drawn at its own size with the rest of the block
+blank.
 
 **Synchronised output brackets a frame, not a session.** Mode 2026 left on for
 a program's lifetime makes the terminal repaint at whatever timeout it

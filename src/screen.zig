@@ -10,8 +10,12 @@
 //! grapheme is a head and a tail, always adjacent and always in that order;
 //! overwriting either end repairs the other; a wide grapheme with one column
 //! left in the row becomes a blank rather than something the terminal would
-//! wrap. The widths across a row therefore always sum to the width of the
-//! row, which is what makes the renderer's cursor arithmetic provable.
+//! wrap. A grapheme drawn at a scale is a head and a block of tails, as many
+//! rows tall as the scale and as many columns wide as the scale times its
+//! width; writing into any cell of the block clears the whole of it, which is
+//! what a terminal does. The widths across a row therefore always sum to the
+//! width of the row, which is what makes the renderer's cursor arithmetic
+//! provable.
 //!
 //! What this file will never hold: layout, widgets, a previous frame, or a
 //! single byte written to a terminal. The previous frame belongs to the
@@ -133,16 +137,9 @@ pub const Screen = struct {
         s.cells = cells;
         s.size = size;
 
-        // A wide grapheme that used to have room may not any more.
-        if (size.cols > 0) {
-            for (0..size.rows) |r| {
-                const last = r * size.cols + size.cols - 1;
-                if (s.cells[last].shape.kind == .wide) {
-                    s.cells[last] = .blank(s.cells[last].style);
-                    s.cells[last].shape.kind = .spacer_head;
-                }
-            }
-        }
+        // A wide grapheme or a block that used to have room may not any
+        // more, and a block may have lost its lower rows.
+        if (size.rows > 0) s.heal(0, size.rows - 1);
         s.clampCursor();
         s.damageAll();
     }
@@ -198,35 +195,49 @@ pub const Screen = struct {
 
     /// One cell already owned by this screen, clipped and damage marked.
     ///
-    /// A cell two columns wide also writes its tail, and whatever the two of
-    /// them covered is repaired: a half of another wide grapheme becomes a
-    /// blank in the style it had. A wide grapheme with only the last column
-    /// left becomes a blank, because a terminal asked to draw it there would
-    /// wrap it onto the next row. A cell handed in as a tail is taken as a
-    /// blank: tails are the grid's own bookkeeping.
+    /// A cell two columns wide also writes its tail, and one drawn at a
+    /// scale writes its whole block of tails; whatever any of them covered is
+    /// repaired first, so a wide grapheme or a block that loses a cell loses
+    /// all of it and never leaves an orphan. A wide grapheme with only the
+    /// last column left becomes a blank, because a terminal asked to draw it
+    /// there would wrap it onto the next row; a block that does not fit
+    /// becomes a blank too. A cell handed in as a tail is taken as a blank:
+    /// tails are the grid's own bookkeeping.
     pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) void {
         if (col >= s.size.cols or row >= s.size.rows) return;
         const i = s.index(col, row);
 
         var put = c;
         if (put.shape.kind == .spacer_tail) put = .blank(c.style);
-        if (put.shape.kind == .wide and col + 1 >= s.size.cols) {
+        if (put.shape.kind == .spacer_head) put.shape.scale = 0;
+        if (put.shape.kind == .wide and put.shape.scale <= 1 and col + 1 >= s.size.cols) {
             // There is one column left and the grapheme wants two. The cell
             // is a spacer, not a space: the diff has to be able to tell it
             // from something the caller asked for.
             put = .blank(put.style);
             put.shape.kind = .spacer_head;
         }
+        if (col + put.width() > s.size.cols or row + put.rows() > s.size.rows) {
+            put = .blank(put.style);
+        }
 
-        s.detach(col, row);
-        if (put.shape.kind == .wide) {
-            s.detach(col + 1, row);
-            s.place(i, put);
-            var tail = put;
-            tail.shape.kind = .spacer_tail;
-            s.place(i + 1, tail);
-        } else {
-            s.place(i, put);
+        const span = put.width();
+        const tall = put.rows();
+        var dr: u16 = 0;
+        while (dr < tall) : (dr += 1) {
+            var dc: u16 = 0;
+            while (dc < span) : (dc += 1) s.detach(col + dc, row + dr);
+        }
+        s.place(i, put);
+        var tail = put;
+        tail.shape.kind = .spacer_tail;
+        dr = 0;
+        while (dr < tall) : (dr += 1) {
+            var dc: u16 = 0;
+            while (dc < span) : (dc += 1) {
+                if (dr == 0 and dc == 0) continue;
+                s.place(s.index(col + dc, row + dr), tail);
+            }
         }
     }
 
@@ -273,6 +284,46 @@ pub const Screen = struct {
                 .drift = textmod.disagrees(grapheme),
             },
         });
+    }
+
+    /// A grapheme drawn `scale` cells tall and `scale` times its width
+    /// across, through the text sizing protocol, for a terminal that has it.
+    ///
+    /// The block has to fit inside the grid: when it does not, nothing is
+    /// written and the answer is false. A scale of zero or one is `write`.
+    /// On a terminal without the protocol the renderer draws the grapheme at
+    /// its own size and the rest of the block blank.
+    pub fn writeScaled(
+        s: *Screen,
+        col: u16,
+        row: u16,
+        grapheme: []const u8,
+        style: Style,
+        to: Link,
+        scale: u3,
+    ) Allocator.Error!bool {
+        if (scale <= 1) {
+            try s.write(col, row, grapheme, style, to);
+            return true;
+        }
+        if (grapheme.len == 0) return false;
+        if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
+        const w = textmod.graphemeWidth(grapheme, s.method);
+        if (w == 0) return false;
+        if (@as(u32, col) + @as(u32, w) * scale > s.size.cols) return false;
+        if (@as(u32, row) + scale > s.size.rows) return false;
+        const t = try s.graphemes.intern(s.gpa, grapheme);
+        s.writeOwnedCell(col, row, .{
+            .text = t,
+            .style = cellmod.canonical(style),
+            .link = to,
+            .shape = .{
+                .kind = if (w == 2) .wide else .narrow,
+                .drift = textmod.disagrees(grapheme),
+                .scale = scale,
+            },
+        });
+        return true;
     }
 
     /// A rectangle of one cell.
@@ -329,11 +380,11 @@ pub const Screen = struct {
             while (top < r.row + shift) : (top += 1) s.blankRun(r.col, top, r.cols, blank);
         }
 
-        var seam = r.row;
-        while (seam < r.bottom()) : (seam += 1) {
-            s.healSeam(r.col, @intCast(seam));
-            s.healSeam(@intCast(r.right()), @intCast(seam));
-        }
+        // A wide grapheme cut by the rectangle's side, and a block cut by
+        // any of its edges or torn by the rows moving out from under its
+        // head, are cleared; a block reaches at most six rows past the
+        // rectangle, so that is how far the sweep goes.
+        s.heal(r.row -| max_reach, @intCast(@min(r.bottom() - 1 + max_reach, s.size.rows - 1)));
     }
 
     /// A grapheme into the pool, deduplicated; inline when it fits.
@@ -372,6 +423,39 @@ pub const Screen = struct {
     /// The target a cell's link names, or null when it has none.
     pub fn target(s: *const Screen, l: Link) ?pool.Target {
         return s.links.get(l);
+    }
+
+    /// The head whose grapheme covers a tail: the wide grapheme to its left,
+    /// or the scaled one above and to its left. Null for a cell that is not
+    /// a tail, or for a tail nothing covers, which the grid never keeps.
+    pub fn headOf(s: *const Screen, col: u16, row_n: u16) ?Point {
+        if (col >= s.size.cols or row_n >= s.size.rows) return null;
+        if (!s.cells[s.index(col, row_n)].isTail()) return null;
+        // On the same row, the nearest cell that is not a tail is the only
+        // candidate: heads never overlap.
+        var c = col;
+        while (c > 0) {
+            c -= 1;
+            const h = s.cells[s.index(c, row_n)];
+            if (h.isTail()) continue;
+            if (c + h.width() > col) return .{ .col = c, .row = row_n };
+            break;
+        }
+        // Above it, a head drawn at a scale whose block reaches this far.
+        var r = row_n;
+        var up: u16 = 0;
+        while (r > 0 and up < max_reach) : (up += 1) {
+            r -= 1;
+            c = col + 1;
+            var back: u16 = 0;
+            while (c > 0 and back < max_span) : (back += 1) {
+                c -= 1;
+                const h = s.cells[s.index(c, r)];
+                if (h.isTail() or !h.isScaled()) continue;
+                if (c + h.width() > col and r + h.rows() > row_n) return .{ .col = c, .row = r };
+            }
+        }
+        return null;
     }
 
     /// The whole grid as a window.
@@ -414,29 +498,83 @@ pub const Screen = struct {
         s.damage.mark(@intCast(i % s.size.cols), @intCast(i / s.size.cols));
     }
 
-    /// Breaks the wide grapheme a cell is half of, if it is half of one, so
-    /// that the cell can be written over without leaving an orphan.
+    /// Clears the wide grapheme or the block a cell is part of, if it is part
+    /// of one, so that the cell can be written over without leaving an
+    /// orphan.
     fn detach(s: *Screen, col: u16, row_n: u16) void {
-        if (col >= s.size.cols) return;
-        const i = s.index(col, row_n);
-        const c = s.cells[i];
+        if (col >= s.size.cols or row_n >= s.size.rows) return;
+        const c = s.cells[s.index(col, row_n)];
         if (c.isTail()) {
-            if (col > 0) s.place(i - 1, .blank(s.cells[i - 1].style));
-        } else if (c.shape.kind == .wide and col + 1 < s.size.cols) {
-            s.place(i + 1, .blank(s.cells[i + 1].style));
+            if (s.headOf(col, row_n)) |head| {
+                s.clearBlock(head.col, head.row);
+            } else {
+                s.place(s.index(col, row_n), .blank(c.style));
+            }
+        } else if (c.width() > 1 or c.rows() > 1) {
+            s.clearBlock(col, row_n);
         }
     }
 
-    /// Blanks whichever side of a wide grapheme was left without the other
-    /// across the boundary just left of `col`.
-    fn healSeam(s: *Screen, col: u16, row_n: u16) void {
-        if (col == 0 or col >= s.size.cols) return;
-        const i = s.index(col, row_n);
-        const left = s.cells[i - 1];
-        const here = s.cells[i];
-        const paired = left.shape.kind == .wide and here.isTail();
-        if (here.isTail() and !paired) s.place(i, .blank(here.style));
-        if (left.shape.kind == .wide and !paired) s.place(i - 1, .blank(left.style));
+    /// Every cell a head covers, itself included, back to a blank in the
+    /// style it had.
+    fn clearBlock(s: *Screen, col: u16, row_n: u16) void {
+        const head = s.cells[s.index(col, row_n)];
+        const span = head.width();
+        const tall = head.rows();
+        var dr: u16 = 0;
+        while (dr < tall and row_n + dr < s.size.rows) : (dr += 1) {
+            var dc: u16 = 0;
+            while (dc < span and col + dc < s.size.cols) : (dc += 1) {
+                const i = s.index(col + dc, row_n + dr);
+                s.place(i, .blank(s.cells[i].style));
+            }
+        }
+    }
+
+    /// Puts rows `top` through `bottom` back inside the invariants after
+    /// their cells moved without their neighbours: a head whose block is no
+    /// longer whole is cleared, and a tail nothing covers is blanked.
+    fn heal(s: *Screen, top: u16, bottom: u16) void {
+        var row_n = top;
+        while (row_n <= bottom and row_n < s.size.rows) : (row_n += 1) {
+            var col: u16 = 0;
+            while (col < s.size.cols) : (col += 1) {
+                const i = s.index(col, row_n);
+                const c = s.cells[i];
+                if (c.isTail()) {
+                    if (s.headOf(col, row_n) == null) s.place(i, .blank(c.style));
+                    continue;
+                }
+                if (c.width() == 1 and c.rows() == 1) continue;
+                if (c.shape.kind == .wide and !c.isScaled() and col + 1 >= s.size.cols) {
+                    // The one column left is a spacer, as `writeOwnedCell`
+                    // would have made it.
+                    var spacer: Cell = .blank(c.style);
+                    spacer.shape.kind = .spacer_head;
+                    s.place(i, spacer);
+                    continue;
+                }
+                if (!s.blockWhole(col, row_n, c)) s.clearBlock(col, row_n);
+            }
+        }
+    }
+
+    /// Whether every cell a head covers is a tail of its own scale, inside
+    /// the grid.
+    fn blockWhole(s: *const Screen, col: u16, row_n: u16, head: Cell) bool {
+        const span = head.width();
+        const tall = head.rows();
+        if (col + span > s.size.cols or row_n + tall > s.size.rows) return false;
+        var dr: u16 = 0;
+        while (dr < tall) : (dr += 1) {
+            var dc: u16 = 0;
+            while (dc < span) : (dc += 1) {
+                if (dr == 0 and dc == 0) continue;
+                const t = s.cells[s.index(col + dc, row_n + dr)];
+                if (!t.isTail() or t.shape.scale != head.shape.scale) return false;
+            }
+        }
+        return true;
     }
 
     /// Copies a run of cells from one row to another, marking what changed.
@@ -470,6 +608,12 @@ pub const Screen = struct {
     }
 };
 
+/// The most rows a block reaches below its head: the largest scale, less
+/// the head's own row.
+const max_reach = 6;
+/// The most columns a block spans: the largest scale times a wide glyph.
+const max_span = 14;
+
 const testing = std.testing;
 
 fn made(cols: u16, rows: u16) !Screen {
@@ -481,27 +625,10 @@ fn made(cols: u16, rows: u16) !Screen {
 /// Every invariant the grid promises, checked over the whole of it.
 fn checkInvariants(s: *const Screen) !void {
     for (0..s.size.rows) |r| {
-        var sum: u32 = 0;
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.size.cols) {
             const c = s.cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
-            if (c.isTail()) {
-                // A tail never stands alone, and never in the first column.
-                try testing.expect(col > 0);
-                const head = s.cells[s.index(col - 1, @intCast(r))];
-                try testing.expect(!head.isTail());
-                try testing.expectEqual(Cell.Kind.wide, head.shape.kind);
-            } else {
-                sum += c.width();
-                if (c.shape.kind == .wide) {
-                    // A wide head is never in the last column and always has
-                    // its tail.
-                    try testing.expect(col + 1 < s.size.cols);
-                    const tail = s.cells[s.index(col + 1, @intCast(r))];
-                    try testing.expect(tail.isTail());
-                }
-            }
             // Every grapheme is inside the pool and every link inside the
             // table.
             if (c.text.isPooled()) {
@@ -509,8 +636,28 @@ fn checkInvariants(s: *const Screen) !void {
                 try testing.expect(off + c.text.length() <= s.graphemes.len());
             }
             if (c.link.index()) |li| try testing.expect(li < s.links.count());
+
+            if (c.isTail()) {
+                // A tail never stands alone: something covers it.
+                try testing.expect(s.headOf(col, @intCast(r)) != null);
+                col += 1;
+                continue;
+            }
+            // A head's block is inside the grid and made of its own tails,
+            // so the columns of a row always add up to the row.
+            const span = c.width();
+            try testing.expect(col + span <= s.size.cols);
+            try testing.expect(r + c.rows() <= s.size.rows);
+            for (0..c.rows()) |dr| {
+                for (0..span) |dc| {
+                    if (dr == 0 and dc == 0) continue;
+                    const t = s.cells[s.index(@intCast(col + dc), @intCast(r + dr))];
+                    try testing.expect(t.isTail());
+                    try testing.expectEqual(c.shape.scale, t.shape.scale);
+                }
+            }
+            col += span;
         }
-        try testing.expectEqual(@as(u32, s.size.cols), sum);
     }
 }
 
@@ -607,6 +754,111 @@ test "a caller's tail is taken as a blank" {
     defer s.deinit(testing.allocator);
     s.writeOwnedCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
     try testing.expectEqualStrings(" ", s.textAt(1, 0));
+    try checkInvariants(&s);
+}
+
+test "a scaled grapheme is a head and a block of tails" {
+    var s = try made(8, 4);
+    defer s.deinit(testing.allocator);
+
+    try testing.expect(try s.writeScaled(1, 1, "\u{4e2d}", .{ .bold = true }, .none, 2));
+    const head = s.readCell(1, 1).?;
+    try testing.expectEqual(Cell.Kind.wide, head.shape.kind);
+    try testing.expectEqual(@as(u3, 2), head.shape.scale);
+    try testing.expectEqual(@as(u4, 4), head.width());
+    for (1..5) |col| {
+        for (1..3) |row| {
+            if (col == 1 and row == 1) continue;
+            const tail = s.readCell(@intCast(col), @intCast(row)).?;
+            try testing.expect(tail.isTail());
+            try testing.expectEqual(@as(u3, 2), tail.shape.scale);
+            try testing.expect(tail.style.bold);
+            try testing.expectEqual(geom.Point{ .col = 1, .row = 1 }, s.headOf(@intCast(col), @intCast(row)).?);
+        }
+    }
+    try testing.expect(s.readCell(5, 1).?.eql(.blank(.{})));
+    try testing.expect(s.readCell(1, 3).?.eql(.blank(.{})));
+    try checkInvariants(&s);
+}
+
+test "a block that would not fit is not written" {
+    var s = try made(4, 2);
+    defer s.deinit(testing.allocator);
+    try testing.expect(!try s.writeScaled(3, 0, "a", .{}, .none, 2));
+    try testing.expect(!try s.writeScaled(0, 1, "a", .{}, .none, 2));
+    try testing.expect(!s.damage.any());
+    // Through the owned path, it is a blank rather than half a block.
+    s.writeOwnedCell(3, 0, .init(.{ .text = .inlined("a"), .shape = .{ .scale = 2 } }));
+    try testing.expectEqualStrings(" ", s.textAt(3, 0));
+    try checkInvariants(&s);
+}
+
+test "writing into any cell of a block clears the whole block" {
+    var s = try made(8, 4);
+    defer s.deinit(testing.allocator);
+
+    for ([_]geom.Point{
+        .{ .col = 0, .row = 0 }, .{ .col = 2, .row = 0 }, .{ .col = 0, .row = 2 }, .{ .col = 2, .row = 2 },
+    }) |at| {
+        try testing.expect(try s.writeScaled(0, 0, "a", .{ .bold = true }, .none, 3));
+        try s.write(at.col, at.row, "x", .{}, .none);
+        try testing.expectEqualStrings("x", s.textAt(at.col, at.row));
+        for (0..3) |col| {
+            for (0..3) |row| {
+                if (col == at.col and row == at.row) continue;
+                const c = s.readCell(@intCast(col), @intCast(row)).?;
+                try testing.expectEqualStrings(" ", s.textAt(@intCast(col), @intCast(row)));
+                try testing.expect(!c.isTail());
+                try testing.expect(c.style.bold);
+            }
+        }
+        try checkInvariants(&s);
+    }
+}
+
+test "a block written over a wide grapheme and another block takes both" {
+    var s = try made(8, 3);
+    defer s.deinit(testing.allocator);
+    try s.write(0, 0, "\u{4e2d}", .{}, .none);
+    try testing.expect(try s.writeScaled(4, 1, "b", .{}, .none, 2));
+    try testing.expect(try s.writeScaled(1, 0, "a", .{}, .none, 2));
+    try testing.expectEqualStrings(" ", s.textAt(0, 0));
+    try testing.expectEqualStrings("a", s.textAt(1, 0));
+    try testing.expectEqualStrings("b", s.textAt(4, 1));
+    // The second block still stands: the first did not reach it.
+    try testing.expect(s.readCell(5, 2).?.isTail());
+    try testing.expect(try s.writeScaled(3, 0, "c", .{}, .none, 2));
+    try testing.expectEqual(geom.Point{ .col = 3, .row = 0 }, s.headOf(4, 1).?);
+    try testing.expectEqualStrings(" ", s.textAt(5, 1));
+    try testing.expect(!s.readCell(5, 1).?.isTail());
+    try testing.expect(!s.readCell(4, 2).?.isTail());
+    try testing.expect(!s.readCell(5, 2).?.isTail());
+    try checkInvariants(&s);
+}
+
+test "a scroll that tears a block clears what is left of it" {
+    var s = try made(6, 4);
+    defer s.deinit(testing.allocator);
+    try testing.expect(try s.writeScaled(1, 1, "a", .{}, .none, 2));
+    // The head's row moves up and the tails' row does not.
+    s.scroll(.{ .col = 0, .row = 0, .cols = 6, .rows = 2 }, 1);
+    for (s.cells) |c| try testing.expect(!c.isTail() and !c.isScaled());
+    try checkInvariants(&s);
+
+    // And a block that moves whole moves whole.
+    try testing.expect(try s.writeScaled(1, 2, "a", .{}, .none, 2));
+    s.scroll(.fromSize(s.size), 1);
+    try testing.expectEqualStrings("a", s.textAt(1, 1));
+    try testing.expect(s.readCell(2, 2).?.isTail());
+    try checkInvariants(&s);
+}
+
+test "a resize that cuts a block off blanks it" {
+    var s = try made(6, 4);
+    defer s.deinit(testing.allocator);
+    try testing.expect(try s.writeScaled(2, 1, "a", .{}, .none, 3));
+    try s.resize(testing.allocator, .{ .cols = 6, .rows = 3 });
+    for (s.cells) |c| try testing.expect(!c.isTail() and !c.isScaled());
     try checkInvariants(&s);
 }
 

@@ -661,11 +661,13 @@ pub const Term = struct {
     }
 
     /// The body of an OSC 66: `key=value:key=value ; text`. The `w` key is
-    /// the width every cluster in the text takes; the others are read and
-    /// not acted on, because the renderer does not write them.
+    /// the width every cluster in the text takes and `s` the scale it is
+    /// drawn at; the others are read and not acted on, because the renderer
+    /// does not write them.
     fn sizedText(t: *Term, body: []const u8) Allocator.Error!void {
         const split = std.mem.indexOfScalar(u8, body, ';') orelse return;
         var told: ?u2 = null;
+        var scale: u3 = 0;
         var keys = std.mem.splitScalar(u8, body[0..split], ':');
         while (keys.next()) |pair| {
             if (pair.len < 3 or pair[1] != '=') continue;
@@ -676,11 +678,53 @@ pub const Term = struct {
                     2 => 2,
                     else => null,
                 },
+                's' => scale = @intCast(@min(value, 7)),
                 else => {},
             }
         }
         var it: textmod.Graphemes = .init(body[split + 1 ..]);
-        while (it.next()) |g| try t.putAs(g, told);
+        while (it.next()) |g| {
+            if (scale > 1) {
+                try t.putScaled(g, told, scale);
+            } else {
+                try t.putAs(g, told);
+            }
+        }
+    }
+
+    /// One grapheme drawn at a scale: a block at the cursor, which then
+    /// moves past it along the top row. A block that does not fit draws
+    /// nothing, which is as far as this emulator follows the protocol.
+    fn putScaled(t: *Term, grapheme: []const u8, told: ?u2, scale: u3) Allocator.Error!void {
+        const cols = t.scr.size.cols;
+        const rows = t.scr.size.rows;
+        if (cols == 0 or rows == 0) return;
+        const w = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
+        if (w == 0) return;
+        if (t.wrap_pending) {
+            if (!t.autowrap) return;
+            t.col = 0;
+            t.lineFeed();
+        }
+        const span: u32 = @as(u32, w) * scale;
+        if (t.col + span > cols or t.row + scale > rows) return;
+        const text = try t.scr.intern(t.gpa, grapheme);
+        t.scr.writeOwnedCell(t.col, t.row, .init(.{
+            .text = text,
+            .style = t.style,
+            .link = t.link,
+            .shape = .{
+                .kind = if (w == 2) .wide else .narrow,
+                .drift = textmod.disagrees(grapheme),
+                .scale = scale,
+            },
+        }));
+        t.previous = lastCodepoint(grapheme);
+        t.col = @intCast(t.col + span);
+        if (t.col >= cols) {
+            t.col = cols - 1;
+            t.wrap_pending = true;
+        }
     }
 
     /// `ESC _ ... ST`, which is where a graphics command travels. It is
@@ -1361,6 +1405,21 @@ test "a cluster told its width takes that width whatever this terminal measures"
     try t.feed("\x1b]66;w=1;\u{4e2d}\x1b\\b");
     try testing.expectEqualStrings("\u{4e2d}", textAt(&t, 3, 0));
     try testing.expectEqualStrings("b", textAt(&t, 4, 0));
+}
+
+test "scaled text is a block, and the cursor moves past it along the top" {
+    var t = try made(8, 3);
+    defer t.deinit();
+    try t.feed("\x1b]66;s=2:w=1;a\x1b\\b");
+    try testing.expectEqualStrings("a", textAt(&t, 0, 0));
+    try testing.expectEqual(@as(u3, 2), t.screen().readCell(0, 0).?.shape.scale);
+    try testing.expect(t.screen().readCell(1, 0).?.isTail());
+    try testing.expect(t.screen().readCell(0, 1).?.isTail());
+    try testing.expect(t.screen().readCell(1, 1).?.isTail());
+    try testing.expectEqualStrings("b", textAt(&t, 2, 0));
+    // A block with no room draws nothing.
+    try t.feed("\x1b[3;1H\x1b]66;s=2;c\x1b\\");
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 2));
 }
 
 test "sized text without a width is printed as ordinary text" {

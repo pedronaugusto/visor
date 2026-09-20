@@ -153,6 +153,8 @@ pub const Renderer = struct {
         /// Cells whose width was told to the terminal rather than agreed
         /// with it, through the text sizing protocol.
         told: u32 = 0,
+        /// Graphemes drawn at more than one cell's size.
+        scaled: u32 = 0,
         /// Style changes written.
         styles: u32 = 0,
         /// Link changes written.
@@ -524,7 +526,8 @@ pub const Renderer = struct {
     /// could disagree about, only the wide cells matter.
     fn rowDrifts(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
         const agree = widthsAgree(caps);
-        for (s.rowAt(row)) |c| {
+        for (s.rowAt(row)) |raw| {
+            const c = visible(raw, caps);
             if (c.width() != 1) return true;
             if (!agree and c.shape.drift) return true;
         }
@@ -602,7 +605,7 @@ pub const Renderer = struct {
     fn paintRow(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, stats: *Stats) Error!void {
         const cols = r.size.cols;
         const cells = s.rowAt(row);
-        const erase_from = trailingBlank(cells);
+        const erase_from = trailingBlank(cells, caps);
 
         if (erase_from == 0) {
             if (r.rowIsBlank(row)) return;
@@ -646,7 +649,7 @@ pub const Renderer = struct {
 
             // A run that reaches the end of the row and ends in default
             // blanks is erased rather than painted.
-            const erase_from = if (run_end == cols - 1) @max(col, trailingBlank(cells)) else cols;
+            const erase_from = if (run_end == cols - 1) @max(col, trailingBlank(cells, caps)) else cols;
             const paint_to = if (erase_from <= run_end) erase_from else run_end + 1;
 
             try r.moveTo(out, col, row, stats);
@@ -699,13 +702,17 @@ pub const Renderer = struct {
         const cells = s.rowAt(row);
         var col = from;
         while (col <= to) {
-            const c = cells[col];
+            const c = visible(cells[col], caps);
             if (c.isTail()) {
+                // Covered by a grapheme written elsewhere: the cell is never
+                // written, and the cursor has to be put past it by hand when
+                // that grapheme is on another row.
                 col += 1;
                 continue;
             }
+            try r.moveTo(out, col, row, stats);
             if (erase_tail) {
-                const blanks = blankRunLen(cells, col, to);
+                const blanks = blankRunLen(cells, col, to, caps);
                 if (blanks > erase_cost and col + blanks > to) {
                     try r.setStyle(out, .{}, stats);
                     try r.setLink(out, s, .none, caps, stats);
@@ -716,9 +723,14 @@ pub const Renderer = struct {
             }
             try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
-            const text = s.textOf(&cells[col]);
-            if (toldWidth(c, caps)) {
-                try morse.textSize(out, .{ .width = c.width() }, text);
+            // A covered cell shown as a blank is a space, whatever the head
+            // it carried the text of.
+            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            if (c.isScaled()) {
+                try morse.textSize(out, .{ .scale = c.shape.scale, .width = c.glyphWidth() }, text);
+                stats.scaled += 1;
+            } else if (toldWidth(c, caps)) {
+                try morse.textSize(out, .{ .width = c.glyphWidth() }, text);
                 stats.told += 1;
             } else {
                 try out.writeAll(text);
@@ -922,29 +934,35 @@ pub const Renderer = struct {
 /// and the final byte. A blank run longer than this is cheaper erased.
 const erase_cost = 4;
 
-/// A cell as the terminal will actually show it. A link on a terminal with
-/// no OSC 8 is not a difference worth a byte, so it is not one the previous
-/// frame records either.
+/// A cell as the terminal will actually show it.
+///
+/// A link on a terminal with no OSC 8 is not a difference worth a byte, so
+/// it is not one the previous frame records either. On a terminal without
+/// the text sizing protocol a scaled grapheme is drawn at its own size and
+/// the rest of its block is blank, so that is what the cells become.
 pub fn visible(c: Cell, caps: Caps) Cell {
-    if (caps.osc8) return c;
     var out = c;
-    out.link = .none;
+    if (!caps.osc8) out.link = .none;
+    if (!caps.scaled_text and c.isScaled()) {
+        if (c.isTail()) return .blank(c.style);
+        out.shape.scale = 0;
+    }
     return out;
 }
 
 /// Where the run of default blanks at the end of a row starts, or the row's
 /// width when it does not end in one.
-fn trailingBlank(cells: []const Cell) u16 {
+fn trailingBlank(cells: []const Cell, caps: Caps) u16 {
     var i: u16 = @intCast(cells.len);
-    while (i > 0 and cells[i - 1].isBlankIn(.{})) i -= 1;
+    while (i > 0 and visible(cells[i - 1], caps).isBlankIn(.{})) i -= 1;
     return i;
 }
 
 /// How many default blanks there are from `col`, stopping at `to`.
-fn blankRunLen(cells: []const Cell, col: u16, to: u16) u16 {
+fn blankRunLen(cells: []const Cell, col: u16, to: u16, caps: Caps) u16 {
     var n: u16 = 0;
     var i = col;
-    while (i <= to and cells[i].isBlankIn(.{})) : (i += 1) n += 1;
+    while (i <= to and visible(cells[i], caps).isBlankIn(.{})) : (i += 1) n += 1;
     return n;
 }
 
@@ -1630,6 +1648,58 @@ test "a terminal that measures clusters is never told a width" {
     try f.screen.write(2, 0, "\u{4e2d}", .{}, .none);
     _ = try f.draw();
     try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b]66") == null);
+}
+
+test "a scaled grapheme is one sequence and its block is never written" {
+    var f: Fixture = try .init(testing.allocator, 8, 3);
+    defer f.deinit();
+    f.caps.scaled_text = true;
+
+    try testing.expect(try f.screen.writeScaled(1, 0, "\u{4e2d}", .{ .bold = true }, .none, 2));
+    try f.screen.write(5, 0, "a", .{}, .none);
+    try f.screen.write(0, 1, "b", .{}, .none);
+    try f.screen.write(5, 1, "c", .{}, .none);
+    const stats = try f.draw();
+    try f.expectBytesAgain(
+        " \x1b[1m\x1b]66;s=2:w=2;\u{4e2d}\x1b\\\x1b[0ma\x1b[0K\x1b[1Eb\x1b[6Gc\x1b[0K",
+    );
+    try testing.expectEqual(@as(u32, 1), stats.scaled);
+    try f.expectBytes("");
+    f.screen.damageAll();
+    try f.expectBytes("");
+}
+
+test "on a terminal without the protocol a scaled grapheme is drawn at its own size" {
+    var f: Fixture = try .init(testing.allocator, 8, 2);
+    defer f.deinit();
+    try testing.expect(try f.screen.writeScaled(0, 0, "a", .{ .bold = true }, .none, 2));
+    try f.screen.write(2, 1, "c", .{}, .none);
+    // The block's cells are blanks in the head's style, and the cursor is
+    // stepped past nothing: every cell of the block is written.
+    try f.expectBytes("\x1b[1ma \x1b[1E  \x1b[0mc");
+    try f.expectBytes("");
+}
+
+test "a scaled grapheme reaches the emulator as the block it is" {
+    var f: Fixture = try .init(testing.allocator, 8, 3);
+    defer f.deinit();
+    f.caps.scaled_text = true;
+    const Term = @import("term.zig").Term;
+    var t: Term = try .init(testing.allocator, f.screen.size);
+    defer t.deinit();
+    t.setMethod(.unicode);
+
+    try testing.expect(try f.screen.writeScaled(1, 0, "\u{4e2d}", .{}, .none, 2));
+    try f.screen.write(5, 1, "c", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+
+    // Written over, the block goes on both sides the same way.
+    try f.screen.write(2, 1, "x", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
 }
 
 test "a change of width method repaints every row that ever drifted" {

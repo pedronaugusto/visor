@@ -116,6 +116,7 @@ const Harness = struct {
                 .scroll_detection = true,
                 .rep = true,
                 .explicit_width = method == .explicit,
+                .scaled_text = true,
             },
         };
     }
@@ -141,27 +142,34 @@ const Harness = struct {
 /// Every invariant the grid promises, checked over the whole of it.
 fn checkGrid(s: *const Screen) !void {
     for (0..s.size.rows) |r| {
-        var sum: u32 = 0;
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.size.cols) {
             const c = s.cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
-            if (c.isTail()) {
-                try testing.expect(col > 0);
-                try testing.expect(s.cells[s.index(col - 1, @intCast(r))].shape.kind == .wide);
-            } else {
-                sum += c.width();
-                if (c.shape.kind == .wide) {
-                    try testing.expect(col + 1 < s.size.cols);
-                    try testing.expect(s.cells[s.index(col + 1, @intCast(r))].isTail());
-                }
-            }
             if (c.text.isPooled()) {
                 try testing.expect(c.text.offset().? + c.text.length() <= s.graphemes.len());
             }
             if (c.link.index()) |li| try testing.expect(li < s.links.count());
+            if (c.isTail()) {
+                try testing.expect(s.headOf(col, @intCast(r)) != null);
+                col += 1;
+                continue;
+            }
+            // A head's block is inside the grid and made of its own tails,
+            // so the columns of a row add up to the row.
+            const span = c.width();
+            try testing.expect(col + span <= s.size.cols);
+            try testing.expect(r + c.rows() <= s.size.rows);
+            for (0..c.rows()) |dr| {
+                for (0..span) |dc| {
+                    if (dr == 0 and dc == 0) continue;
+                    const t = s.cells[s.index(@intCast(col + dc), @intCast(r + dr))];
+                    try testing.expect(t.isTail());
+                    try testing.expectEqual(c.shape.scale, t.shape.scale);
+                }
+            }
+            col += span;
         }
-        try testing.expectEqual(@as(u32, s.size.cols), sum);
     }
 }
 
@@ -185,7 +193,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
     const s = &h.screen;
     const cols = s.size.cols;
     const rows = s.size.rows;
-    switch (smith.valueRangeAtMost(u8, 0, 6)) {
+    switch (smith.valueRangeAtMost(u8, 0, 7)) {
         0, 1, 2 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
@@ -194,6 +202,13 @@ fn operate(h: *Harness, smith: *Smith) !void {
             const which = smith.index(uris.len);
             const link = try s.link(h.gpa, uris[which], params[which]);
             try s.write(col, row, g, style, link);
+        },
+        7 => {
+            const col: u16 = @intCast(smith.index(cols));
+            const row: u16 = @intCast(smith.index(rows));
+            const g = alphabet[smith.index(alphabet.len)];
+            const style = styles[smith.index(styles.len)];
+            _ = try s.writeScaled(col, row, g, style, .none, smith.valueRangeAtMost(u3, 2, 3));
         },
         3 => {
             const col: u16 = @intCast(smith.index(cols));

@@ -201,8 +201,8 @@ pub const Cell = extern struct {
         spacer_head = 3,
     };
 
-    /// How wide the grapheme is, whether this cell draws it, and whether the
-    /// two width models disagree about it.
+    /// How wide the grapheme is, whether this cell draws it, whether the two
+    /// width models disagree about it, and how many cells tall it is drawn.
     pub const Shape = packed struct(u8) {
         /// What the cell is.
         kind: Kind = .narrow,
@@ -210,8 +210,14 @@ pub const Cell = extern struct {
         /// different answers. Worked out once, when the cell is written, and
         /// read by the drift rule every frame.
         drift: bool = false,
+        /// How many cells tall the grapheme is drawn, through the text
+        /// sizing protocol. Zero and one both mean one cell. A head drawn at
+        /// a scale covers that many rows and that many times its width in
+        /// columns; every covered cell is a `spacer_tail` carrying the same
+        /// scale, so the two kinds of tail can be told apart.
+        scale: u3 = 0,
         /// Zero, always: the cell is compared as memory.
-        _reserved: u5 = 0,
+        _reserved: u2 = 0,
     };
 
     /// A space in a style. What erasing writes.
@@ -247,12 +253,29 @@ pub const Cell = extern struct {
         return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
     }
 
-    /// The columns the cell's grapheme occupies.
-    pub fn width(c: Cell) u2 {
+    /// The columns the cell's grapheme takes before any scaling: one or two.
+    pub fn glyphWidth(c: Cell) u2 {
         return switch (c.shape.kind) {
             .narrow, .spacer_head => 1,
             .wide, .spacer_tail => 2,
         };
+    }
+
+    /// The columns the cell covers on its own row: the grapheme's width,
+    /// times the scale it is drawn at.
+    pub fn width(c: Cell) u4 {
+        return @as(u4, c.glyphWidth()) * c.rows();
+    }
+
+    /// The rows the cell covers: one, or the scale it is drawn at.
+    pub fn rows(c: Cell) u3 {
+        return @max(c.shape.scale, 1);
+    }
+
+    /// Whether the cell is drawn at more than one cell's size, or is covered
+    /// by one that is.
+    pub fn isScaled(c: Cell) bool {
+        return c.shape.scale > 1;
     }
 
     /// Whether the cell is the covered column of a wide grapheme.
@@ -388,7 +411,7 @@ test "a link is an index and none is the zero value" {
 test "a blank is a space in the style it was given" {
     const c: Cell = .blank(.{ .bg = .ansi(.blue) });
     try testing.expectEqualStrings(" ", c.text.slice(""));
-    try testing.expectEqual(@as(u2, 1), c.width());
+    try testing.expectEqual(@as(u4, 1), c.width());
     try testing.expect(!c.isTail());
     try testing.expect(c.isHead());
     try testing.expect(c.eql(.blank(.{ .bg = .ansi(.blue) })));
@@ -396,10 +419,17 @@ test "a blank is a space in the style it was given" {
 }
 
 test "width comes from the kind and needs no field of its own" {
-    try testing.expectEqual(@as(u2, 1), (Cell{ .shape = .{ .kind = .narrow } }).width());
-    try testing.expectEqual(@as(u2, 2), (Cell{ .shape = .{ .kind = .wide } }).width());
-    try testing.expectEqual(@as(u2, 2), (Cell{ .shape = .{ .kind = .spacer_tail } }).width());
-    try testing.expectEqual(@as(u2, 1), (Cell{ .shape = .{ .kind = .spacer_head } }).width());
+    try testing.expectEqual(@as(u4, 1), (Cell{ .shape = .{ .kind = .narrow } }).width());
+    try testing.expectEqual(@as(u4, 2), (Cell{ .shape = .{ .kind = .wide } }).width());
+    try testing.expectEqual(@as(u4, 2), (Cell{ .shape = .{ .kind = .spacer_tail } }).width());
+    try testing.expectEqual(@as(u4, 1), (Cell{ .shape = .{ .kind = .spacer_head } }).width());
+    // A scale multiplies the columns and is the rows.
+    const big: Cell = .{ .shape = .{ .kind = .wide, .scale = 3 } };
+    try testing.expectEqual(@as(u4, 6), big.width());
+    try testing.expectEqual(@as(u3, 3), big.rows());
+    try testing.expectEqual(@as(u2, 2), big.glyphWidth());
+    try testing.expect(big.isScaled());
+    try testing.expect(!(Cell{ .shape = .{ .scale = 1 } }).isScaled());
 }
 
 test "what is still visible on a cell with no glyph in it" {

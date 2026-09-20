@@ -56,7 +56,10 @@ pub const Caps = struct {
     /// mattering at all. Under `.unicode` nothing is stated, because the
     /// terminal already agrees.
     explicit_width: bool = false,
-    /// Text drawn at more than one cell's size.
+    /// Text drawn at more than one cell's size, through the same protocol.
+    /// A grapheme the screen holds at a scale goes out as one sequence and
+    /// its block is never written; without this, it is drawn at its own
+    /// size and the rest of the block blank.
     scaled_text: bool = false,
     /// The kitty keyboard protocol.
     kitty_keyboard: bool = false,

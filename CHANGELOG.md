@@ -18,6 +18,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   but ASCII is. `Stats.told` counts them. The emulator takes the width it is
   told, and the round trip runs a third time against a terminal measuring by
   codepoint that is told every width.
+- `Caps.scaled_text` is read, and there is text to read it for:
+  `Screen.writeScaled` and `Window.writeScaled` draw a grapheme at a scale of
+  up to seven, as a head and a block of covered cells that `Cell.Shape.scale`
+  and `Cell.rows` describe and `Screen.headOf` finds. Writing into any cell
+  of the block clears it whole. The renderer writes the head as one OSC 66
+  and never touches the block, `Stats.scaled` counts them, and without the
+  capability the grapheme is drawn at its own size with the block blank. The
+  emulator draws the block, and the round trip's generator writes scaled
+  text. `Cell.width` now returns the columns a cell covers at its scale, as a
+  `u4`; `Cell.glyphWidth` is the width before scaling.
 
 ### Fixed
 
