@@ -211,32 +211,34 @@ pub const Layout = struct {
         // parts is charged whether or not there was room for it: a split
         // into four with three cells between them, in two cells, has
         // nothing left for any part and must not put one past the edge.
-        const limit: u16 = switch (l.direction) {
-            .horizontal => @intCast(inner.right()),
-            .vertical => @intCast(inner.bottom()),
+        const coordinate_end: u32 = @as(u32, std.math.maxInt(u16)) + 1;
+        const limit: u32 = switch (l.direction) {
+            .horizontal => @min(inner.right(), coordinate_end),
+            .vertical => @min(inner.bottom(), coordinate_end),
         };
-        var at: u16 = switch (l.direction) {
+        var at: u32 = switch (l.direction) {
             .horizontal => inner.col,
             .vertical => inner.row,
         };
         for (out[0..n]) |*r| {
             const start = @min(at, limit);
-            const size = @min(l.axisOf(r.*), limit - start);
+            const size: u16 = @intCast(@min(l.axisOf(r.*), limit - start));
+            const coordinate: u16 = @intCast(@min(start, std.math.maxInt(u16)));
             switch (l.direction) {
                 .horizontal => {
-                    r.col = start;
+                    r.col = coordinate;
                     r.cols = size;
                     r.row = inner.row;
                     r.rows = inner.rows;
                 },
                 .vertical => {
-                    r.row = start;
+                    r.row = coordinate;
                     r.rows = size;
                     r.col = inner.col;
                     r.cols = inner.cols;
                 },
             }
-            at = start +| size +| l.spacing;
+            at = start + size + l.spacing;
             if (r.cols == 0 or r.rows == 0) {
                 r.cols = 0;
                 r.rows = 0;
@@ -330,6 +332,27 @@ test "fixed parts take what they asked for and a fill takes the rest" {
     try std_testing.expectEqual(Rect{ .col = 0, .row = 0, .cols = 3, .rows = 4 }, parts[0]);
     try std_testing.expectEqual(Rect{ .col = 3, .row = 0, .cols = 5, .rows = 4 }, parts[1]);
     try std_testing.expectEqual(Rect{ .col = 8, .row = 0, .cols = 2, .rows = 4 }, parts[2]);
+}
+
+test "a split clips at the u16 coordinate edge" {
+    const parts = (Layout.horizontal(&.{ .{ .fill = 1 }, .{ .fill = 1 } })).splitFixed(2, .{
+        .col = std.math.maxInt(u16) - 1,
+        .row = 0,
+        .cols = 4,
+        .rows = 1,
+    });
+    try std_testing.expectEqual(Rect{
+        .col = std.math.maxInt(u16) - 1,
+        .row = 0,
+        .cols = 2,
+        .rows = 1,
+    }, parts[0]);
+    try std_testing.expectEqual(Rect{
+        .col = std.math.maxInt(u16),
+        .row = 0,
+        .cols = 0,
+        .rows = 0,
+    }, parts[1]);
 }
 
 test "two fills share what is left in proportion to their weights" {

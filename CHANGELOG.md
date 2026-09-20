@@ -43,6 +43,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Scrollbar thumb sizing and positioning accepts the full public `usize`
   state range without intermediate overflow.
 - Calendar weekday calculation covers the complete public `i32` year range.
+- Layout splitting clips rectangles that cross the `u16` coordinate edge
+  instead of trapping while narrowing their endpoints.
 
 ## [0.1.0] - 2026-09-19
 
