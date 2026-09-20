@@ -17,10 +17,13 @@
 //! - **Incremental equals a repaint.** A second terminal is given one full
 //!   repaint of the final screen, and the two terminals must agree.
 //!
-//! All four run twice, against a terminal measuring by codepoint and a
-//! terminal measuring by cluster, because the rule that repaints a drifting
-//! row exists for the case where two width models disagree, and a harness
-//! with one width model cannot produce the input it defends against.
+//! All four run three times: against a terminal measuring by codepoint, a
+//! terminal measuring by cluster, and a terminal measuring by codepoint that
+//! is told the width of every cluster it could measure differently. The rule
+//! that repaints a drifting row exists for the case where two width models
+//! disagree, and a harness with one width model cannot produce the input it
+//! defends against; the third run is the case where the disagreement is
+//! there and the protocol, not the repaint, is what settles it.
 //!
 //! The same generator checks the grid's own invariants after every
 //! operation, so a damage map that under-reports fails here rather than once
@@ -112,6 +115,7 @@ const Harness = struct {
                 .sync = true,
                 .scroll_detection = true,
                 .rep = true,
+                .explicit_width = method == .explicit,
             },
         };
     }
@@ -226,6 +230,13 @@ fn randomRect(smith: *Smith, cols: u16, rows: u16) geom.Rect {
     };
 }
 
+/// How the terminal on the other end measures, given how the renderer was
+/// told to. A terminal told every width measures by codepoint on its own,
+/// which is the case the telling exists for.
+fn terminalMethod(method: textmod.Method) textmod.Method {
+    return if (method == .explicit) .wcwidth else method;
+}
+
 /// The four properties, once, over a generated sequence of frames.
 fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
     const size: geom.Size = .{
@@ -237,7 +248,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
     defer h.deinit();
     var t: Term = try .init(gpa, size);
     defer t.deinit();
-    t.setMethod(method);
+    t.setMethod(terminalMethod(method));
 
     const before = try gpa.alloc(Cell, h.screen.cells.len);
     defer gpa.free(before);
@@ -276,7 +287,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
     // same thing as the terminal that was given every frame.
     var fresh: Term = try .init(gpa, size);
     defer fresh.deinit();
-    fresh.setMethod(method);
+    fresh.setMethod(terminalMethod(method));
     var once: Renderer = try .init(gpa, size);
     defer once.deinit(gpa);
     once.repaint();
@@ -313,6 +324,14 @@ test "the round trip holds against a terminal measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
             try roundTrip(gpa, smith, .unicode);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the round trip holds against a terminal told every width" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTrip(gpa, smith, .explicit);
         }
     }.one, .{ .corpus = &corpus.entries });
 }

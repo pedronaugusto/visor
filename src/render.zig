@@ -150,6 +150,9 @@ pub const Renderer = struct {
         /// Cells drawn by repeating the one before them rather than written
         /// out, where the terminal has `REP`.
         repeated: u32 = 0,
+        /// Cells whose width was told to the terminal rather than agreed
+        /// with it, through the text sizing protocol.
+        told: u32 = 0,
         /// Style changes written.
         styles: u32 = 0,
         /// Link changes written.
@@ -477,7 +480,7 @@ pub const Renderer = struct {
                 stats.skipped += cols;
                 continue;
             }
-            const drift = r.rowDrifts(s, row);
+            const drift = r.rowDrifts(s, caps, row);
             if (drift) r.drifted[row] = true;
             stats.rows += 1;
 
@@ -490,7 +493,7 @@ pub const Renderer = struct {
             // An over-measured cluster runs past the margin and wraps, so
             // after a drifted row the cursor may be a row low as well as a
             // column off. Nothing but an absolute move is safe.
-            if (drift and caps.width_method != .unicode) r.cursor = null;
+            if (drift and !widthsAgree(caps)) r.cursor = null;
             r.commitRow(s, caps, row);
         }
     }
@@ -516,17 +519,18 @@ pub const Renderer = struct {
     /// A cell diff cannot safely step across a glyph whose width the two ends
     /// measure differently, and it cannot land on a covered column at all.
     /// The disagreement is worked out once, when the cell is written, so this
-    /// is a scan of one bit per cell. Under mode 2027 the terminal measures
-    /// clusters the way this package does, so only the wide cells matter.
-    fn rowDrifts(r: *const Renderer, s: *const Screen, row: u16) bool {
-        const cluster_widths = r.method == .unicode;
+    /// is a scan of one bit per cell. Where the terminal measures clusters
+    /// the way this package does, or is told the width of every cluster it
+    /// could disagree about, only the wide cells matter.
+    fn rowDrifts(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
+        const agree = widthsAgree(caps);
         for (s.rowAt(row)) |c| {
             if (c.width() != 1) return true;
-            if (!cluster_widths and c.shape.drift) return true;
+            if (!agree and c.shape.drift) return true;
         }
         for (r.prevRow(row)) |c| {
             if (c.width() != 1) return true;
-            if (!cluster_widths and c.shape.drift) return true;
+            if (!agree and c.shape.drift) return true;
         }
         return false;
     }
@@ -713,7 +717,12 @@ pub const Renderer = struct {
             try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
             const text = s.textOf(&cells[col]);
-            try out.writeAll(text);
+            if (toldWidth(c, caps)) {
+                try morse.textSize(out, .{ .width = c.width() }, text);
+                stats.told += 1;
+            } else {
+                try out.writeAll(text);
+            }
             stats.cells += 1;
             col += c.width();
             if (caps.rep and repeatable(c, text)) {
@@ -937,6 +946,35 @@ fn blankRunLen(cells: []const Cell, col: u16, to: u16) u16 {
     var i = col;
     while (i <= to and cells[i].isBlankIn(.{})) : (i += 1) n += 1;
     return n;
+}
+
+/// Whether the terminal and this package cannot disagree about a cluster's
+/// width: because the terminal measures clusters the way this package does,
+/// or because every cluster they could disagree about is written with its
+/// width stated.
+fn widthsAgree(caps: Caps) bool {
+    return switch (caps.width_method) {
+        .unicode => true,
+        .wcwidth, .explicit => caps.explicit_width,
+    };
+}
+
+/// Whether a cell goes out through the text sizing protocol with its width
+/// stated.
+///
+/// Under `.explicit` that is every cluster a width model could measure at
+/// all differently, which is everything but printable ASCII. Under
+/// `.wcwidth` it is only the clusters the two models disagree about, since
+/// the rest the terminal measures the way this package did. Under
+/// `.unicode` the terminal already agrees, and stating a width would cost
+/// eleven bytes a cluster for nothing.
+fn toldWidth(c: Cell, caps: Caps) bool {
+    if (!caps.explicit_width) return false;
+    return switch (caps.width_method) {
+        .unicode => false,
+        .wcwidth => c.shape.drift,
+        .explicit => !c.text.isAscii(),
+    };
 }
 
 /// Whether `REP` may stand in for further copies of a cell: one column, one
@@ -1549,6 +1587,49 @@ test "a cluster the two width models disagree about makes its row drift" {
     try testing.expectEqual(@as(?Point, null), f.renderer.cursor);
     try testing.expect(f.renderer.drifted[0]);
     try testing.expect(!f.renderer.drifted[1]);
+}
+
+test "a cluster the models disagree about is written with its width when the terminal takes one" {
+    var f: Fixture = try .init(testing.allocator, 12, 2);
+    defer f.deinit();
+    f.caps.width_method = .wcwidth;
+    f.caps.explicit_width = true;
+    f.screen.method = .wcwidth;
+
+    try f.screen.write(0, 0, "\u{26a0}\u{fe0f}", .{}, .none);
+    try f.screen.write(1, 0, "a", .{}, .none);
+    const stats = try f.draw();
+    try f.expectBytesAgain("\x1b]66;w=1;\u{26a0}\u{fe0f}\x1b\\a");
+    try testing.expectEqual(@as(u32, 1), stats.told);
+    // The row was diffed, not repainted, and the cursor is still trusted.
+    try testing.expectEqual(@as(u32, 0), stats.repainted);
+    try testing.expectEqual(Point{ .col = 2, .row = 0 }, f.renderer.cursor.?);
+    try testing.expect(!f.renderer.drifted[0]);
+}
+
+test "told every width, the terminal is told everything but ASCII" {
+    var f: Fixture = try .init(testing.allocator, 12, 1);
+    defer f.deinit();
+    f.caps.width_method = .explicit;
+    f.caps.explicit_width = true;
+    f.screen.method = .explicit;
+
+    try f.screen.write(0, 0, "a", .{}, .none);
+    try f.screen.write(1, 0, "\u{e9}", .{}, .none);
+    try f.screen.write(2, 0, "\u{4e2d}", .{}, .none);
+    const stats = try f.draw();
+    try f.expectBytesAgain("a\x1b]66;w=1;\u{e9}\x1b\\\x1b]66;w=2;\u{4e2d}\x1b\\\x1b[0K");
+    try testing.expectEqual(@as(u32, 2), stats.told);
+}
+
+test "a terminal that measures clusters is never told a width" {
+    var f: Fixture = try .init(testing.allocator, 12, 1);
+    defer f.deinit();
+    f.caps.explicit_width = true;
+    try f.screen.write(0, 0, "\u{26a0}\u{fe0f}", .{}, .none);
+    try f.screen.write(2, 0, "\u{4e2d}", .{}, .none);
+    _ = try f.draw();
+    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b]66") == null);
 }
 
 test "a change of width method repaints every row that ever drifted" {

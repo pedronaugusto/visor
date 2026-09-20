@@ -48,6 +48,13 @@ pub const Caps = struct {
     in_band_resize: bool = false,
     /// The text sizing protocol's explicit width, so a cluster's width is
     /// told to the terminal rather than agreed with it.
+    ///
+    /// Under `.wcwidth` the renderer states the width of every cluster the
+    /// two models disagree about, and a row holding one is diffed like any
+    /// other rather than repainted whole; under `.explicit` it states the
+    /// width of everything but ASCII, and the terminal's own tables stop
+    /// mattering at all. Under `.unicode` nothing is stated, because the
+    /// terminal already agrees.
     explicit_width: bool = false,
     /// Text drawn at more than one cell's size.
     scaled_text: bool = false,

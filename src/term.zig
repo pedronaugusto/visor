@@ -7,8 +7,8 @@
 //! built on this package needs exactly the same check.
 //!
 //! It is as complete as the renderer's output and no more: the cursor
-//! movements, the erases, the scrolls, the repeat, SGR, OSC 8 and the modes
-//! this package writes. A graphics command is recorded rather than drawn, which is what
+//! movements, the erases, the scrolls, the repeat, SGR, OSC 8, the width a
+//! cluster is told through OSC 66, and the modes this package writes. A graphics command is recorded rather than drawn, which is what
 //! lets the rule that the text pass never deletes a placement be a test.
 //!
 //! What this file will never be: a terminal emulator for general use. It has
@@ -187,9 +187,15 @@ pub const Term = struct {
     /// One grapheme cluster into a cell, wrapping and scrolling as a
     /// terminal does.
     fn put(t: *Term, grapheme: []const u8) Allocator.Error!void {
+        return t.putAs(grapheme, null);
+    }
+
+    /// The same, with the width the cluster was told to take rather than
+    /// the one this terminal would measure.
+    fn putAs(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
         const cols = t.scr.size.cols;
         if (cols == 0 or t.scr.size.rows == 0) return;
-        const w = textmod.graphemeWidth(grapheme, t.scr.method);
+        const w = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
         if (w == 0) return;
 
         if (t.wrap_pending) {
@@ -210,7 +216,17 @@ pub const Term = struct {
             t.col = 0;
             t.lineFeed();
         }
-        try t.scr.write(t.col, t.row, grapheme, t.style, t.link);
+        if (told) |_| {
+            const text = try t.scr.intern(t.gpa, grapheme);
+            t.scr.writeOwnedCell(t.col, t.row, .init(.{
+                .text = text,
+                .style = t.style,
+                .link = t.link,
+                .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(grapheme) },
+            }));
+        } else {
+            try t.scr.write(t.col, t.row, grapheme, t.style, t.link);
+        }
         t.previous = lastCodepoint(grapheme);
         t.col += w;
         if (t.col >= cols) {
@@ -622,10 +638,15 @@ pub const Term = struct {
         }
     }
 
-    /// `ESC ] ... ST`, of which only OSC 8 changes a cell.
+    /// `ESC ] ... ST`: OSC 8 changes what a cell links to, and OSC 66 prints
+    /// text at a width it was told. Nothing else changes a cell.
     fn operatingSystemCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const body = stringBody(bytes, 2) orelse return 0;
         const payload = bytes[2..body.end];
+        if (std.mem.startsWith(u8, payload, "66;")) {
+            try t.sizedText(payload[3..]);
+            return body.len;
+        }
         if (std.mem.startsWith(u8, payload, "8;")) {
             const rest = payload[2..];
             const split = std.mem.indexOfScalar(u8, rest, ';') orelse return body.len;
@@ -637,6 +658,29 @@ pub const Term = struct {
                 try t.scr.link(t.gpa, uri, params);
         }
         return body.len;
+    }
+
+    /// The body of an OSC 66: `key=value:key=value ; text`. The `w` key is
+    /// the width every cluster in the text takes; the others are read and
+    /// not acted on, because the renderer does not write them.
+    fn sizedText(t: *Term, body: []const u8) Allocator.Error!void {
+        const split = std.mem.indexOfScalar(u8, body, ';') orelse return;
+        var told: ?u2 = null;
+        var keys = std.mem.splitScalar(u8, body[0..split], ':');
+        while (keys.next()) |pair| {
+            if (pair.len < 3 or pair[1] != '=') continue;
+            const value = std.fmt.parseInt(u8, pair[2..], 10) catch continue;
+            switch (pair[0]) {
+                'w' => told = switch (value) {
+                    1 => 1,
+                    2 => 2,
+                    else => null,
+                },
+                else => {},
+            }
+        }
+        var it: textmod.Graphemes = .init(body[split + 1 ..]);
+        while (it.next()) |g| try t.putAs(g, told);
     }
 
     /// `ESC _ ... ST`, which is where a graphics command travels. It is
@@ -1302,6 +1346,29 @@ test "a repeat with nothing printed yet prints nothing" {
     defer t.deinit();
     try t.feed("\x1b[3b");
     try testing.expect(!t.scr.damage.any());
+}
+
+test "a cluster told its width takes that width whatever this terminal measures" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    t.setMethod(.wcwidth);
+    // Narrow by codepoint, and told it is wide.
+    try t.feed("\x1b]66;w=2;\u{26a0}\u{fe0f}\x1b\\a");
+    try testing.expectEqualStrings("\u{26a0}\u{fe0f}", textAt(&t, 0, 0));
+    try testing.expect(t.screen().readCell(1, 0).?.isTail());
+    try testing.expectEqualStrings("a", textAt(&t, 2, 0));
+    // Wide by cluster, and told it is narrow.
+    try t.feed("\x1b]66;w=1;\u{4e2d}\x1b\\b");
+    try testing.expectEqualStrings("\u{4e2d}", textAt(&t, 3, 0));
+    try testing.expectEqualStrings("b", textAt(&t, 4, 0));
+}
+
+test "sized text without a width is printed as ordinary text" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    try t.feed("\x1b]66;;ab\x1b\\");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("ab      ", rowText(&t, 0, &buf));
 }
 
 test "a saved cursor comes back where it was" {

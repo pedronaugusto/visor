@@ -12,6 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   single-codepoint glyph in one style is written as the glyph and a repeat
   count, and `Stats.repeated` counts the cells it stood for. The emulator
   understands the sequence.
+- `Caps.explicit_width` is read: a cluster the two width models disagree
+  about is written with its width stated through OSC 66, and its row is
+  diffed rather than repainted whole; under `Method.explicit` every cluster
+  but ASCII is. `Stats.told` counts them. The emulator takes the width it is
+  told, and the round trip runs a third time against a terminal measuring by
+  codepoint that is told every width.
 
 ### Fixed
 

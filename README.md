@@ -227,7 +227,10 @@ written, and a row holding one is repainted whole from an absolute position
 with the cursor not trusted afterwards — because an over-measured cluster runs
 past the margin and wraps, so the following rows are a row out as well as a
 column. A change of width method repaints every row that has ever held one.
-Under mode 2027 the models agree and the re-anchor is skipped.
+Under mode 2027 the models agree and the re-anchor is skipped. Where the
+terminal takes the text sizing protocol, the cluster goes out with its width
+stated instead, and the row is diffed like any other; `.explicit` states the
+width of everything but ASCII, and the terminal's own tables stop mattering.
 
 **Wide graphemes are in the grid, not inferred at render time.** A wide
 cluster is a head and a covered column, always adjacent; overwriting either
@@ -316,10 +319,11 @@ because a grid compared as a string is exactly where a covered column goes
 missing. Four properties come out of the one generator: the terminal shows the
 screen, a second draw writes nothing at all, a repaint recovers from a
 previous frame corrupted on purpose, and a terminal given one repaint of the
-final screen agrees with the terminal given every frame. All four run twice,
-against a terminal measuring by codepoint and a terminal measuring by cluster,
+final screen agrees with the terminal given every frame. All four run three
+times: against a terminal measuring by codepoint, a terminal measuring by
+cluster, and a terminal measuring by codepoint that is told every width,
 because the rule that repaints a drifting row exists for the case where the
-two disagree.
+two disagree, and the protocol is the other way to settle it.
 
 `zig build conformance` runs the same four properties again, over the same
 inputs, against a terminal emulator that is not this one's. `Term` ships with
