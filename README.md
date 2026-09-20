@@ -367,6 +367,12 @@ the picture it should be — then drawn again, which must write nothing. A test
 that asserts on the cells a widget wrote has proved half of what a program
 runs.
 
+The pictures get the same treatment: random placements, moves, deletions,
+stacking changes and acknowledgements over the layers, with text drawn beside
+them, checking that a frame with nothing new writes nothing, that the text
+pass is whole before the first graphics command, and that a deletion happens
+only for a picture that left and names it alone.
+
 Beside it: byte-exact tests on what each mechanism writes, a grid fuzz that
 checks the invariants and the damage map after every operation, a
 `checkAllAllocationFailures` pass on `init`, `resize`, `intern` and

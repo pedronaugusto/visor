@@ -41,6 +41,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The conformance build compares every column's link with the second
   emulator's, URI and `id` both, where before it compared the grapheme, the
   width and the style and let a link go unchecked.
+- The image layers are fuzzed: random placements, moves, deletions, stacking
+  changes and acknowledgements over the layers, with the checks that a frame
+  with nothing new writes nothing, that the text pass is whole before the
+  first graphics command, and that a deletion happens only for a picture that
+  left and names it alone.
 
 ### Removed
 

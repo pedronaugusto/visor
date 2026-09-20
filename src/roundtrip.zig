@@ -22,6 +22,12 @@
 //! shrinking between frames, with the rows above it and the cursor below it
 //! at the end checked too.
 //!
+//! Pictures get the same treatment: random placements, moves, deletions,
+//! stacking changes and acknowledgements over the layers, with the checks
+//! that a frame with nothing new writes nothing, that the text pass is whole
+//! before the first graphics command, and that a deletion happens only for a
+//! picture that left and names it alone.
+//!
 //! All four run three times: against a terminal measuring by codepoint, a
 //! terminal measuring by cluster, and a terminal measuring by codepoint that
 //! is told the width of every cluster it could measure differently. The rule
@@ -471,6 +477,181 @@ test "the round trip holds for an inline screen measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
             try roundTripInline(gpa, smith, .unicode);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+//=========================================================================
+// Pictures: the same idea over the layers, where the property is that a
+// frame with nothing new in it writes nothing, and that the text pass never
+// writes a graphics command.
+//=========================================================================
+
+const layer = @import("layer.zig");
+
+/// A picture the program is showing, as the program keeps it between
+/// frames; declared again every frame, because that is how the layers work.
+const Shown = struct {
+    image: u32,
+    placement: u32,
+    rect: geom.Rect,
+    under: bool,
+    order: layer.Layer.Order,
+
+    fn asLayer(p: Shown) layer.Layer {
+        return .{
+            .image = p.image,
+            .placement = p.placement,
+            .rect = p.rect,
+            .under = p.under,
+            .order = p.order,
+        };
+    }
+};
+
+/// Random placements, moves, deletions, stacking changes and acknowledgements
+/// over a few frames, with text drawn beside them.
+fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
+    const size: geom.Size = .{
+        .cols = @intCast(smith.valueRangeAtMost(u8, 2, 24)),
+        .rows = @intCast(smith.valueRangeAtMost(u8, 2, 12)),
+    };
+    var h: Harness = try .init(gpa, size, .unicode);
+    defer h.deinit();
+    h.caps.kitty_graphics = smith.valueRangeAtMost(u8, 0, 3) != 0;
+    h.caps.scroll_detection = false;
+
+    // Two terminals: one given every byte, one given each frame only up to
+    // its first graphics command, which must already be the whole picture
+    // of the text.
+    var whole: Term = try .init(gpa, size);
+    defer whole.deinit();
+    whole.setMethod(.unicode);
+    var before_graphics: Term = try .init(gpa, size);
+    defer before_graphics.deinit();
+    before_graphics.setMethod(.unicode);
+
+    var showing: std.ArrayList(Shown) = .empty;
+    defer showing.deinit(gpa);
+    var expected_commands: usize = 0;
+
+    var frames: usize = 0;
+    while (frames < 6 and !smith.eos()) : (frames += 1) {
+        const previous = try gpa.dupe(Shown, showing.items);
+        defer gpa.free(previous);
+
+        var ops: usize = 0;
+        const count = smith.valueRangeAtMost(u8, 1, 8);
+        while (ops < count) : (ops += 1) {
+            switch (smith.valueRangeAtMost(u8, 0, 6)) {
+                0, 1 => {
+                    // A new picture, or the same one moved.
+                    const shown: Shown = .{
+                        .image = smith.valueRangeAtMost(u32, 1, 4),
+                        .placement = smith.valueRangeAtMost(u32, 1, 3),
+                        .rect = randomRect(smith, size.cols, size.rows),
+                        .under = smith.value(bool),
+                        .order = .{
+                            .layer = smith.valueRangeAtMost(i32, -2, 2),
+                            .z = smith.valueRangeAtMost(i32, -2, 2),
+                            .sibling = smith.valueRangeAtMost(i32, -2, 2),
+                        },
+                    };
+                    for (showing.items) |*held| {
+                        if (held.image == shown.image and held.placement == shown.placement) {
+                            held.* = shown;
+                            break;
+                        }
+                    } else try showing.append(gpa, shown);
+                },
+                2 => {
+                    if (showing.items.len != 0) _ = showing.swapRemove(smith.index(showing.items.len));
+                },
+                3 => {
+                    // The terminal answers for an image, or refuses it.
+                    const number = smith.valueRangeAtMost(u32, 1, 4);
+                    try h.screen.layers.declareImage(gpa, .{ .number = number, .width = 32, .height = 32 });
+                    h.screen.layers.ack(.{
+                        .number = number,
+                        .id = smith.valueRangeAtMost(u32, 1, 99),
+                        .message = if (smith.value(bool)) "OK" else "ENOENT",
+                    });
+                },
+                4 => {
+                    // A frame of animation: every picture a cell along.
+                    for (showing.items) |*held| {
+                        held.rect.col = @intCast(@min(held.rect.col + 1, size.cols - 1));
+                        held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
+                    }
+                },
+                5, 6 => try operate(&h, smith),
+                else => unreachable,
+            }
+        }
+        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        try checkGrid(&h.screen);
+
+        h.out.clearRetainingCapacity();
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const bytes = h.out.written();
+        try testing.expectEqual(bytes.len, stats.bytes);
+
+        // The text pass is finished before the first graphics command.
+        const first = std.mem.indexOf(u8, bytes, "\x1b_G") orelse bytes.len;
+        try before_graphics.feed(bytes[0..first]);
+        try term.expectScreensEqual(&h.screen, before_graphics.screen());
+        try before_graphics.feed(bytes[first..]);
+        try whole.feed(bytes);
+        try term.expectScreensEqual(&h.screen, whole.screen());
+
+        // Every graphics command is counted, and none is written for a
+        // terminal without the protocol.
+        const commands = std.mem.count(u8, bytes, "\x1b_G");
+        try testing.expectEqual(commands, stats.placements);
+        if (!h.caps.kitty_graphics) try testing.expectEqual(@as(usize, 0), commands);
+        expected_commands += commands;
+        try testing.expectEqual(expected_commands, whole.graphics.items.len);
+
+        // A deletion names one placement, keeps the bytes, and happens only
+        // for a picture that left.
+        var left: usize = 0;
+        for (previous) |was| {
+            for (showing.items) |now| {
+                if (now.image == was.image and now.placement == was.placement) break;
+            } else left += 1;
+        }
+        const deletions = std.mem.count(u8, bytes, "a=d");
+        try testing.expectEqual(if (h.caps.kitty_graphics) left else 0, deletions);
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=a"));
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=A"));
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=N"));
+
+        // Declared again unchanged, the frame writes nothing at all.
+        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        h.out.clearRetainingCapacity();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        h.screen.damageAll();
+        h.out.clearRetainingCapacity();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+    }
+
+    // Everything taken down: one deletion each, then nothing.
+    const remaining = showing.items.len;
+    showing.clearRetainingCapacity();
+    h.out.clearRetainingCapacity();
+    const down = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    try testing.expectEqual(if (h.caps.kitty_graphics) remaining else 0, std.mem.count(u8, h.out.written(), "a=d"));
+    try testing.expectEqual(@as(u32, @intCast(if (h.caps.kitty_graphics) remaining else 0)), down.placements);
+    h.out.clearRetainingCapacity();
+    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+    try testing.expectEqual(@as(usize, 0), h.screen.layers.count());
+}
+
+test "pictures placed, moved, stacked and taken down keep every frame idempotent and out of the text pass" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try imageRoundTrip(gpa, smith);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
