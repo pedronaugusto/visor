@@ -41,20 +41,35 @@ pub const Wrap = enum {
 pub const Graphemes = struct {
     bytes: []const u8,
     inner: uucode.grapheme.Iterator(uucode.utf8.Iterator),
+    ascii_at: ?usize = null,
 
     /// The clusters of `bytes`, in order.
     pub fn init(bytes: []const u8) Graphemes {
-        return .{ .bytes = bytes, .inner = uucode.grapheme.utf8Iterator(bytes) };
+        return .{
+            .bytes = bytes,
+            .inner = uucode.grapheme.utf8Iterator(bytes),
+            .ascii_at = if (printableAscii(bytes)) 0 else null,
+        };
     }
 
     /// The next cluster, or null at the end.
     pub fn next(g: *Graphemes) ?[]const u8 {
+        if (g.ascii_at) |at| {
+            if (at == g.bytes.len) return null;
+            g.ascii_at = at + 1;
+            return g.bytes[at .. at + 1];
+        }
         const found = g.inner.nextGrapheme() orelse return null;
         return g.bytes[found.start..found.end];
     }
 
     /// The next cluster and where it starts, or null at the end.
     pub fn nextAt(g: *Graphemes) ?struct { bytes: []const u8, start: usize } {
+        if (g.ascii_at) |at| {
+            if (at == g.bytes.len) return null;
+            g.ascii_at = at + 1;
+            return .{ .bytes = g.bytes[at .. at + 1], .start = at };
+        }
         const found = g.inner.nextGrapheme() orelse return null;
         return .{ .bytes = g.bytes[found.start..found.end], .start = found.start };
     }
@@ -67,6 +82,7 @@ pub const Graphemes = struct {
 /// whole, which is what puts a flag or a family emoji in two columns instead
 /// of eight.
 pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
+    if (grapheme.len == 1 and grapheme[0] >= 0x20 and grapheme[0] < 0x7f) return 1;
     switch (method) {
         .wcwidth => {
             var total: usize = 0;
@@ -80,7 +96,15 @@ pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
 
 /// The columns a string takes, by `method`.
 pub fn width(str: []const u8, method: Method) u16 {
+    if (printableAscii(str)) {
+        return @intCast(@min(str.len, std.math.maxInt(u16)));
+    }
     return @intCast(@min(widthWide(str, method), std.math.maxInt(u16)));
+}
+
+fn printableAscii(str: []const u8) bool {
+    for (str) |b| if (b < 0x20 or b >= 0x7f) return false;
+    return true;
 }
 
 fn widthWide(str: []const u8, method: Method) usize {

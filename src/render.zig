@@ -93,6 +93,10 @@ pub const Renderer = struct {
     /// a terminal that clips a row it measures wider than the model does is
     /// not something the model can see happen.
     drifted: []bool,
+    /// Rows of `prev` a cell diff cannot safely cross. Unlike `drifted`,
+    /// this follows scrolling content and is cleared when the row becomes
+    /// safe again.
+    untrusted: []bool,
     /// A hash of each row of `prev` and of the screen, for finding a frame
     /// whose rows moved.
     hashes: []u64,
@@ -100,6 +104,9 @@ pub const Renderer = struct {
     /// to the caller in one go, which is what lets the synchronised-output
     /// bracket be decided after the frame's size is known.
     buf: []u8,
+    /// SGR spellings already constructed for style pairs this renderer has
+    /// seen. A collision only rebuilds one spelling.
+    style_sequences: StyleSequenceCache = .{},
 
     /// The style the terminal is in.
     style: Style = .{},
@@ -186,6 +193,7 @@ pub const Renderer = struct {
             .prev = &.{},
             .force = &.{},
             .drifted = &.{},
+            .untrusted = &.{},
             .hashes = &.{},
             .buf = &.{},
         };
@@ -209,6 +217,7 @@ pub const Renderer = struct {
             .prev = &.{},
             .force = &.{},
             .drifted = &.{},
+            .untrusted = &.{},
             .hashes = &.{},
             .buf = &.{},
         };
@@ -218,6 +227,7 @@ pub const Renderer = struct {
         r.prev = next.prev;
         r.force = next.force;
         r.drifted = next.drifted;
+        r.untrusted = next.untrusted;
         r.hashes = next.hashes;
         r.buf = next.buf;
         r.repaint();
@@ -342,6 +352,7 @@ pub const Renderer = struct {
         @memset(r.prev, .blank(.{}));
         @memset(r.force, false);
         @memset(r.drifted, false);
+        @memset(r.untrusted, false);
         r.style = .{};
         r.link = .none;
         r.cursor = .{ .col = 0, .row = 0 };
@@ -429,14 +440,19 @@ pub const Renderer = struct {
         const cols = r.size.cols;
         const blank: Cell = .blank(.{});
         const region = r.prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
+        const untrusted = r.untrusted[top .. @as(usize, bottom) + 1];
         const moved = @as(usize, distance) * cols;
         if (up) {
             std.mem.copyForwards(Cell, region[0 .. region.len - moved], region[moved..]);
             @memset(region[region.len - moved ..], blank);
+            std.mem.copyForwards(bool, untrusted[0 .. untrusted.len - distance], untrusted[distance..]);
+            @memset(untrusted[untrusted.len - distance ..], false);
             for (bottom + 1 - distance..bottom + 1) |row| r.force[row] = true;
         } else {
             std.mem.copyBackwards(Cell, region[moved..], region[0 .. region.len - moved]);
             @memset(region[0..moved], blank);
+            std.mem.copyBackwards(bool, untrusted[distance..], untrusted[0 .. untrusted.len - distance]);
+            @memset(untrusted[0..distance], false);
             for (top..top + distance) |row| r.force[row] = true;
         }
     }
@@ -456,6 +472,9 @@ pub const Renderer = struct {
         r.drifted = try gpa.alloc(bool, size.rows);
         errdefer gpa.free(r.drifted);
         @memset(r.drifted, false);
+        r.untrusted = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r.untrusted);
+        @memset(r.untrusted, false);
         r.hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
         errdefer gpa.free(r.hashes);
         r.buf = try gpa.alloc(u8, sync_gate);
@@ -466,6 +485,7 @@ pub const Renderer = struct {
         gpa.free(r.prev);
         gpa.free(r.force);
         gpa.free(r.drifted);
+        gpa.free(r.untrusted);
         gpa.free(r.hashes);
         gpa.free(r.buf);
     }
@@ -535,6 +555,7 @@ pub const Renderer = struct {
                 try morse.clearScreen(out, .to_end);
             }
             @memset(r.prev, .blank(.{}));
+            @memset(r.untrusted, false);
         }
     }
 
@@ -547,19 +568,22 @@ pub const Renderer = struct {
             const span = s.damage.row(row);
             const forced = r.force[row];
             if (span == null and !forced) continue;
+            const first = if (forced) 0 else span.?.first;
+            const last = if (forced) cols - 1 else span.?.last;
 
             // A row the damage map named but nothing really changed in is
             // one whole-row comparison away from costing nothing.
-            if (!forced and r.rowUnchanged(s, caps, row)) {
+            if (!forced and r.rowUnchanged(s, caps, row, first, last)) {
                 stats.skipped += cols;
                 continue;
             }
-            const drift = r.rowDrifts(s, caps, row);
+            const scan_first = if (r.untrusted[row]) 0 else first;
+            const scan_last = if (r.untrusted[row]) cols - 1 else last;
+            const current_untrusted = rowDrifts(s, caps, row, scan_first, scan_last);
+            const drift = r.untrusted[row] or current_untrusted;
             if (drift) r.drifted[row] = true;
             stats.rows += 1;
 
-            const first = if (forced) 0 else span.?.first;
-            const last = if (forced) cols - 1 else span.?.last;
             const whole = forced or drift or try r.paintIsCheaper(s, caps, row, first, last);
             if (whole) stats.repainted += 1;
             try r.hideForWrite(out);
@@ -568,22 +592,25 @@ pub const Renderer = struct {
             // after a drifted row the cursor may be a row low as well as a
             // column off. Nothing but an absolute move is safe.
             if (drift and !widthsAgree(caps)) r.cursor = null;
-            r.commitRow(s, caps, row);
+            r.commitRow(s, caps, row, first, last);
+            r.untrusted[row] = current_untrusted;
         }
     }
 
     /// Whether a row holds what the terminal is already showing.
     ///
-    /// One `memcmp` where every cell is shown as it is held, because the
-    /// previous frame then holds the cells as they were written. Where the
-    /// terminal has no OSC 8 or no scaled text, a link or a scale is not a
-    /// difference it can show and the previous frame does not record one, so
-    /// the comparison has to strip it rather than find a difference nothing
-    /// could write.
-    fn rowUnchanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
-        if (shownAsHeld(caps)) return cellmod.rowsEqual(s.rowAt(row), r.prevRow(row));
-        for (s.rowAt(row), r.prevRow(row)) |now, was| {
-            if (!visible(now, caps).eql(was)) return false;
+    /// One `memcmp` over the conservative damage span where every cell is
+    /// shown as it is held, because the previous frame then holds the cells
+    /// as they were written. Where the terminal has no OSC 8 or no scaled
+    /// text, a link or a scale is not a difference it can show and the
+    /// previous frame does not record one, so the comparison has to strip it
+    /// rather than find a difference nothing could write.
+    fn rowUnchanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) bool {
+        const now = s.rowAt(row)[first .. @as(usize, last) + 1];
+        const was = r.prevRow(row)[first .. @as(usize, last) + 1];
+        if (shownAsHeld(caps)) return cellmod.rowsEqual(now, was);
+        for (now, was) |current, previous| {
+            if (!visible(current, caps).eql(previous)) return false;
         }
         return true;
     }
@@ -594,17 +621,14 @@ pub const Renderer = struct {
     /// A cell diff cannot safely step across a glyph whose width the two ends
     /// measure differently, and it cannot land on a covered column at all.
     /// The disagreement is worked out once, when the cell is written, so this
-    /// is a scan of one bit per cell. Where the terminal measures clusters
-    /// the way this package does, or is told the width of every cluster it
-    /// could disagree about, only the wide cells matter.
-    fn rowDrifts(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
+    /// is a scan of one bit per cell. The caller scans only damage while the
+    /// previous row is trusted, and the whole row while it is not. Where the
+    /// terminal measures clusters the way this package does, or is told the
+    /// width of every cluster it could disagree about, only wide cells matter.
+    fn rowDrifts(s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) bool {
         const agree = widthsAgree(caps);
-        for (s.rowAt(row)) |raw| {
+        for (s.rowAt(row)[first .. @as(usize, last) + 1]) |raw| {
             const c = visible(raw, caps);
-            if (c.width() != 1) return true;
-            if (!agree and c.shape.drift) return true;
-        }
-        for (r.prevRow(row)) |c| {
             if (c.width() != 1) return true;
             if (!agree and c.shape.drift) return true;
         }
@@ -613,9 +637,9 @@ pub const Renderer = struct {
 
     /// Whether writing the row whole costs fewer bytes than diffing it.
     ///
-    /// Both are priced by emitting them into a writer that counts and throws
-    /// away, so the answer is the real byte count and not a model of one. A
-    /// narrow span cannot lose, so it is not priced.
+    /// Both are counted with the same state transitions as emission, so the
+    /// answer is the exact byte count and not an estimate. A narrow span
+    /// cannot lose, so it is not priced.
     fn paintIsCheaper(
         r: *Renderer,
         s: *Screen,
@@ -626,13 +650,89 @@ pub const Renderer = struct {
     ) Error!bool {
         const cols = r.size.cols;
         if (@as(u32, last - first) + 1 <= cols / 2) return false;
+        if (first == 0 and last == cols - 1 and r.allChanged(s, caps, row)) return true;
+        const floor = r.paintTextFloor(s, caps, row);
+        if (r.isolatedDiffCost(s, caps, row, first, last, floor)) |diff| {
+            if (diff < floor) return false;
+        }
         const diff = try r.price(s, caps, row, first, last, false);
         const paint = try r.price(s, caps, row, 0, cols - 1, true);
         return paint <= diff;
     }
 
-    /// What one way of writing a row would cost, in bytes, leaving the
-    /// renderer exactly as it found it.
+    /// Whether every cell in a row differs from what the terminal shows.
+    /// In that case diffing and painting emit the same row, so the tie goes
+    /// to painting without pricing either one.
+    fn allChanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
+        for (s.rowAt(row), r.prevRow(row)) |now, was| {
+            if (visible(now, caps).eql(was)) return false;
+        }
+        return true;
+    }
+
+    /// A valid, deliberately unbridged diff. The real planner can only make
+    /// it shorter, so beating the unavoidable text in a whole row proves the
+    /// diff wins without pricing either candidate in full.
+    fn isolatedDiffCost(
+        r: *Renderer,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        first: u16,
+        last: u16,
+        limit: usize,
+    ) ?usize {
+        const cells = s.rowAt(row);
+        const old = r.prevRow(row);
+        var state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        var cost: usize = 0;
+        var col = first;
+        while (col <= last) {
+            if (visible(cells[col], caps).eql(old[col])) {
+                col += 1;
+                continue;
+            }
+            const from = col;
+            while (col < last and !visible(cells[col + 1], caps).eql(old[col + 1])) col += 1;
+            cost += r.moveCost(&state, from, row);
+            cost += r.writeCellsCost(&state, s, caps, row, from, col, false);
+            if (cost >= limit) return null;
+            col += 1;
+        }
+        return cost;
+    }
+
+    /// Bytes a whole-row paint cannot avoid. Pen, link, cursor and erase
+    /// sequences are omitted; text sizing and REP are retained because they
+    /// change how many text bytes the paint actually needs.
+    fn paintTextFloor(_: *Renderer, s: *Screen, caps: Caps, row: u16) usize {
+        const cells = s.rowAt(row);
+        const end = trailingBlank(cells, caps);
+        var cost: usize = 0;
+        var col: u16 = 0;
+        while (col < end) {
+            const c = visible(cells[col], caps);
+            if (c.isTail()) {
+                col += 1;
+                continue;
+            }
+            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
+            cost += text.len;
+            col += c.width();
+            if (caps.rep and repeatable(c, text)) {
+                const same = sameRunLen(cells, col, end - 1, visible(c, caps), caps);
+                if (@as(usize, same) > 3 + digits(same)) {
+                    cost += 3 + digits(same);
+                    col += same;
+                }
+            }
+        }
+        return cost;
+    }
+
+    /// What one way of writing a row costs, in bytes, without emitting it or
+    /// changing the renderer.
     pub fn price(
         r: *Renderer,
         s: *Screen,
@@ -642,20 +742,226 @@ pub const Renderer = struct {
         last: u16,
         whole: bool,
     ) Error!u64 {
-        const saved: struct { style: Style, link: Link, cursor: ?Point } = .{
+        var state: CostState = .{
             .style = r.style,
             .link = r.link,
             .cursor = r.cursor,
         };
-        defer {
-            r.style = saved.style;
-            r.link = saved.link;
-            r.cursor = saved.cursor;
+        return if (whole)
+            r.paintRowCost(&state, s, caps, row)
+        else
+            r.diffRowCost(&state, s, caps, row, first, last);
+    }
+
+    /// The arithmetic counterpart of `paintRow`.
+    fn paintRowCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16) usize {
+        const cols = r.size.cols;
+        const cells = s.rowAt(row);
+        const erase_from = trailingBlank(cells, caps);
+
+        if (erase_from == 0) {
+            if (r.rowIsBlank(row)) return 0;
+            return r.moveCost(state, 0, row) + r.eraseToEndCost(state, s, caps);
         }
-        var thrown: Writer.Discarding = .init(&.{});
-        var ignored: Stats = .{};
-        try r.emitRow(&thrown.writer, s, caps, row, first, last, whole, &ignored);
-        return thrown.fullCount();
+        var cost = r.moveCost(state, 0, row);
+        cost += r.writeCellsCost(state, s, caps, row, 0, erase_from - 1, true);
+        if (erase_from < cols) {
+            cost += r.moveCost(state, erase_from, row);
+            cost += r.eraseToEndCost(state, s, caps);
+        }
+        return cost;
+    }
+
+    /// The arithmetic counterpart of `diffRow`.
+    fn diffRowCost(
+        r: *Renderer,
+        state: *CostState,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        first: u16,
+        last: u16,
+    ) usize {
+        const cols = r.size.cols;
+        const cells = s.rowAt(row);
+        const old = r.prevRow(row);
+
+        var cost: usize = 0;
+        var col = first;
+        while (col <= last) {
+            if (visible(cells[col], caps).eql(old[col])) {
+                col += 1;
+                continue;
+            }
+            const run_end = r.runEndCost(state.*, s, caps, row, col, last);
+            const erase_from = if (run_end == cols - 1) @max(col, trailingBlank(cells, caps)) else cols;
+            const paint_to = if (erase_from <= run_end) erase_from else run_end + 1;
+
+            cost += r.moveCost(state, col, row);
+            if (paint_to > col) {
+                cost += r.writeCellsCost(state, s, caps, row, col, paint_to - 1, true);
+            }
+            if (erase_from <= run_end) {
+                cost += r.moveCost(state, erase_from, row);
+                cost += r.eraseToEndCost(state, s, caps);
+            }
+            col = run_end + 1;
+        }
+        return cost;
+    }
+
+    /// The arithmetic counterpart of `eraseToEnd`.
+    fn eraseToEndCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps) usize {
+        return setStyleCost(r, state, .{}) + setLinkCost(state, s, .none, caps) + clear_line_cost;
+    }
+
+    /// The arithmetic counterpart of `writeCells`.
+    fn writeCellsCost(
+        r: *Renderer,
+        state: *CostState,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        from: u16,
+        to: u16,
+        erase_tail: bool,
+    ) usize {
+        const cells = s.rowAt(row);
+        const erase_from = if (erase_tail)
+            @max(from, trailingBlank(cells[0 .. @as(usize, to) + 1], caps))
+        else
+            to + 1;
+        var cost: usize = 0;
+        var col = from;
+        while (col <= to) {
+            const c = visible(cells[col], caps);
+            if (c.isTail()) {
+                col += 1;
+                continue;
+            }
+            cost += r.moveCost(state, col, row);
+            if (erase_tail and col == erase_from) {
+                const blanks = to - col + 1;
+                if (blanks > erase_cost) {
+                    cost += setStyleCost(r, state, .{});
+                    cost += setLinkCost(state, s, .none, caps);
+                    return cost + 3 + digits(blanks);
+                }
+            }
+            cost += setStyleCost(r, state, c.style);
+            cost += setLinkCost(state, s, c.link, caps);
+            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            if (c.isScaled()) {
+                // OSC 66, two one-digit keys, their separator, the metadata
+                // terminator and ST.
+                cost += 15 + text.len;
+            } else if (toldWidth(c, caps)) {
+                // OSC 66, one one-digit width key, the metadata terminator
+                // and ST.
+                cost += 11 + text.len;
+            } else {
+                cost += text.len;
+            }
+            col += c.width();
+            if (caps.rep and repeatable(c, text)) {
+                const same = sameRunLen(cells, col, to, visible(c, caps), caps);
+                if (@as(usize, same) > 3 + digits(same)) {
+                    cost += 3 + digits(same);
+                    col += same;
+                }
+            }
+            r.advanceCost(state, col, row);
+        }
+        return cost;
+    }
+
+    /// Advances the priced terminal state past a non-empty changed stretch.
+    /// Diffable rows contain only one-column visible cells, so the last cell
+    /// determines the pen and the cursor without pricing the stretch whose
+    /// bytes the caller does not use.
+    fn writeCellsState(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16, from: u16, to: u16) void {
+        const cells = s.rowAt(row);
+        const c = visible(cells[to], caps);
+        state.style = c.style;
+        if (caps.osc8) {
+            for (cells[from .. @as(usize, to) + 1]) |raw| {
+                const link = visible(raw, caps).link;
+                if (state.link != link) {
+                    state.link = if (link == .none or s.target(link) != null) link else .none;
+                }
+            }
+        }
+        r.advanceCost(state, to + 1, row);
+    }
+
+    /// Whether text alone already makes a bridge dearer than `limit`.
+    /// Styles, links and moves can only add bytes, so this can reject a long
+    /// gap before pricing any of them. REP is handled by the caller because
+    /// it can make repeated text shorter than its byte lengths.
+    fn textCostExceeds(s: *Screen, caps: Caps, row: u16, from: u16, to: u16, limit: usize) bool {
+        const cells = s.rowAt(row);
+        var cost: usize = 0;
+        var col = from;
+        while (col <= to) {
+            const c = visible(cells[col], caps);
+            if (c.isTail()) {
+                col += 1;
+                continue;
+            }
+            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            cost += text.len;
+            if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
+            if (cost > limit) return true;
+            col += c.width();
+        }
+        return false;
+    }
+
+    /// Plans a run exactly as `runEnd` does, while counting instead of
+    /// writing the candidate bridge and move.
+    fn runEndCost(
+        r: *Renderer,
+        initial: CostState,
+        s: *Screen,
+        caps: Caps,
+        row: u16,
+        col: u16,
+        last: u16,
+    ) u16 {
+        const cells = s.rowAt(row);
+        const old = r.prevRow(row);
+        var state = initial;
+
+        var end = col;
+        var scan: u32 = @as(u32, col) + 1;
+        while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
+        r.writeCellsState(&state, s, caps, row, col, end);
+
+        while (scan <= last) {
+            const gap: u16 = @intCast(scan);
+            while (scan <= last and visible(cells[scan], caps).eql(old[scan])) : (scan += 1) {}
+            if (scan > last) break;
+            const next: u16 = @intCast(scan);
+
+            var moved = state;
+            var move_cost = r.moveCost(&moved, next, row);
+            move_cost += r.writeCellsCost(&moved, s, caps, row, next, next, false);
+            if (!caps.rep and textCostExceeds(s, caps, row, gap, next, move_cost)) return end;
+
+            var bridged = state;
+            const bridge_cost = r.writeCellsCost(&bridged, s, caps, row, gap, next, false);
+
+            if (bridge_cost > move_cost) return end;
+            state = bridged;
+            end = next;
+            if (next == last) return end;
+            scan = @as(u32, next) + 1;
+
+            const more: u16 = @intCast(scan);
+            while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
+            if (scan > more) r.writeCellsState(&state, s, caps, row, more, end);
+        }
+        return end;
     }
 
     /// One row, either whole or only where it changed.
@@ -718,7 +1024,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const run_end = try r.runEnd(s, caps, row, col, last);
+            const run_end = r.runEnd(s, caps, row, col, last);
 
             // A run that reaches the end of the row and ends in default
             // blanks is erased rather than painted.
@@ -773,6 +1079,10 @@ pub const Renderer = struct {
         erase_tail: bool,
     ) Error!void {
         const cells = s.rowAt(row);
+        const erase_from = if (erase_tail)
+            @max(from, trailingBlank(cells[0 .. @as(usize, to) + 1], caps))
+        else
+            to + 1;
         var col = from;
         while (col <= to) {
             const c = visible(cells[col], caps);
@@ -784,9 +1094,9 @@ pub const Renderer = struct {
                 continue;
             }
             try r.moveTo(out, col, row, stats);
-            if (erase_tail) {
-                const blanks = blankRunLen(cells, col, to, caps);
-                if (blanks > erase_cost and col + blanks > to) {
+            if (erase_tail and col == erase_from) {
+                const blanks = to - col + 1;
+                if (blanks > erase_cost) {
                     try r.setStyle(out, .{}, stats);
                     try r.setLink(out, s, .none, caps, stats);
                     try morse.eraseChars(out, blanks);
@@ -826,9 +1136,9 @@ pub const Renderer = struct {
     /// The last column of the run starting at `col`.
     ///
     /// At every unchanged gap, both continuing the run and moving to the
-    /// next changed cell are emitted into counting writers. Including that
-    /// changed cell makes the two candidates meet with the same style, link
-    /// and cursor, so the cheaper choice cannot make a later choice dearer.
+    /// next changed cell are counted exactly. Including that changed cell
+    /// makes the two candidates meet with the same style, link and cursor,
+    /// so the cheaper choice cannot make a later choice dearer.
     fn runEnd(
         r: *Renderer,
         s: *Screen,
@@ -836,65 +1146,16 @@ pub const Renderer = struct {
         row: u16,
         col: u16,
         last: u16,
-    ) Error!u16 {
-        const State = struct { style: Style, link: Link, cursor: ?Point };
-        const cells = s.rowAt(row);
-        const old = r.prevRow(row);
-        const saved: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
-        defer {
-            r.style = saved.style;
-            r.link = saved.link;
-            r.cursor = saved.cursor;
-        }
-
-        var simulated: Writer.Discarding = .init(&.{});
-        var ignored: Stats = .{};
-        try r.moveTo(&simulated.writer, col, row, &ignored);
-
-        var end = col;
-        var scan: u32 = @as(u32, col) + 1;
-        while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
-        try r.writeCells(&simulated.writer, s, caps, row, col, end, &ignored, false);
-
-        while (scan <= last) {
-            const gap: u16 = @intCast(scan);
-            while (scan <= last and visible(cells[scan], caps).eql(old[scan])) : (scan += 1) {}
-            if (scan > last) break;
-            const next: u16 = @intCast(scan);
-            const before: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
-
-            var bridged: Writer.Discarding = .init(&.{});
-            var bridge_stats: Stats = .{};
-            try r.writeCells(&bridged.writer, s, caps, row, gap, next, &bridge_stats, false);
-            const after_bridge: State = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
-
-            r.style = before.style;
-            r.link = before.link;
-            r.cursor = before.cursor;
-            var moved: Writer.Discarding = .init(&.{});
-            var move_stats: Stats = .{};
-            try r.moveTo(&moved.writer, next, row, &move_stats);
-            try r.writeCells(&moved.writer, s, caps, row, next, next, &move_stats, false);
-
-            if (bridged.fullCount() > moved.fullCount()) return end;
-            r.style = after_bridge.style;
-            r.link = after_bridge.link;
-            r.cursor = after_bridge.cursor;
-            end = next;
-            if (next == last) return end;
-            scan = @as(u32, next) + 1;
-
-            const more: u16 = @intCast(scan);
-            while (scan <= last and !visible(cells[scan], caps).eql(old[scan])) : (scan += 1) end = @intCast(scan);
-            if (scan > more) try r.writeCells(&simulated.writer, s, caps, row, more, end, &ignored, false);
-        }
-        return end;
+    ) u16 {
+        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        return r.runEndCost(state, s, caps, row, col, last);
     }
 
-    /// Copies a row of the screen into the previous frame.
-    fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16) void {
-        const cells = s.rowAt(row);
-        const old = r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
+    /// Copies a row's conservative damage span into the previous frame.
+    fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) void {
+        const cells = s.rowAt(row)[first .. @as(usize, last) + 1];
+        const row_start = @as(usize, row) * r.size.cols;
+        const old = r.prev[row_start + first .. row_start + @as(usize, last) + 1];
         if (shownAsHeld(caps)) {
             @memcpy(old, cells);
             return;
@@ -916,8 +1177,23 @@ pub const Renderer = struct {
     /// Writes the shortest SGR between the style the terminal is in and the
     /// one it should be in.
     pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
-        if (std.meta.eql(r.style, to)) return;
-        try morse.diffStyle(out, r.style, to);
+        if (std.mem.eql(u8, std.mem.asBytes(&r.style), std.mem.asBytes(&to))) return;
+        const from = r.style;
+        if (r.style_sequences.get(from, to)) |sequence| {
+            try out.writeAll(sequence);
+        } else {
+            var bytes: [StyleSequenceCache.max_len]u8 = undefined;
+            var fixed: Writer = .fixed(&bytes);
+            morse.diffStyle(&fixed, from, to) catch {
+                try morse.diffStyle(out, from, to);
+                r.style = to;
+                stats.styles += 1;
+                return;
+            };
+            const sequence = fixed.buffered();
+            r.style_sequences.put(from, to, sequence);
+            try out.writeAll(sequence);
+        }
         r.style = to;
         stats.styles += 1;
     }
@@ -956,6 +1232,41 @@ pub const Renderer = struct {
         } else {
             r.cursor = .{ .col = col, .row = row };
         }
+    }
+
+    /// The arithmetic counterpart of `advance`.
+    fn advanceCost(r: *Renderer, state: *CostState, col: u16, row: u16) void {
+        if (col >= r.size.cols) {
+            state.cursor = null;
+        } else {
+            state.cursor = .{ .col = col, .row = row };
+        }
+    }
+
+    /// The arithmetic counterpart of `moveTo`, including the style reset a
+    /// saved-origin restore performs in inline mode.
+    fn moveCost(r: *Renderer, state: *CostState, col: u16, row: u16) usize {
+        const there: Point = .{ .col = col, .row = row };
+        if (state.cursor) |at| {
+            if (at.col == col and at.row == row) return 0;
+        }
+
+        const cost: usize = if (r.region != null) region: {
+            const origin: Point = .{ .col = 0, .row = 0 };
+            const from_origin = plan(origin, there, .region);
+            const via_origin: usize = if (col == 0 and row == 0) 2 else 2 + from_origin.cost;
+            if (state.cursor) |at| {
+                const direct = plan(at, there, .region);
+                if (direct.cost <= via_origin) break :region direct.cost;
+            }
+            state.style = .{};
+            break :region via_origin;
+        } else if (state.cursor) |at|
+            plan(at, there, .screen).cost
+        else
+            absoluteCost(there);
+        state.cursor = there;
+        return cost;
     }
 
     /// Puts the cursor at a place in the fewest bytes.
@@ -1026,9 +1337,251 @@ pub const Renderer = struct {
 // The pieces the renderer's methods are made of.
 //=========================================================================
 
+/// The terminal state carried through an arithmetic price.
+const CostState = struct {
+    style: Style,
+    link: Link,
+    cursor: ?Point,
+};
+
+/// Constructed SGR transitions. Formatting colour parameters is much more
+/// work than copying the result, and real interfaces draw from a small style
+/// vocabulary even when adjacent pairs are varied.
+const StyleSequenceCache = struct {
+    const count = 512;
+    const max_len = 128;
+    const Entry = struct {
+        from: Style = .{},
+        to: Style = .{},
+        bytes: [max_len]u8 = undefined,
+        len: u8 = 0,
+        cost: u8 = 0,
+        valid: bool = false,
+        cost_valid: bool = false,
+    };
+
+    entries: [count]Entry = @splat(.{}),
+
+    fn entry(cache: *StyleSequenceCache, from: Style, to: Style) *Entry {
+        var hash = styleHash(from) *% 0x9e3779b185ebca87 ^ styleHash(to) *% 0xc2b2ae3d27d4eb4f;
+        hash ^= hash >> 33;
+        hash *%= 0xff51afd7ed558ccd;
+        hash ^= hash >> 33;
+        return &cache.entries[hash & (count - 1)];
+    }
+
+    /// A cheap index for the fixed-layout style. Equality is still checked
+    /// on every hit, so a collision changes only how often a cost is rebuilt.
+    fn styleHash(style: Style) u64 {
+        const bytes = std.mem.asBytes(&style);
+        comptime std.debug.assert(@sizeOf(Style) == 22);
+        return std.mem.readInt(u64, bytes[0..8], .little) *% 0x9e3779b185ebca87 ^
+            std.mem.readInt(u64, bytes[8..16], .little) *% 0xc2b2ae3d27d4eb4f ^
+            @as(u64, std.mem.readInt(u32, bytes[16..20], .little)) *% 0x165667b19e3779f9 ^
+            @as(u64, std.mem.readInt(u16, bytes[20..22], .little)) *% 0x85ebca77c2b2ae63;
+    }
+
+    fn get(cache: *StyleSequenceCache, from: Style, to: Style) ?[]const u8 {
+        const found = cache.entry(from, to);
+        if (!found.valid or !matches(found, from, to)) return null;
+        return found.bytes[0..found.len];
+    }
+
+    fn getCost(cache: *StyleSequenceCache, from: Style, to: Style) ?usize {
+        const found = cache.entry(from, to);
+        if (!found.cost_valid or !matches(found, from, to)) return null;
+        return found.cost;
+    }
+
+    fn put(cache: *StyleSequenceCache, from: Style, to: Style, sequence: []const u8) void {
+        std.debug.assert(sequence.len <= max_len);
+        const found = cache.entry(from, to);
+        found.from = from;
+        found.to = to;
+        @memcpy(found.bytes[0..sequence.len], sequence);
+        found.len = @intCast(sequence.len);
+        found.cost = @intCast(sequence.len);
+        found.valid = true;
+        found.cost_valid = true;
+    }
+
+    fn putCost(cache: *StyleSequenceCache, from: Style, to: Style, cost: usize) void {
+        std.debug.assert(cost <= max_len);
+        const found = cache.entry(from, to);
+        found.from = from;
+        found.to = to;
+        found.cost = @intCast(cost);
+        found.valid = false;
+        found.cost_valid = true;
+    }
+
+    fn matches(found: *const Entry, from: Style, to: Style) bool {
+        return std.mem.eql(u8, std.mem.asBytes(&found.from), std.mem.asBytes(&from)) and
+            std.mem.eql(u8, std.mem.asBytes(&found.to), std.mem.asBytes(&to));
+    }
+};
+
+/// One SGR parameter list, counted rather than written.
+const SgrCost = struct {
+    n: usize = 0,
+    any: bool = false,
+    turned_off: bool = false,
+
+    fn open(p: *SgrCost) void {
+        if (p.any) {
+            p.n += 1;
+        } else {
+            p.n += 2;
+            p.any = true;
+        }
+    }
+
+    fn code(p: *SgrCost, value: u8) void {
+        p.open();
+        p.n += digits(value);
+    }
+
+    fn offCode(p: *SgrCost, value: u8) void {
+        p.turned_off = true;
+        p.code(value);
+    }
+
+    fn compound(p: *SgrCost, len: usize) void {
+        p.open();
+        p.n += len;
+    }
+
+    fn field(p: *SgrCost, value: u8) void {
+        p.n += 1 + digits(value);
+    }
+
+    fn finish(p: *SgrCost) void {
+        if (p.any) p.n += 1;
+    }
+};
+
+/// Counts one foreground or background colour parameter.
+fn colorCost(p: *SgrCost, color: morse.Color, default_code: u8, base: u8, bright_base: u8, extended: u8) void {
+    switch (color.kind) {
+        .default => p.offCode(default_code),
+        .ansi => {
+            const slot = color.index();
+            p.code(if (slot < 8) base + slot else bright_base + (slot - 8));
+        },
+        .palette => {
+            p.code(extended);
+            p.n += 3 + digits(color.index());
+        },
+        .rgb => {
+            p.code(extended);
+            p.n += 3 + digits(color.r);
+            p.field(color.g);
+            p.field(color.b);
+        },
+    }
+}
+
+/// Counts one underline-colour parameter.
+fn underlineColorCost(p: *SgrCost, color: morse.Color) void {
+    switch (color.kind) {
+        .default => p.offCode(59),
+        .ansi, .palette => {
+            p.compound(5);
+            p.n += digits(color.index());
+        },
+        .rgb => {
+            p.compound(6);
+            p.n += digits(color.r);
+            p.n += 1 + digits(color.g);
+            p.n += 1 + digits(color.b);
+        },
+    }
+}
+
+/// Counts either spelling of one SGR transition.
+fn sgrCost(from: Style, to: Style, reset: bool) SgrCost {
+    var p: SgrCost = .{};
+    if (reset) p.code(0);
+    const base: Style = if (reset) .{} else from;
+
+    const off_bold_dim = (base.bold and !to.bold) or (base.dim and !to.dim);
+    if (off_bold_dim) p.offCode(22);
+    if (base.italic and !to.italic) p.offCode(23);
+    if (base.underline != .none and to.underline == .none) p.offCode(24);
+    if (base.blink and !to.blink) p.offCode(25);
+    if (base.reverse and !to.reverse) p.offCode(27);
+    if (base.hidden and !to.hidden) p.offCode(28);
+    if (base.strikethrough and !to.strikethrough) p.offCode(29);
+    if (base.overline and !to.overline) p.offCode(55);
+    if (base.script != to.script and to.script == .none) p.offCode(75);
+
+    if (to.bold and (!base.bold or off_bold_dim)) p.code(1);
+    if (to.dim and (!base.dim or off_bold_dim)) p.code(2);
+    if (to.italic and !base.italic) p.code(3);
+    if (to.underline != base.underline and to.underline != .none) {
+        if (to.underline == .single) {
+            p.code(4);
+        } else {
+            p.compound(2);
+            p.n += digits(@intFromEnum(to.underline));
+        }
+    }
+    if (to.blink and !base.blink) p.code(5);
+    if (to.reverse and !base.reverse) p.code(7);
+    if (to.hidden and !base.hidden) p.code(8);
+    if (to.strikethrough and !base.strikethrough) p.code(9);
+    if (to.overline and !base.overline) p.code(53);
+    if (to.script != base.script and to.script != .none) p.code(@intFromEnum(to.script));
+
+    if (!base.fg.eql(to.fg)) colorCost(&p, to.fg, 39, 30, 90, 38);
+    if (!base.bg.eql(to.bg)) colorCost(&p, to.bg, 49, 40, 100, 48);
+    if (!base.underline_color.eql(to.underline_color)) underlineColorCost(&p, to.underline_color);
+    p.finish();
+    return p;
+}
+
+/// The shortest SGR transition, by the same arithmetic as `morse.diffStyle`.
+fn styleCost(from: Style, to: Style) usize {
+    if (std.mem.eql(u8, std.mem.asBytes(&from), std.mem.asBytes(&to))) return 0;
+    const delta = sgrCost(from, to, false);
+    if (!delta.turned_off) return delta.n;
+    return @min(delta.n, sgrCost(from, to, true).n);
+}
+
+fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
+    if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
+    const from = state.style;
+    const n = r.style_sequences.getCost(from, to) orelse cost: {
+        const computed = styleCost(from, to);
+        r.style_sequences.putCost(from, to, computed);
+        break :cost computed;
+    };
+    state.style = to;
+    return n;
+}
+
+/// The OSC 8 transition cost, including the target strings for an open.
+fn setLinkCost(state: *CostState, s: *const Screen, to: Link, caps: Caps) usize {
+    if (!caps.osc8 or state.link == to) return 0;
+    if (to == .none) {
+        state.link = .none;
+        return hyperlink_end_cost;
+    }
+    const target = s.target(to) orelse {
+        state.link = .none;
+        return hyperlink_end_cost;
+    };
+    state.link = to;
+    return hyperlink_end_cost + target.uri.len + target.params.len;
+}
+
 /// What `CSI n X` costs before it starts saving: the introducer, one digit
 /// and the final byte. A blank run longer than this is cheaper erased.
 const erase_cost = 4;
+
+/// `CSI 0 K` and `OSC 8 ; ; ST` respectively.
+const clear_line_cost = 4;
+const hyperlink_end_cost = 7;
 
 /// Whether every cell is shown exactly as the grid holds it, so a row can be
 /// compared and remembered as memory rather than cell by cell through
@@ -1059,14 +1612,6 @@ fn trailingBlank(cells: []const Cell, caps: Caps) u16 {
     var i: u16 = @intCast(cells.len);
     while (i > 0 and visible(cells[i - 1], caps).isBlankIn(.{})) i -= 1;
     return i;
-}
-
-/// How many default blanks there are from `col`, stopping at `to`.
-fn blankRunLen(cells: []const Cell, col: u16, to: u16, caps: Caps) u16 {
-    var n: u16 = 0;
-    var i = col;
-    while (i <= to and visible(cells[i], caps).isBlankIn(.{})) : (i += 1) n += 1;
-    return n;
 }
 
 /// Whether the terminal and this package cannot disagree about a cluster's
@@ -1281,10 +1826,8 @@ const Frame = struct {
         const f: *Frame = @alignCast(@fieldParentPtr("writer", w));
         if (f.sync and !f.opened) {
             f.opened = true;
-            var counter: Writer.Discarding = .init(&.{});
-            try morse.syncOutput.set(&counter.writer, true);
             try morse.syncOutput.set(f.out, true);
-            f.n += counter.fullCount();
+            f.n += sync_sequence_cost;
         }
         const aux = w.buffered();
         const aux_n = try f.out.writeSplatHeader(aux, data, splat);
@@ -1313,14 +1856,13 @@ const Frame = struct {
             return;
         }
         try f.writer.flush();
-        var before = f.out.end;
-        _ = &before;
-        var counter: Writer.Discarding = .init(&.{});
-        try morse.syncOutput.set(&counter.writer, false);
         try morse.syncOutput.set(f.out, false);
-        f.n += counter.fullCount();
+        f.n += sync_sequence_cost;
     }
 };
+
+/// `CSI ? 2026 h` or `CSI ? 2026 l`.
+const sync_sequence_cost = 4 + digits(morse.syncOutput.number);
 
 const testing = std.testing;
 
@@ -1719,6 +2261,76 @@ test "both ways of writing a row are priced in the bytes they really cost" {
     try testing.expectEqual(priced, stats.bytes);
 }
 
+test "arithmetic style prices match every emitted transition" {
+    const styles = [_]Style{
+        .{},
+        .{ .bold = true },
+        .{ .bold = true, .dim = true, .italic = true },
+        .{ .underline = .curly, .underline_color = .ansi(.green) },
+        .{ .blink = true, .reverse = true, .hidden = true, .strikethrough = true },
+        .{ .overline = true, .script = .superscript },
+        .{ .fg = .ansi(.bright_magenta), .bg = .palette(137) },
+        .{ .fg = .rgb(1, 22, 203), .bg = .rgb(255, 0, 9) },
+        .{ .underline = .dashed, .underline_color = .rgb(9, 88, 7) },
+    };
+    for (styles) |from| {
+        for (styles) |to| {
+            var bytes: [128]u8 = undefined;
+            var out: Writer = .fixed(&bytes);
+            try morse.diffStyle(&out, from, to);
+            try testing.expectEqual(out.buffered().len, styleCost(from, to));
+        }
+    }
+}
+
+test "arithmetic row prices match emitted rows" {
+    var f: Fixture = try .init(testing.allocator, 40, 2);
+    defer f.deinit();
+    f.caps.rep = true;
+    f.caps.scaled_text = true;
+
+    const link = try f.screen.link(testing.allocator, "https://ziglang.org", "id=price");
+    for (0..40) |col| try f.screen.write(@intCast(col), 0, "x", .{}, .none);
+    _ = try f.draw();
+
+    try f.screen.write(0, 0, "a", .{ .bold = true }, link);
+    try f.screen.write(2, 0, "b", .{ .fg = .rgb(1, 22, 203) }, .none);
+    for (8..20) |col| try f.screen.write(@intCast(col), 0, "y", .{ .underline = .curly }, .none);
+    f.screen.fill(.{ .col = 30, .row = 0, .cols = 10, .rows = 1 }, .blank(.{}));
+
+    const Check = struct {
+        fn row(fixture: *Fixture, whole: bool) !void {
+            const r = &fixture.renderer;
+            const saved = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+            var emitted: Writer.Discarding = .init(&.{});
+            var ignored: Renderer.Stats = .{};
+            try r.emitRow(&emitted.writer, &fixture.screen, fixture.caps, 0, 0, 39, whole, &ignored);
+            r.style = saved.style;
+            r.link = saved.link;
+            r.cursor = saved.cursor;
+
+            const priced = try r.price(&fixture.screen, fixture.caps, 0, 0, 39, whole);
+            try testing.expectEqual(emitted.fullCount(), priced);
+            if (whole) {
+                try testing.expect(r.paintTextFloor(&fixture.screen, fixture.caps, 0) <= priced);
+            } else {
+                try testing.expect(r.isolatedDiffCost(&fixture.screen, fixture.caps, 0, 0, 39, std.math.maxInt(usize)).? >= priced);
+            }
+            try testing.expectEqual(saved.style, r.style);
+            try testing.expectEqual(saved.link, r.link);
+            try testing.expectEqual(saved.cursor, r.cursor);
+        }
+    };
+
+    try Check.row(&f, false);
+    try Check.row(&f, true);
+    f.renderer.region = 2;
+    f.renderer.cursor = .{ .col = 17, .row = 1 };
+    f.renderer.style = .{ .bold = true, .fg = .ansi(.cyan) };
+    try Check.row(&f, false);
+    try Check.row(&f, true);
+}
+
 test "a row with one cell changed is not written whole" {
     var f: Fixture = try .init(testing.allocator, 40, 1);
     defer f.deinit();
@@ -1883,6 +2495,22 @@ test "a change of width method repaints every row that ever drifted" {
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 1), stats.rows);
     try testing.expectEqual(@as(u32, 1), stats.repainted);
+}
+
+test "cached row safety follows scrolled previous rows" {
+    var f: Fixture = try .init(testing.allocator, 4, 4);
+    defer f.deinit();
+
+    f.renderer.untrusted[2] = true;
+    f.renderer.shiftPrev(0, 3, 1, true);
+    try testing.expect(f.renderer.untrusted[1]);
+    try testing.expect(!f.renderer.untrusted[2]);
+    try testing.expect(!f.renderer.untrusted[3]);
+
+    f.renderer.shiftPrev(0, 3, 2, false);
+    try testing.expect(f.renderer.untrusted[3]);
+    try testing.expect(!f.renderer.untrusted[0]);
+    try testing.expect(!f.renderer.untrusted[1]);
 }
 
 test "a screen of the wrong size is refused rather than drawn" {

@@ -205,8 +205,8 @@ them with the shortest cursor move; the cheaper path decides whether the run
 continues.
 
 **A row is written whole when the diff would cost more.** Both are priced by
-emitting them into a writer that counts and discards, so the answer is the
-real byte count rather than a model of one.
+counting their exact text, style, link, erase and cursor-move bytes, so the
+choice takes no extra emit pass.
 
 **A blank run is erased, not painted.** A row blank to its end is `EL`, four
 bytes whatever the width; a blank run longer than the sequence that erases it

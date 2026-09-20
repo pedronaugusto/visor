@@ -221,6 +221,18 @@ pub const Screen = struct {
             put = .blank(put.style);
         }
 
+        // The overwhelmingly common write replaces one ordinary cell with
+        // another. Neither side can own a tail, so there is no block to
+        // detach or rebuild.
+        if (put.shape.kind == .narrow and put.rows() == 1 and
+            s.cells[i].shape.kind == .narrow and s.cells[i].rows() == 1)
+        {
+            if (s.cells[i].eql(put)) return;
+            s.cells[i] = put;
+            s.damage.mark(col, row);
+            return;
+        }
+
         const span = put.width();
         const tall = put.rows();
         var dr: u16 = 0;
@@ -269,7 +281,8 @@ pub const Screen = struct {
     ) Allocator.Error!void {
         if (grapheme.len == 0) return;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
-        const w = textmod.graphemeWidth(grapheme, s.method);
+        const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
+        const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
         if (w == 0) return;
         const t = try s.graphemes.intern(s.gpa, grapheme);
         s.writeOwnedCell(col, row, .{
@@ -281,7 +294,7 @@ pub const Screen = struct {
                 // Worked out once, here, and read by the drift rule every
                 // frame after: re-measuring a row costs as much as drawing
                 // one.
-                .drift = textmod.disagrees(grapheme),
+                .drift = if (ascii) false else textmod.disagrees(grapheme),
             },
         });
     }
@@ -308,7 +321,8 @@ pub const Screen = struct {
         }
         if (grapheme.len == 0) return false;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
-        const w = textmod.graphemeWidth(grapheme, s.method);
+        const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
+        const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
         if (w == 0) return false;
         if (@as(u32, col) + @as(u32, w) * scale > s.size.cols) return false;
         if (@as(u32, row) + scale > s.size.rows) return false;
@@ -319,7 +333,7 @@ pub const Screen = struct {
             .link = to,
             .shape = .{
                 .kind = if (w == 2) .wide else .narrow,
-                .drift = textmod.disagrees(grapheme),
+                .drift = if (ascii) false else textmod.disagrees(grapheme),
                 .scale = scale,
             },
         });

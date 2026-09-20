@@ -51,6 +51,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Row and run planning counts the exact output arithmetically instead of
+  emitting candidates into counting writers, removing repeated render passes
+  from changed frames without changing their bytes. Safe damage spans,
+  printable ASCII measurement, and repeated SGR transitions reuse facts the
+  renderer already knows as well.
 - A failed frame write is retried as a complete repaint without losing text,
   damage, or image-layer changes.
 - `Screen.writeCell` and `Window.writeCell` are replaced by `copyCell`, which
