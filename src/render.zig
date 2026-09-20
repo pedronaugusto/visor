@@ -218,6 +218,12 @@ pub const Renderer = struct {
     /// nothing. Never flushes the caller's writer.
     pub fn draw(r: *Renderer, w: *Writer, s: *Screen, caps: Caps) Error!Stats {
         if (!std.meta.eql(r.size, s.size)) return error.SizeMismatch;
+        // The emit path updates its model while it constructs the frame. If
+        // any write fails, none of those updates describe what the terminal
+        // received, so the next attempt must establish the whole frame from
+        // an absolute position again. Damage and layers are committed only
+        // after the caller accepted every byte below.
+        errdefer r.repaint();
         var stats: Stats = .{};
 
         // A terminal told to measure clusters differently has redrawn
@@ -245,9 +251,6 @@ pub const Renderer = struct {
                 if (try scroll_detect.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
             }
             try r.drawRows(out, s, caps, &stats);
-            s.damage.clear();
-            @memset(r.force, false);
-            r.repaint_all = false;
         }
         // Between frames the terminal carries no open link. It costs the
         // seven bytes that close one on the frame that opened it, and it
@@ -264,6 +267,12 @@ pub const Renderer = struct {
         try r.finishCursor(out, s);
 
         try frame.finish();
+        if (body) {
+            s.damage.clear();
+            @memset(r.force, false);
+            r.repaint_all = false;
+        }
+        s.layers.commitFrame(caps);
         stats.bytes = frame.n;
         return stats;
     }
@@ -1180,6 +1189,19 @@ test "the same frame twice writes nothing the second time" {
     _ = try f.draw();
     try f.expectBytes("");
     f.screen.damageAll();
+    try f.expectBytes("");
+}
+
+test "a failed frame is written in full when retried" {
+    var f: Fixture = try .init(testing.allocator, 10, 2);
+    defer f.deinit();
+
+    try f.screen.write(4, 1, "x", .{}, .none);
+    var short: [1]u8 = undefined;
+    var failing: Writer = .fixed(&short);
+    try testing.expectError(error.WriteFailed, f.renderer.draw(&failing, &f.screen, f.caps));
+
+    try f.expectBytes("\x1b]8;;\x1b\\\x1b[0m\x1b[2;1H    x\x1b[0K");
     try f.expectBytes("");
 }
 

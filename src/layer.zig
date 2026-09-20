@@ -213,10 +213,7 @@ pub const Layers = struct {
     /// Writes nothing when nothing moved, so a caller may call it twice and
     /// a renderer that calls it for them costs nothing.
     pub fn emit(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
-        if (!caps.kitty_graphics) {
-            l.declared.clearRetainingCapacity();
-            return 0;
-        }
+        if (!caps.kitty_graphics) return 0;
         std.mem.sort(Layer, l.declared.items, {}, lessThan);
         var written: usize = 0;
 
@@ -237,13 +234,21 @@ pub const Layers = struct {
             written += 1;
         }
 
-        // The two lists change places rather than one being copied into the
-        // other, so this allocates nothing and `draw` keeps its promise.
+        return written;
+    }
+
+    /// Commits the declarations after the caller accepted the complete
+    /// frame. Kept separate from `emit` so a failed output write can retry
+    /// both placements and deletions unchanged.
+    pub fn commitFrame(l: *Layers, caps: Caps) void {
+        if (!caps.kitty_graphics) {
+            l.declared.clearRetainingCapacity();
+            return;
+        }
         const was_shown = l.shown;
         l.shown = l.declared;
         l.declared = was_shown;
         l.declared.clearRetainingCapacity();
-        return written;
     }
 
     /// Takes every placement off the screen. What a program writes on the
