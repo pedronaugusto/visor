@@ -304,7 +304,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
         3 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
-            s.writeCell(col, row, .blank(styles[smith.index(styles.len)]));
+            s.writeOwnedCell(col, row, .blank(styles[smith.index(styles.len)]));
         },
         4 => s.fill(randomRect(smith, cols, rows), .blank(styles[smith.index(styles.len)])),
         5 => s.scroll(randomRect(smith, cols, rows), smith.valueRangeAtMost(i32, -3, 3)),
@@ -361,6 +361,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
     }
 
     // A repaint recovers from any state the renderer drifted into.
+    corrupt(&h.renderer, smith);
     h.renderer.repaint();
     _ = try h.frame(o);
     try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
@@ -377,6 +378,19 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
     _ = try once.draw(&h.out.writer, &h.screen, h.caps);
     fresh.feed(h.out.written());
     try expectAgrees(&h.screen, fresh);
+}
+
+/// Puts the renderer's model out of step with the terminal, as a dropped
+/// write or an out-of-band terminal write would.
+fn corrupt(r: *visor.Renderer, smith: *Smith) void {
+    var i: usize = 0;
+    const count = smith.valueRangeAtMost(u8, 1, 8);
+    while (i < count and r.prev.len != 0) : (i += 1) {
+        r.prev[smith.index(r.prev.len)] = .blank(styles[smith.index(styles.len)]);
+    }
+    r.style = styles[smith.index(styles.len)];
+    r.cursor = null;
+    r.shown = null;
 }
 
 test "the second emulator agrees, measuring by codepoint" {
