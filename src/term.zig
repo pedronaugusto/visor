@@ -204,7 +204,7 @@ pub const Term = struct {
             var spacer: Cell = .blank(t.style);
             spacer.shape.kind = .spacer_head;
             var at = t.col;
-            while (at < cols) : (at += 1) t.scr.writeCell(at, t.row, spacer);
+            while (at < cols) : (at += 1) t.scr.writeOwnedCell(at, t.row, spacer);
             t.col = 0;
             t.lineFeed();
         }
@@ -254,7 +254,7 @@ pub const Term = struct {
         for (0..distance) |k| {
             const row: u16 = @intCast(first + k);
             var col = rect.col;
-            while (col < rect.right()) : (col += 1) t.scr.writeCell(col, row, blank);
+            while (col < rect.right()) : (col += 1) t.scr.writeOwnedCell(col, row, blank);
         }
     }
 
@@ -436,7 +436,7 @@ pub const Term = struct {
         const blank = t.erased();
         var i: u16 = 0;
         while (i < count and col + i < t.scr.size.cols) : (i += 1) {
-            t.scr.writeCell(col + i, row, blank);
+            t.scr.writeOwnedCell(col + i, row, blank);
         }
     }
 
@@ -474,7 +474,7 @@ pub const Term = struct {
         var col = cols;
         while (col > t.col + count) {
             col -= 1;
-            t.scr.writeCell(col, t.row, t.scr.readCell(col - count, t.row).?);
+            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col - count, t.row).?);
         }
         t.eraseRun(t.col, t.row, count);
     }
@@ -486,7 +486,7 @@ pub const Term = struct {
         const count: u16 = @intCast(@min(n, cols - t.col));
         var col = t.col;
         while (col + count < cols) : (col += 1) {
-            t.scr.writeCell(col, t.row, t.scr.readCell(col + count, t.row).?);
+            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col + count, t.row).?);
         }
         t.eraseRun(cols - count, t.row, count);
     }

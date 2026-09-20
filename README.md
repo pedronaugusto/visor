@@ -160,8 +160,8 @@ with a `try`. Resizing allocates.
 | | |
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
-| The grid | `Screen` — `init`, `deinit`, `resize`, `writeCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `print`, `printSegment`, `writeCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
+| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
+| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |

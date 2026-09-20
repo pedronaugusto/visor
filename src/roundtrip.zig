@@ -202,7 +202,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
         3 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
-            s.writeCell(col, row, .blank(styles[smith.index(styles.len)]));
+            s.writeOwnedCell(col, row, .blank(styles[smith.index(styles.len)]));
         },
         4 => {
             const rect = randomRect(smith, cols, rows);

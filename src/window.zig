@@ -213,9 +213,15 @@ pub const Window = struct {
     }
 
     /// One cell, in this window's coordinates, clipped.
-    pub fn writeCell(w: Window, col: u16, row: u16, c: Cell) void {
+    pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
-        w.screen.writeCell(w.rect.col + col, w.rect.row + row, c);
+        w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, c);
+    }
+
+    /// Copies a cell from another screen into this window.
+    pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) std.mem.Allocator.Error!void {
+        if (col >= w.rect.cols or row >= w.rect.rows) return;
+        try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, c);
     }
 
     /// What is there, or null outside the window.
@@ -432,7 +438,7 @@ pub const Window = struct {
         if (glyph.len > Cell.Text.max_inline) return;
         const cluster = textmod.graphemeWidth(glyph, w.screen.method);
         if (cluster == 0) return;
-        w.writeCell(col, row, .{
+        w.writeOwnedCell(col, row, .{
             .text = .inlined(glyph),
             .style = cellmod.canonical(style),
             .shape = .{
@@ -477,7 +483,7 @@ test "the whole grid is a window and a child is inside it" {
 
     const c = root.child(.{ .col = 2, .row = 1, .cols = 4, .rows = 2 });
     try testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, c.rect);
-    c.writeCell(0, 0, .init(.{ .text = .inlined("x") }));
+    c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expectEqualStrings("x", s.textAt(2, 1));
 }
 
@@ -486,7 +492,7 @@ test "a child asked for outside its parent comes back empty" {
     defer s.deinit(testing.allocator);
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
     try testing.expect(c.rect.isEmpty());
-    c.writeCell(0, 0, .init(.{ .text = .inlined("x") }));
+    c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expect(!s.damage.any());
 }
 
@@ -502,8 +508,8 @@ test "a write past the window's edge writes nothing at all" {
     var s = try made(6, 2);
     defer s.deinit(testing.allocator);
     const c = s.window().child(.{ .col = 1, .row = 0, .cols = 2, .rows = 1 });
-    c.writeCell(5, 0, .init(.{ .text = .inlined("x") }));
-    c.writeCell(0, 5, .init(.{ .text = .inlined("x") }));
+    c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
+    c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
     try testing.expect(!s.damage.any());
     try testing.expectEqual(@as(?Cell, null), c.readCell(2, 0));
 }

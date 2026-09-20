@@ -196,7 +196,7 @@ pub const Screen = struct {
         return s.cells[s.index(col, row)];
     }
 
-    /// One cell, clipped, damage marked. Never allocates.
+    /// One cell already owned by this screen, clipped and damage marked.
     ///
     /// A cell two columns wide also writes its tail, and whatever the two of
     /// them covered is repaired: a half of another wide grapheme becomes a
@@ -204,7 +204,7 @@ pub const Screen = struct {
     /// left becomes a blank, because a terminal asked to draw it there would
     /// wrap it onto the next row. A cell handed in as a tail is taken as a
     /// blank: tails are the grid's own bookkeeping.
-    pub fn writeCell(s: *Screen, col: u16, row: u16, c: Cell) void {
+    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) void {
         if (col >= s.size.cols or row >= s.size.rows) return;
         const i = s.index(col, row);
 
@@ -230,6 +230,18 @@ pub const Screen = struct {
         }
     }
 
+    /// Copies a cell from another screen, re-interning every owned value.
+    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) Allocator.Error!void {
+        var put = c;
+        if (c.text.isPooled()) put.text = try s.graphemes.intern(s.gpa, source.graphemes.slice(&c.text));
+        if (source.links.get(c.link)) |link_target| {
+            put.link = try s.links.intern(s.gpa, link_target.uri, link_target.params);
+        } else {
+            put.link = .none;
+        }
+        s.writeOwnedCell(col, row, put);
+    }
+
     /// A grapheme measured, placed, and its tail written if it is wide.
     ///
     /// Allocates only when the grapheme is longer than six bytes and the
@@ -249,7 +261,7 @@ pub const Screen = struct {
         const w = textmod.graphemeWidth(grapheme, s.method);
         if (w == 0) return;
         const t = try s.graphemes.intern(s.gpa, grapheme);
-        s.writeCell(col, row, .{
+        s.writeOwnedCell(col, row, .{
             .text = t,
             .style = cellmod.canonical(style),
             .link = to,
@@ -270,7 +282,7 @@ pub const Screen = struct {
         var y = r.row;
         while (y < r.bottom()) : (y += 1) {
             var col = r.col;
-            while (col < r.right()) : (col += 1) s.writeCell(col, @intCast(y), c);
+            while (col < r.right()) : (col += 1) s.writeOwnedCell(col, @intCast(y), c);
         }
     }
 
@@ -518,7 +530,7 @@ test "a write outside the grid changes nothing" {
 
     try s.write(9, 0, "x", .{}, .none);
     try s.write(0, 9, "x", .{}, .none);
-    s.writeCell(4, 0, .blank(.{ .bold = true }));
+    s.writeOwnedCell(4, 0, .blank(.{ .bold = true }));
     try testing.expect(!s.damage.any());
     try testing.expectEqual(@as(?Cell, null), s.readCell(4, 0));
 }
@@ -593,7 +605,7 @@ test "a wide grapheme with one column left becomes a blank" {
 test "a caller's tail is taken as a blank" {
     var s = try made(3, 1);
     defer s.deinit(testing.allocator);
-    s.writeCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
+    s.writeOwnedCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
     try testing.expectEqualStrings(" ", s.textAt(1, 0));
     try checkInvariants(&s);
 }
@@ -723,6 +735,18 @@ test "a long grapheme is pooled and read back through the screen" {
     try testing.expect(c.text.isPooled());
     try testing.expectEqualStrings(family, s.textAt(0, 0));
     try checkInvariants(&s);
+}
+
+test "copying a pooled cell between screens keeps its source text" {
+    var a = try made(2, 1);
+    defer a.deinit(testing.allocator);
+    var b = try made(2, 1);
+    defer b.deinit(testing.allocator);
+
+    try a.write(0, 0, "source-long", .{}, .none);
+    try b.write(1, 0, "target-long", .{}, .none);
+    try b.copyCell(&a, 0, 0, a.readCell(0, 0).?);
+    try testing.expectEqualStrings("source-long", b.textAt(0, 0));
 }
 
 test "a link is interned and reaches the cell" {

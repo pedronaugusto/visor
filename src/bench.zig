@@ -178,7 +178,7 @@ test "a frame that changed every style stays inside its budget" {
             var style = c.style;
             style.reverse = true;
             c.setStyle(style);
-            b.screen.writeCell(col, row, c);
+            b.screen.writeOwnedCell(col, row, c);
         }
     }
     const stats = try b.draw();
@@ -217,7 +217,7 @@ test "the draw path allocates nothing at all" {
     // standing by to prove nothing reaches for one.
     const gpa = failing.allocator();
     _ = gpa;
-    b.screen.writeCell(4, 4, .blank(.{ .bold = true }));
+    b.screen.writeOwnedCell(4, 4, .blank(.{ .bold = true }));
     b.screen.fill(.{ .col = 0, .row = 0, .cols = 10, .rows = 2 }, .blank(.{}));
     b.screen.scroll(.fromSize(b.screen.size), 1);
     b.screen.clear();

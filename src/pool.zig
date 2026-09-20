@@ -82,9 +82,11 @@ pub const Graphemes = struct {
         if (found) |e| return .atOffset(e.key_ptr.offset, e.key_ptr.len);
 
         const offset = std.math.cast(u32, p.bytes.items.len) orelse return error.OutOfMemory;
+        const borrowed = aliasOffset(p.bytes.items, grapheme);
         try p.bytes.ensureUnusedCapacity(gpa, grapheme.len);
         try p.index.ensureUnusedCapacityContext(gpa, 1, .{ .bytes = p.bytes.items });
-        p.bytes.appendSliceAssumeCapacity(grapheme);
+        const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
+        p.bytes.appendSliceAssumeCapacity(source);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return .atOffset(offset, byte_len);
@@ -193,13 +195,17 @@ pub const Links = struct {
         const i = std.math.cast(u16, l.entries.items.len) orelse return error.OutOfMemory;
         if (i == std.math.maxInt(u16)) return error.OutOfMemory;
 
+        const uri_borrowed = aliasOffset(l.bytes.items, uri);
+        const params_borrowed = aliasOffset(l.bytes.items, params);
         try l.bytes.ensureUnusedCapacity(gpa, uri.len + params.len);
         try l.entries.ensureUnusedCapacity(gpa, 1);
         try l.index.ensureUnusedCapacityContext(gpa, 1, .{ .links = l });
 
-        l.bytes.appendSliceAssumeCapacity(uri);
+        const uri_source = if (uri_borrowed) |off| l.bytes.items[off..][0..uri.len] else uri;
+        l.bytes.appendSliceAssumeCapacity(uri_source);
         const params_off: u32 = @intCast(l.bytes.items.len);
-        l.bytes.appendSliceAssumeCapacity(params);
+        const params_source = if (params_borrowed) |off| l.bytes.items[off..][0..params.len] else params;
+        l.bytes.appendSliceAssumeCapacity(params_source);
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,
@@ -227,6 +233,18 @@ pub const Links = struct {
         return l.entries.items.len;
     }
 };
+
+/// The offset of a slice borrowed from `storage`, saved across a possible
+/// reallocation. Empty slices need no preservation.
+fn aliasOffset(storage: []const u8, bytes: []const u8) ?usize {
+    if (bytes.len == 0 or storage.len == 0) return null;
+    const base = @intFromPtr(storage.ptr);
+    const at = @intFromPtr(bytes.ptr);
+    if (at < base or at - base > storage.len) return null;
+    const off = at - base;
+    if (bytes.len > storage.len - off) return null;
+    return off;
+}
 
 const testing = std.testing;
 
@@ -295,6 +313,17 @@ test "interning survives the pool being grown under it" {
     }
 }
 
+test "interning a borrowed substring survives pool growth" {
+    var p: Graphemes = .{};
+    defer p.deinit(testing.allocator);
+
+    const whole = try p.intern(testing.allocator, "x-borrowed-long");
+    p.bytes.shrinkAndFree(testing.allocator, p.bytes.items.len);
+    const borrowed = p.slice(&whole)[2..];
+    const part = try p.intern(testing.allocator, borrowed);
+    try testing.expectEqualStrings("borrowed-long", p.slice(&part));
+}
+
 test "a link is interned and its parameters are part of it" {
     var l: Links = .{};
     defer l.deinit(testing.allocator);
@@ -319,6 +348,18 @@ test "an empty uri is no link at all" {
     try testing.expectEqual(Link.none, try l.intern(testing.allocator, "", "id=1"));
     try testing.expectEqual(@as(?Target, null), l.get(.none));
     try testing.expectEqual(@as(usize, 0), l.count());
+}
+
+test "interning a borrowed target survives link-pool growth" {
+    var l: Links = .{};
+    defer l.deinit(testing.allocator);
+
+    const whole = try l.intern(testing.allocator, "x-https://example.test", "x-id=borrowed");
+    l.bytes.shrinkAndFree(testing.allocator, l.bytes.items.len);
+    const target = l.get(whole).?;
+    const part = try l.intern(testing.allocator, target.uri[2..], target.params[2..]);
+    try testing.expectEqualStrings("https://example.test", l.get(part).?.uri);
+    try testing.expectEqualStrings("id=borrowed", l.get(part).?.params);
 }
 
 test "a link index from another screen reads as nothing" {
