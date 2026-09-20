@@ -34,12 +34,13 @@ sys.stdout.write(before + BEGIN + "\n" + os.environ["BLOCK"] + "\n" + END + afte
 PY
 )
 
+# Command substitution drops the final newline; the file keeps one.
 if [ "${1-}" = "--write" ]; then
-    printf '%s' "$updated" > README.md
+    printf '%s\n' "$updated" > README.md
     exit 0
 fi
 
-if ! printf '%s' "$updated" | diff -u README.md - ; then
+if ! printf '%s\n' "$updated" | diff -u README.md - ; then
     echo
     echo "README.md's Usage block is out of date. Run ci/check-readme.sh --write" >&2
     exit 1
