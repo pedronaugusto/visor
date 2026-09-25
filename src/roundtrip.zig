@@ -535,10 +535,20 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
     defer showing.deinit(gpa);
     var expected_commands: usize = 0;
 
+    // What the program writes itself, outside a frame: pixels sent and
+    // images freed. Never fed to the terminals, which draw frames.
+    var side: std.Io.Writer.Allocating = .init(gpa);
+    defer side.deinit();
+    // The images sent or freed this frame, whose placements the terminal
+    // took down itself.
+    var resent: std.ArrayList(u32) = .empty;
+    defer resent.deinit(gpa);
+
     var frames: usize = 0;
     while (frames < 6 and !smith.eos()) : (frames += 1) {
         const previous = try gpa.dupe(Shown, showing.items);
         defer gpa.free(previous);
+        resent.clearRetainingCapacity();
 
         var ops: usize = 0;
         const count = smith.valueRangeAtMost(u8, 1, 8);
@@ -567,15 +577,39 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
                 2 => {
                     if (showing.items.len != 0) _ = showing.swapRemove(smith.index(showing.items.len));
                 },
-                3 => {
+                3 => switch (smith.valueRangeAtMost(u8, 0, 2)) {
+                    // Pixels sent under an id, perhaps one on screen, which
+                    // the terminal takes down while they land.
+                    0 => {
+                        const id = smith.valueRangeAtMost(u32, 1, 4);
+                        const px = [_]u8{ 0, 0, 0, 255 } ** 4;
+                        _ = try h.screen.layers.transmit(gpa, &side.writer, id, &px, .{
+                            .width = 2,
+                            .height = 2,
+                            .answer = smith.value(bool),
+                            .now_ms = @intCast(frames * 16),
+                        });
+                        try resent.append(gpa, id);
+                    },
                     // The terminal answers for an image, or refuses it.
-                    const number = smith.valueRangeAtMost(u32, 1, 4);
-                    try h.screen.layers.declareImage(gpa, .{ .number = number, .width = 32, .height = 32 });
-                    h.screen.layers.ack(.{
-                        .number = number,
-                        .id = smith.valueRangeAtMost(u32, 1, 99),
+                    1 => h.screen.layers.ack(.{
+                        .id = smith.valueRangeAtMost(u32, 1, 4),
                         .message = if (smith.value(bool)) "OK" else "ENOENT",
-                    });
+                    }),
+                    // An image freed: its placements go with it, and nothing
+                    // is left for the frame to delete.
+                    2 => {
+                        const id = smith.valueRangeAtMost(u32, 1, 4);
+                        try h.screen.layers.free(&side.writer, id);
+                        try resent.append(gpa, id);
+                        var i: usize = 0;
+                        while (i < showing.items.len) {
+                            if (showing.items[i].image == id) {
+                                _ = showing.swapRemove(i);
+                            } else i += 1;
+                        }
+                    },
+                    else => unreachable,
                 },
                 4 => {
                     // A frame of animation: every picture a cell along.
@@ -613,9 +647,11 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
         try testing.expectEqual(expected_commands, whole.graphics.items.len);
 
         // A deletion names one placement, keeps the bytes, and happens only
-        // for a picture that left.
+        // for a picture that left -- not for one whose image was sent again
+        // or freed, which the terminal took down itself.
         var left: usize = 0;
         for (previous) |was| {
+            if (std.mem.indexOfScalar(u32, resent.items, was.image) != null) continue;
             for (showing.items) |now| {
                 if (now.image == was.image and now.placement == was.placement) break;
             } else left += 1;

@@ -42,6 +42,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is read; a burst of signals is one event. `resized` is the same wake,
   asked without blocking, for a program with a loop of its own.
 - `Tty.inputFile`, the file keys and replies arrive on.
+- `Layers` owns an image's whole life, so a program writes no graphics
+  command itself. `transmit` sends pixels under an id, chunked, deflated when
+  that makes them smaller, and quiet unless an answer is asked for; `ready`
+  says whether a layer can show it — at once when sent quietly, on the
+  terminal's word when an answer was asked for, or when the caller's grace
+  period runs out, after which a terminal that has never answered is not
+  waited for again; `free` takes the pixels and every placement away, and
+  `freeAll` does it for every image on the way out. `Image.State`,
+  `Layers.answers` and `Layers.fallbacks` say where things stand. The layer
+  fuzz sends, answers and frees between frames.
 - `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
   and the way back. A screen entered this way is undone by `Tty.restore`,
   `Tty.close`, `restoreGlobal` and `Panic` too — modes, alternate screen and
@@ -58,6 +68,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   handler that only writes to a pipe, which a program reads through `Input`
   or asks with `resized`, rather than a function of the program's run in a
   signal context.
+- **Breaking:** an image is named by the id the program chooses (`i=`),
+  not by a number the terminal turns into an id. A program that picks its
+  ids needs no answer to name a picture, sending new pixels to an id
+  replaces them rather than leaving the old ones behind, and freeing one is
+  exact. `Image.number`, `Image.acked` and `Image.handle` are gone, and so is
+  `Layers.declareImage`: `transmit` records the image. `Layers.ack` matches
+  by id and ignores an answer about any other.
+- A layer's placement is written before a departed layer's deletion, so a
+  picture replaced by one under another id is covered before it goes.
+- **Breaking:** `Caps.Probe` has a `graphics_id` with no default, carried by
+  the graphics question in place of the fixed 31, and only an answer carrying
+  it sets `kitty_graphics`: an answer about one of the program's pictures is
+  not an answer to the question.
 - `Tty.open` on macOS opens the terminal under its device name when a
   standard stream is on it, rather than as `/dev/tty`, which the kernel's
   `poll` there cannot wait on.

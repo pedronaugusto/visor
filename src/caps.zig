@@ -114,13 +114,19 @@ pub const Caps = struct {
     /// "no", which is why they are asked together and why nothing here
     /// waits.
     pub const Probe = struct {
+        /// The image id the graphics question carries, which the answer
+        /// echoes back. No default: the program chooses one it never sends a
+        /// picture under, because the graphics answer is told from an
+        /// answer about a picture by this id alone, and an id that collides
+        /// with a picture's would read one as the other.
+        graphics_id: u32,
         /// What the questions have answered so far.
         caps: Caps = .{},
         /// Whether the closing DA1 reply has come back.
         done: bool = false,
 
         /// Writes every question, DA1 last.
-        pub fn write(_: *const Probe, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn write(p: *const Probe, w: *std.Io.Writer) std.Io.Writer.Error!void {
             try morse.queryMode(w, morse.syncOutput.number);
             try morse.queryMode(w, morse.unicodeCore.number);
             try morse.queryMode(w, morse.inBandResize.number);
@@ -128,7 +134,7 @@ pub const Caps = struct {
             try morse.queryCapability(w, "Tc");
             try morse.queryCapability(w, "RGB");
             try morse.queryVersion(w);
-            try morse.queryGraphics(w, 31);
+            try morse.queryGraphics(w, p.graphics_id);
             try morse.queryDeviceAttributes(w);
         }
 
@@ -171,8 +177,11 @@ pub const Caps = struct {
                 }
                 return;
             }
-            if (morse.parseGraphicsResponse(bytes)) |_| {
-                p.caps.kitty_graphics = true;
+            if (morse.parseGraphicsResponse(bytes)) |reply| {
+                // Any answer to the question, `OK` or an error, is a
+                // terminal that speaks the protocol; an answer about some
+                // other image is not an answer to it.
+                if (reply.id == p.graphics_id) p.caps.kitty_graphics = true;
                 return;
             }
             if (morse.parseDeviceAttributes(bytes)) |da| {
@@ -207,7 +216,7 @@ test "the defaults are what is safe on the oldest terminal" {
 test "the probe asks its questions and ends with the one always answered" {
     var buffer: [512]u8 = undefined;
     var out: std.Io.Writer = .fixed(&buffer);
-    const p: Caps.Probe = .{};
+    const p: Caps.Probe = .{ .graphics_id = 1 };
     try p.write(&out);
     const asked = out.buffered();
     try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2026$p") != null);
@@ -215,12 +224,12 @@ test "the probe asks its questions and ends with the one always answered" {
     try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2048$p") != null);
     try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q5463\x1b\\") != null);
     try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q524742\x1b\\") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1b_G") != null);
+    try testing.expect(std.mem.indexOf(u8, asked, "\x1b_Ga=q,i=1,") != null);
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
 }
 
 test "a mode reply turns its field on and a reset one turns it off" {
-    var p: Caps.Probe = .{};
+    var p: Caps.Probe = .{ .graphics_id = 1 };
     p.feed("\x1b[?2026;1$y");
     try testing.expect(p.caps.sync);
     p.feed("\x1b[?2026;2$y");
@@ -232,7 +241,7 @@ test "a mode reply turns its field on and a reset one turns it off" {
 }
 
 test "the probe settles on the device attributes answer and not before" {
-    var p: Caps.Probe = .{};
+    var p: Caps.Probe = .{ .graphics_id = 1 };
     p.feed("\x1b[?2026;1$y");
     try testing.expect(!p.settled());
     p.feed("\x1b[?62;4;22c");
@@ -240,7 +249,7 @@ test "the probe settles on the device attributes answer and not before" {
 }
 
 test "an unrecognised reply changes nothing" {
-    var p: Caps.Probe = .{};
+    var p: Caps.Probe = .{ .graphics_id = 1 };
     const before = p.caps;
     p.feed("nonsense");
     p.feed("\x1b[");
@@ -250,14 +259,24 @@ test "an unrecognised reply changes nothing" {
 }
 
 test "a 256-colour count is not evidence of truecolor" {
-    var p: Caps.Probe = .{};
+    var p: Caps.Probe = .{ .graphics_id = 1 };
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
     p.feed("\x1bP1+r436f=323536\x1b\\");
     try testing.expect(!p.caps.truecolor);
 }
 
 test "a truecolor-specific capability enables truecolor" {
-    var p: Caps.Probe = .{};
+    var p: Caps.Probe = .{ .graphics_id = 1 };
     p.feed("\x1bP1+r5463\x1b\\");
     try testing.expect(p.caps.truecolor);
+}
+
+test "the graphics answer is the one carrying the id the program chose" {
+    var p: Caps.Probe = .{ .graphics_id = 1 };
+    // An answer about a picture is not an answer to the question.
+    p.feed("\x1b_Gi=31;OK\x1b\\");
+    try testing.expect(!p.caps.kitty_graphics);
+    // A refusal of the question still says the protocol is there.
+    p.feed("\x1b_Gi=1;EINVAL:dimensions required\x1b\\");
+    try testing.expect(p.caps.kitty_graphics);
 }

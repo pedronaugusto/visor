@@ -168,7 +168,7 @@ with a `try`. Resizing allocates.
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
-| Pictures | `Image`, `Layer`, `Layer.Order`, `Layers`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `count` — `Transmit`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -277,9 +277,13 @@ half whether or not it wrote the opening one.
 **The text pass never writes a graphics command and never deletes a
 placement.** A picture that moves is re-placed under the same image and
 placement id, which the protocol replaces without flicker; one that leaves is
-deleted by name, and its bytes are kept. Nothing waits for an acknowledgement:
-a placement names the number the program chose, and the acknowledgement, when
-it comes, upgrades that to the id the terminal assigned.
+deleted by name after the frame's placements, with its pixels kept, so a
+picture swapped for another is covered before it goes. `Layers` sends the
+pixels too — chunked, deflated when that helps, quiet unless asked — and frees
+them, so a program writes no graphics command of its own. Nothing waits on the
+terminal's word unless asked to: an image sent quietly is shown at once, and
+one sent asking for an answer is shown on the answer or when the caller's grace
+period runs out, and a terminal that never answers is not waited for twice.
 
 **A cell's pixel size is the terminal's word, not a division.** The
 operating system and a resize report give the text area, which a terminal may
