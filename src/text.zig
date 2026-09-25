@@ -186,6 +186,13 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
                 break_at = null;
                 continue;
             }
+            // A cluster wider than the whole row takes a row of its own
+            // rather than leave an empty one before it.
+            if (row.end == row.start) {
+                row.columns = w;
+                row.end = at + g.len;
+                continue;
+            }
             // A space that crosses the edge is itself the break: the word
             // before it filled the row exactly.
             if (mode == .word and g.len == 1 and g[0] == ' ') {
@@ -318,6 +325,18 @@ test "a word that fills the row exactly breaks at the space after it" {
     try testing.expectEqual(@as(usize, 2), m);
     try testing.expectEqualStrings("abcde", spaced[rows[0].start..rows[0].end]);
     try testing.expectEqualStrings("fg", spaced[rows[1].start..rows[1].end]);
+}
+
+test "a cluster wider than the row takes a row of its own" {
+    const str = "\u{1f680}\u{1f680}";
+    var rows: [8]Row = undefined;
+    for ([_]Wrap{ .grapheme, .word }) |mode| {
+        const n = wrap(str, 1, mode, .unicode, &rows);
+        try testing.expectEqual(@as(usize, 2), n);
+        try testing.expectEqualStrings("\u{1f680}", str[rows[0].start..rows[0].end]);
+        try testing.expectEqual(@as(u16, 2), rows[0].columns);
+        try testing.expectEqualStrings("\u{1f680}", str[rows[1].start..rows[1].end]);
+    }
 }
 
 test "a word longer than the row is cut anyway" {

@@ -409,9 +409,9 @@ pub const Tty = struct {
 /// process group, which belongs to one session and so to one terminal.
 /// Null when no standard stream is on it. macOS only.
 fn deviceOf(ctty: std.posix.fd_t, buf: *[std.posix.PATH_MAX]u8) ?[]const u8 {
-    const group = std.posix.tcgetpgrp(ctty) catch return null;
+    const group = foregroundGroup(ctty) orelse return null;
     for ([_]std.posix.fd_t{ 0, 1, 2 }) |fd| {
-        const theirs = std.posix.tcgetpgrp(fd) catch continue;
+        const theirs = foregroundGroup(fd) orelse continue;
         if (theirs != group) continue;
         @memset(buf, 0);
         if (std.posix.errno(std.posix.system.fcntl(fd, std.posix.F.GETPATH, @intFromPtr(buf))) != .SUCCESS) continue;
@@ -420,6 +420,17 @@ fn deviceOf(ctty: std.posix.fd_t, buf: *[std.posix.PATH_MAX]u8) ?[]const u8 {
         return path;
     }
     return null;
+}
+
+/// The foreground process group of the terminal `fd` is open on, or null
+/// when it is not a terminal. By ioctl, because Zig's libc bindings for
+/// macOS have neither `tcgetpgrp` nor the request's name. macOS only.
+fn foregroundGroup(fd: std.posix.fd_t) ?std.posix.pid_t {
+    const tiocgpgrp = 0x40047477; // _IOR('t', 119, int)
+    var group: std.posix.pid_t = 0;
+    const rc = std.posix.system.ioctl(fd, ioctlRequest(tiocgpgrp), @intFromPtr(&group));
+    if (std.posix.errno(rc) != .SUCCESS) return null;
+    return group;
 }
 
 /// Puts the one open terminal back: the modes a renderer entered through
@@ -712,6 +723,15 @@ test "leaving through the terminal disarms, and a renderer that goes away is for
     r.deinit(testing.allocator);
     try testing.expect(armed == null);
     t.restore();
+}
+
+test "opening this program's terminal compiles and fails cleanly without one" {
+    // `open` is analysed only where it is called, and nothing else in the
+    // suite calls it: a platform it did not compile on went unnoticed.
+    if (Tty.open(testing.io)) |opened| {
+        var t = opened;
+        t.close();
+    } else |_| {}
 }
 
 test "the size carries the text area in pixels where the terminal set it" {

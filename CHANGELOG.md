@@ -141,6 +141,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Measured by codepoint (`.wcwidth`), a nonspacing or enclosing mark, a
   variation selector and a joiner counted a column each; `wcwidth(3)` counts
   them as nothing, so "e" and a combining acute measured two.
+- `wrap` left an empty row before a cluster wider than the whole row; the
+  cluster now takes a row of its own.
+- `Tty.open` did not compile on macOS: Zig's libc bindings there have no
+  `tcgetpgrp`. The foreground group is asked by ioctl, and a test now calls
+  `open` so a platform it fails to compile on is caught by the suite.
 
 ## [0.2.1] - 2026-09-20
 
