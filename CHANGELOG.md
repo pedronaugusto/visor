@@ -93,6 +93,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   standard stream is on it, rather than as `/dev/tty`, which the kernel's
   `poll` there cannot wait on.
 
+### Fixed
+
+- Bytes that are not UTF-8, written into the grid, reached the terminal as
+  they were and were measured as something they were not. `Screen.write` and
+  `writeScaled` now store the replacement character for them, which is what
+  a terminal would have drawn. Found by the text input's fuzz.
+
 ## [0.2.1] - 2026-09-20
 
 ### Fixed

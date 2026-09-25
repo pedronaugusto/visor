@@ -270,15 +270,19 @@ pub const Screen = struct {
     /// Allocates only when the grapheme is longer than six bytes and the
     /// screen has not seen it before. A grapheme that measures zero columns,
     /// and one that is or begins with a control character, is not written:
-    /// neither is something a terminal would put in a cell.
+    /// neither is something a terminal would put in a cell. Bytes that are
+    /// not UTF-8 are written as the replacement character, which is what a
+    /// terminal would have shown for them, so the grid never holds bytes the
+    /// terminal would read differently from the way they were measured.
     pub fn write(
         s: *Screen,
         col: u16,
         row: u16,
-        grapheme: []const u8,
+        text: []const u8,
         style: Style,
         to: Link,
     ) Allocator.Error!void {
+        const grapheme = valid(text);
         if (grapheme.len == 0) return;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
@@ -310,15 +314,16 @@ pub const Screen = struct {
         s: *Screen,
         col: u16,
         row: u16,
-        grapheme: []const u8,
+        text: []const u8,
         style: Style,
         to: Link,
         scale: u3,
     ) Allocator.Error!bool {
         if (scale <= 1) {
-            try s.write(col, row, grapheme, style, to);
+            try s.write(col, row, text, style, to);
             return true;
         }
+        const grapheme = valid(text);
         if (grapheme.len == 0) return false;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
@@ -338,6 +343,13 @@ pub const Screen = struct {
             },
         });
         return true;
+    }
+
+    /// A grapheme as it may go in a cell: itself when it is UTF-8, and the
+    /// replacement character when it is not.
+    fn valid(grapheme: []const u8) []const u8 {
+        if (grapheme.len == 1 and grapheme[0] < 0x80) return grapheme;
+        return if (std.unicode.utf8ValidateSlice(grapheme)) grapheme else "\u{fffd}";
     }
 
     /// A rectangle of one cell.
@@ -705,6 +717,17 @@ test "writing the same cell twice damages once and not at all the second time" {
     s.damage.clear();
     try s.write(1, 0, "a", .{}, .none);
     try testing.expect(!s.damage.any());
+}
+
+test "bytes that are not UTF-8 go in as the replacement character" {
+    var s: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 1 });
+    defer s.deinit(testing.allocator);
+    try s.write(0, 0, "\xff", .{}, .none);
+    try s.write(1, 0, "\xe4\xb8", .{}, .none);
+    try testing.expectEqualStrings("\u{fffd}", s.textAt(0, 0));
+    try testing.expectEqualStrings("\u{fffd}", s.textAt(1, 0));
+    try testing.expect(try s.writeScaled(2, 0, "\xc3", .{}, .none, 1));
+    try testing.expectEqualStrings("\u{fffd}", s.textAt(2, 0));
 }
 
 test "a wide grapheme writes a head and a tail" {
