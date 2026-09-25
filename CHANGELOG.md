@@ -24,6 +24,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the mouse modes that were turned on are turned off. `Renderer.setModes`
   changes them mid-session, writing only what differs, and `leave` undoes
   what is on at the time.
+- `Input`: the terminal's input, read. `next` reads the `Tty`, frames the
+  bytes with `morse.KeyParser` and hands back morse's own events one at a
+  time — every reply the terminal sends as `unhandled`, whole, for the
+  program's parser. A lone `ESC`, `ESC [` or `ESC O` waits the caller's
+  timeout for the rest of a sequence and is then the key it also is; the end
+  of the stream settles whatever was pending before it reports
+  `EndOfStream`. It starts no thread: `next` blocks on the caller's `std.Io`
+  and is stopped by cancelling the task it runs in, so nothing has to be
+  written to the terminal to wake it. A property test feeds random streams
+  through a pipe in reads of one to thirty-two bytes and checks the events
+  are the parser's over the whole stream.
+- `Tty.watchResize`, `unwatchResize`, `resized` and `resizeFile`: a
+  `SIGWINCH` handler that writes one byte into a pipe. `Input` waits on the
+  pipe beside the terminal and turns a wake into the same `resize` event an
+  in-band report is, with the size and pixels the operating system has when
+  it is read; a burst of signals is one event. `resized` is the same wake,
+  asked without blocking, for a program with a loop of its own.
+- `Tty.inputFile`, the file keys and replies arrive on.
 - `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
   and the way back. A screen entered this way is undone by `Tty.restore`,
   `Tty.close`, `restoreGlobal` and `Panic` too — modes, alternate screen and
@@ -36,6 +54,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   where the operating system has it, instead of a `Size`.
 - **Breaking:** `Renderer.enter(w, caps, mode, modes)` takes the input modes
   as a fourth argument; `.{}` asks for none, as before.
+- **Breaking:** `Tty.onResize` is gone. `watchResize` replaces it: a
+  handler that only writes to a pipe, which a program reads through `Input`
+  or asks with `resized`, rather than a function of the program's run in a
+  signal context.
+- `Tty.open` on macOS opens the terminal under its device name when a
+  standard stream is on it, rather than as `/dev/tty`, which the kernel's
+  `poll` there cannot wait on.
 
 ## [0.2.1] - 2026-09-20
 

@@ -169,7 +169,7 @@ with a `try`. Resizing allocates.
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
 | Pictures | `Image`, `Layer`, `Layer.Order`, `Layers`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -288,6 +288,16 @@ toward the right edge. `Winsize` keeps the area and the cell apart, takes the
 cell only from the terminal's answer to `CSI 16 t`, and when it has to divide
 it says so.
 
+**Input is morse's events, read.** `Input.next` reads the terminal, frames
+the bytes with `morse.KeyParser` and hands back the parser's events as they
+are — a reply to a question is `unhandled`, whole, for the program to read
+with the parser that reads it, so nothing is dropped on the way and there is
+no second event type. The lone `ESC` is settled on the caller's timeout; a
+resize wakes the wait through a pipe the signal handler writes to and comes
+back as the same `resize` event an in-band report is, with pixels. It starts
+no thread and keeps no clock: it blocks on the caller's `std.Io`, and
+cancelling the task it runs in is what stops it.
+
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
 `Caps.Probe` writes the questions and folds the answers in; a caller who would
@@ -315,7 +325,7 @@ its own.
 ## Scope
 
 - **No widgets in the base.** They are a second module, which `visor` never imports.
-- **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one.
+- **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one. `Input` is a read, not a loop: the program decides where it runs and what an event means.
 - **No widget whose substance is keys, focus or a clock.** Those are three quarters event handling, and the program has the loop.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
@@ -341,8 +351,8 @@ a local script and no CI job calls it.
 `Tty` is the one file that calls an operating system. It is compiled on all
 three platforms in CI, and on Linux and macOS the suite runs it against a
 pseudo-terminal it opens itself: the size with its pixels, entering and
-leaving, and the panic path's way back. The Windows half is compiled and not
-run.
+leaving, the panic path's way back, and a resize waking `Input`. The Windows
+half is compiled and not run.
 
 ## Testing
 

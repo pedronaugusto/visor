@@ -28,6 +28,7 @@ const cell_mod = @import("cell.zig");
 const caps_mod = @import("caps.zig");
 const damage_mod = @import("damage.zig");
 const geom_mod = @import("geom.zig");
+const input_mod = @import("input.zig");
 const layer_mod = @import("layer.zig");
 const pool_mod = @import("pool.zig");
 const render_mod = @import("render.zig");
@@ -143,6 +144,10 @@ pub const Layers = layer_mod.Layers;
 
 /// This program's own terminal, for a program that wants one.
 pub const Tty = tty_mod.Tty;
+/// The terminal's input, read and framed: morse's events, one at a time,
+/// with the lone escape settled on the caller's timeout and a resize woken
+/// out of the wait.
+pub const Input = input_mod.Input;
 /// How big the terminal is: the grid, and what it has said about pixels.
 pub const Winsize = winsize_mod.Winsize;
 /// A size in pixels, zero where unknown.
@@ -174,6 +179,7 @@ test {
     _ = caps_mod;
     _ = damage_mod;
     _ = geom_mod;
+    _ = input_mod;
     _ = layer_mod;
     _ = pool_mod;
     _ = render_mod;

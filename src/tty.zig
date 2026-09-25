@@ -51,6 +51,36 @@ pub fn forget(r: *const Renderer) void {
     if (armed == r) armed = null;
 }
 
+/// The pipe a resize writes into, read end first; `-1` when nothing is
+/// watched. Global because a signal handler is handed nothing else.
+var resize_pipe: [2]if (is_windows) i32 else std.posix.fd_t = .{ -1, -1 };
+/// The `SIGWINCH` handler that was there before `watchResize`.
+var resize_was: if (is_windows) void else std.posix.Sigaction = undefined;
+
+/// The handler: one byte into a pipe, which is all a signal handler may do.
+/// A full pipe already holds a wake, so a write that would block is dropped.
+fn onWinch(_: std.posix.SIG) callconv(.c) void {
+    const byte: [1]u8 = .{'w'};
+    _ = std.posix.system.write(resize_pipe[1], &byte, 1);
+}
+
+/// Empties the resize pipe; whether there was anything in it. `Input` calls
+/// this after the pipe woke it.
+pub fn drainResizePipe() bool {
+    var any = false;
+    var sink: [64]u8 = undefined;
+    while (true) {
+        const rc = std.posix.system.read(resize_pipe[0], &sink, sink.len);
+        if (std.posix.errno(rc) != .SUCCESS or rc == 0) return any;
+        any = true;
+    }
+}
+
+fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
+    const rc = std.posix.system.fcntl(fd, cmd, @as(usize, arg));
+    if (std.posix.errno(rc) != .SUCCESS) return error.Unexpected;
+}
+
 /// What the terminal was before this program touched it.
 const Saved = if (is_windows) struct {
     input: windows.HANDLE,
@@ -73,8 +103,6 @@ pub const Tty = struct {
     /// What the terminal was before `raw`, or null when it has not been
     /// changed.
     saved: ?Saved = null,
-    /// Whether a resize handler has been installed.
-    watching: bool = false,
 
     /// Anything opening the terminal can fail with.
     pub const OpenError = Io.File.OpenError || error{NotATerminal};
@@ -119,6 +147,19 @@ pub const Tty = struct {
             };
         }
         const file = try Io.Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = .read_write });
+        if (builtin.os.tag == .macos) {
+            // The kernel's poll cannot wait on /dev/tty here -- it answers
+            // POLLNVAL at once -- and the reader waits on the terminal and
+            // the resize pipe together. The device the standard streams are
+            // on is the same terminal under a name poll does work on.
+            var path: [std.posix.PATH_MAX]u8 = undefined;
+            if (deviceOf(file.handle, &path)) |device| {
+                if (Io.Dir.openFileAbsolute(io, device, .{ .mode = .read_write })) |real| {
+                    file.close(io);
+                    return .{ .file = real, .io = io, .input = {} };
+                } else |_| {}
+            }
+        }
         return .{ .file = file, .io = io, .input = {} };
     }
 
@@ -132,6 +173,7 @@ pub const Tty = struct {
     /// Gives the terminal back, restoring its mode first if it was changed.
     pub fn close(t: *Tty) void {
         t.restore();
+        t.unwatchResize();
         t.file.close(t.io);
         if (is_windows and t.input.handle != t.file.handle) t.input.close(t.io);
         t.* = undefined;
@@ -288,39 +330,97 @@ pub const Tty = struct {
         return file.readStreaming(t.io, &.{buf});
     }
 
-    /// Calls `handler` when the terminal changes size.
+    /// Has a resize wake the reader: a handler for `SIGWINCH` that writes a
+    /// byte into a pipe, which `Input.next` waits on beside the terminal and
+    /// turns into a `resize` event carrying the size and pixels the
+    /// operating system has now.
     ///
     /// Installed only when asked for, because a library that installs a
     /// signal handler takes something from the program that the program
-    /// cannot get back. The handler runs in a signal context: it may not
-    /// allocate, may not lock and may not draw. Set a flag and read it from
-    /// the loop; ask the size again when you do, because the one that was
-    /// current when the signal arrived may not be any more.
+    /// cannot get back; `unwatchResize` and `close` put the one it found
+    /// back. The handler does nothing but that write, so a burst of signals
+    /// is one wake and one event.
     ///
     /// A terminal that answers for mode 2048 makes this unnecessary: the
-    /// resize arrives on the input stream, as an event rather than an
-    /// interruption.
-    pub fn onResize(t: *Tty, comptime handler: fn () void) error{}!void {
-        if (is_windows) {
-            // The console reports a resize as an input record, which the
-            // read path already sees; there is no signal to install.
-            t.watching = true;
-            return;
+    /// resize arrives on the input stream, in step with everything else. On
+    /// Windows there is no signal and this does nothing.
+    pub fn watchResize(t: *Tty) error{ SystemResources, Unexpected }!void {
+        _ = t;
+        if (is_windows) return;
+        if (resize_pipe[0] != -1) return;
+        var fds: [2]std.posix.fd_t = undefined;
+        switch (std.posix.errno(std.posix.system.pipe(&fds))) {
+            .SUCCESS => {},
+            .MFILE, .NFILE => return error.SystemResources,
+            else => return error.Unexpected,
         }
-        const wrapped = struct {
-            fn onSignal(_: i32) callconv(.c) void {
-                handler();
-            }
+        errdefer for (fds) |fd| {
+            _ = std.posix.system.close(fd);
         };
-        var action: std.posix.Sigaction = .{
-            .handler = .{ .handler = wrapped.onSignal },
+        for (fds) |fd| {
+            try fcntlSet(fd, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+            try fcntlSet(fd, std.posix.F.SETFD, std.posix.FD_CLOEXEC);
+        }
+        resize_pipe = fds;
+        const action: std.posix.Sigaction = .{
+            .handler = .{ .handler = onWinch },
             .mask = std.posix.sigemptyset(),
             .flags = std.posix.SA.RESTART,
         };
-        std.posix.sigaction(.WINCH, &action, null);
-        t.watching = true;
+        std.posix.sigaction(.WINCH, &action, &resize_was);
+    }
+
+    /// Puts back the `SIGWINCH` handler `watchResize` found, and closes the
+    /// pipe. Safe to call when nothing is being watched.
+    pub fn unwatchResize(t: *Tty) void {
+        _ = t;
+        if (is_windows or resize_pipe[0] == -1) return;
+        std.posix.sigaction(.WINCH, &resize_was, null);
+        for (resize_pipe) |fd| {
+            _ = std.posix.system.close(fd);
+        }
+        resize_pipe = .{ -1, -1 };
+    }
+
+    /// Whether the terminal has changed size since this was last asked, for
+    /// a program with a loop of its own rather than an `Input`. Never
+    /// blocks; false when nothing is being watched.
+    pub fn resized(t: *Tty) bool {
+        _ = t;
+        if (is_windows or resize_pipe[0] == -1) return false;
+        return drainResizePipe();
+    }
+
+    /// The read end of the resize pipe, when a resize is being watched.
+    pub fn resizeFile(t: *const Tty) ?Io.File {
+        _ = t;
+        if (is_windows or resize_pipe[0] == -1) return null;
+        return .{ .handle = resize_pipe[0], .flags = .{ .nonblocking = true } };
+    }
+
+    /// The file keys and replies arrive on.
+    pub fn inputFile(t: *const Tty) Io.File {
+        return if (is_windows) t.input else t.file;
     }
 };
+
+/// The device behind `/dev/tty`, found as the device one of the standard
+/// streams is open on when it is the same terminal: the same foreground
+/// process group, which belongs to one session and so to one terminal.
+/// Null when no standard stream is on it. macOS only.
+fn deviceOf(ctty: std.posix.fd_t, buf: *[std.posix.PATH_MAX]u8) ?[]const u8 {
+    const group = std.posix.tcgetpgrp(ctty) catch return null;
+    for ([_]std.posix.fd_t{ 0, 1, 2 }) |fd| {
+        const theirs = std.posix.tcgetpgrp(fd) catch continue;
+        if (theirs != group) continue;
+        @memset(buf, 0);
+        if (std.posix.errno(std.posix.system.fcntl(fd, std.posix.F.GETPATH, @intFromPtr(buf))) != .SUCCESS) continue;
+        const path = std.mem.sliceTo(buf, 0);
+        if (!std.mem.startsWith(u8, path, "/dev/") or std.mem.eql(u8, path, "/dev/tty")) continue;
+        return path;
+    }
+    return null;
+}
 
 /// Puts the one open terminal back: the modes a renderer entered through
 /// `Tty.enter` undone — keyboard flags popped, mouse, paste, focus and
