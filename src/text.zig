@@ -78,7 +78,8 @@ pub const Graphemes = struct {
 /// The columns one grapheme cluster takes: 0, 1 or 2.
 ///
 /// `.wcwidth` sums its codepoints the way a terminal with no cluster support
-/// does, and clamps at two; `.unicode` and `.explicit` measure the cluster
+/// does, `wcwidth(3)` a codepoint, and clamps at two: a mark that combines, a
+/// variation selector and a joiner take no column of their own; `.unicode` and `.explicit` measure the cluster
 /// whole, which is what puts a flag or a family emoji in two columns instead
 /// of eight.
 pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
@@ -87,11 +88,24 @@ pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
         .wcwidth => {
             var total: usize = 0;
             var it: uucode.utf8.Iterator = .init(grapheme);
-            while (it.next()) |cp| total += uucode.get(.wcwidth_standalone, cp);
+            while (it.next()) |cp| total += codepointWidth(cp);
             return @intCast(@min(total, 2));
         },
         .unicode, .explicit => return @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2)),
     }
+}
+
+/// One codepoint's columns as `wcwidth(3)` counts them. uucode's
+/// zero-in-cluster set is the marks, the selectors, the joiner and the
+/// Hangul vowels and finals, which `wcwidth(3)` counts as nothing even
+/// alone; the emoji modifiers are in it too, and `wcwidth(3)` counts
+/// those as the emoji they are.
+fn codepointWidth(cp: u21) usize {
+    return switch (cp) {
+        // the five skin tones
+        0x1f3fb...0x1f3ff => uucode.get(.wcwidth_standalone, cp),
+        else => if (uucode.get(.wcwidth_zero_in_grapheme, cp)) 0 else uucode.get(.wcwidth_standalone, cp),
+    };
 }
 
 /// The columns a string takes, by `method`.
@@ -172,6 +186,12 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
                 break_at = null;
                 continue;
             }
+            // A space that crosses the edge is itself the break: the word
+            // before it filled the row exactly.
+            if (mode == .word and g.len == 1 and g[0] == ' ') {
+                break_at = at;
+                break_columns = row.columns;
+            }
             const cut = if (mode == .word) break_at orelse at else at;
             const cut_columns = if (mode == .word and break_at != null) break_columns else row.columns;
             rows_out[written] = .{ .start = row.start, .end = cut, .columns = cut_columns };
@@ -246,6 +266,17 @@ test "a combining mark adds no columns to the cluster it joins" {
     try testing.expectEqual(@as(u16, 1), width("e\u{301}", .unicode));
 }
 
+test "measured per codepoint, a mark, a selector and a joiner take no column" {
+    // wcwidth(3) counts a nonspacing mark as nothing, even with no base.
+    try testing.expectEqual(@as(u2, 1), graphemeWidth("e\u{301}", .wcwidth));
+    try testing.expectEqual(@as(u16, 1), width("c\u{30e}", .wcwidth));
+    try testing.expectEqual(@as(u2, 0), graphemeWidth("\u{301}", .wcwidth));
+    try testing.expectEqual(@as(u2, 1), graphemeWidth("\u{2764}\u{fe0f}", .wcwidth));
+    // a skin tone is an emoji of its own to wcwidth(3)
+    try testing.expectEqual(@as(u2, 2), graphemeWidth("\u{1f3fd}", .wcwidth));
+    try testing.expectEqual(@as(u2, 2), graphemeWidth("\u{1f44b}\u{1f3fd}", .wcwidth));
+}
+
 test "the clusters come out whole" {
     var it: Graphemes = .init("a\u{e9}\u{1f469}\u{200d}\u{1f680}\u{4e2d}");
     try testing.expectEqualStrings("a", it.next().?);
@@ -271,6 +302,22 @@ test "wrapping by word cuts at a space and eats it" {
     try testing.expectEqual(@as(usize, 2), n);
     try testing.expectEqualStrings("the quick", str[rows[0].start..rows[0].end]);
     try testing.expectEqualStrings("brown fox", str[rows[1].start..rows[1].end]);
+}
+
+test "a word that fills the row exactly breaks at the space after it" {
+    const str = "ab cd efg";
+    var rows: [8]Row = undefined;
+    const n = wrap(str, 5, .word, .unicode, &rows);
+    try testing.expectEqual(@as(usize, 2), n);
+    try testing.expectEqualStrings("ab cd", str[rows[0].start..rows[0].end]);
+    try testing.expectEqual(@as(u16, 5), rows[0].columns);
+    try testing.expectEqualStrings("efg", str[rows[1].start..rows[1].end]);
+    // and several spaces at the edge are all eaten
+    const spaced = "abcde   fg";
+    const m = wrap(spaced, 5, .word, .unicode, &rows);
+    try testing.expectEqual(@as(usize, 2), m);
+    try testing.expectEqualStrings("abcde", spaced[rows[0].start..rows[0].end]);
+    try testing.expectEqualStrings("fg", spaced[rows[1].start..rows[1].end]);
 }
 
 test "a word longer than the row is cut anyway" {

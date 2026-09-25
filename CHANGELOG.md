@@ -135,6 +135,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exiting or panicking on a terminal that had stopped reading waited for
   ever. The mode now goes back at once, and unread input is thrown away
   first, so a late answer to a probe does not land in the shell.
+- `wrap` by word broke a row one word early when the space that crossed the
+  edge was itself the break: "ab cd efg" at five columns came out "ab",
+  "cd ef", "g" instead of "ab cd", "efg".
+- Measured by codepoint (`.wcwidth`), a nonspacing or enclosing mark, a
+  variation selector and a joiner counted a column each; `wcwidth(3)` counts
+  them as nothing, so "e" and a combining acute measured two.
 
 ## [0.2.1] - 2026-09-20
 
