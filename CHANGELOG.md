@@ -130,6 +130,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   they were and were measured as something they were not. `Screen.write` and
   `writeScaled` now store the replacement character for them, which is what
   a terminal would have drawn. Found by the text input's fuzz.
+- The way out (`Tty.restore`, `restoreGlobal`, the panic handler) put the
+  terminal's mode back only after all output had been read, so a program
+  exiting or panicking on a terminal that had stopped reading waited for
+  ever. The mode now goes back at once, and unread input is thrown away
+  first, so a late answer to a probe does not land in the shell.
 
 ## [0.2.1] - 2026-09-20
 

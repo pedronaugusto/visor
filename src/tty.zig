@@ -470,7 +470,31 @@ fn restoreSaved(was: Saved) void {
         _ = SetConsoleMode(was.output, was.output_mode);
         return;
     }
-    std.posix.tcsetattr(was.handle, .FLUSH, was.mode) catch {};
+    // At once, not after the output drains: a terminal that is not reading
+    // (paused, or gone) would hold a panicking program here for ever. What
+    // was written is already queued and is sent either way.
+    discardInput(was.handle);
+    std.posix.tcsetattr(was.handle, .NOW, was.mode) catch {};
+}
+
+/// Throws away what the terminal sent that nobody read, without waiting on
+/// the output: a late answer to a probe would otherwise land in the shell.
+fn discardInput(handle: std.posix.fd_t) void {
+    const T = std.posix.T;
+    if (@hasDecl(T, "CFLSH")) {
+        // TCIFLUSH, which is zero on every Linux architecture
+        _ = std.posix.system.ioctl(handle, ioctlRequest(T.CFLSH), @as(usize, 0));
+    } else if (@hasDecl(T, "IOCFLUSH")) {
+        var which: c_int = 1; // FREAD
+        _ = std.posix.system.ioctl(handle, ioctlRequest(T.IOCFLUSH), @intFromPtr(&which));
+    }
+}
+
+/// The request argument as this system's `ioctl` spells its type: a
+/// `c_int` through libc, where the high bit of a request is a sign bit.
+const IoctlRequest = if (is_windows) u32 else @typeInfo(@TypeOf(std.posix.system.ioctl)).@"fn".params[1].type.?;
+fn ioctlRequest(v: u32) IoctlRequest {
+    return if (@typeInfo(IoctlRequest).int.signedness == .signed) @bitCast(v) else @intCast(v);
 }
 
 /// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
@@ -586,22 +610,23 @@ test "the panic handler is a type to install, not something installed" {
 
 /// The master end read on a thread of its own, for the calls that wait for
 /// the output to drain before they return.
-const Drain = struct {
-    file: Io.File,
-    want: usize,
-    buf: [1024]u8 = undefined,
-    got: usize = 0,
-
-    fn run(d: *Drain) void {
-        const bytes = readAtLeast(testing.io, d.file, &d.buf, d.want) catch return;
-        d.got = bytes.len;
-    }
-};
-
 /// Everything the master end has been sent, until `want` bytes have come.
 fn readAtLeast(io: Io, file: Io.File, buf: []u8, want: usize) ![]const u8 {
     var got: usize = 0;
     while (got < want) {
+        const n = try file.readStreaming(io, &.{buf[got..]});
+        if (n == 0) break;
+        got += n;
+    }
+    return buf[0..got];
+}
+
+/// Everything the master end has been sent, until `part` is in it: a
+/// write may arrive in more than one read.
+fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
+    var got: usize = 0;
+    while (std.mem.indexOf(u8, buf[0..got], part) == null) {
+        if (got == buf.len) return error.NoSpaceLeft;
         const n = try file.readStreaming(io, &.{buf[got..]});
         if (n == 0) break;
         got += n;
@@ -638,20 +663,22 @@ test "entering through the terminal arms the way back, and the panic path undoes
     const entered = try readAtLeast(testing.io, pair.master, &seen, 1);
     try testing.expect(std.mem.startsWith(u8, entered, "\x1b[?1049h\x1b[>2u"));
 
-    // The panic path: no argument, no allocation, no failure. The mode is
-    // put back with the output drained first, and on a pseudo-terminal the
-    // output drains only when the master reads it, so the reading is done
-    // beside it.
-    var reader: Drain = .{ .file = pair.master, .want = want.buffered().len };
-    const thread = try std.Thread.spawn(.{}, Drain.run, .{&reader});
+    // The panic path: no argument, no allocation, no failure, and no wait
+    // on a terminal that is not reading: nothing reads the master until
+    // the mode is back.
     restoreGlobal();
-    thread.join();
     try testing.expect(armed == null);
     try testing.expectEqual(@as(?Saved, null), open_tty);
-    const undone = reader.buf[0..reader.got];
-    try testing.expectEqualStrings(want.buffered(), undone);
+    // what is left of the way in, then the way out, whole
+    var out: [1024]u8 = undefined;
+    const undone = try readUntil(testing.io, pair.master, &out, "\x1b[<u\x1b[?1049l");
+    try testing.expect(std.mem.endsWith(u8, undone, want.buffered()));
     try testing.expect(std.mem.endsWith(u8, undone, "\x1b[<u\x1b[?1049l"));
-    const after = try std.posix.tcgetattr(t.file.handle);
+    var after = try std.posix.tcgetattr(t.file.handle);
+    // A BSD kernel marks input for retyping whenever canonical mode comes
+    // back without a flush that waits on the output; it clears on the next
+    // read and is not part of the mode that was found.
+    if (@hasField(@TypeOf(after.lflag), "PENDIN")) after.lflag.PENDIN = before.lflag.PENDIN;
     try testing.expectEqual(before.lflag, after.lflag);
     try testing.expectEqual(before.iflag, after.iflag);
     // The tty still thinks it is raw; that is the caller's own record, and
@@ -668,16 +695,15 @@ test "leaving through the terminal disarms, and a renderer that goes away is for
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
     try t.enter(&r, .{}, .alt, .{ .paste = true });
     var seen: [256]u8 = undefined;
-    const bytes = try readAtLeast(testing.io, pair.master, &seen, 1);
+    const bytes = try readUntil(testing.io, pair.master, &seen, "\x1b[?2004h");
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2004h") != null);
 
-    var reader: Drain = .{ .file = pair.master, .want = 1 };
-    const thread = try std.Thread.spawn(.{}, Drain.run, .{&reader});
+    // left with nothing reading the master: the way out must not wait on it
     try t.leave(&r);
-    thread.join();
     try testing.expect(armed == null);
     try testing.expect(t.saved == null);
-    try testing.expect(std.mem.indexOf(u8, reader.buf[0..reader.got], "\x1b[?2004l") != null);
+    const undone = try readUntil(testing.io, pair.master, &seen, "\x1b[?1049l");
+    try testing.expect(std.mem.indexOf(u8, undone, "\x1b[?2004l") != null);
 
     // Entered again, and the renderer goes away without leaving: the way
     // back forgets it rather than reaching for it.
@@ -736,17 +762,10 @@ pub const testing_pty = struct {
         }
     };
 
-    const set_winsize = request(switch (builtin.os.tag) {
+    const set_winsize = ioctlRequest(switch (builtin.os.tag) {
         .linux => std.os.linux.T.IOCSWINSZ,
         else => 0x80087467,
     });
-
-    /// The request argument as this system's `ioctl` spells its type: a
-    /// `c_int` through libc, where the high bit of a request is a sign bit.
-    const Request = @typeInfo(@TypeOf(std.posix.system.ioctl)).@"fn".params[1].type.?;
-    fn request(v: u32) Request {
-        return if (@typeInfo(Request).int.signedness == .signed) @bitCast(v) else @intCast(v);
-    }
 
     pub fn open(io: Io) !Pair {
         const master = try Io.Dir.openFileAbsolute(io, "/dev/ptmx", .{ .mode = .read_write });
@@ -763,9 +782,9 @@ pub const testing_pty = struct {
                 break :blk try std.fmt.bufPrint(&name_buf, "/dev/pts/{d}", .{n});
             },
             .macos => blk: {
-                const grant = request(0x20007454); // TIOCPTYGRANT
-                const unlock = request(0x20007452); // TIOCPTYUNLK
-                const get_name = request(0x40807453); // TIOCPTYGNAME
+                const grant = ioctlRequest(0x20007454); // TIOCPTYGRANT
+                const unlock = ioctlRequest(0x20007452); // TIOCPTYUNLK
+                const get_name = ioctlRequest(0x40807453); // TIOCPTYGNAME
                 if (std.posix.errno(std.posix.system.ioctl(master.handle, grant, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
                 if (std.posix.errno(std.posix.system.ioctl(master.handle, unlock, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
                 if (std.posix.errno(std.posix.system.ioctl(master.handle, get_name, @intFromPtr(&name_buf))) != .SUCCESS)
