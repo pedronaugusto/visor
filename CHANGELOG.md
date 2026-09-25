@@ -75,6 +75,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exact. `Image.number`, `Image.acked` and `Image.handle` are gone, and so is
   `Layers.declareImage`: `transmit` records the image. `Layers.ack` matches
   by id and ignores an answer about any other.
+- `dumpScreenStyles` names any number of styles. Past sixty-two every id is
+  two characters, in the legend and the grid alike, where before the
+  sixty-third style printed `?`. A cell's OSC 8 link is part of its style and
+  is printed last as ` link=<uri>`, and the column a wide grapheme covers
+  prints the id of the cell that covers it. The format is written out in the
+  function's documentation, for programs that write the same dump from
+  another renderer. **Breaking:** it and `Term.dumpStyles` can fail with
+  `error.OutOfMemory`, on the screen's own allocator.
 - A layer's placement is written before a departed layer's deletion, so a
   picture replaced by one under another id is covered before it goes.
 - **Breaking:** `Caps.Probe` has a `graphics_id` with no default, carried by

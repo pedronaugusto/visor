@@ -748,7 +748,7 @@ pub const Term = struct {
     }
 
     /// The styles as one identifier a cell, with the legend above.
-    pub fn dumpStyles(t: *const Term, w: *Writer) Writer.Error!void {
+    pub fn dumpStyles(t: *const Term, w: *Writer) (Writer.Error || std.mem.Allocator.Error)!void {
         try dumpScreenStyles(&t.scr, w);
     }
 
@@ -778,31 +778,72 @@ pub fn dumpScreen(s: *const Screen, w: *Writer) Writer.Error!void {
 /// The goldens compare glyphs, and a swap that passes them has proved half a
 /// renderer. This is the other half: the same draw writes a second file and
 /// a colour that moved fails as loudly as a glyph that did.
-pub fn dumpScreenStyles(s: *const Screen, w: *Writer) Writer.Error!void {
+///
+/// The format, which is also what other programs write to compare against
+/// this one:
+///
+/// - The legend first, one line per distinct style in the order it first
+///   appears reading row by row: `# <id> fg=<c> bg=<c>` and then, where they
+///   are on, ` ul=<u>`, ` ulc=<c>`, ` bold`, ` dim`, ` italic`, ` blink`,
+///   ` reverse`, ` hidden`, ` strike`, ` overline`, and last ` link=<uri>`
+///   for a cell carrying an OSC 8 link. The link is part of what makes a
+///   style distinct; its parameters are not printed.
+/// - A colour is `default`, one of the sixteen names, `palette:<n>`, or
+///   `#rrggbb` in lower case.
+/// - Ids are `0-9a-zA-Z`, one character a cell when the screen has 62 styles
+///   or fewer. With more, every id is two characters, most significant first,
+///   in the legend and in the grid, so a row of the grid is twice the width.
+/// - The grid is one line a row and one id a column. The column a wide
+///   grapheme covers prints the id of the cell it continues.
+/// - Every line ends in a newline, with no blank line after the last.
+///
+/// Allocates, on the screen's own allocator, what it needs to tell any
+/// number of styles apart; nothing survives the call.
+pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.Allocator.Error)!void {
     const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    var seen: [62]Style = undefined;
-    var count: usize = 0;
+    var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
 
-    // First pass: the legend, in the order the styles first appear.
-    for (s.cells) |c| {
-        if (indexOfStyle(seen[0..count], c.style) != null) continue;
-        if (count == seen.len) continue;
-        seen[count] = c.style;
-        count += 1;
+    // Each cell's legend line, keyed by the line itself: two cells whose
+    // lines read the same are the same style to anyone reading the dump.
+    var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
+    const ids = try arena.alloc(u32, s.cells.len);
+    var key: std.Io.Writer.Allocating = .init(arena);
+    for (s.cells, 0..) |cell, i| {
+        const col: u16 = @intCast(i % s.size.cols);
+        const row: u16 = @intCast(i / s.size.cols);
+        // A covered column speaks for the grapheme that covers it.
+        const source = if (s.headOf(col, row)) |head| s.cells[s.index(head.col, head.row)] else cell;
+        key.clearRetainingCapacity();
+        writeStyleName(&key.writer, source.style) catch return error.OutOfMemory;
+        if (s.target(source.link)) |target| {
+            key.writer.print(" link={s}", .{target.uri}) catch return error.OutOfMemory;
+        }
+        const found = try seen.getOrPut(arena, key.written());
+        if (!found.found_existing) found.key_ptr.* = try arena.dupe(u8, key.written());
+        ids[i] = @intCast(found.index);
     }
-    for (seen[0..count], 0..) |style, i| {
-        try w.print("# {c} ", .{alphabet[i]});
-        try writeStyleName(w, style);
+
+    const two = seen.count() > alphabet.len;
+    const Id = struct {
+        fn write(out: *Writer, id: u32, wide: bool) Writer.Error!void {
+            if (wide) try out.writeByte(alphabet[id / alphabet.len]);
+            try out.writeByte(alphabet[id % alphabet.len]);
+        }
+    };
+    for (seen.keys(), 0..) |line, i| {
+        try w.writeAll("# ");
+        try Id.write(w, @intCast(i), two);
+        try w.writeByte(' ');
+        try w.writeAll(line);
         try w.writeByte('\n');
     }
-
     var row: u16 = 0;
     while (row < s.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
-            const c = s.cells[s.index(col, row)];
-            const i = indexOfStyle(seen[0..count], c.style);
-            try w.writeByte(if (i) |n| alphabet[n] else '?');
+            try Id.write(w, ids[s.index(col, row)], two);
         }
         try w.writeByte('\n');
     }
@@ -847,12 +888,6 @@ fn stylesEqual(a: Style, b: Style) bool {
     const ca = cellmod.canonical(a);
     const cb = cellmod.canonical(b);
     return std.mem.eql(u8, std.mem.asBytes(&ca), std.mem.asBytes(&cb));
-}
-
-/// Where a style already is in the legend, or null.
-fn indexOfStyle(seen: []const Style, style: Style) ?usize {
-    for (seen, 0..) |s, i| if (stylesEqual(s, style)) return i;
-    return null;
 }
 
 /// Two screens compared cell by cell, naming the first that differs and
@@ -1461,6 +1496,86 @@ test "the style dump names every style it used" {
         \\0111
         \\
     , out.written());
+}
+
+test "the style dump spells every attribute in one order, and a link is part of the style" {
+    var sc: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer sc.deinit(testing.allocator);
+    const everything: Style = .{
+        .fg = .palette(208),
+        .bg = .rgb(0x1e, 0x1e, 0x2e),
+        .underline = .curly,
+        .underline_color = .ansi(.bright_red),
+        .bold = true,
+        .dim = true,
+        .italic = true,
+        .blink = true,
+        .reverse = true,
+        .hidden = true,
+        .strikethrough = true,
+        .overline = true,
+    };
+    try sc.write(0, 0, "a", everything, .none);
+    const zig = try sc.link(testing.allocator, "https://ziglang.org", "id=1");
+    const other = try sc.link(testing.allocator, "https://ziglang.org", "id=2");
+    try sc.write(1, 0, "b", .{}, zig);
+    // The same URI under another id prints the same line, so it is the same
+    // style to anyone reading the dump.
+    try sc.write(2, 0, "c", .{}, other);
+    // A wide grapheme's covered column prints the id of the cell it covers.
+    try sc.write(0, 1, "\u{4e2d}", .{ .fg = .ansi(.cyan) }, .none);
+
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try dumpScreenStyles(&sc, &out.writer);
+    try testing.expectEqualStrings(
+        \\# 0 fg=palette:208 bg=#1e1e2e ul=curly ulc=bright_red bold dim italic blink reverse hidden strike overline
+        \\# 1 fg=default bg=default link=https://ziglang.org
+        \\# 2 fg=default bg=default
+        \\# 3 fg=cyan bg=default
+        \\0112
+        \\3322
+        \\
+    , out.written());
+}
+
+test "past sixty-two styles every id is two characters, legend and grid alike" {
+    const cols = 10;
+    const rows = 7;
+    var sc: Screen = try .init(testing.allocator, .{ .cols = cols, .rows = rows });
+    defer sc.deinit(testing.allocator);
+    for (0..rows) |r| for (0..cols) |c| {
+        const n: u8 = @intCast(r * cols + c);
+        try sc.write(@intCast(c), @intCast(r), "x", .{ .fg = .rgb(n, 0, 0) }, .none);
+    };
+
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try dumpScreenStyles(&sc, &out.writer);
+    var lines = std.mem.splitScalar(u8, out.written(), '\n');
+    var legend: usize = 0;
+    var grid: usize = 0;
+    while (lines.next()) |line| {
+        if (line.len == 0) {
+            try testing.expect(lines.next() == null);
+            break;
+        }
+        if (line[0] == '#') {
+            legend += 1;
+            continue;
+        }
+        try testing.expectEqual(@as(usize, 2 * cols), line.len);
+        grid += 1;
+    }
+    try testing.expectEqual(@as(usize, cols * rows), legend);
+    try testing.expectEqual(@as(usize, rows), grid);
+    try testing.expect(std.mem.startsWith(u8, out.written(), "# 00 fg=#000000 bg=default\n"));
+    // The sixty-third style is the first to need the second character.
+    try testing.expect(std.mem.indexOf(u8, out.written(), "# 10 fg=#3e0000 bg=default\n") != null);
+    try testing.expect(std.mem.indexOf(u8, out.written(), "# 0Z fg=#3d0000 bg=default\n") != null);
+    // And the grid's first row is the first ten, two characters each.
+    try testing.expect(std.mem.indexOf(u8, out.written(), "\n00010203040506070809\n") != null);
+    try testing.expect(std.mem.indexOf(u8, out.written(), "?") == null);
 }
 
 test "comparing two screens names the first cell that differs" {
