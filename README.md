@@ -5,7 +5,7 @@
 visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
 the terminal from the frame it is showing to the one it should be showing. A
-second module, `visor.widgets`, holds a layout solver and thirteen widgets
+second module, `visor.widgets`, holds a layout solver and seventeen widgets
 drawn on that grid, and the base never imports it.
 
 ## Usage
@@ -163,8 +163,9 @@ with a `try`. Resizing allocates.
 | | |
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
+| Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
+| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
@@ -178,7 +179,8 @@ with a `try`. Resizing allocates.
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll), `List` and `List.State`, `Table` and `Table.State`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`. Beside them: `Item`, `Line`, `Row`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll), `List` and `List.State`, `Table` and `Table.State`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Row`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
 ## Design
@@ -330,7 +332,7 @@ its own.
 
 - **No widgets in the base.** They are a second module, which `visor` never imports.
 - **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one. `Input` is a read, not a loop: the program decides where it runs and what an event means.
-- **No widget whose substance is keys, focus or a clock.** Those are three quarters event handling, and the program has the loop.
+- **No widget whose substance is handling keys, focus or a clock.** Those are three quarters event handling, and the program has the loop. `Keys` shows which keys work and handles none; `TextInput` says where the cursor lands and moves it for no key.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
 - **One graphics protocol.** The kitty protocol, as ordered layers; there is no second picture path.
@@ -403,6 +405,13 @@ stacking changes and acknowledgements over the layers, with text drawn beside
 them, checking that a frame with nothing new writes nothing, that the text
 pass is whole before the first graphics command, and that a deletion happens
 only for a picture that left and names it alone.
+
+Input and typed text are fuzzed as well: random streams, pushed through a
+pipe and read in pieces of every size, must come out of `Input` as the events
+the parser makes of the whole stream; and random text — wide and combined
+clusters, both kinds of line end, bytes that are not UTF-8 — must lay out in
+`TextInput` with every byte in exactly one row and every cluster boundary a
+place that leads back to itself.
 
 Beside it: byte-exact tests on what each mechanism writes, a grid fuzz that
 checks the invariants and the damage map after every operation, a

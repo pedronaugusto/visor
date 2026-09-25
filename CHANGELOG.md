@@ -52,6 +52,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `freeAll` does it for every image on the way out. `Image.State`,
   `Layers.answers` and `Layers.fallbacks` say where things stand. The layer
   fuzz sends, answers and frees between frames.
+- `Palette`, `mix` and `Rgb`: what the terminal's colours look like.
+  `Palette.ask` writes the questions for the foreground, the background and
+  the sixteen slots; `update` folds the answers in; `resolve` turns any
+  colour into the RGB it is drawn in, or null while its slot is unanswered,
+  with the standard cube and grey ramp above the sixteen. `mix` is the step
+  between two colours, which is what a tint toward the background is.
+- `Window.linkAt`, the OSC 8 target under a cell — what a click there opens,
+  with no table of where links were drawn, because a cell carries its link —
+  and `Window.copyText`, one row's text between two columns as the terminal
+  shows it, for a selection.
+- In `visor.widgets`:
+  - `TextInput`, text being typed laid out as rows with the cursor as a place
+    in them. The layout is public — `rows`, `rowCount`, `place`, `at`,
+    `prev`, `next`, `wordStart`, `lineStart`, `lineEnd` — because the program
+    moving the cursor and the widget drawing it must agree on every break.
+    Every byte belongs to exactly one row; widths are by cluster, so a wide
+    or combined character moves as one. `draw` keeps the cursor's row in
+    view through `TextInput.State`. Fuzzed.
+  - `Scroll`, which rows of something longer a view shows: anchored at the
+    bottom it follows the live end, and scrolled back it holds the rows on
+    screen still while more arrive; anchored at the top it is a document.
+    `Scroll.State` is the offset and the length it was taken against.
+  - `Keys`, the keys that work here beside what they do, in one row, with
+    `width` for a program deciding what to drop on a short row.
+  - `Rule`, a line across a window or down it, in the glyph and style given.
+  - `Sextants` and `sextant`: a picture in cells, two by three pixels a cell,
+    for a terminal that draws no pictures; and `Marker.sextant` for `Canvas`.
+  - `Block.corners`: corner marks with no lines between them, which take no
+    room from the inside.
+  - `Sparkline.mode = .level`: each point the nearest of the eight heights,
+    never nothing, which is the sparkline a line of text wants.
 - `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
   and the way back. A screen entered this way is undone by `Tty.restore`,
   `Tty.close`, `restoreGlobal` and `Panic` too — modes, alternate screen and

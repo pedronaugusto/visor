@@ -31,6 +31,24 @@ pub const Block = struct {
     /// to first. Null leaves what is already there, which is what a block
     /// drawn over a background wants.
     style: ?Style = null,
+    /// Corners marked with the frame's corner glyphs and no line between
+    /// them: a reticle, or a pair of brackets at opposite corners. They take
+    /// no room from the inside, and need a window at least two cells each
+    /// way.
+    corners: Corners = .{},
+
+    /// Which corners carry a mark.
+    pub const Corners = packed struct(u4) {
+        top_left: bool = false,
+        top_right: bool = false,
+        bottom_left: bool = false,
+        bottom_right: bool = false,
+
+        /// All four.
+        pub const all: Corners = .{ .top_left = true, .top_right = true, .bottom_left = true, .bottom_right = true };
+        /// The top-left and the bottom-right: a frame implied, never drawn.
+        pub const diagonal: Corners = .{ .top_left = true, .bottom_right = true };
+    };
 
     /// Text on one of the frame's rows.
     pub const Title = struct {
@@ -57,6 +75,15 @@ pub const Block = struct {
             .glyphs = b.glyphs,
             .style = b.border_style,
         } });
+
+        if (win.cols() >= 2 and win.rows() >= 2) {
+            const right = win.cols() - 1;
+            const bottom = win.rows() - 1;
+            if (b.corners.top_left) try win.write(0, 0, b.glyphs.top_left, b.border_style, .none);
+            if (b.corners.top_right) try win.write(right, 0, b.glyphs.top_right, b.border_style, .none);
+            if (b.corners.bottom_left) try win.write(0, bottom, b.glyphs.bottom_left, b.border_style, .none);
+            if (b.corners.bottom_right) try win.write(right, bottom, b.glyphs.bottom_right, b.border_style, .none);
+        }
 
         if (b.title) |t| try b.drawTitle(win, 0, t);
         if (b.title_bottom) |t| try b.drawTitle(win, win.rows() -| 1, t);
@@ -160,4 +187,34 @@ test "a block's own style blanks what was under it" {
         \\
     );
     try testing.expectEqual(visor.Color.ansi(.blue), h.styleAt(0, 0).bg);
+}
+
+test "corners mark a frame without drawing it, and take no room from the inside" {
+    var h: Harness = try .init(testing.allocator, 8, 4);
+    defer h.deinit();
+    const inner = try (Block{
+        .corners = .diagonal,
+        .border_style = .{ .dim = true },
+        .padding = .{ .left = 2, .right = 2, .top = 1, .bottom = 1 },
+    }).draw(h.window());
+    try testing.expectEqual(visor.Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, inner.rect);
+    _ = try inner.printSegment(.{ .text = "abcd" }, .{});
+    try h.expectFrame(
+        \\┌
+        \\  abcd
+        \\
+        \\       ┘
+        \\
+    );
+    try testing.expect(h.styleAt(0, 0).dim);
+
+    h.window().clear();
+    _ = try (Block{ .corners = .all, .glyphs = .rounded }).draw(h.window().child(.{ .cols = 3, .rows = 2 }));
+    try h.expectFrame(
+        \\╭ ╮
+        \\╰ ╯
+        \\
+        \\
+        \\
+    );
 }

@@ -14,7 +14,7 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
-    const size: visor.Size = .{ .cols = 80, .rows = 26 };
+    const size: visor.Size = .{ .cols = 80, .rows = 33 };
     var screen: visor.Screen = try .init(gpa, size);
     defer screen.deinit(gpa);
     screen.method = .unicode;
@@ -45,13 +45,14 @@ pub fn main() !void {
     });
 }
 
-/// The page: four rows of panels, each one widget.
+/// The page: rows of panels, each one widget, and a key strip at the foot.
 fn draw(win: visor.Window) !void {
     const rows = (widgets.Layout.vertical(&.{
         .{ .fixed = 9 },
         .{ .fixed = 8 },
+        .{ .fixed = 9 },
         .{ .fill = 1 },
-    })).splitFixed(3, .fromSize(win.size()));
+    })).splitFixed(4, .fromSize(win.size()));
 
     const top = (widgets.Layout.horizontal(&.{
         .{ .fixed = 26 },
@@ -72,6 +73,59 @@ fn draw(win: visor.Window) !void {
     try drawMeters(child(win, middle[2]));
 
     try drawSpark(child(win, rows[2]));
+
+    const bottom = (widgets.Layout.horizontal(&.{
+        .{ .fill = 1 },
+        .{ .fixed = 24 },
+    })).splitFixed(2, rows[3]);
+    try drawInput(child(win, bottom[0]));
+    try drawSextants(child(win, bottom[1]));
+}
+
+fn drawInput(win: visor.Window) !void {
+    const inside = try panel(win, " text input, rule, keys ");
+    const rows = (widgets.Layout.vertical(&.{
+        .{ .fixed = 2 },
+        .{ .fixed = 1 },
+        .{ .fill = 1 },
+    })).splitFixed(3, .fromSize(inside.size()));
+    const draft = "a draft that wraps at a word and keeps its cursor in view";
+    var state: widgets.TextInput.State = .{};
+    try (widgets.TextInput{
+        .text = draft,
+        .cursor = draft.len,
+        .show_cursor = false,
+    }).draw(child(inside, rows[0]), &state);
+    try (widgets.Rule{ .glyph = widgets.Rule.dashed, .style = .{ .dim = true } }).draw(child(inside, rows[1]));
+    try (widgets.Keys{
+        .keys = &.{
+            .{ .key = "\u{21b5}", .label = "send" },
+            .{ .key = "esc", .label = "back" },
+        },
+        .key_style = .{ .fg = .ansi(.yellow), .bold = true },
+        .label_style = .{ .dim = true },
+    }).draw(child(inside, rows[2]));
+}
+
+fn drawSextants(win: visor.Window) !void {
+    const inside = (try (widgets.Block{
+        .corners = .all,
+        .border_style = .{ .dim = true },
+        .padding = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
+    }).draw(win));
+    // A lit disc, two by three pixels a cell.
+    const w = 40;
+    const h = 12;
+    var pixels: [w * h * 4]u8 = @splat(0);
+    for (0..h) |y| for (0..w) |x| {
+        const dx = (@as(f32, @floatFromInt(x)) - 20) / 20;
+        const dy = (@as(f32, @floatFromInt(y)) - 6) / 6;
+        const d = dx * dx + dy * dy;
+        if (d > 1) continue;
+        const v: u8 = @intFromFloat(255 * (1 - d * 0.7));
+        pixels[(y * w + x) * 4 ..][0..4].* = .{ v / 3, v, v, 255 };
+    };
+    try (widgets.Sextants{ .pixels = &pixels, .width = w, .height = h }).draw(inside);
 }
 
 /// A window over one of the split's rectangles.

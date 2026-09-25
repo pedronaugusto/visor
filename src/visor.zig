@@ -30,6 +30,7 @@ const damage_mod = @import("damage.zig");
 const geom_mod = @import("geom.zig");
 const input_mod = @import("input.zig");
 const layer_mod = @import("layer.zig");
+const palette_mod = @import("palette.zig");
 const pool_mod = @import("pool.zig");
 const render_mod = @import("render.zig");
 const screen_mod = @import("screen.zig");
@@ -66,6 +67,12 @@ pub const Underline = cell_mod.Underline;
 pub const Link = cell_mod.Link;
 /// The target a `Link` names: a URI and the parameters beside it.
 pub const Target = pool_mod.Target;
+/// A colour as eight bits a channel.
+pub const Rgb = palette_mod.Rgb;
+/// What the terminal's colours look like, as it reported them.
+pub const Palette = palette_mod.Palette;
+/// The step between two colours.
+pub const mix = palette_mod.mix;
 
 //=========================================================================
 // The grid and the views of it.
@@ -181,6 +188,7 @@ test {
     _ = geom_mod;
     _ = input_mod;
     _ = layer_mod;
+    _ = palette_mod;
     _ = pool_mod;
     _ = render_mod;
     _ = @import("scroll.zig");

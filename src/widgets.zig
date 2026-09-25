@@ -77,6 +77,18 @@ pub const Scrollbar = @import("widgets/scrollbar.zig").Scrollbar;
 pub const Canvas = @import("widgets/canvas.zig").Canvas;
 /// One month, as weeks in rows.
 pub const Calendar = @import("widgets/calendar.zig").Calendar;
+/// Text being typed, laid out as rows, with the cursor as a place in them.
+pub const TextInput = @import("widgets/text_input.zig").TextInput;
+/// Which rows of something longer a view shows, held still while it grows.
+pub const Scroll = @import("widgets/scroll.zig").Scroll;
+/// The keys that work here, each beside what it does.
+pub const Keys = @import("widgets/keys.zig").Keys;
+/// A line across a window or down it.
+pub const Rule = @import("widgets/rule.zig").Rule;
+/// A picture drawn in cells, two by three pixels a cell.
+pub const Sextants = @import("widgets/sextants.zig").Sextants;
+/// The block sextant for a pattern of six lit pixels.
+pub const sextant = @import("widgets/sextants.zig").sextant;
 
 /// The marks a canvas can draw with, and how many of them fit in a cell.
 pub const Marker = @import("widgets/canvas.zig").Marker;
@@ -110,5 +122,10 @@ test {
     _ = @import("widgets/canvas.zig");
     _ = @import("widgets/calendar.zig");
     _ = @import("widgets/harness.zig");
+    _ = @import("widgets/text_input.zig");
+    _ = @import("widgets/scroll.zig");
+    _ = @import("widgets/keys.zig");
+    _ = @import("widgets/rule.zig");
+    _ = @import("widgets/sextants.zig");
     std.testing.refAllDecls(@This());
 }

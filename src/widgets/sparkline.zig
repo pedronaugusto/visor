@@ -28,6 +28,20 @@ pub const Sparkline = struct {
     style: Style = .{},
     /// Which end of the data the window's right edge holds.
     direction: Direction = .left_to_right,
+    /// How a point becomes a height.
+    mode: Mode = .fill,
+
+    /// How a point becomes a height.
+    pub const Mode = enum {
+        /// In eighths of the window's height, rounded down: a zero point is
+        /// no block at all, and the largest fills the window.
+        fill,
+        /// The nearest of the heights, and never nothing: a zero point is
+        /// the lowest eighth and the largest the full height. One row tall,
+        /// it is one of eight glyphs a point, which is what a sparkline
+        /// written into a line of text wants.
+        level,
+    };
 
     /// Which way the series runs across the window.
     pub const Direction = enum {
@@ -58,7 +72,14 @@ pub const Sparkline = struct {
                 .left_to_right => @intCast(i),
                 .right_to_left => @intCast(shown.len - 1 - i),
             };
-            const scaled: u64 = @intCast(@as(u128, @min(value, top)) * rows * 8 / top);
+            const scaled: u64 = switch (s.mode) {
+                .fill => @intCast(@as(u128, @min(value, top)) * rows * 8 / top),
+                .level => blk: {
+                    const t = @as(f64, @floatFromInt(@min(value, top))) / @as(f64, @floatFromInt(top));
+                    const steps: f64 = @floatFromInt(@as(u64, rows) * 8 - 1);
+                    break :blk @as(u64, @intFromFloat(@round(t * steps))) + 1;
+                },
+            };
             var row: u16 = rows;
             var left = scaled;
             while (row > 0) : (row -= 1) {
@@ -132,6 +153,23 @@ test "a sparkline can run the other way" {
     try (Sparkline{ .data = &.{ 0, 4, 8 }, .max = 8, .direction = .right_to_left }).draw(h.window());
     try h.expectFrame(
         \\█▄
+        \\
+    );
+}
+
+test "by level every point is one of eight glyphs, and a zero is the lowest" {
+    var h: Harness = try .init(testing.allocator, 5, 1);
+    defer h.deinit();
+    try (Sparkline{ .data = &.{ 0, 1, 50, 99, 100 }, .mode = .level }).draw(h.window());
+    // round(t * 7): 0, 0, 4 (3.5 rounds up), 7, 7.
+    try h.expectFrame(
+        \\▁▁▅██
+        \\
+    );
+    h.window().clear();
+    try (Sparkline{ .data = &.{ 0, 0 }, .mode = .level }).draw(h.window());
+    try h.expectFrame(
+        \\▁▁
         \\
     );
 }

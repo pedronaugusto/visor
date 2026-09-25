@@ -13,6 +13,8 @@
 const std = @import("std");
 const visor = @import("visor");
 
+const sextants = @import("sextants.zig");
+
 const Style = visor.Style;
 const Window = visor.Window;
 
@@ -21,6 +23,9 @@ pub const Marker = enum {
     /// Eight marks a cell, two across and four down. The sharpest, and the
     /// one that needs a font with braille in it.
     braille,
+    /// Six marks a cell, two across and three down, as block sextants: solid
+    /// where braille is dotted, so a filled shape reads as filled.
+    sextant,
     /// One mark a cell, a full block.
     block,
     /// Two marks a cell, one above the other.
@@ -33,7 +38,7 @@ pub const Marker = enum {
     /// How many marks fit across a cell.
     pub fn across(m: Marker) u8 {
         return switch (m) {
-            .braille => 2,
+            .braille, .sextant => 2,
             .block, .half_block, .dot, .bar => 1,
         };
     }
@@ -42,6 +47,7 @@ pub const Marker = enum {
     pub fn down(m: Marker) u8 {
         return switch (m) {
             .braille => 4,
+            .sextant => 3,
             .half_block => 2,
             .block, .dot, .bar => 1,
         };
@@ -176,6 +182,11 @@ pub const Painter = struct {
                     0;
                 const n = std.unicode.utf8Encode(braille_base + (had | bit), &bytes) catch return;
                 try p.win.write(col, row, bytes[0..n], style, .none);
+            },
+            .sextant => {
+                const bit: u6 = @as(u6, 1) << @intCast((gy % down) * 2 + gx % across);
+                const had = sextants.maskOf(existing(p.win, col, row)) orelse 0;
+                try p.win.write(col, row, sextants.sextant(had | bit), style, .none);
             },
             .half_block => {
                 const now = existing(p.win, col, row);
@@ -372,10 +383,24 @@ test "the marks a cell holds are the marker's own" {
     try testing.expectEqual(@as(u8, 4), Marker.braille.down());
     try testing.expectEqual(@as(u8, 1), Marker.block.across());
     try testing.expectEqual(@as(u8, 2), Marker.half_block.down());
+    try testing.expectEqual(@as(u8, 2), Marker.sextant.across());
+    try testing.expectEqual(@as(u8, 3), Marker.sextant.down());
+}
+
+test "a sextant cell gathers every mark that lands in it" {
+    var h: Harness = try .init(testing.allocator, 2, 1);
+    defer h.deinit();
+    const p = (Canvas{ .x_bounds = .{ 0, 4 }, .y_bounds = .{ 0, 3 }, .marker = .sextant }).painter(h.window());
+    // The top-left and the bottom-right of the first cell.
+    try p.point(0.5, 2.5, .{});
+    try p.point(1.5, 0.5, .{});
+    // The whole left column of the second: the left half block.
+    try p.line(2.5, 0.2, 2.5, 2.8, .{});
+    try h.expectFrame("\u{1fb1f}\u{258c}\n");
 }
 
 test "every point that locates to a mark puts one in that mark's cell" {
-    for ([_]Marker{ .braille, .block, .half_block, .dot, .bar }) |marker| {
+    for ([_]Marker{ .braille, .sextant, .block, .half_block, .dot, .bar }) |marker| {
         var h: Harness = try .init(testing.allocator, 4, 3);
         defer h.deinit();
         const c: Canvas = .{ .x_bounds = .{ 0, 8 }, .y_bounds = .{ 0, 12 }, .marker = marker };

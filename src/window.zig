@@ -18,6 +18,7 @@ const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const textmod = @import("text.zig");
 const Screen = @import("screen.zig").Screen;
+const Target = @import("pool.zig").Target;
 
 const Cell = cellmod.Cell;
 const Link = cellmod.Link;
@@ -326,6 +327,47 @@ pub const Window = struct {
         if (col < w.rect.col or row < w.rect.row) return null;
         if (col >= w.rect.right() or row >= w.rect.bottom()) return null;
         return .{ .col = @intCast(col - w.rect.col), .row = @intCast(row - w.rect.row) };
+    }
+
+    /// The OSC 8 target under a cell of the window, or null: what a click
+    /// there opens. A cell carries its link, so nothing has to remember
+    /// where the links were drawn.
+    pub fn linkAt(w: Window, col: u16, row: u16) ?Target {
+        if (col >= w.rect.cols or row >= w.rect.rows) return null;
+        const at_col = w.rect.col + col;
+        const at_row = w.rect.row + row;
+        const head = w.screen.headOf(at_col, at_row) orelse Point{ .col = at_col, .row = at_row };
+        const c = w.screen.readCell(head.col, head.row) orelse return null;
+        return w.screen.target(c.link);
+    }
+
+    /// The text of one row of the window from column `from` up to `to`, as
+    /// the terminal shows it: each grapheme once, a wide one taken whole
+    /// when the range starts on its covered column, and the blanks at the
+    /// end left off. What a selection copies.
+    pub fn copyText(w: Window, out: *std.Io.Writer, row: u16, from: u16, to: u16) std.Io.Writer.Error!void {
+        if (row >= w.rect.rows) return;
+        const end = @min(to, w.rect.cols);
+        const at_row = w.rect.row + row;
+        var spaces: usize = 0;
+        var col = from;
+        while (col < end) : (col += 1) {
+            const at_col = w.rect.col + col;
+            const c = w.screen.readCell(at_col, at_row) orelse break;
+            var text: []const u8 = undefined;
+            if (c.isTail()) {
+                if (col != from) continue;
+                const head = w.screen.headOf(at_col, at_row) orelse continue;
+                text = w.screen.textAt(head.col, head.row);
+            } else text = w.screen.textOf(&c);
+            if (std.mem.eql(u8, text, " ")) {
+                spaces += 1;
+                continue;
+            }
+            try out.splatByteAll(' ', spaces);
+            spaces = 0;
+            try out.writeAll(text);
+        }
     }
 
     /// Where the terminal's cursor should end the frame, in this window's
@@ -707,4 +749,40 @@ test "a window scrolls only its own rectangle" {
     try testing.expectEqualStrings("c", s.textAt(0, 1));
     try testing.expectEqualStrings(" ", s.textAt(0, 2));
     try testing.expectEqualStrings("d", s.textAt(0, 3));
+}
+
+test "the link under a cell is what a click there opens, a wide grapheme's in both its columns" {
+    var sc: Screen = try .init(testing.allocator, .{ .cols = 10, .rows = 2 });
+    defer sc.deinit(testing.allocator);
+    const win = sc.window().child(.{ .col = 2, .row = 1 });
+    const link = try sc.link(testing.allocator, "file:///tmp/a.log", "");
+    _ = try win.print(&.{
+        .{ .text = "see " },
+        .{ .text = "a\u{4e2d}", .link = link },
+    }, .{ .wrap = .none });
+    try testing.expect(win.linkAt(0, 0) == null);
+    try testing.expectEqualStrings("file:///tmp/a.log", win.linkAt(4, 0).?.uri);
+    try testing.expectEqualStrings("file:///tmp/a.log", win.linkAt(5, 0).?.uri);
+    try testing.expectEqualStrings("file:///tmp/a.log", win.linkAt(6, 0).?.uri);
+    try testing.expect(win.linkAt(7, 0) == null);
+    try testing.expect(win.linkAt(40, 0) == null);
+}
+
+test "a row's text comes back as the terminal shows it, trailing blanks left off" {
+    var sc: Screen = try .init(testing.allocator, .{ .cols = 12, .rows = 1 });
+    defer sc.deinit(testing.allocator);
+    const win = sc.window();
+    _ = try win.printSegment(.{ .text = "a b\u{4e2d}c" }, .{ .wrap = .none });
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try win.copyText(&out.writer, 0, 0, 12);
+    try testing.expectEqualStrings("a b\u{4e2d}c", out.written());
+    // Starting on the covered column takes the grapheme whole.
+    out.clearRetainingCapacity();
+    try win.copyText(&out.writer, 0, 4, 6);
+    try testing.expectEqualStrings("\u{4e2d}c", out.written());
+    // A range ending on the head's first column takes it once.
+    out.clearRetainingCapacity();
+    try win.copyText(&out.writer, 0, 1, 4);
+    try testing.expectEqualStrings(" b\u{4e2d}", out.written());
 }
