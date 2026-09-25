@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Winsize`, `Pixels` and `CellSize`: the terminal's grid, its text area in
+  pixels, and one cell in pixels, kept apart. `Winsize.update` folds a resize
+  event (from the signal or in band) and the answers to `CSI 14 t`, `16 t` and
+  `18 t`; `cellSize` returns the cell the terminal reported, or the text area
+  divided by the grid flagged as not reported, because a terminal that pads
+  its text area makes the division too large. A resize forgets a reported
+  cell: it is also what a change of font looks like.
+- `Tty.adopt`, a `Tty` over a file the program already has open.
+
+### Changed
+
+- **Breaking:** `Tty.size` returns a `Winsize`, with the text area in pixels
+  where the operating system has it, instead of a `Size`.
+
 ## [0.2.1] - 2026-09-20
 
 ### Fixed

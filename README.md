@@ -169,7 +169,7 @@ with a `try`. Resizing allocates.
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
 | Pictures | `Image`, `Layer`, `Layer.Order`, `Layers`. |
-| This program's terminal | `Tty` — `open`, `close`, `raw`, `restore`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -271,6 +271,13 @@ placement id, which the protocol replaces without flicker; one that leaves is
 deleted by name, and its bytes are kept. Nothing waits for an acknowledgement:
 a placement names the number the program chose, and the acknowledgement, when
 it comes, upgrades that to the id the terminal assigned.
+
+**A cell's pixel size is the terminal's word, not a division.** The
+operating system and a resize report give the text area, which a terminal may
+pad, so the area divided by the grid is a little too large and the error grows
+toward the right edge. `Winsize` keeps the area and the cell apart, takes the
+cell only from the terminal's answer to `CSI 16 t`, and when it has to divide
+it says so.
 
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.

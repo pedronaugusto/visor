@@ -21,10 +21,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const morse = @import("morse");
 
-const geom = @import("geom.zig");
+const Winsize = @import("winsize.zig").Winsize;
 
 const Io = std.Io;
-const Size = geom.Size;
 const Writer = std.Io.Writer;
 const windows = std.os.windows;
 const is_windows = builtin.os.tag == .windows;
@@ -108,11 +107,18 @@ pub const Tty = struct {
         return .{ .file = file, .io = io, .input = {} };
     }
 
+    /// A terminal the program already has open: a descriptor it was handed,
+    /// or the far end of a pseudo-terminal it made. Everything `open` gives
+    /// works on it, and `close` closes the file.
+    pub fn adopt(io: Io, file: Io.File) Tty {
+        return .{ .file = file, .io = io, .input = if (is_windows) file else {} };
+    }
+
     /// Gives the terminal back, restoring its mode first if it was changed.
     pub fn close(t: *Tty) void {
         t.restore();
         t.file.close(t.io);
-        if (is_windows) t.input.close(t.io);
+        if (is_windows and t.input.handle != t.file.handle) t.input.close(t.io);
         t.* = undefined;
     }
 
@@ -186,12 +192,16 @@ pub const Tty = struct {
         open_tty = null;
     }
 
-    /// How big the terminal is, from the operating system.
+    /// How big the terminal is, from the operating system: the grid, and
+    /// the text area in pixels where the terminal filled that in.
     ///
-    /// `Caps.in_band_resize` is the better source where the terminal has it:
-    /// the report arrives on the input stream, in step with everything else,
-    /// rather than out of band and after the fact.
-    pub fn size(t: *Tty) SizeError!Size {
+    /// The cell's own pixel size is not here, because the operating system
+    /// does not know it: ask the terminal (`CSI 16 t`) and fold the answer
+    /// into the `Winsize` with `update`. `Caps.in_band_resize` is the better
+    /// source for the rest where the terminal has it: the report arrives on
+    /// the input stream, in step with everything else, rather than out of
+    /// band and after the fact.
+    pub fn size(t: *Tty) SizeError!Winsize {
         if (is_windows) {
             var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
             if (GetConsoleScreenBufferInfo(t.file.handle, &info) == .FALSE) {
@@ -199,12 +209,15 @@ pub const Tty = struct {
             }
             const cols = info.srWindow.Right - info.srWindow.Left + 1;
             const rows = info.srWindow.Bottom - info.srWindow.Top + 1;
-            return .{ .cols = @intCast(@max(cols, 0)), .rows = @intCast(@max(rows, 0)) };
+            return .{ .cells = .{ .cols = @intCast(@max(cols, 0)), .rows = @intCast(@max(rows, 0)) } };
         }
         var ws: std.posix.winsize = undefined;
         const err = std.posix.system.ioctl(t.file.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
         if (std.posix.errno(err) != .SUCCESS) return error.NotATerminal;
-        return .{ .cols = ws.col, .rows = ws.row };
+        return .{
+            .cells = .{ .cols = ws.col, .rows = ws.row },
+            .area = .{ .width = ws.xpixel, .height = ws.ypixel },
+        };
     }
 
     /// A buffered writer over the terminal, in a buffer the caller owns.
@@ -373,3 +386,100 @@ test "the panic handler is a type to install, not something installed" {
     try testing.expect(@TypeOf(Panic) == type);
     try testing.expect(@hasDecl(Panic, "call"));
 }
+
+test "the size carries the text area in pixels where the terminal set it" {
+    if (is_windows) return error.SkipZigTest;
+    var pair = try testing_pty.open(testing.io);
+    defer pair.close();
+    try pair.setSize(.{ .row = 40, .col = 132, .xpixel = 1188, .ypixel = 800 });
+
+    var t: Tty = .adopt(testing.io, pair.slave);
+    const ws = try t.size();
+    try testing.expectEqual(@as(u16, 132), ws.cells.cols);
+    try testing.expectEqual(@as(u16, 40), ws.cells.rows);
+    try testing.expectEqual(@as(u32, 1188), ws.area.width);
+    try testing.expectEqual(@as(u32, 800), ws.area.height);
+    // The operating system knows the area, never the cell.
+    try testing.expect(!ws.cell.known());
+    try testing.expect(!ws.cellSize().?.reported);
+}
+
+test "a file that is not a terminal has no size" {
+    if (is_windows) return error.SkipZigTest;
+    const fds = try testing_pty.pipe();
+    defer {
+        _ = std.posix.system.close(fds[0]);
+        _ = std.posix.system.close(fds[1]);
+    }
+    var t: Tty = .adopt(testing.io, .{ .handle = fds[0], .flags = .{ .nonblocking = false } });
+    try testing.expectError(error.NotATerminal, t.size());
+}
+
+/// A pseudo-terminal for the suite, opened without libc: the master from
+/// `/dev/ptmx`, unlocked and named by the ioctls each kernel spells its own
+/// way, and the slave by that name. Test-only.
+pub const testing_pty = struct {
+    pub const Pair = struct {
+        io: Io,
+        master: Io.File,
+        slave: Io.File,
+
+        pub fn setSize(p: *Pair, ws: std.posix.winsize) !void {
+            const rc = std.posix.system.ioctl(p.master.handle, set_winsize, @intFromPtr(&ws));
+            if (std.posix.errno(rc) != .SUCCESS) return error.Unexpected;
+        }
+
+        pub fn close(p: *Pair) void {
+            p.slave.close(p.io);
+            p.master.close(p.io);
+        }
+    };
+
+    const set_winsize = request(switch (builtin.os.tag) {
+        .linux => std.os.linux.T.IOCSWINSZ,
+        else => 0x80087467,
+    });
+
+    /// The request argument as this system's `ioctl` spells its type: a
+    /// `c_int` through libc, where the high bit of a request is a sign bit.
+    const Request = @typeInfo(@TypeOf(std.posix.system.ioctl)).@"fn".params[1].type.?;
+    fn request(v: u32) Request {
+        return if (@typeInfo(Request).int.signedness == .signed) @bitCast(v) else @intCast(v);
+    }
+
+    pub fn open(io: Io) !Pair {
+        const master = try Io.Dir.openFileAbsolute(io, "/dev/ptmx", .{ .mode = .read_write });
+        errdefer master.close(io);
+        var name_buf: [128]u8 = @splat(0);
+        const name: []const u8 = switch (builtin.os.tag) {
+            .linux => blk: {
+                var unlock: c_int = 0;
+                if (std.posix.errno(std.posix.system.ioctl(master.handle, std.os.linux.T.IOCSPTLCK, @intFromPtr(&unlock))) != .SUCCESS)
+                    return error.Unexpected;
+                var n: c_uint = 0;
+                if (std.posix.errno(std.posix.system.ioctl(master.handle, std.os.linux.T.IOCGPTN, @intFromPtr(&n))) != .SUCCESS)
+                    return error.Unexpected;
+                break :blk try std.fmt.bufPrint(&name_buf, "/dev/pts/{d}", .{n});
+            },
+            .macos => blk: {
+                const grant = request(0x20007454); // TIOCPTYGRANT
+                const unlock = request(0x20007452); // TIOCPTYUNLK
+                const get_name = request(0x40807453); // TIOCPTYGNAME
+                if (std.posix.errno(std.posix.system.ioctl(master.handle, grant, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
+                if (std.posix.errno(std.posix.system.ioctl(master.handle, unlock, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
+                if (std.posix.errno(std.posix.system.ioctl(master.handle, get_name, @intFromPtr(&name_buf))) != .SUCCESS)
+                    return error.Unexpected;
+                break :blk std.mem.sliceTo(&name_buf, 0);
+            },
+            else => return error.SkipZigTest,
+        };
+        const slave = try Io.Dir.openFileAbsolute(io, name, .{ .mode = .read_write });
+        return .{ .io = io, .master = master, .slave = slave };
+    }
+
+    pub fn pipe() ![2]std.posix.fd_t {
+        var fds: [2]std.posix.fd_t = undefined;
+        if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
+        return fds;
+    }
+};

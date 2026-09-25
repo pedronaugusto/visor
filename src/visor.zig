@@ -36,6 +36,7 @@ const term_mod = @import("term.zig");
 const text_mod = @import("text.zig");
 const tty_mod = @import("tty.zig");
 const window_mod = @import("window.zig");
+const winsize_mod = @import("winsize.zig");
 
 /// The writers and parsers this package stands on, re-exported whole.
 ///
@@ -139,6 +140,13 @@ pub const Layers = layer_mod.Layers;
 
 /// This program's own terminal, for a program that wants one.
 pub const Tty = tty_mod.Tty;
+/// How big the terminal is: the grid, and what it has said about pixels.
+pub const Winsize = winsize_mod.Winsize;
+/// A size in pixels, zero where unknown.
+pub const Pixels = winsize_mod.Pixels;
+/// One cell in pixels, and whether the terminal said so or it was worked
+/// out from the text area.
+pub const CellSize = winsize_mod.CellSize;
 /// Puts the one open terminal back. Allocates nothing, fails at nothing.
 pub const restoreGlobal = tty_mod.restoreGlobal;
 /// A panic handler that calls `restoreGlobal` and then Zig's. Yours to
@@ -171,6 +179,7 @@ test {
     _ = text_mod;
     _ = tty_mod;
     _ = window_mod;
+    _ = winsize_mod;
     _ = @import("roundtrip.zig");
     _ = @import("bench.zig");
 }
