@@ -96,6 +96,9 @@ pub const Span = damage_mod.Span;
 pub const Renderer = render_mod.Renderer;
 /// What a full-screen program takes on the way in.
 pub const Mode = render_mod.Mode;
+/// The input a program asks the terminal for: keyboard flags, mouse, focus,
+/// paste and colour-scheme reports.
+pub const Modes = render_mod.Modes;
 /// What this terminal can do. Every field is safe at its default.
 pub const Caps = caps_mod.Caps;
 
@@ -147,7 +150,8 @@ pub const Pixels = winsize_mod.Pixels;
 /// One cell in pixels, and whether the terminal said so or it was worked
 /// out from the text area.
 pub const CellSize = winsize_mod.CellSize;
-/// Puts the one open terminal back. Allocates nothing, fails at nothing.
+/// Puts the one open terminal back, the modes a renderer entered through it
+/// included. Allocates nothing, fails at nothing.
 pub const restoreGlobal = tty_mod.restoreGlobal;
 /// A panic handler that calls `restoreGlobal` and then Zig's. Yours to
 /// install; never installed behind your back.

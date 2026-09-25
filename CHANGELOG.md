@@ -16,11 +16,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its text area makes the division too large. A resize forgets a reported
   cell: it is also what a change of font looks like.
 - `Tty.adopt`, a `Tty` over a file the program already has open.
+- `Modes`: the input a program asks for on the way in — kitty keyboard flags,
+  mouse reports, focus, bracketed paste and colour-scheme reports.
+  `Renderer.enter` takes them and `leave` undoes exactly those, in reverse:
+  the keyboard flags are pushed after the switch to the alternate screen and
+  popped before the switch back, because the stack is per screen, and only
+  the mouse modes that were turned on are turned off. `Renderer.setModes`
+  changes them mid-session, writing only what differs, and `leave` undoes
+  what is on at the time.
+- `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
+  and the way back. A screen entered this way is undone by `Tty.restore`,
+  `Tty.close`, `restoreGlobal` and `Panic` too — modes, alternate screen and
+  cursor before the terminal's mode — through a buffer on the stack and a
+  write that cannot fail. `Renderer.deinit` takes a renderer off that path.
 
 ### Changed
 
 - **Breaking:** `Tty.size` returns a `Winsize`, with the text area in pixels
   where the operating system has it, instead of a `Size`.
+- **Breaking:** `Renderer.enter(w, caps, mode, modes)` takes the input modes
+  as a fourth argument; `.{}` asks for none, as before.
 
 ## [0.2.1] - 2026-09-20
 

@@ -22,6 +22,9 @@ const builtin = @import("builtin");
 const morse = @import("morse");
 
 const Winsize = @import("winsize.zig").Winsize;
+const render = @import("render.zig");
+const Caps = @import("caps.zig").Caps;
+const Renderer = render.Renderer;
 
 const Io = std.Io;
 const Writer = std.Io.Writer;
@@ -35,6 +38,18 @@ const is_windows = builtin.os.tag == .windows;
 /// handed. It is written when `raw` succeeds and cleared when `restore`
 /// runs.
 var open_tty: ?Saved = null;
+
+/// The renderer a `Tty` entered a screen through, so the way back can undo
+/// the modes it switched as well as the terminal's mode.
+///
+/// Set by `Tty.enter` and cleared by `Tty.leave`, by the way back itself, and
+/// by `Renderer.deinit`, so it never names a renderer that is gone.
+var armed: ?*Renderer = null;
+
+/// Stops the way back reaching for `r`. `Renderer.deinit` calls this.
+pub fn forget(r: *const Renderer) void {
+    if (armed == r) armed = null;
+}
 
 /// What the terminal was before this program touched it.
 const Saved = if (is_windows) struct {
@@ -184,12 +199,47 @@ pub const Tty = struct {
         open_tty = saved;
     }
 
-    /// The mode as it was found. Safe to call when it was never changed.
+    /// The mode as it was found, and the screen and input modes a renderer
+    /// entered through `enter` undone before it. Safe to call when nothing
+    /// was changed.
     pub fn restore(t: *Tty) void {
         const was = t.saved orelse return;
         restoreSaved(was);
         t.saved = null;
         open_tty = null;
+    }
+
+    /// Anything entering or leaving a screen can fail with.
+    pub const EnterError = ModeError || render.Error;
+
+    /// Takes the screen: raw mode, then everything `Renderer.enter` writes,
+    /// flushed. From here the way back — `leave`, `restore`, `close`,
+    /// `restoreGlobal` and `Panic` — undoes the modes the renderer has on at
+    /// the time as well as the terminal's mode.
+    pub fn enter(
+        t: *Tty,
+        r: *Renderer,
+        caps: Caps,
+        mode: render.Mode,
+        modes: render.Modes,
+    ) EnterError!void {
+        try t.raw();
+        armed = r;
+        var buffer: [256]u8 = undefined;
+        var out = t.writer(&buffer);
+        try r.enter(&out.interface, caps, mode, modes);
+        try out.interface.flush();
+    }
+
+    /// Gives the screen back: everything `Renderer.leave` writes, flushed,
+    /// and then the terminal's mode as it was found.
+    pub fn leave(t: *Tty, r: *Renderer) render.Error!void {
+        forget(r);
+        defer t.restore();
+        var buffer: [256]u8 = undefined;
+        var out = t.writer(&buffer);
+        try r.leave(&out.interface);
+        try out.interface.flush();
     }
 
     /// How big the terminal is, from the operating system: the grid, and
@@ -272,7 +322,10 @@ pub const Tty = struct {
     }
 };
 
-/// Puts the one open terminal back.
+/// Puts the one open terminal back: the modes a renderer entered through
+/// `Tty.enter` undone — keyboard flags popped, mouse, paste, focus and
+/// colour-scheme reports off, the alternate screen left, the cursor shown —
+/// and then the terminal's own mode.
 ///
 /// Allocates nothing, fails at nothing, and is safe from a panic handler or
 /// an atexit hook. A terminal that was never put in raw mode is left alone.
@@ -282,7 +335,8 @@ pub fn restoreGlobal() void {
     open_tty = null;
 }
 
-/// A panic handler that puts the terminal back and then panics.
+/// A panic handler that puts the terminal back — screen, input modes and
+/// raw mode — and then panics.
 ///
 /// Yours to install, and never installed behind your back:
 ///
@@ -300,14 +354,49 @@ pub const Panic = std.debug.FullPanic(struct {
     }
 }.call);
 
-/// The way back, from whatever remembered it.
+/// The way back, from whatever remembered it: the modes a renderer entered,
+/// undone through a buffer on the stack and one write that may fail, then the
+/// terminal's own mode.
 fn restoreSaved(was: Saved) void {
+    if (armed) |r| {
+        armed = null;
+        var buffer: [512]u8 = undefined;
+        var out: Writer = .fixed(&buffer);
+        r.leave(&out) catch {};
+        writeRaw(if (is_windows) was.output else was.handle, out.buffered());
+    }
     if (is_windows) {
         _ = SetConsoleMode(was.input, was.input_mode);
         _ = SetConsoleMode(was.output, was.output_mode);
         return;
     }
     std.posix.tcsetattr(was.handle, .FLUSH, was.mode) catch {};
+}
+
+/// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
+/// error, because the caller may be a panic handler with a broken `Io` and
+/// nothing to report a failure to.
+fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: []const u8) void {
+    var left = bytes;
+    while (left.len != 0) {
+        if (is_windows) {
+            var written: windows.DWORD = 0;
+            const n: windows.DWORD = @intCast(@min(left.len, std.math.maxInt(windows.DWORD)));
+            if (WriteFile(handle, left.ptr, n, &written, null) == .FALSE or written == 0) return;
+            left = left[written..];
+            continue;
+        }
+        const rc = std.posix.system.write(handle, left.ptr, left.len);
+        switch (std.posix.errno(rc)) {
+            .SUCCESS => {
+                const n: usize = @intCast(rc);
+                if (n == 0) return;
+                left = left[n..];
+            },
+            .INTR, .AGAIN => continue,
+            else => return,
+        }
+    }
 }
 
 //=========================================================================
@@ -368,6 +457,14 @@ extern "kernel32" fn SetConsoleMode(
     dwMode: windows.DWORD,
 ) callconv(.winapi) windows.BOOL;
 
+extern "kernel32" fn WriteFile(
+    hFile: windows.HANDLE,
+    lpBuffer: [*]const u8,
+    nNumberOfBytesToWrite: windows.DWORD,
+    lpNumberOfBytesWritten: ?*windows.DWORD,
+    lpOverlapped: ?*anyopaque,
+) callconv(.winapi) windows.BOOL;
+
 extern "kernel32" fn GetConsoleScreenBufferInfo(
     hConsoleOutput: windows.HANDLE,
     lpConsoleScreenBufferInfo: *CONSOLE_SCREEN_BUFFER_INFO,
@@ -385,6 +482,110 @@ test "the panic handler is a type to install, not something installed" {
     // Installing it is the caller's line of code, never this package's.
     try testing.expect(@TypeOf(Panic) == type);
     try testing.expect(@hasDecl(Panic, "call"));
+}
+
+/// The master end read on a thread of its own, for the calls that wait for
+/// the output to drain before they return.
+const Drain = struct {
+    file: Io.File,
+    want: usize,
+    buf: [1024]u8 = undefined,
+    got: usize = 0,
+
+    fn run(d: *Drain) void {
+        const bytes = readAtLeast(testing.io, d.file, &d.buf, d.want) catch return;
+        d.got = bytes.len;
+    }
+};
+
+/// Everything the master end has been sent, until `want` bytes have come.
+fn readAtLeast(io: Io, file: Io.File, buf: []u8, want: usize) ![]const u8 {
+    var got: usize = 0;
+    while (got < want) {
+        const n = try file.readStreaming(io, &.{buf[got..]});
+        if (n == 0) break;
+        got += n;
+    }
+    return buf[0..got];
+}
+
+test "entering through the terminal arms the way back, and the panic path undoes exactly that" {
+    if (is_windows) return error.SkipZigTest;
+    var pair = try testing_pty.open(testing.io);
+    defer pair.close();
+    var t: Tty = .adopt(testing.io, pair.slave);
+    const before = try std.posix.tcgetattr(t.file.handle);
+
+    var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer r.deinit(testing.allocator);
+    const modes: render.Modes = .{
+        .keyboard = .{ .report_event_types = true },
+        .mouse = .{ .press = true, .sgr = true },
+        .paste = true,
+    };
+    try t.enter(&r, .{}, .alt, modes);
+    try testing.expect(armed == &r);
+    try testing.expect(t.saved != null);
+
+    // What the renderer would write on the way out, worked out on a copy so
+    // the real one is still entered.
+    var copy = r;
+    var want_buf: [512]u8 = undefined;
+    var want: Writer = .fixed(&want_buf);
+    try copy.leave(&want);
+
+    var seen: [1024]u8 = undefined;
+    const entered = try readAtLeast(testing.io, pair.master, &seen, 1);
+    try testing.expect(std.mem.startsWith(u8, entered, "\x1b[?1049h\x1b[>2u"));
+
+    // The panic path: no argument, no allocation, no failure. The mode is
+    // put back with the output drained first, and on a pseudo-terminal the
+    // output drains only when the master reads it, so the reading is done
+    // beside it.
+    var reader: Drain = .{ .file = pair.master, .want = want.buffered().len };
+    const thread = try std.Thread.spawn(.{}, Drain.run, .{&reader});
+    restoreGlobal();
+    thread.join();
+    try testing.expect(armed == null);
+    try testing.expectEqual(@as(?Saved, null), open_tty);
+    const undone = reader.buf[0..reader.got];
+    try testing.expectEqualStrings(want.buffered(), undone);
+    try testing.expect(std.mem.endsWith(u8, undone, "\x1b[<u\x1b[?1049l"));
+    const after = try std.posix.tcgetattr(t.file.handle);
+    try testing.expectEqual(before.lflag, after.lflag);
+    try testing.expectEqual(before.iflag, after.iflag);
+    // The tty still thinks it is raw; that is the caller's own record, and
+    // restoring it again is harmless.
+    t.saved = null;
+}
+
+test "leaving through the terminal disarms, and a renderer that goes away is forgotten" {
+    if (is_windows) return error.SkipZigTest;
+    var pair = try testing_pty.open(testing.io);
+    defer pair.close();
+    var t: Tty = .adopt(testing.io, pair.slave);
+
+    var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    try t.enter(&r, .{}, .alt, .{ .paste = true });
+    var seen: [256]u8 = undefined;
+    const bytes = try readAtLeast(testing.io, pair.master, &seen, 1);
+    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2004h") != null);
+
+    var reader: Drain = .{ .file = pair.master, .want = 1 };
+    const thread = try std.Thread.spawn(.{}, Drain.run, .{&reader});
+    try t.leave(&r);
+    thread.join();
+    try testing.expect(armed == null);
+    try testing.expect(t.saved == null);
+    try testing.expect(std.mem.indexOf(u8, reader.buf[0..reader.got], "\x1b[?2004l") != null);
+
+    // Entered again, and the renderer goes away without leaving: the way
+    // back forgets it rather than reaching for it.
+    try t.enter(&r, .{}, .alt, .{});
+    _ = try readAtLeast(testing.io, pair.master, &seen, 1);
+    r.deinit(testing.allocator);
+    try testing.expect(armed == null);
+    t.restore();
 }
 
 test "the size carries the text area in pixels where the terminal set it" {

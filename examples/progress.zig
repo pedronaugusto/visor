@@ -38,7 +38,7 @@ pub fn main() !void {
 
     // Two rows at the cursor. The prompt's row is the first of them, and
     // what was typed there is erased with the rest of the rows.
-    try renderer.enter(&out.writer, caps, .@"inline");
+    try renderer.enter(&out.writer, caps, .@"inline", .{});
     try term.feed(out.written());
     try show(gpa, &term, "entered: two rows at the prompt", null);
 

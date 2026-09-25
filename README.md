@@ -166,10 +166,10 @@ with a `try`. Resizing allocates.
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
-| The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `leave`. `Renderer.Stats`, `Mode`. |
+| The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
 | Pictures | `Image`, `Layer`, `Layer.Order`, `Layers`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `onResize`. `restoreGlobal`, `Panic`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -258,6 +258,15 @@ takes more rows the same way, shrinking gives them back blank, and `leave`
 puts the cursor on the row below with the last frame still showing. A
 scrolling region is an absolute thing, so scroll detection is off.
 
+**The way out undoes the way in, and nothing else.** `enter` takes the
+screen and the input modes the program asked for; `leave` turns off exactly
+those, in reverse. The kitty keyboard flags are a stack per screen, so they
+are pushed after the switch to the alternate screen and popped before the
+switch back. A screen entered through `Tty.enter` is undone the same way by
+`restoreGlobal` and the panic handler, from a buffer on the stack, so a
+program that dies leaves the shell with its keyboard, its mouse and its
+cursor.
+
 **Synchronised output brackets a frame, not a session.** Mode 2026 left on for
 a program's lifetime makes the terminal repaint at whatever timeout it
 invented, which is ten frames a second on the tightest of them. `draw` writes
@@ -330,9 +339,10 @@ the examples without running them, and CI does that for `x86_64-linux-gnu`,
 a local script and no CI job calls it.
 
 `Tty` is the one file that calls an operating system. It is compiled on all
-three platforms in CI and opened by nothing in the suite, so no half of it has
-been run against a real terminal yet; the alternate screen, raw mode and
-inline mode against a real terminal are the work still open there.
+three platforms in CI, and on Linux and macOS the suite runs it against a
+pseudo-terminal it opens itself: the size with its pixels, entering and
+leaving, and the panic path's way back. The Windows half is compiled and not
+run.
 
 ## Testing
 

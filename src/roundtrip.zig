@@ -412,7 +412,7 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
     var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
     h.caps.scroll_detection = false;
-    try h.renderer.enter(&h.out.writer, h.caps, .@"inline");
+    try h.renderer.enter(&h.out.writer, h.caps, .@"inline", .{});
     try t.feed(h.out.written());
     try expectRegionEqual(&h.screen, &t);
 

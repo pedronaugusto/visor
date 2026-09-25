@@ -33,6 +33,7 @@ const scroll_detect = @import("scroll.zig");
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
+const tty = @import("tty.zig");
 
 const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
@@ -62,6 +63,62 @@ pub const Mode = enum {
     /// without asking.
     @"inline",
 };
+
+/// The input a program asks the terminal for, beside the screen it takes.
+///
+/// Every field is off by default, and whatever `enter` turns on `leave` turns
+/// off again, and nothing else: a mode the program never asked for is left as
+/// the terminal had it.
+pub const Modes = struct {
+    /// Keys in the kitty protocol, with these flags. Pushed onto the
+    /// terminal's keyboard stack on the way in and popped on the way out, so
+    /// the flags the shell had come back. The stack is per screen, which is
+    /// why the push comes after the switch to the alternate screen and the
+    /// pop before the switch back.
+    keyboard: ?morse.KittyFlags = null,
+    /// Which mouse reports to send. `focus` in here is ignored: focus
+    /// reports are the field of their own below.
+    mouse: morse.Mouse = .{},
+    /// Focus in and out reports, mode 1004.
+    focus: bool = false,
+    /// Pasted text bracketed, mode 2004, so it can be told from typing.
+    paste: bool = false,
+    /// Unprompted reports when the palette turns light or dark, mode 2031.
+    color_scheme: bool = false,
+
+    /// The mouse modes as `morse.mouse` takes them, focus included.
+    fn mouseModes(m: Modes) morse.Mouse {
+        var modes = m.mouse;
+        modes.focus = m.focus;
+        return modes;
+    }
+};
+
+/// The DEC private mode numbers `morse.mouse` switches, one per field of
+/// `morse.Mouse`, so a way out can switch off exactly the ones that are on.
+const mouse_mode_numbers = .{
+    .{ "press", 1000 },
+    .{ "drag", 1002 },
+    .{ "any_motion", 1003 },
+    .{ "focus", 1004 },
+    .{ "sgr", 1006 },
+    .{ "rxvt", 1015 },
+    .{ "sgr_pixels", 1016 },
+};
+
+fn anyMouse(m: morse.Mouse) bool {
+    inline for (mouse_mode_numbers) |pair| {
+        if (@field(m, pair[0])) return true;
+    }
+    return false;
+}
+
+/// Switches off each mouse mode that `m` has on, and no other.
+fn mouseOffExactly(w: *Writer, m: morse.Mouse) Writer.Error!void {
+    inline for (mouse_mode_numbers) |pair| {
+        if (@field(m, pair[0])) try morse.setMode(w, pair[1], false);
+    }
+}
 
 /// Anything `draw`, `enter` or `leave` can fail with.
 pub const Error = Writer.Error || error{
@@ -141,6 +198,9 @@ pub const Renderer = struct {
         in_band_resize: bool,
         /// Whether the terminal was asked to measure clusters, mode 2027.
         unicode_core: bool,
+        /// The input modes in effect: what `enter` set, as `setModes` has
+        /// changed it since.
+        modes: Modes = .{},
     };
 
     /// What one `draw` cost, so a budget can be a test rather than a
@@ -202,7 +262,11 @@ pub const Renderer = struct {
     }
 
     /// Gives the previous frame back.
+    ///
+    /// A renderer a `Tty` entered through is forgotten by the panic path
+    /// here, so the way out never reaches for a renderer that is gone.
     pub fn deinit(r: *Renderer, gpa: Allocator) void {
+        tty.forget(r);
         r.release(gpa);
         r.* = undefined;
     }
@@ -308,7 +372,8 @@ pub const Renderer = struct {
         return stats;
     }
 
-    /// What a full-screen program writes on the way in, in one call.
+    /// What a full-screen program writes on the way in, in one call: the
+    /// screen it takes and the input it wants.
     ///
     /// Synchronised output is deliberately not here. Mode 2026 is a bracket
     /// around one frame, not a mode a session sits in: left on, every
@@ -316,25 +381,26 @@ pub const Renderer = struct {
     /// instead of when the program asks, which is ten frames a second on the
     /// tightest of them. `draw` writes the bracket, and only when the frame
     /// is large enough to be worth it.
-    pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode) Error!void {
+    pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {
         // Record every mode before it may have reached a partially failing
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
         r.entered = .{
             .mode = mode,
-            .in_band_resize = false,
-            .unicode_core = false,
+            .in_band_resize = caps.in_band_resize,
+            .unicode_core = caps.width_method == .unicode,
+            .modes = modes,
         };
         r.region = if (mode == .@"inline") r.size.rows else null;
         if (mode == .alt) try morse.altScreen.set(w, true);
-        if (caps.in_band_resize) {
-            r.entered.?.in_band_resize = true;
-            try morse.inBandResize.set(w, true);
-        }
-        if (caps.width_method == .unicode) {
-            r.entered.?.unicode_core = true;
-            try morse.unicodeCore.set(w, true);
-        }
+        // After the switch: the alternate screen has a keyboard stack of its
+        // own, and this push belongs on it.
+        if (modes.keyboard) |flags| try morse.kittyKeyboardPush(w, flags);
+        if (anyMouse(modes.mouseModes())) try morse.mouse(w, modes.mouseModes());
+        if (modes.paste) try morse.bracketedPaste.set(w, true);
+        if (modes.color_scheme) try morse.colorScheme.set(w, true);
+        if (caps.in_band_resize) try morse.inBandResize.set(w, true);
+        if (caps.width_method == .unicode) try morse.unicodeCore.set(w, true);
         try morse.resetStyle(w);
         switch (mode) {
             .alt => {
@@ -361,6 +427,33 @@ pub const Renderer = struct {
         r.repaint_all = false;
     }
 
+    /// Anything `setModes` can fail with.
+    pub const ModesError = Writer.Error || error{
+        /// The renderer has not entered a screen, so there is nothing to
+        /// change and nothing that would undo the change.
+        NotEntered,
+    };
+
+    /// Changes the input modes mid-session — mouse reports for one view and
+    /// not another, say — writing only what differs, and remembers the
+    /// change so `leave` undoes what is in effect then.
+    pub fn setModes(r: *Renderer, w: *Writer, modes: Modes) ModesError!void {
+        const was = if (r.entered) |e| e.modes else return error.NotEntered;
+        r.entered.?.modes = modes;
+        if (was.keyboard) |old| {
+            if (modes.keyboard) |new| {
+                if (old != new) try morse.kittyKeyboardSet(w, new, .replace);
+            } else try morse.kittyKeyboardPop(w);
+        } else if (modes.keyboard) |new| try morse.kittyKeyboardPush(w, new);
+        const old_mouse = was.mouseModes();
+        const new_mouse = modes.mouseModes();
+        if (old_mouse != new_mouse) {
+            if (anyMouse(new_mouse)) try morse.mouse(w, new_mouse) else try mouseOffExactly(w, old_mouse);
+        }
+        if (was.paste != modes.paste) try morse.bracketedPaste.set(w, modes.paste);
+        if (was.color_scheme != modes.color_scheme) try morse.colorScheme.set(w, modes.color_scheme);
+    }
+
     /// The same in reverse, exactly and only what `enter` turned on, plus the
     /// one thing that has to be written whether or not it was.
     ///
@@ -384,6 +477,12 @@ pub const Renderer = struct {
         r.shown = true;
         if (was.unicode_core) try morse.unicodeCore.set(w, false);
         if (was.in_band_resize) try morse.inBandResize.set(w, false);
+        if (was.modes.color_scheme) try morse.colorScheme.set(w, false);
+        if (was.modes.paste) try morse.bracketedPaste.set(w, false);
+        try mouseOffExactly(w, was.modes.mouseModes());
+        // Before the switch back: the stack this pops is the alternate
+        // screen's own.
+        if (was.modes.keyboard != null) try morse.kittyKeyboardPop(w);
         switch (was.mode) {
             .alt => try morse.altScreen.set(w, false),
             .@"inline" => {
@@ -2075,7 +2174,7 @@ test "entering and leaving write exactly the modes they turn on" {
     defer f.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, .{ .in_band_resize = true }, .alt);
+    try f.renderer.enter(&f.out.writer, .{ .in_band_resize = true }, .alt, .{});
     try testing.expectEqualStrings(
         "\x1b[?1049h\x1b[?2048h\x1b[0m\x1b[2J\x1b[1;1H\x1b[?25l",
         f.written(),
@@ -2089,12 +2188,91 @@ test "entering and leaving write exactly the modes they turn on" {
     );
 }
 
+test "the input modes go on after the screen and come off before it, exactly" {
+    var f: Fixture = try .init(testing.allocator, 4, 2);
+    defer f.deinit();
+
+    const modes: Modes = .{
+        .keyboard = .{ .disambiguate_escape_codes = true, .report_event_types = true },
+        .mouse = .{ .press = true, .sgr = true },
+        .focus = true,
+        .paste = true,
+        .color_scheme = true,
+    };
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, .{}, .alt, modes);
+    try testing.expectEqualStrings(
+        "\x1b[?1049h" ++ // the alternate screen, and its own keyboard stack
+            "\x1b[>3u" ++ // pushed onto that stack
+            "\x1b[?1000h\x1b[?1002l\x1b[?1003l\x1b[?1004h\x1b[?1006h\x1b[?1015l\x1b[?1016l" ++
+            "\x1b[?2004h\x1b[?2031h" ++
+            "\x1b[0m\x1b[2J\x1b[1;1H\x1b[?25l",
+        f.written(),
+    );
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    try testing.expectEqualStrings(
+        "\x1b[?2026l\x1b[0m\x1b[?25h" ++
+            "\x1b[?2031l\x1b[?2004l" ++
+            // Only the mouse modes that were on: the ones `enter` found off
+            // were not this program's to touch.
+            "\x1b[?1000l\x1b[?1004l\x1b[?1006l" ++
+            "\x1b[<u" ++ // popped while still on the screen it was pushed on
+            "\x1b[?1049l",
+        f.written(),
+    );
+}
+
+test "a mode never asked for is never written, either way" {
+    var f: Fixture = try .init(testing.allocator, 4, 2);
+    defer f.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, .{}, .alt, .{});
+    try f.renderer.leave(&f.out.writer);
+    const bytes = f.written();
+    for ([_][]const u8{ "\x1b[>", "\x1b[<u", "?1000", "?1004", "?1006", "?2004", "?2031" }) |needle| {
+        try testing.expect(std.mem.indexOf(u8, bytes, needle) == null);
+    }
+}
+
+test "modes changed mid-session write the difference, and leaving undoes what is on then" {
+    var f: Fixture = try .init(testing.allocator, 4, 2);
+    defer f.deinit();
+    try testing.expectError(error.NotEntered, f.renderer.setModes(&f.out.writer, .{ .paste = true }));
+
+    try f.renderer.enter(&f.out.writer, .{}, .alt, .{ .mouse = .{ .press = true, .sgr = true } });
+
+    // The same modes again: nothing.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .mouse = .{ .press = true, .sgr = true } });
+    try testing.expectEqualStrings("", f.written());
+
+    // The mouse off for a view that does not want it, the keyboard on.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .disambiguate_escape_codes = true } });
+    try testing.expectEqualStrings("\x1b[>1u\x1b[?1000l\x1b[?1006l", f.written());
+
+    // New flags replace the top of the stack rather than pushing again.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .report_event_types = true }, .paste = true });
+    try testing.expectEqualStrings("\x1b[=2;1u\x1b[?2004h", f.written());
+
+    // And the way out pops once and turns off the paste it now has on.
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    try testing.expectEqualStrings(
+        "\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2004l\x1b[<u\x1b[?1049l",
+        f.written(),
+    );
+}
+
 test "entering asks the terminal to measure clusters when it was told to" {
     var f: Fixture = try .init(testing.allocator, 4, 2);
     defer f.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, .{ .width_method = .unicode }, .alt);
+    try f.renderer.enter(&f.out.writer, .{ .width_method = .unicode }, .alt, .{});
     try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2027h") != null);
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
@@ -2107,7 +2285,7 @@ test "leaving unwinds a partially written enter" {
 
     var short: [8]u8 = undefined;
     var failing: Writer = .fixed(&short);
-    try testing.expectError(error.WriteFailed, f.renderer.enter(&failing, .{}, .alt));
+    try testing.expectError(error.WriteFailed, f.renderer.enter(&failing, .{}, .alt, .{}));
 
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
@@ -2555,7 +2733,7 @@ test "entering inline mode takes the rows at the cursor and leaves the prompt ab
     defer t.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try testing.expectEqualStrings("\x1b[?2027h\x1b[0m\r\n\n\x1b[2A\x1b7\x1b[0J\x1b[?25l", f.written());
     try t.feed(f.written());
     try testing.expectEqual(@as(u16, 2), t.row);
@@ -2584,7 +2762,7 @@ test "an inline screen at the bottom of the terminal scrolls it to make room" {
     defer t.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try t.feed(f.written());
     // Two lines scrolled off; the third is the row above the screen.
     try expectRowText(&t, 0, "line 2");
@@ -2601,7 +2779,7 @@ test "the cursor is moved relative to the saved origin in inline mode" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
 
     // Down and across from the origin is two moves; there is no absolute one.
     try f.screen.write(3, 2, "x", .{}, .none);
@@ -2627,7 +2805,7 @@ test "growing an inline screen takes more rows and keeps what was above" {
     defer t.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try t.feed(f.written());
     try f.screen.write(0, 0, "a", .{}, .none);
     try f.screen.write(0, 1, "b", .{}, .none);
@@ -2657,7 +2835,7 @@ test "shrinking an inline screen gives its rows back blank" {
     defer t.deinit();
 
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try t.feed(f.written());
     for (0..4) |row| try f.screen.write(0, @intCast(row), "x", .{}, .none);
     _ = try f.draw();
@@ -2683,7 +2861,7 @@ test "a repaint in inline mode starts from a blank screen at the origin" {
     var t = try promptedTerm(10, 6, 1);
     defer t.deinit();
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try t.feed(f.written());
     try f.screen.write(2, 1, "x", .{}, .none);
     _ = try f.draw();
@@ -2706,7 +2884,7 @@ test "inline mode never writes a scrolling region" {
     defer f.deinit();
     f.caps.scroll_detection = true;
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     for (0..12) |row| {
         var buf: [8]u8 = undefined;
         const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
@@ -2726,7 +2904,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     var t = try promptedTerm(10, 8, 1);
     defer t.deinit();
     f.out.clearRetainingCapacity();
-    try f.renderer.enter(&f.out.writer, f.caps, .@"inline");
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try t.feed(f.written());
     try f.screen.write(0, 2, "x", .{}, .none);
     _ = try f.draw();
@@ -2748,7 +2926,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     var u = try promptedTerm(10, 3, 1);
     defer u.deinit();
     g.out.clearRetainingCapacity();
-    try g.renderer.enter(&g.out.writer, g.caps, .@"inline");
+    try g.renderer.enter(&g.out.writer, g.caps, .@"inline", .{});
     try u.feed(g.written());
     try g.screen.write(0, 1, "y", .{}, .none);
     _ = try g.draw();
