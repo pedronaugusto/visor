@@ -20,10 +20,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mouse reports, focus, bracketed paste and colour-scheme reports.
   `Renderer.enter` takes them and `leave` undoes exactly those, in reverse:
   the keyboard flags are pushed after the switch to the alternate screen and
-  popped before the switch back, because the stack is per screen, and only
-  the mouse modes that were turned on are turned off. `Renderer.setModes`
-  changes them mid-session, writing only what differs, and `leave` undoes
-  what is on at the time.
+  popped before the switch back, because the stack is per screen. The mouse
+  is a `?morse.Mouse`, one motion and one encoding as the terminal keeps
+  them: `enter` puts the terminal's mouse in exactly that state whatever was
+  on, and the way out turns that motion and that encoding off. Focus is a
+  field of its own, mode 1004. `Renderer.setModes` changes them mid-session,
+  writing only what differs — for the mouse, the old motion or encoding off
+  before the new one on — and `leave` undoes what is on at the time.
 - `Input`: the terminal's input, read. `next` reads the `Tty`, frames the
   bytes with `morse.KeyParser` and hands back morse's own events one at a
   time — every reply the terminal sends as `unhandled`, whole, for the
@@ -144,8 +147,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Entering with mouse modes, or changing them with `setModes`, could leave
   the terminal reporting no mouse at all: the modes went out in ascending
   order, and a terminal resets the motion it reports when any of 1000, 1002
-  and 1003 goes off after another went on. Fixed in morse's `mouse`, which
-  now writes every mode off before any on.
+  and 1003 goes off after another went on. `Modes.mouse` is now morse's
+  `Mouse`, one motion and one encoding, and nothing written after an `h` can
+  reset its setting.
 - `wrap` left an empty row before a cluster wider than the whole row; the
   cluster now takes a row of its own.
 - `Tty.open` did not compile on macOS: Zig's libc bindings there have no

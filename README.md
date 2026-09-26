@@ -108,9 +108,9 @@ std.debug.print("{s}", .{out.written()});
 
 // Every sequence visor writes comes from morse, which it re-exports
 // whole: one fetch, and everything under the grid is reachable.
-var control: [64]u8 = undefined;
+var control: [128]u8 = undefined;
 var w: std.Io.Writer = .fixed(&control);
-try visor.morse.mouse(&w, .{ .press = true, .sgr = true });
+try visor.morse.mouse(&w, .{ .motion = .press });
 ```
 <!-- END GENERATED -->
 
@@ -264,10 +264,14 @@ scrolling region is an absolute thing, so scroll detection is off.
 screen and the input modes the program asked for; `leave` turns off exactly
 those, in reverse. The kitty keyboard flags are a stack per screen, so they
 are pushed after the switch to the alternate screen and popped before the
-switch back. A screen entered through `Tty.enter` is undone the same way by
-`restoreGlobal` and the panic handler, from a buffer on the stack, so a
-program that dies leaves the shell with its keyboard, its mouse and its
-cursor.
+switch back. The mouse is one motion and one encoding, as the terminal keeps
+it: `enter` puts it in exactly the state asked for, whatever was on before,
+`setModes` changes only the setting that differs, the old mode off before the
+new one on, and `leave` turns off that motion and that encoding. Focus
+reports are a mode of their own. A screen entered through `Tty.enter` is
+undone the same way by `restoreGlobal` and the panic handler, from a buffer
+on the stack, so a program that dies leaves the shell with its keyboard, its
+mouse and its cursor.
 
 **Synchronised output brackets a frame, not a session.** Mode 2026 left on for
 a program's lifetime makes the terminal repaint at whatever timeout it

@@ -931,13 +931,13 @@ test "a link survives a frame in which a neighbouring cell changed" {
     try testing.expect(std.mem.indexOf(u8, f.written(), "id=2") != null);
 }
 
-test "the mouse modes are switchable one by one" {
+test "a program that asks for clicks gets clicks and no motion" {
     // Not this package's code, but this package's promise: a program that
     // asks for clicks gets clicks, and not a report for every cell the
     // pointer crosses.
     var buffer: [256]u8 = undefined;
     var out: Writer = .fixed(&buffer);
-    try morse.mouse(&out, .{ .press = true, .sgr = true });
+    try morse.mouse(&out, .{ .motion = .press });
     const bytes = out.buffered();
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1000h") != null);
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1006h") != null);

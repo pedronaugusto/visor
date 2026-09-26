@@ -656,7 +656,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     defer r.deinit(testing.allocator);
     const modes: render.Modes = .{
         .keyboard = .{ .report_event_types = true },
-        .mouse = .{ .press = true, .sgr = true },
+        .mouse = .{ .motion = .press },
         .paste = true,
     };
     try t.enter(&r, .{}, .alt, modes);

@@ -76,47 +76,45 @@ pub const Modes = struct {
     /// why the push comes after the switch to the alternate screen and the
     /// pop before the switch back.
     keyboard: ?morse.KittyFlags = null,
-    /// Which mouse reports to send. `focus` in here is ignored: focus
-    /// reports are the field of their own below.
-    mouse: morse.Mouse = .{},
+    /// Which mouse reports to send, or null for none: one motion and one
+    /// encoding, as the terminal keeps them. `enter` puts the terminal's
+    /// mouse in exactly this state, whatever was on before, and the way out
+    /// turns this motion and this encoding off.
+    mouse: ?morse.Mouse = null,
     /// Focus in and out reports, mode 1004.
     focus: bool = false,
     /// Pasted text bracketed, mode 2004, so it can be told from typing.
     paste: bool = false,
     /// Unprompted reports when the palette turns light or dark, mode 2031.
     color_scheme: bool = false,
-
-    /// The mouse modes as `morse.mouse` takes them, focus included.
-    fn mouseModes(m: Modes) morse.Mouse {
-        var modes = m.mouse;
-        modes.focus = m.focus;
-        return modes;
-    }
 };
 
-/// The DEC private mode numbers `morse.mouse` switches, one per field of
-/// `morse.Mouse`, so a way out can switch off exactly the ones that are on.
-const mouse_mode_numbers = .{
-    .{ "press", 1000 },
-    .{ "drag", 1002 },
-    .{ "any_motion", 1003 },
-    .{ "focus", 1004 },
-    .{ "sgr", 1006 },
-    .{ "rxvt", 1015 },
-    .{ "sgr_pixels", 1016 },
-};
-
-fn anyMouse(m: morse.Mouse) bool {
-    inline for (mouse_mode_numbers) |pair| {
-        if (@field(m, pair[0])) return true;
-    }
-    return false;
+/// Turns off the mouse `m` put on: its motion and its encoding. On a
+/// terminal that keeps each as one setting, either `l` resets the whole
+/// setting; on one that keeps a flag per mode, these are the only two flags
+/// `morse.mouse` left on. Either way the mouse is off and nothing else was
+/// touched.
+fn mouseOff(w: *Writer, m: morse.Mouse) Writer.Error!void {
+    try morse.setMode(w, m.motion.number(), false);
+    try morse.setMode(w, m.encoding.number(), false);
 }
 
-/// Switches off each mouse mode that `m` has on, and no other.
-fn mouseOffExactly(w: *Writer, m: morse.Mouse) Writer.Error!void {
-    inline for (mouse_mode_numbers) |pair| {
-        if (@field(m, pair[0])) try morse.setMode(w, pair[1], false);
+/// From one mouse the terminal is known to be in to another, writing only
+/// the settings that differ: the old mode off before the new one on, so the
+/// `l` cannot reset the setting the `h` just made.
+fn mouseChange(w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!void {
+    const old = was orelse {
+        if (now) |m| try morse.mouse(w, m);
+        return;
+    };
+    const new = now orelse return mouseOff(w, old);
+    if (old.motion != new.motion) {
+        try morse.setMode(w, old.motion.number(), false);
+        try morse.setMode(w, new.motion.number(), true);
+    }
+    if (old.encoding != new.encoding) {
+        try morse.setMode(w, old.encoding.number(), false);
+        try morse.setMode(w, new.encoding.number(), true);
     }
 }
 
@@ -396,7 +394,8 @@ pub const Renderer = struct {
         // After the switch: the alternate screen has a keyboard stack of its
         // own, and this push belongs on it.
         if (modes.keyboard) |flags| try morse.kittyKeyboardPush(w, flags);
-        if (anyMouse(modes.mouseModes())) try morse.mouse(w, modes.mouseModes());
+        if (modes.mouse) |m| try morse.mouse(w, m);
+        if (modes.focus) try morse.focusEvents.set(w, true);
         if (modes.paste) try morse.bracketedPaste.set(w, true);
         if (modes.color_scheme) try morse.colorScheme.set(w, true);
         if (caps.in_band_resize) try morse.inBandResize.set(w, true);
@@ -445,11 +444,8 @@ pub const Renderer = struct {
                 if (old != new) try morse.kittyKeyboardSet(w, new, .replace);
             } else try morse.kittyKeyboardPop(w);
         } else if (modes.keyboard) |new| try morse.kittyKeyboardPush(w, new);
-        const old_mouse = was.mouseModes();
-        const new_mouse = modes.mouseModes();
-        if (old_mouse != new_mouse) {
-            if (anyMouse(new_mouse)) try morse.mouse(w, new_mouse) else try mouseOffExactly(w, old_mouse);
-        }
+        try mouseChange(w, was.mouse, modes.mouse);
+        if (was.focus != modes.focus) try morse.focusEvents.set(w, modes.focus);
         if (was.paste != modes.paste) try morse.bracketedPaste.set(w, modes.paste);
         if (was.color_scheme != modes.color_scheme) try morse.colorScheme.set(w, modes.color_scheme);
     }
@@ -479,7 +475,8 @@ pub const Renderer = struct {
         if (was.in_band_resize) try morse.inBandResize.set(w, false);
         if (was.modes.color_scheme) try morse.colorScheme.set(w, false);
         if (was.modes.paste) try morse.bracketedPaste.set(w, false);
-        try mouseOffExactly(w, was.modes.mouseModes());
+        if (was.modes.focus) try morse.focusEvents.set(w, false);
+        if (was.modes.mouse) |m| try mouseOff(w, m);
         // Before the switch back: the stack this pops is the alternate
         // screen's own.
         if (was.modes.keyboard != null) try morse.kittyKeyboardPop(w);
@@ -2194,7 +2191,7 @@ test "the input modes go on after the screen and come off before it, exactly" {
 
     const modes: Modes = .{
         .keyboard = .{ .disambiguate_escape_codes = true, .report_event_types = true },
-        .mouse = .{ .press = true, .sgr = true },
+        .mouse = .{ .motion = .press },
         .focus = true,
         .paste = true,
         .color_scheme = true,
@@ -2204,9 +2201,10 @@ test "the input modes go on after the screen and come off before it, exactly" {
     try testing.expectEqualStrings(
         "\x1b[?1049h" ++ // the alternate screen, and its own keyboard stack
             "\x1b[>3u" ++ // pushed onto that stack
-            // every mode off before any on: a terminal resets its motion
-            // or its encoding when any of that setting's modes goes off
-            "\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1016l\x1b[?1000h\x1b[?1004h\x1b[?1006h" ++
+            // the mouse exactly: every other mode of both settings off,
+            // whatever was on, then one motion and one encoding
+            "\x1b[?9l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1015l\x1b[?1016l\x1b[?1000h\x1b[?1006h" ++
+            "\x1b[?1004h" ++ // focus, a mode of its own
             "\x1b[?2004h\x1b[?2031h" ++
             "\x1b[0m\x1b[2J\x1b[1;1H\x1b[?25l",
         f.written(),
@@ -2216,10 +2214,11 @@ test "the input modes go on after the screen and come off before it, exactly" {
     try f.renderer.leave(&f.out.writer);
     try testing.expectEqualStrings(
         "\x1b[?2026l\x1b[0m\x1b[?25h" ++
-            "\x1b[?2031l\x1b[?2004l" ++
-            // Only the mouse modes that were on: the ones `enter` found off
-            // were not this program's to touch.
-            "\x1b[?1000l\x1b[?1004l\x1b[?1006l" ++
+            "\x1b[?2031l\x1b[?2004l\x1b[?1004l" ++
+            // The motion and the encoding that were on, and no other: the
+            // modes `enter` found on were turned off then, and are not this
+            // program's to write again.
+            "\x1b[?1000l\x1b[?1006l" ++
             "\x1b[<u" ++ // popped while still on the screen it was pushed on
             "\x1b[?1049l",
         f.written(),
@@ -2233,7 +2232,7 @@ test "a mode never asked for is never written, either way" {
     try f.renderer.enter(&f.out.writer, .{}, .alt, .{});
     try f.renderer.leave(&f.out.writer);
     const bytes = f.written();
-    for ([_][]const u8{ "\x1b[>", "\x1b[<u", "?1000", "?1004", "?1006", "?2004", "?2031" }) |needle| {
+    for ([_][]const u8{ "\x1b[>", "\x1b[<u", "?9", "?1000", "?1002", "?1003", "?1004", "?1005", "?1006", "?1015", "?1016", "?2004", "?2031" }) |needle| {
         try testing.expect(std.mem.indexOf(u8, bytes, needle) == null);
     }
 }
@@ -2243,28 +2242,49 @@ test "modes changed mid-session write the difference, and leaving undoes what is
     defer f.deinit();
     try testing.expectError(error.NotEntered, f.renderer.setModes(&f.out.writer, .{ .paste = true }));
 
-    try f.renderer.enter(&f.out.writer, .{}, .alt, .{ .mouse = .{ .press = true, .sgr = true } });
+    try f.renderer.enter(&f.out.writer, .{}, .alt, .{ .mouse = .{ .motion = .press } });
 
     // The same modes again: nothing.
     f.out.clearRetainingCapacity();
-    try f.renderer.setModes(&f.out.writer, .{ .mouse = .{ .press = true, .sgr = true } });
+    try f.renderer.setModes(&f.out.writer, .{ .mouse = .{ .motion = .press } });
     try testing.expectEqualStrings("", f.written());
 
-    // The mouse off for a view that does not want it, the keyboard on.
+    // Drag for a view that has one: the old motion off before the new one
+    // on, so the off cannot reset the motion just set. The encoding stays.
     f.out.clearRetainingCapacity();
-    try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .disambiguate_escape_codes = true } });
-    try testing.expectEqualStrings("\x1b[>1u\x1b[?1000l\x1b[?1006l", f.written());
+    try f.renderer.setModes(&f.out.writer, .{ .mouse = .{ .motion = .drag } });
+    try testing.expectEqualStrings("\x1b[?1000l\x1b[?1002h", f.written());
+
+    // Pixels: the encoding changes the same way, and the motion stays.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .mouse = .{ .motion = .drag, .encoding = .sgr_pixels } });
+    try testing.expectEqualStrings("\x1b[?1006l\x1b[?1016h", f.written());
+
+    // The mouse off for a view that does not want it, the keyboard and
+    // focus on.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .disambiguate_escape_codes = true }, .focus = true });
+    try testing.expectEqualStrings("\x1b[>1u\x1b[?1002l\x1b[?1016l\x1b[?1004h", f.written());
 
     // New flags replace the top of the stack rather than pushing again.
     f.out.clearRetainingCapacity();
     try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .report_event_types = true }, .paste = true });
-    try testing.expectEqualStrings("\x1b[=2;1u\x1b[?2004h", f.written());
+    try testing.expectEqualStrings("\x1b[=2;1u\x1b[?1004l\x1b[?2004h", f.written());
 
-    // And the way out pops once and turns off the paste it now has on.
+    // The mouse back, from off: exactly, as on the way in.
+    f.out.clearRetainingCapacity();
+    try f.renderer.setModes(&f.out.writer, .{ .keyboard = .{ .report_event_types = true }, .paste = true, .mouse = .{ .motion = .any } });
+    try testing.expectEqualStrings(
+        "\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1005l\x1b[?1015l\x1b[?1016l\x1b[?1003h\x1b[?1006h",
+        f.written(),
+    );
+
+    // And the way out pops once and turns off the paste and mouse it now
+    // has on.
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
     try testing.expectEqualStrings(
-        "\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2004l\x1b[<u\x1b[?1049l",
+        "\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[<u\x1b[?1049l",
         f.written(),
     );
 }

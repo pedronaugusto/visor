@@ -105,8 +105,8 @@ pub fn main() !void {
 
     // Every sequence visor writes comes from morse, which it re-exports
     // whole: one fetch, and everything under the grid is reachable.
-    var control: [64]u8 = undefined;
+    var control: [128]u8 = undefined;
     var w: std.Io.Writer = .fixed(&control);
-    try visor.morse.mouse(&w, .{ .press = true, .sgr = true });
+    try visor.morse.mouse(&w, .{ .motion = .press });
     // --- README:usage ---
 }
