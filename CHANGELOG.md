@@ -255,6 +255,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   measuring by codepoint a marker, a label or an alignment could be off by a
   column for every cluster the two measures disagree about. Every widget now
   measures the way the window's screen does.
+- On Windows a lone `ESC` waited for the next key: the wait was the read,
+  with no timeout. It now waits on the console's input handle for the
+  caller's timeout first, passing over input records a read would not
+  return, and settles the key as it does elsewhere.
 - **Text was left on the screen after a resize.** A resize or a repaint gave
   the renderer a blank previous frame, and a row the new frame held blank was
   skipped as already blank, so whatever the terminal still showed there -- a

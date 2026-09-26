@@ -148,9 +148,30 @@ pub const Input = struct {
     const wait = if (is_windows) waitWindows else waitPosix;
 
     /// The console has no resize signal and its handles take no part in a
-    /// poll, so the wait is the read.
+    /// poll, so the wait is the read -- except for the lone `ESC`, which
+    /// waits on the console's input handle for the caller's timeout first.
+    /// The handle is signalled by any input record, and a read in terminal
+    /// input mode passes over the ones that are not keys (focus, menu,
+    /// buffer size), so those are taken off the queue and the wait begun
+    /// again rather than left to a read that would block on them.
     fn waitWindows(in: *Input) Error!Woke {
-        return in.readBlocking(in.tty.inputFile());
+        const file = in.tty.inputFile();
+        if (!in.ambiguous()) return in.readBlocking(file);
+        const ms: u32 = @intCast(std.math.clamp(in.escape.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
+        while (true) {
+            switch (console.WaitForSingleObject(file.handle, ms)) {
+                console.WAIT_OBJECT_0 => {},
+                console.WAIT_TIMEOUT => return .quiet,
+                else => return in.readBlocking(file),
+            }
+            var records: [16]console.INPUT_RECORD = undefined;
+            var n: u32 = 0;
+            if (console.PeekConsoleInputW(file.handle, &records, records.len, &n) == .FALSE) return in.readBlocking(file);
+            if (keyWaiting(records[0..n])) return in.readBlocking(file);
+            // Nothing a read would return: take those records off and wait
+            // again.
+            _ = console.ReadConsoleInputW(file.handle, &records, n, &n);
+        }
     }
 
     fn waitPosix(in: *Input) Error!Woke {
@@ -222,6 +243,50 @@ pub const Input = struct {
         };
         return if (n == 0) .ended else .{ .bytes = n };
     }
+};
+
+/// Whether a console's queued input holds a key going down, which is what a
+/// read in terminal input mode returns bytes for.
+fn keyWaiting(records: []const console.INPUT_RECORD) bool {
+    for (records) |r| {
+        if (r.EventType == console.KEY_EVENT and r.Event.KeyEvent.bKeyDown != 0) return true;
+    }
+    return false;
+}
+
+/// The console calls the lone `ESC`'s wait makes on Windows. Declared here,
+/// in the style of `std.os.windows.kernel32`; nothing below is reached
+/// elsewhere but the record shapes, which a test reads.
+const console = struct {
+    const windows = std.os.windows;
+    const KEY_EVENT: u16 = 0x0001;
+    const WAIT_OBJECT_0: u32 = 0x00000000;
+    const WAIT_TIMEOUT: u32 = 0x00000102;
+
+    const KEY_EVENT_RECORD = extern struct {
+        bKeyDown: i32,
+        wRepeatCount: u16,
+        wVirtualKeyCode: u16,
+        wVirtualScanCode: u16,
+        uChar: u16,
+        dwControlKeyState: u32,
+    };
+
+    const INPUT_RECORD = extern struct {
+        EventType: u16,
+        Event: extern union {
+            KeyEvent: KEY_EVENT_RECORD,
+            raw: [16]u8,
+        },
+    };
+
+    comptime {
+        std.debug.assert(@sizeOf(INPUT_RECORD) == 20);
+    }
+
+    extern "kernel32" fn WaitForSingleObject(hHandle: windows.HANDLE, dwMilliseconds: u32) callconv(.winapi) u32;
+    extern "kernel32" fn PeekConsoleInputW(hConsoleInput: windows.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) windows.BOOL;
+    extern "kernel32" fn ReadConsoleInputW(hConsoleInput: windows.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) windows.BOOL;
 };
 
 const testing = std.testing;
@@ -555,4 +620,29 @@ test "the pump's corpus draws every fragment, raw bytes, every read size and lon
     try testing.expect(t.read_len.covers(1, 32));
     try testing.expect(t.bytes.least == 0);
     try testing.expect(t.bytes.most > 1024);
+}
+
+test "a console queue with a key going down is one a read returns for, and one with only other records is not" {
+    var focus: console.INPUT_RECORD = .{ .EventType = 0x0010, .Event = .{ .raw = @splat(0) } };
+    var up: console.INPUT_RECORD = .{ .EventType = console.KEY_EVENT, .Event = .{ .KeyEvent = .{
+        .bKeyDown = 0,
+        .wRepeatCount = 1,
+        .wVirtualKeyCode = 0x41,
+        .wVirtualScanCode = 0,
+        .uChar = 'a',
+        .dwControlKeyState = 0,
+    } } };
+    try testing.expect(!keyWaiting(&.{ focus, up }));
+    var down = up;
+    down.Event.KeyEvent.bKeyDown = 1;
+    try testing.expect(keyWaiting(&.{ focus, down }));
+    try testing.expect(!keyWaiting(&.{}));
+    _ = &focus;
+    _ = &up;
+}
+
+test "the pump is compiled for every target, the Windows wait included" {
+    // Every other test here is skipped on Windows before it reaches `next`,
+    // so this is what makes the cross-compiled check analyse the wait there.
+    _ = &Input.next;
 }

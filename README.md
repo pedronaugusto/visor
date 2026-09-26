@@ -334,7 +334,7 @@ are: a key, the mouse, and an answer to a question read as a typed `reply` —
 a colour, a size, a mode, a graphics acknowledgement — which `Palette`,
 `Winsize`, `Caps.Probe` and `Layers.ack` take as they come, so nothing is
 parsed twice, nothing is dropped on the way and there is no second event
-type. The lone `ESC` is settled on the caller's timeout; a
+type. The lone `ESC` is settled on the caller's timeout, on Windows too; a
 resize wakes the wait through a pipe the signal handler writes to and comes
 back as the same `resize` event an in-band report is, with pixels. It starts
 no thread and keeps no clock: it blocks on the caller's `std.Io`, and
