@@ -6,8 +6,14 @@
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
-        .morse = .{ .path = "../morse" },
-        .conduit = .{ .path = "../conduit" },
+        .morse = .{
+            .url = "git+https://github.com/pedronaugusto/morse#4933a5e1362e00b9ecb4c41c6776a74da0ca9796",
+            .hash = "morse-0.5.0-OKnGoXtHDgCJqe3XC9t91AKt2QD1Z337BqRNh6Rj6Axd",
+        },
+        .conduit = .{
+            .url = "git+https://github.com/pedronaugusto/conduit#f96fa544aadd87f2b9b4a43cf6c79b4e3cd7b651",
+            .hash = "conduit-0.5.1-4rIA756BCQBOO1-wp2xjdFvnU5d2KQOUWq39_WvRKJW8",
+        },
     },
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xfc47eb8a53109791,

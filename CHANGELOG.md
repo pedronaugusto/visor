@@ -166,8 +166,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Tty` builds on conduit's terminal primitives (`conduit.tty`) for raw
   mode, the way back, the size and the device's name, instead of its own
   copies of the same calls, and the suite's pseudo-terminal is conduit's.
-  The dependency is taken by path while conduit is unreleased; the module
-  visor imports links no C library on Linux. On Windows the input handle
+  The dependency is pinned by commit until conduit's next release; the
+  module visor imports links no C library on Linux. On Windows the input handle
   no longer asks for window-size records, which a terminal-sequence read
   never returns.
 - **Breaking:** `Screen` no longer holds the pictures. The grid is text,
