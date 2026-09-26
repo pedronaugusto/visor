@@ -83,6 +83,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   colour into the RGB it is drawn in, or null while its slot is unanswered,
   with the standard cube and grey ramp above the sixteen. `mix` is the step
   between two colours, which is what a tint toward the background is.
+- `Window.sub`: the child over a rectangle of the window's own cells, the
+  shape `Layout.split` and `Layout.repeat` hand back, clipped to the window.
 - `Window.ink`, `Window.inked` and `Window.Ink`: a program's look applied to
   every cell a window writes. The ink is a function the program owns, given
   each stroke -- where on the screen it lands, how many columns it covers,

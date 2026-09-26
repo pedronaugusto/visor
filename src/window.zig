@@ -269,6 +269,13 @@ pub const Window = struct {
         return .{ .screen = w.screen, .rect = inner, .ink = w.ink };
     }
 
+    /// The sub-window over `r`, a rectangle in this window's own cells —
+    /// what `Layout.split` and `Layout.repeat` hand back for an area made
+    /// with `Rect.fromSize(w.size())` — clipped to this one.
+    pub fn sub(w: Window, r: Rect) Window {
+        return w.child(.{ .col = r.col, .row = r.row, .cols = r.cols, .rows = r.rows });
+    }
+
     /// One cell, in this window's coordinates, clipped.
     pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
@@ -939,4 +946,13 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
     }, .{ .wrap = .word });
 
     for (plain.cells, inked.cells) |a, b| try testing.expect(a.eql(b));
+}
+
+test "a rectangle of the window's own cells is the child over it, clipped" {
+    var s = try Screen.init(testing.allocator, .{ .cols = 10, .rows = 4 });
+    defer s.deinit(testing.allocator);
+    const outer = s.window().child(.{ .col = 2, .row = 1 });
+    const inner = outer.sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 1 });
+    try testing.expectEqual(Rect{ .col = 5, .row = 2, .cols = 5, .rows = 1 }, inner.rect);
+    try testing.expectEqual(outer.ink, inner.ink);
 }
