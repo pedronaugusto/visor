@@ -238,6 +238,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A frame past 1024 bytes is bracketed.** The synchronised-output bracket
+  was kept only for a frame larger than 8 KiB, on the reasoning that a
+  smaller one reaches the terminal in one read. It does not: macOS's
+  pseudo-terminal hands the terminal a write 1024 bytes at a time, so a
+  frame of a few kilobytes arrived in pieces a terminal could draw between.
+  `sync_gate` is 1024.
 - **The properties had been testing almost nothing.** `std.testing.Smith`
   reads eight bytes for every value and answers the lowest in range when
   those bytes are out of it, and it ends a loop at the first byte that is not

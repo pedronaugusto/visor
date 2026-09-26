@@ -135,9 +135,12 @@ pub const Error = Writer.Error || error{
 /// worth its sixteen bytes.
 ///
 /// A frame small enough for the terminal to take in one read does not tear,
-/// and the bracket costs more than the frame saves. The number is the usual
-/// stdio buffer, which is what decides "one read" on the receiving end.
-pub const sync_gate = 8192;
+/// and the bracket costs more than the frame saves. What decides "one read"
+/// is the pseudo-terminal between the program and the terminal, not either
+/// end's buffer: macOS hands the terminal a program's write 1024 bytes at a
+/// time, however large the write, so a frame past that arrives in pieces a
+/// terminal can draw between.
+pub const sync_gate = 1024;
 
 /// The last frame, and the style, link and cursor the terminal is currently
 /// in.
