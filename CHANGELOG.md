@@ -95,6 +95,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     for a terminal that draws no pictures; and `Marker.sextant` for `Canvas`.
   - `Block.corners`: corner marks with no lines between them, which take no
     room from the inside.
+  - `List` draws the row a person picks from. An `Item` may be runs in
+    styles of their own (`segments`, each a `List.Segment` that may start at
+    a column and take at most so many), text against the right edge
+    (`aside`), and rows under the first (`below`). The list has a
+    `marker_style` for both markers, a `gap` after them, an `ellipsis` for
+    what is cut, an `aside_gap`, and `text_min`, how far the text gives way
+    to the aside before the aside is cut instead. `selected_style` may be
+    null, for a program that styles the chosen item's runs itself.
+    `List.visible` says which items a window shows and how many it does not,
+    for a head that says "N more". A test draws a picker by hand at
+    worked-out columns and through the list and finds the same cells, and
+    the conformance build reads a list back from the second emulator.
   - `Layout.repeat`, parts of one size with the spacing between them and the
     cells that do not divide left at the end, so a grid of columns lines up
     whatever their number; and `Layout.fitCount`, how many parts of at least

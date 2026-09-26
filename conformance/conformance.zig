@@ -36,6 +36,7 @@ const std = @import("std");
 const visor = @import("visor");
 const vt = @import("ghostty-vt");
 const corpus = @import("corpus");
+const widgets = @import("visor.widgets");
 
 const Allocator = std.mem.Allocator;
 const Smith = std.testing.Smith;
@@ -987,4 +988,36 @@ test "every cluster written to the last row reaches the second emulator" {
         col += w;
     }
     _ = try h.frame(o);
+}
+
+test "a list of rows a person picks from reaches the second emulator as drawn" {
+    // Runs in their own styles lined up in a column, a state at the right
+    // edge, a second row under an item, a marker in its own style, and text
+    // cut with an ellipsis: every cell the list drew, read back.
+    const gpa = testing.allocator;
+    for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
+        var h: Harness = try .init(gpa, .{ .cols = 22, .rows = 5 }, method);
+        defer h.deinit();
+        const o = try Oracle.init(gpa, h.screen.size, method);
+        defer o.deinit();
+        const Run = widgets.List.Segment;
+        const items = [_]widgets.Item{
+            .{ .segments = &[_]Run{ .{ .text = "1", .style = .{ .dim = true } }, .{ .text = "\u{4e2d}\u{6587} name", .at = 2 } }, .aside = &[_]Run{.{ .text = "12k", .style = .{ .fg = .ansi(.yellow) } }} },
+            .{ .segments = &[_]Run{ .{ .text = "2", .style = .{ .bold = true } }, .{ .text = "a name far too long to fit", .at = 2 } }, .aside = &[_]Run{.{ .text = "3.4M" }}, .below = &.{&[_]Run{.{ .text = "e\u{301}t\u{e9} \u{26a0}\u{fe0f}", .style = .{ .italic = true } }}} },
+            .{ .text = "last" },
+        };
+        var state: widgets.List.State = .{ .selected = 1 };
+        try (widgets.List{
+            .items = &items,
+            .marker = "\u{25b8}",
+            .blank_marker = " ",
+            .marker_style = .{ .fg = .ansi(.red), .bold = true },
+            .gap = 1,
+            .selected_style = null,
+            .ellipsis = "\u{2026}",
+            .text_min = 0,
+        }).draw(h.screen.window(), &state);
+        _ = try h.frame(o);
+        try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+    }
 }

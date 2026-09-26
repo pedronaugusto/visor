@@ -39,6 +39,7 @@ pub fn build(b: *std.Build) void {
             .error_tracing = false,
             .imports = &.{
                 .{ .name = "visor", .module = visor.module("visor") },
+                .{ .name = "visor.widgets", .module = visor.module("visor.widgets") },
                 .{ .name = "corpus", .module = visor.module("corpus") },
                 .{ .name = "ghostty-vt", .module = ghostty.module("ghostty-vt") },
             },
