@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`Caps.sgr_pixels` is answered.** The probe asks for mode 1016 with the
+  other modes, and a terminal that has it (set or reset) sets the field, so a
+  program knows before it asks for the mouse in pixels.
 - `Winsize`, `Pixels` and `CellSize`: the terminal's grid, its text area in
   pixels, and one cell in pixels, kept apart. `Winsize.update` folds a resize
   event (from the signal or in band) and the answers to `CSI 14 t`, `16 t` and

@@ -165,10 +165,12 @@ pub const Caps = struct {
                         .not_recognized, .permanently_reset => false,
                     };
                     // Synchronised output is a bracket written around a frame,
-                    // and in-band resize reports are turned on by `enter`:
-                    // neither is on when asked about.
+                    // in-band resize reports are turned on by `enter`, and
+                    // pixel mouse reports by whoever asks for the mouse:
+                    // none is on when asked about.
                     if (m.mode == morse.syncOutput.number) p.caps.sync = has;
                     if (m.mode == morse.inBandResize.number) p.caps.in_band_resize = has;
+                    if (m.mode == morse.Mouse.Encoding.sgr_pixels.number()) p.caps.sgr_pixels = has;
                     // A terminal that measures clusters whatever anyone asks
                     // answers permanently set; one that can be asked will be,
                     // by `enter`.
@@ -240,7 +242,7 @@ test "the probe asks morse's questions, in morse's order, and nothing of its own
     // Among them the ones a `Caps` is made of, and the one always answered
     // last.
     const asked = out.buffered();
-    for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
+    for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1b[?1016$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
         try testing.expect(std.mem.indexOf(u8, asked, q) != null);
     }
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
@@ -251,24 +253,28 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     // on: reset. That is a yes.
     for ([_][]const u8{ "1", "2", "3" }) |state| {
         var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
-        var buf: [3][32]u8 = undefined;
+        var buf: [4][32]u8 = undefined;
         p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
         p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
         p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
         try testing.expect(p.caps.sync);
         try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
         try testing.expect(p.caps.in_band_resize);
+        try testing.expect(p.caps.sgr_pixels);
     }
     for ([_][]const u8{ "0", "4" }) |state| {
         var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
-        p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true };
-        var buf: [3][32]u8 = undefined;
+        p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true, .sgr_pixels = true };
+        var buf: [4][32]u8 = undefined;
         p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
         p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
         p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
         try testing.expect(!p.caps.sync);
         try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
         try testing.expect(!p.caps.in_band_resize);
+        try testing.expect(!p.caps.sgr_pixels);
     }
 }
 
@@ -303,6 +309,7 @@ test "a probe answered in full is settled at once" {
         .color_scheme = false,
         .unicode_core = false,
         .in_band_resize = false,
+        .mouse_pixels = false,
         .kitty_keyboard = false,
         .modify_other_keys = false,
         .graphics = false,
