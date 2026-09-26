@@ -88,6 +88,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the grid has columns, for a program that reads a column back by its place
   in the line. `dumpScreen`'s documentation said it wrote such a filler, which
   it never did; it holds each cluster once, as before, and now says so.
+- `Rule.gap`: cells left as they are between two glyphs, a spaced rule that
+  reads as broken rather than drawn.
 - `Window.sub`: the child over a rectangle of the window's own cells, the
   shape `Layout.split` and `Layout.repeat` hand back, clipped to the window.
 - `Window.ink`, `Window.inked` and `Window.Ink`: a program's look applied to

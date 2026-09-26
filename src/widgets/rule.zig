@@ -22,6 +22,9 @@ pub const Rule = struct {
     glyph: ?[]const u8 = null,
     /// The style it draws in.
     style: Style = .{},
+    /// Cells left as they are between two glyphs: a spaced rule, one that
+    /// reads as broken rather than drawn.
+    gap: u16 = 0,
 
     /// A thin line across.
     pub const solid = "\u{2500}";
@@ -43,12 +46,12 @@ pub const Rule = struct {
                 const glyph = r.glyph orelse solid;
                 const step = @max(visor.graphemeWidth(glyph, win.screen.method), 1);
                 var col: u16 = 0;
-                while (col + step <= win.cols()) : (col += step) try win.write(col, 0, glyph, r.style, .none);
+                while (col + step <= win.cols()) : (col +|= step +| r.gap) try win.write(col, 0, glyph, r.style, .none);
             },
             .vertical => {
                 const glyph = r.glyph orelse vertical;
                 var row: u16 = 0;
-                while (row < win.rows()) : (row += 1) try win.write(0, row, glyph, r.style, .none);
+                while (row < win.rows()) : (row +|= 1 +| r.gap) try win.write(0, row, glyph, r.style, .none);
             },
         }
     }
@@ -78,6 +81,21 @@ test "a wide glyph is repeated whole, never half" {
     try (Rule{ .glyph = "\u{4e00}" }).draw(h.window());
     try h.expectFrame(
         \\一一
+        \\
+    );
+}
+
+test "a spaced rule leaves the cells between its glyphs as they were" {
+    var h: Harness = try .init(testing.allocator, 7, 4);
+    defer h.deinit();
+    try h.window().write(1, 0, "x", .{}, .none);
+    try (Rule{ .glyph = Rule.dashed, .gap = 1 }).draw(h.window().child(.{ .rows = 1 }));
+    try (Rule{ .direction = .vertical, .gap = 2 }).draw(h.window().child(.{ .col = 6, .row = 1 }));
+    try h.expectFrame(
+        \\╌x╌ ╌ ╌
+        \\      │
+        \\
+        \\
         \\
     );
 }
