@@ -1630,3 +1630,54 @@ test "comparing two screens names the first cell that differs" {
     try b.write(0, 0, "\u{ff21}", .{}, .none);
     try testing.expectEqual(geom.Point{ .col = 0, .row = 0 }, firstDifference(&a, &b).?);
 }
+
+//=========================================================================
+// The dump format, pinned as a program keeps its goldens in it: the glyph
+// dump and the style dump of one small screen, byte for byte. A program that
+// writes the same dump from another renderer, or keeps years of goldens in
+// it, is holding this package to these bytes.
+//=========================================================================
+
+test "the dumps a program keeps its goldens in are these bytes" {
+    var screen: Screen = try .init(testing.allocator, .{ .cols = 6, .rows = 2 });
+    defer screen.deinit(testing.allocator);
+    screen.method = .unicode;
+    try screen.write(0, 0, "a", .{ .fg = .ansi(.red), .bold = true }, .none);
+    try screen.write(1, 0, "b", .{ .fg = .ansi(.bright_red), .bg = .palette(200) }, .none);
+    try screen.write(2, 0, "\u{4E2D}", .{ .fg = .rgb(255, 16, 0), .underline = .curly, .underline_color = .palette(3) }, .none);
+    try screen.write(4, 0, "l", .{}, try screen.link(testing.allocator, "https://example.com", "id=1"));
+    try screen.write(0, 1, "r", .{ .reverse = true, .hidden = true, .strikethrough = true, .dim = true, .italic = true, .blink = true }, .none);
+
+    var styles: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer styles.deinit();
+    try dumpScreenStyles(&screen, &styles.writer);
+    try testing.expectEqualStrings(
+        \\# 0 fg=red bg=default bold
+        \\# 1 fg=bright_red bg=palette:200
+        \\# 2 fg=#ff1000 bg=default ul=curly ulc=palette:3
+        \\# 3 fg=default bg=default link=https://example.com
+        \\# 4 fg=default bg=default
+        \\# 5 fg=default bg=default dim italic blink reverse hidden strike
+        \\012234
+        \\544444
+        \\
+    , styles.written());
+
+    var glyphs: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer glyphs.deinit();
+    try dumpScreen(&screen, &glyphs.writer);
+    try testing.expectEqualStrings("ab\u{4E2D}l \nr     \n", glyphs.written());
+}
+
+test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first appearance" {
+    var screen: Screen = try .init(testing.allocator, .{ .cols = 64, .rows = 1 });
+    defer screen.deinit(testing.allocator);
+    for (0..64) |c| screen.writeOwnedCell(@intCast(c), 0, .blank(.{ .fg = .palette(@intCast(c + 16)) }));
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try dumpScreenStyles(&screen, &out.writer);
+    const got = out.written();
+    try testing.expect(std.mem.startsWith(u8, got, "# 00 fg=palette:16 bg=default\n"));
+    try testing.expect(std.mem.indexOf(u8, got, "\n# 10 fg=palette:78 bg=default\n# 11 fg=palette:79 bg=default\n") != null);
+    try testing.expect(std.mem.endsWith(u8, got, "\n000102030405060708090a0b0c0d0e0f0g0h0i0j0k0l0m0n0o0p0q0r0s0t0u0v0w0x0y0z0A0B0C0D0E0F0G0H0I0J0K0L0M0N0O0P0Q0R0S0T0U0V0W0X0Y0Z1011\n"));
+}

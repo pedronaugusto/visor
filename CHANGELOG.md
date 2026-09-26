@@ -53,6 +53,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Layers.repaint`: the next frame places every declared picture again, as
   though the terminal could have moved or dropped any of them. `Renderer`
   calls it on every repaint.
+- The dump format is pinned byte for byte in the suite, on a screen that
+  uses a bright ANSI name, a palette background, a truecolour foreground, a
+  curly underline in a palette colour, a link, every attribute and a wide
+  cluster's covered column; and the ids past sixty-two are pinned in order.
+  A program keeping its goldens in the dump need not test the format
+  itself.
 - The conformance build replays the corpus through the same generator as
   the package's suite, proves that it explores, and draws every grapheme
   across resizes too.
