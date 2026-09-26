@@ -141,6 +141,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Measured by codepoint (`.wcwidth`), a nonspacing or enclosing mark, a
   variation selector and a joiner counted a column each; `wcwidth(3)` counts
   them as nothing, so "e" and a combining acute measured two.
+- Entering with mouse modes, or changing them with `setModes`, could leave
+  the terminal reporting no mouse at all: the modes went out in ascending
+  order, and a terminal resets the motion it reports when any of 1000, 1002
+  and 1003 goes off after another went on. Fixed in morse's `mouse`, which
+  now writes every mode off before any on.
 - `wrap` left an empty row before a cluster wider than the whole row; the
   cluster now takes a row of its own.
 - `Tty.open` did not compile on macOS: Zig's libc bindings there have no

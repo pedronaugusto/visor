@@ -2204,7 +2204,9 @@ test "the input modes go on after the screen and come off before it, exactly" {
     try testing.expectEqualStrings(
         "\x1b[?1049h" ++ // the alternate screen, and its own keyboard stack
             "\x1b[>3u" ++ // pushed onto that stack
-            "\x1b[?1000h\x1b[?1002l\x1b[?1003l\x1b[?1004h\x1b[?1006h\x1b[?1015l\x1b[?1016l" ++
+            // every mode off before any on: a terminal resets its motion
+            // or its encoding when any of that setting's modes goes off
+            "\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1016l\x1b[?1000h\x1b[?1004h\x1b[?1006h" ++
             "\x1b[?2004h\x1b[?2031h" ++
             "\x1b[0m\x1b[2J\x1b[1;1H\x1b[?25l",
         f.written(),

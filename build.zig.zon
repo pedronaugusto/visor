@@ -6,10 +6,7 @@
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
-        .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse?ref=v0.5.0#d981c9fc71d54270b39805e538a79434328a85f5",
-            .hash = "morse-0.5.0-OKnGoZfHDQDN66K4wjIsDZpLKCWZxYgtlAA1JAwSzvse",
-        },
+        .morse = .{ .path = "../morse" },
     },
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xfc47eb8a53109791,
