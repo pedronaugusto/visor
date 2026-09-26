@@ -100,9 +100,9 @@ fn frame(
     out: *std.Io.Writer.Allocating,
 ) !visor.Renderer.Stats {
     out.clearRetainingCapacity();
-    const stats = try renderer.draw(&out.writer, screen, caps);
+    const stats = try renderer.draw(&out.writer, screen, null, caps);
     try term.feed(out.written());
-    std.debug.assert((try renderer.draw(&out.writer, screen, caps)).bytes == 0);
+    std.debug.assert((try renderer.draw(&out.writer, screen, null, caps)).bytes == 0);
     const origin = term.saved.?.row;
     var row: u16 = 0;
     while (row < screen.size.rows) : (row += 1) {

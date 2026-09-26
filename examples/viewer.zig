@@ -270,7 +270,7 @@ fn show(
     what: []const u8,
 ) !void {
     out.clearRetainingCapacity();
-    const stats = try renderer.draw(&out.writer, screen, caps);
+    const stats = try renderer.draw(&out.writer, screen, null, caps);
     try term.feed(out.written());
     try visor.expectScreensEqual(screen, term.screen());
 

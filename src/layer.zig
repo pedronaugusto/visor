@@ -518,6 +518,7 @@ const Fixture = struct {
     renderer: Renderer,
     out: std.Io.Writer.Allocating,
     caps: Caps,
+    layers: Layers = .{},
 
     fn init(gpa: Allocator, cols: u16, rows: u16) !Fixture {
         const size: geom.Size = .{ .cols = cols, .rows = rows };
@@ -539,13 +540,14 @@ const Fixture = struct {
 
     fn deinit(f: *Fixture) void {
         f.screen.deinit(f.gpa);
+        f.layers.deinit(f.gpa);
         f.renderer.deinit(f.gpa);
         f.out.deinit();
     }
 
     fn draw(f: *Fixture) !Renderer.Stats {
         f.out.clearRetainingCapacity();
-        return f.renderer.draw(&f.out.writer, &f.screen, f.caps);
+        return f.renderer.draw(&f.out.writer, &f.screen, &f.layers, f.caps);
     }
 
     fn written(f: *Fixture) []const u8 {
@@ -567,7 +569,7 @@ test "a layer is placed by the id the program chose, with no round trip" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 13,
         .rect = .{ .col = 2, .row = 1, .cols = 8, .rows = 4 },
     });
@@ -587,9 +589,9 @@ test "the same layer declared again writes nothing" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
     const layer: Layer = .{ .image = 1, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 } };
-    try f.screen.layers.declare(testing.allocator, layer);
+    try f.layers.declare(testing.allocator, layer);
     _ = try f.draw();
-    try f.screen.layers.declare(testing.allocator, layer);
+    try f.layers.declare(testing.allocator, layer);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.placements);
     try testing.expectEqual(@as(usize, 0), stats.bytes);
@@ -599,12 +601,12 @@ test "a layer that moved is replaced rather than deleted and placed again" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 },
     });
     _ = try f.draw();
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 6, .row = 2, .cols = 4, .rows = 2 },
     });
@@ -618,7 +620,7 @@ test "a layer that left is deleted by name and its bytes are kept" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 5,
         .placement = 3,
         .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 },
@@ -642,8 +644,8 @@ test "after a resize every picture is placed again, and one that left is still d
     defer f.deinit();
     const stays: Layer = .{ .image = 1, .rect = .{ .col = 0, .row = 4, .cols = 4, .rows = 2 } };
     const leaves: Layer = .{ .image = 2, .rect = .{ .col = 8, .row = 0, .cols = 4, .rows = 2 } };
-    try f.screen.layers.declare(testing.allocator, stays);
-    try f.screen.layers.declare(testing.allocator, leaves);
+    try f.layers.declare(testing.allocator, stays);
+    try f.layers.declare(testing.allocator, leaves);
     _ = try f.draw();
 
     // The terminal took a new size and may have moved or dropped either;
@@ -651,7 +653,7 @@ test "after a resize every picture is placed again, and one that left is still d
     const size: geom.Size = .{ .cols = 24, .rows = 6 };
     try f.screen.resize(testing.allocator, size);
     try f.renderer.resize(testing.allocator, size);
-    try f.screen.layers.declare(testing.allocator, stays);
+    try f.layers.declare(testing.allocator, stays);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 2), stats.placements);
     const bytes = f.written();
@@ -661,7 +663,7 @@ test "after a resize every picture is placed again, and one that left is still d
     try testing.expect(std.mem.indexOf(u8, bytes, "i=2") != null);
 
     // And once placed, it is known where it is again.
-    try f.screen.layers.declare(testing.allocator, stays);
+    try f.layers.declare(testing.allocator, stays);
     try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
 }
 
@@ -669,9 +671,9 @@ test "a picture swapped for another is placed before the old one goes" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
     const at: Rect = .{ .col = 1, .row = 1, .cols = 6, .rows = 3 };
-    try f.screen.layers.declare(testing.allocator, .{ .image = 6, .rect = at });
+    try f.layers.declare(testing.allocator, .{ .image = 6, .rect = at });
     _ = try f.draw();
-    try f.screen.layers.declare(testing.allocator, .{ .image = 7, .rect = at });
+    try f.layers.declare(testing.allocator, .{ .image = 7, .rect = at });
     _ = try f.draw();
     const bytes = f.written();
     const placed = std.mem.indexOf(u8, bytes, "a=p,q=2,i=7").?;
@@ -795,16 +797,16 @@ test "sending to an id on screen places it again, and freeing takes it all away"
     const px = [_]u8{ 1, 2, 3, 4 };
     const layer: Layer = .{ .image = 8, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 } };
 
-    _ = try f.screen.layers.transmit(testing.allocator, &sent.writer, 8, &px, .{ .width = 1, .height = 1 });
-    try f.screen.layers.declare(testing.allocator, layer);
+    _ = try f.layers.transmit(testing.allocator, &sent.writer, 8, &px, .{ .width = 1, .height = 1 });
+    try f.layers.declare(testing.allocator, layer);
     _ = try f.draw();
-    try testing.expectEqual(@as(usize, 1), f.screen.layers.count());
+    try testing.expectEqual(@as(usize, 1), f.layers.count());
 
     // New pixels under the same id: the terminal took the placement down,
     // so the next frame puts it back though the layer did not move.
-    _ = try f.screen.layers.transmit(testing.allocator, &sent.writer, 8, &px, .{ .width = 1, .height = 1 });
-    try testing.expectEqual(@as(usize, 1), f.screen.layers.images.items.len);
-    try f.screen.layers.declare(testing.allocator, layer);
+    _ = try f.layers.transmit(testing.allocator, &sent.writer, 8, &px, .{ .width = 1, .height = 1 });
+    try testing.expectEqual(@as(usize, 1), f.layers.images.items.len);
+    try f.layers.declare(testing.allocator, layer);
     const again = try f.draw();
     try testing.expectEqual(@as(u32, 1), again.placements);
     try testing.expect(std.mem.indexOf(u8, f.written(), "a=p") != null);
@@ -812,10 +814,10 @@ test "sending to an id on screen places it again, and freeing takes it all away"
     // Freed: the pixels and the placements, in one command the program
     // wrote, and nothing for the next frame to delete.
     sent.clearRetainingCapacity();
-    try f.screen.layers.free(&sent.writer, 8);
+    try f.layers.free(&sent.writer, 8);
     try testing.expectEqualStrings("\x1b_Ga=d,q=2,d=I,i=8\x1b\\", sent.written());
-    try testing.expect(f.screen.layers.image(8) == null);
-    try testing.expectEqual(@as(usize, 0), f.screen.layers.count());
+    try testing.expect(f.layers.image(8) == null);
+    try testing.expectEqual(@as(usize, 0), f.layers.count());
     const after = try f.draw();
     try testing.expectEqual(@as(u32, 0), after.placements);
     try testing.expectEqual(@as(usize, 0), after.bytes);
@@ -824,7 +826,7 @@ test "sending to an id on screen places it again, and freeing takes it all away"
 test "a layer at its own size names no columns or rows" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 16,
         .placement = 9,
         .rect = .{ .col = 3, .row = 2 },
@@ -857,12 +859,12 @@ test "layers are stacked in the order their tuples give" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 2,
         .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 },
         .order = .{ .layer = 1 },
     });
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 4, .row = 0, .cols = 2, .rows = 2 },
         .order = .{ .layer = 0 },
@@ -882,17 +884,17 @@ test "inserting a layer re-places unchanged layers at their new z positions" {
 
     const a: Layer = .{ .image = 1, .rect = .{ .cols = 2, .rows = 2 }, .order = .{ .layer = 1 } };
     const b: Layer = .{ .image = 2, .rect = .{ .col = 3, .cols = 2, .rows = 2 }, .order = .{ .layer = 2 } };
-    try f.screen.layers.declare(testing.allocator, a);
-    try f.screen.layers.declare(testing.allocator, b);
+    try f.layers.declare(testing.allocator, a);
+    try f.layers.declare(testing.allocator, b);
     _ = try f.draw();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 3,
         .rect = .{ .col = 6, .cols = 2, .rows = 2 },
         .order = .{ .layer = 0 },
     });
-    try f.screen.layers.declare(testing.allocator, a);
-    try f.screen.layers.declare(testing.allocator, b);
+    try f.layers.declare(testing.allocator, a);
+    try f.layers.declare(testing.allocator, b);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 3), stats.placements);
 }
@@ -900,7 +902,7 @@ test "inserting a layer re-places unchanged layers at their new z positions" {
 test "a layer over the text gets a z at or above zero" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 },
         .under = false,
@@ -915,7 +917,7 @@ test "a terminal with no graphics gets no graphics commands" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
     f.caps.kitty_graphics = false;
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 },
     });
@@ -932,7 +934,7 @@ test "the text pass never deletes a placement" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();
 
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 0, .row = 0, .cols = 8, .rows = 4 },
     });
@@ -940,7 +942,7 @@ test "the text pass never deletes a placement" {
     _ = try f.draw();
 
     // A frame in which one cell changed and the picture did not.
-    try f.screen.layers.declare(testing.allocator, .{
+    try f.layers.declare(testing.allocator, .{
         .image = 1,
         .rect = .{ .col = 0, .row = 0, .cols = 8, .rows = 4 },
     });

@@ -76,12 +76,12 @@ pub const Harness = struct {
     /// whatever the widget just drew.
     pub fn frame(h: *Harness) ![]const u8 {
         h.out.clearRetainingCapacity();
-        _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        _ = try h.renderer.draw(&h.out.writer, &h.screen, null, h.caps);
         try h.term.feed(h.out.written());
         try visor.expectScreensEqual(&h.screen, h.term.screen());
 
         h.out.clearRetainingCapacity();
-        const again = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const again = try h.renderer.draw(&h.out.writer, &h.screen, null, h.caps);
         try testing.expectEqual(@as(usize, 0), again.bytes);
 
         h.text.clearRetainingCapacity();

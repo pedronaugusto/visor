@@ -30,6 +30,7 @@ const morse = @import("morse");
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const moved_rows = @import("moved_rows.zig");
+const Layers = @import("layer.zig").Layers;
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
@@ -321,9 +322,15 @@ pub const Renderer = struct {
         @memset(r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols], unknown);
     }
 
-    /// Writes the difference between the last frame and this one. Allocates
+    /// Writes the difference between the last frame and this one: the grid,
+    /// then the pictures in `layers` when the program shows any. Allocates
     /// nothing. Never flushes the caller's writer.
-    pub fn draw(r: *Renderer, w: *Writer, s: *Screen, caps: Caps) Error!Stats {
+    ///
+    /// The grid is text and nothing else, and the pictures beside it are the
+    /// program's to keep; the renderer takes both because it is the one
+    /// that orders them, the text pass whole before the first graphics
+    /// command. A program that shows no pictures passes null.
+    pub fn draw(r: *Renderer, w: *Writer, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {
         if (!std.meta.eql(r.size, s.size)) return error.SizeMismatch;
         // The emit path updates its model while it constructs the frame. If
         // any write fails, none of those updates describe what the terminal
@@ -341,8 +348,8 @@ pub const Renderer = struct {
         }
         r.method = caps.width_method;
 
-        const body = r.repaint_all or s.damage.any() or r.anyForced() or
-            s.layers.declared.items.len != 0 or s.layers.count() != 0;
+        const pictures = if (layers) |l| l.declared.items.len != 0 or l.count() != 0 else false;
+        const body = r.repaint_all or s.damage.any() or r.anyForced() or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
             s.damage.clear();
@@ -355,7 +362,7 @@ pub const Renderer = struct {
         if (r.repaint_all) {
             try r.beginRepaint(out, caps);
             // The terminal's pictures are as unknown as its text.
-            s.layers.repaint();
+            if (layers) |l| l.repaint();
         }
         if (body) {
             if (caps.scroll_detection and r.region == null) {
@@ -373,7 +380,7 @@ pub const Renderer = struct {
         }
         // After the text pass, never inside it: the rule this package exists
         // to keep is that redrawing a cell cannot disturb a picture.
-        stats.placements = @intCast(try s.layers.emit(out, caps));
+        if (layers) |l| stats.placements = @intCast(try l.emit(out, caps));
         if (stats.placements != 0) r.cursor = null;
         try r.finishCursor(out, s);
 
@@ -383,7 +390,7 @@ pub const Renderer = struct {
             @memset(r.force, false);
             r.repaint_all = false;
         }
-        s.layers.commitFrame(caps);
+        if (layers) |l| l.commitFrame(caps);
         stats.bytes = frame.n;
         return stats;
     }
@@ -2076,7 +2083,7 @@ const Fixture = struct {
     /// Draws and gives back what was written.
     fn draw(f: *Fixture) !Renderer.Stats {
         f.out.clearRetainingCapacity();
-        return f.renderer.draw(&f.out.writer, &f.screen, f.caps);
+        return f.renderer.draw(&f.out.writer, &f.screen, null, f.caps);
     }
 
     fn written(f: *Fixture) []const u8 {
@@ -2218,7 +2225,7 @@ test "a failed frame is written in full when retried" {
     try f.screen.write(4, 1, "x", .{}, .none);
     var short: [1]u8 = undefined;
     var failing: Writer = .fixed(&short);
-    try testing.expectError(error.WriteFailed, f.renderer.draw(&failing, &f.screen, f.caps));
+    try testing.expectError(error.WriteFailed, f.renderer.draw(&failing, &f.screen, null, f.caps));
 
     // Every row, the blank one erased: what part of the failed frame got
     // through is not known.

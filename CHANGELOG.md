@@ -140,6 +140,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   visor imports links no C library on Linux. On Windows the input handle
   no longer asks for window-size records, which a terminal-sequence read
   never returns.
+- **Breaking:** `Screen` no longer holds the pictures. The grid is text,
+  and a program that shows pictures keeps a `Layers` beside its screen and
+  passes it to `Renderer.draw(w, screen, layers, caps)`, null when it shows
+  none, since the renderer is what orders the text pass before the first
+  graphics command.
 - **Breaking:** a table's row is `Table.Row`; `widgets.Row` is gone, so the
   one `Row` a program meets is `visor.Row`, the row a wrap produced. The
   renderer's scroll detection lives in `moved_rows.zig`, which leaves

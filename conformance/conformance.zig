@@ -328,6 +328,8 @@ const Harness = struct {
     renderer: visor.Renderer,
     out: std.Io.Writer.Allocating,
     caps: visor.Caps,
+    /// The pictures shown beside the screen.
+    layers: visor.Layers = .{},
     /// Where the generator's draws are counted, for the test that proves the
     /// corpus explores; null everywhere else.
     tally: ?*Tally = null,
@@ -360,6 +362,7 @@ const Harness = struct {
 
     fn deinit(h: *Harness) void {
         h.screen.deinit(h.gpa);
+        h.layers.deinit(h.gpa);
         h.renderer.deinit(h.gpa);
         h.out.deinit();
     }
@@ -381,7 +384,7 @@ const Harness = struct {
     /// feeds when it decides they arrive.
     fn render(h: *Harness) ![]const u8 {
         h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try testing.expectEqual(h.out.written().len, stats.bytes);
         return h.out.written();
     }
@@ -389,7 +392,7 @@ const Harness = struct {
     /// One frame: draw, feed the bytes to the other terminal, compare.
     fn frame(h: *Harness, o: *Oracle) !visor.Renderer.Stats {
         h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try testing.expectEqual(h.out.written().len, stats.bytes);
         o.feed(h.out.written());
         try expectAgrees(&h.screen, o);
@@ -498,7 +501,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
     once.repaint();
     h.out.clearRetainingCapacity();
     h.screen.damageAll();
-    _ = try once.draw(&h.out.writer, &h.screen, h.caps);
+    _ = try once.draw(&h.out.writer, &h.screen, null, h.caps);
     fresh.feed(h.out.written());
     try expectAgrees(&h.screen, fresh);
 }
@@ -804,7 +807,7 @@ fn placementCount(o: *const Oracle) usize {
 /// Every layer the screen shows is where the second emulator has it, and
 /// it has nothing else.
 fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
-    for (h.screen.layers.shown.items) |layer| {
+    for (h.layers.shown.items) |layer| {
         const at = placementOf(o, layer.image, layer.placement) orelse {
             std.debug.print("image {d}/{d}: drawn at {any}, the terminal has none\n", .{ layer.image, layer.placement, layer.rect });
             return error.PlacementMissing;
@@ -814,14 +817,14 @@ fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
             return error.PlacementMoved;
         }
     }
-    try testing.expectEqual(h.screen.layers.shown.items.len, placementCount(o));
+    try testing.expectEqual(h.layers.shown.items.len, placementCount(o));
 }
 
 /// A picture of `id`, four by four pixels, sent the way a program sends one.
 fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
     const pixels: [4 * 4 * 4]u8 = @splat(0x80);
     h.out.clearRetainingCapacity();
-    _ = try h.screen.layers.transmit(h.gpa, &h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
+    _ = try h.layers.transmit(h.gpa, &h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
     o.feed(h.out.written());
 }
 
@@ -878,7 +881,7 @@ fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
 
 /// This frame's layers: picture `i + 1` at `rects[i]`.
 fn layOut(h: *Harness, rects: []const visor.Rect) !void {
-    for (rects, 1..) |r, i| try h.screen.layers.declare(h.gpa, .{ .image = @intCast(i), .rect = r });
+    for (rects, 1..) |r, i| try h.layers.declare(h.gpa, .{ .image = @intCast(i), .rect = r });
 }
 
 test "pictures stay where the program put them across resizes" {

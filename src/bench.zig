@@ -59,7 +59,7 @@ const Bench = struct {
 
     fn draw(b: *Bench) !Renderer.Stats {
         b.out.clearRetainingCapacity();
-        return b.renderer.draw(&b.out.writer, &b.screen, b.caps);
+        return b.renderer.draw(&b.out.writer, &b.screen, null, b.caps);
     }
 
     /// A frame with eight style runs a row, which is what a real one looks

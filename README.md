@@ -75,7 +75,7 @@ panel.setCursorShape(.bar);
 // caller decides when the bytes leave.
 var buffer: std.Io.Writer.Allocating = .init(gpa);
 defer buffer.deinit();
-const stats = try renderer.draw(&buffer.writer, &screen, caps);
+const stats = try renderer.draw(&buffer.writer, &screen, null, caps);
 
 // `Stats` is what makes a budget a test rather than a comment, and
 // what tells a caller how big a write buffer a frame wants.
@@ -88,7 +88,7 @@ std.debug.print("frame: {d} bytes, {d} cells in {d} runs, {d} moves\n", .{
 // design is checked against.
 var second: std.Io.Writer.Allocating = .init(gpa);
 defer second.deinit();
-std.debug.assert((try renderer.draw(&second.writer, &screen, caps)).bytes == 0);
+std.debug.assert((try renderer.draw(&second.writer, &screen, null, caps)).bytes == 0);
 
 // And this is how a program built on visor tests its own screens: the
 // emulator reads the bytes back into a grid, and the two are compared
@@ -167,7 +167,7 @@ with a `try`. Resizing allocates.
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
-| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
+| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `child`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
@@ -290,6 +290,10 @@ invented, which is ten frames a second on the tightest of them. `draw` writes
 the bracket, into its own buffer, and keeps it only when the frame turns out
 too large for the terminal to take in one read; `leave` writes the closing
 half whether or not it wrote the opening one.
+
+**The grid is text; the pictures are beside it.** A `Screen` holds cells
+and nothing else, and a program that shows pictures keeps its `Layers` next
+to it and hands both to `Renderer.draw`, which is the one that orders them.
 
 **The text pass never writes a graphics command and never deletes a
 placement.** A picture that moves is re-placed under the same image and

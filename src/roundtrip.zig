@@ -113,6 +113,8 @@ const Harness = struct {
     renderer: Renderer,
     out: std.Io.Writer.Allocating,
     caps: Caps,
+    /// The pictures shown beside the screen.
+    layers: layer.Layers = .{},
     /// Where the generator's draws are counted, for the test that proves the
     /// corpus explores; null everywhere else.
     tally: ?*Tally = null,
@@ -143,6 +145,7 @@ const Harness = struct {
 
     fn deinit(h: *Harness) void {
         h.screen.deinit(h.gpa);
+        h.layers.deinit(h.gpa);
         h.renderer.deinit(h.gpa);
         h.out.deinit();
     }
@@ -151,7 +154,7 @@ const Harness = struct {
     /// was fed every frame before it, and compare.
     fn frame(h: *Harness, t: *Term) !Renderer.Stats {
         h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try testing.expectEqual(h.out.written().len, stats.bytes);
         try t.feed(h.out.written());
         try term.expectScreensEqual(&h.screen, t.screen());
@@ -367,7 +370,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     once.repaint();
     h.out.clearRetainingCapacity();
     h.screen.damageAll();
-    _ = try once.draw(&h.out.writer, &h.screen, h.caps);
+    _ = try once.draw(&h.out.writer, &h.screen, null, h.caps);
     try fresh.feed(h.out.written());
     try term.expectScreensEqual(t.screen(), fresh.screen());
 }
@@ -481,7 +484,7 @@ fn stale(h: *Harness, t: *Term, dice: *corpus.Dice, to: geom.Size) !void {
     if (dice.value(bool)) {
         try scribble(h, dice);
         h.out.clearRetainingCapacity();
-        _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try t.resize(to);
         try t.feed(h.out.written());
     } else try t.resize(to);
@@ -613,16 +616,16 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try testing.expectEqual(h.out.written().len, stats.bytes);
         try testing.expectEqual(@as(u32, 0), stats.scrolled);
         try t.feed(h.out.written());
         try expectRegionEqual(&h.screen, &t);
 
         h.out.clearRetainingCapacity();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
         h.screen.damageAll();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
     }
 
     if (tally) |tl| tl.frames.add(frames);
@@ -631,11 +634,11 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
     corrupt(&h.renderer, &dice);
     h.renderer.repaint();
     h.out.clearRetainingCapacity();
-    _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
     try t.feed(h.out.written());
     try expectRegionEqual(&h.screen, &t);
     h.out.clearRetainingCapacity();
-    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
 
     // And the way out leaves the frame and puts the cursor below it.
     const origin = t.saved.?.row;
@@ -772,7 +775,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                     0 => {
                         const id = dice.valueRangeAtMost(u32, 1, 4);
                         const px = [_]u8{ 0, 0, 0, 255 } ** 4;
-                        _ = try h.screen.layers.transmit(gpa, &side.writer, id, &px, .{
+                        _ = try h.layers.transmit(gpa, &side.writer, id, &px, .{
                             .width = 2,
                             .height = 2,
                             .answer = dice.value(bool),
@@ -781,7 +784,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                         try resent.append(gpa, id);
                     },
                     // The terminal answers for an image, or refuses it.
-                    1 => h.screen.layers.ack(.{
+                    1 => h.layers.ack(.{
                         .id = dice.valueRangeAtMost(u32, 1, 4),
                         .message = if (dice.value(bool)) "OK" else "ENOENT",
                     }),
@@ -789,7 +792,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                     // is left for the frame to delete.
                     2 => {
                         const id = dice.valueRangeAtMost(u32, 1, 4);
-                        try h.screen.layers.free(&side.writer, id);
+                        try h.layers.free(&side.writer, id);
                         try resent.append(gpa, id);
                         var i: usize = 0;
                         while (i < showing.items.len) {
@@ -811,11 +814,11 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                 else => unreachable,
             }
         }
-        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         const bytes = h.out.written();
         try testing.expectEqual(bytes.len, stats.bytes);
 
@@ -852,13 +855,13 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=N"));
 
         // Declared again unchanged, the frame writes nothing at all.
-        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
         h.out.clearRetainingCapacity();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
-        for (showing.items) |p| try h.screen.layers.declare(gpa, p.asLayer());
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
+        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
         h.screen.damageAll();
         h.out.clearRetainingCapacity();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
     }
 
     if (tally) |tl| tl.frames.add(frames);
@@ -867,12 +870,12 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
     const remaining = showing.items.len;
     showing.clearRetainingCapacity();
     h.out.clearRetainingCapacity();
-    const down = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    const down = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
     try testing.expectEqual(if (h.caps.kitty_graphics) remaining else 0, std.mem.count(u8, h.out.written(), "a=d"));
     try testing.expectEqual(@as(u32, @intCast(if (h.caps.kitty_graphics) remaining else 0)), down.placements);
     h.out.clearRetainingCapacity();
-    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
-    try testing.expectEqual(@as(usize, 0), h.screen.layers.count());
+    try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
+    try testing.expectEqual(@as(usize, 0), h.layers.count());
 }
 
 test "pictures placed, moved, stacked and taken down keep every frame idempotent and out of the text pass" {
@@ -1001,12 +1004,12 @@ test "a frame the damage map named but nothing changed in writes nothing at all"
     h.caps.osc8 = false;
     h.renderer.repaint();
     h.out.clearRetainingCapacity();
-    _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
 
     const link = try h.screen.link(gpa, "https://ziglang.org", "");
     try h.screen.write(0, 0, "a", .{ .bold = true }, link);
     h.screen.damageAll();
     h.out.clearRetainingCapacity();
-    const after = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+    const after = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
     try testing.expectEqual(@as(usize, 0), after.bytes);
 }

@@ -72,7 +72,7 @@ pub fn main() !void {
     // caller decides when the bytes leave.
     var buffer: std.Io.Writer.Allocating = .init(gpa);
     defer buffer.deinit();
-    const stats = try renderer.draw(&buffer.writer, &screen, caps);
+    const stats = try renderer.draw(&buffer.writer, &screen, null, caps);
 
     // `Stats` is what makes a budget a test rather than a comment, and
     // what tells a caller how big a write buffer a frame wants.
@@ -85,7 +85,7 @@ pub fn main() !void {
     // design is checked against.
     var second: std.Io.Writer.Allocating = .init(gpa);
     defer second.deinit();
-    std.debug.assert((try renderer.draw(&second.writer, &screen, caps)).bytes == 0);
+    std.debug.assert((try renderer.draw(&second.writer, &screen, null, caps)).bytes == 0);
 
     // And this is how a program built on visor tests its own screens: the
     // emulator reads the bytes back into a grid, and the two are compared

@@ -250,7 +250,7 @@ const Fixture = struct {
 
     fn draw(f: *Fixture) !Renderer.Stats {
         f.out.clearRetainingCapacity();
-        return f.renderer.draw(&f.out.writer, &f.screen, f.caps);
+        return f.renderer.draw(&f.out.writer, &f.screen, null, f.caps);
     }
 
     /// Numbers down the left of the screen, so a moved row is obvious.

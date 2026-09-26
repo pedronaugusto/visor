@@ -26,7 +26,7 @@ pub fn main() !void {
     const caps: visor.Caps = .{ .width_method = .unicode, .truecolor = true, .osc8 = true };
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
-    const stats = try renderer.draw(&out.writer, &screen, caps);
+    const stats = try renderer.draw(&out.writer, &screen, null, caps);
 
     var term: visor.Term = try .init(gpa, size);
     defer term.deinit();
