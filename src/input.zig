@@ -16,7 +16,9 @@
 //! `std.Io`, so a program runs it wherever it likes — on its main loop, or
 //! as a task in an `Io.Group` feeding a queue — and stops it by cancelling
 //! that task: the wait is a cancellation point, so nothing has to be written
-//! to the terminal to wake it.
+//! to the terminal to wake it. `nextWithin` is the same read with the
+//! caller's deadline beside it, for a wait that ends on silence — a startup
+//! probe's quiet period — with nothing cancelled and nothing lost.
 //!
 //! What this file will never hold: a thread, a queue, a timer of its own, or
 //! a decision about what an event means.
@@ -89,6 +91,18 @@ pub const Input = struct {
     /// same `resize` event an in-band report is, with the size and the
     /// pixels the operating system has now.
     pub fn next(in: *Input) Error!morse.Event {
+        return (try in.nextWithin(.none)).?;
+    }
+
+    /// The next event, or null when `timeout` passes before one is framed.
+    ///
+    /// What was read already is handed over first, even past the deadline,
+    /// so a deadline that has gone by still empties what is buffered. A lone
+    /// `ESC` whose own timeout ends first is the key it also is; one still
+    /// waiting at the caller's deadline stays held for the next call. What
+    /// the event borrows is valid until the next call, as with `next`.
+    pub fn nextWithin(in: *Input, timeout: Io.Timeout) Error!?morse.Event {
+        const until = timeout.toDeadline(in.tty.io);
         while (true) {
             // What was read already comes first, including the repeats a
             // console sequence can stand for.
@@ -114,10 +128,11 @@ pub const Input = struct {
                 return error.EndOfStream;
             }
 
-            switch (try in.wait()) {
+            switch (try in.wait(until)) {
                 .bytes => |n| in.fresh = in.read_buffer[0..n],
                 .ended => in.ended = true,
                 .quiet => if (in.parser.flush()) |e| return e,
+                .expired => return null,
                 .resized => {},
             }
         }
@@ -131,6 +146,8 @@ pub const Input = struct {
         ended,
         /// Nothing arrived within the escape timeout.
         quiet,
+        /// Nothing arrived before the caller's deadline.
+        expired,
         /// The resize pipe, and nothing else.
         resized,
     };
@@ -143,9 +160,25 @@ pub const Input = struct {
         return held.len == 1 or held[1] == '[' or held[1] == 'O';
     }
 
-    /// Waits for the terminal, the resize pipe, or the escape timeout,
-    /// whichever comes first.
+    /// Waits for the terminal, the resize pipe, the escape timeout or the
+    /// caller's deadline, whichever comes first.
     const wait = if (is_windows) waitWindows else waitPosix;
+
+    /// Which timeout a wait runs under: the escape's, while what the parser
+    /// holds is ambiguous, or the caller's, whichever ends first. `expires`
+    /// says a timeout is the caller's deadline, not the escape's.
+    const Limit = struct { timeout: Io.Timeout, expires: bool };
+
+    fn limit(in: *const Input, until: Io.Timeout) Limit {
+        const left = until.toDurationFromNow(in.tty.io);
+        if (in.ambiguous()) {
+            const escape: Io.Clock.Duration = .{ .raw = in.escape, .clock = .awake };
+            if (left) |l| if (l.raw.nanoseconds < in.escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
+            return .{ .timeout = .{ .duration = escape }, .expires = false };
+        }
+        const l = left orelse return .{ .timeout = .none, .expires = false };
+        return .{ .timeout = .{ .duration = l }, .expires = true };
+    }
 
     /// The console has no resize signal and its handles take no part in a
     /// poll, so the wait is the read -- except for the lone `ESC`, which
@@ -154,14 +187,15 @@ pub const Input = struct {
     /// input mode passes over the ones that are not keys (focus, menu,
     /// buffer size), so those are taken off the queue and the wait begun
     /// again rather than left to a read that would block on them.
-    fn waitWindows(in: *Input) Error!Woke {
+    fn waitWindows(in: *Input, until: Io.Timeout) Error!Woke {
         const file = in.tty.inputFile();
-        if (!in.ambiguous()) return in.readBlocking(file);
-        const ms: u32 = @intCast(std.math.clamp(in.escape.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
         while (true) {
+            const lim = in.limit(until);
+            const left = lim.timeout.toDurationFromNow(in.tty.io) orelse return in.readBlocking(file);
+            const ms: u32 = @intCast(std.math.clamp(left.raw.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
             switch (console.WaitForSingleObject(file.handle, ms)) {
                 console.WAIT_OBJECT_0 => {},
-                console.WAIT_TIMEOUT => return .quiet,
+                console.WAIT_TIMEOUT => return if (lim.expires) .expired else .quiet,
                 else => return in.readBlocking(file),
             }
             var records: [16]console.INPUT_RECORD = undefined;
@@ -174,13 +208,11 @@ pub const Input = struct {
         }
     }
 
-    fn waitPosix(in: *Input) Error!Woke {
+    fn waitPosix(in: *Input, until: Io.Timeout) Error!Woke {
         const io = in.tty.io;
         const tty_file = in.tty.inputFile();
-        const timeout: Io.Timeout = if (in.ambiguous())
-            .{ .duration = .{ .raw = in.escape, .clock = .awake } }
-        else
-            .none;
+        const lim = in.limit(until);
+        const timeout = lim.timeout;
         const resize = in.tty.resizeFile();
 
         if (timeout == .none and resize == null) return in.readBlocking(tty_file);
@@ -204,7 +236,7 @@ pub const Input = struct {
         if (failed) |e| return e;
         if (in.resize_due) return .resized;
         outcome catch |err| switch (err) {
-            error.Timeout => return .quiet,
+            error.Timeout => return if (lim.expires) .expired else .quiet,
             error.Canceled => return error.Canceled,
             // An `Io` that cannot wait on two things at once still reads.
             error.ConcurrencyUnavailable => return in.readBlocking(tty_file),
@@ -411,6 +443,40 @@ test "the end of the stream settles what was pending, then says so" {
     try testing.expectEqual(morse.Key.escape, (try in.next()).key.key);
     try testing.expectError(error.EndOfStream, in.next());
     try testing.expectError(error.EndOfStream, in.next());
+}
+
+test "a read within a deadline hands over what came, and null once the deadline passes in silence" {
+    if (is_windows) return error.SkipZigTest;
+    var p: Piped = try .init();
+    defer p.deinit();
+    var parser: [64]u8 = undefined;
+    var read: [16]u8 = undefined;
+    var in = inputOver(&p.tty, &parser, &read, 5_000);
+
+    // Nothing typed: the deadline ends the wait, and nothing is lost.
+    const before = std.Io.Timestamp.now(testing.io, .awake);
+    try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }));
+    const waited = before.durationTo(std.Io.Timestamp.now(testing.io, .awake));
+    try testing.expect(waited.nanoseconds >= 25 * std.time.ns_per_ms);
+
+    // What is typed is handed over, and what is buffered comes first even
+    // with a deadline already gone by.
+    p.type_("a\x1b[B");
+    try testing.expectEqual(morse.Key{ .char = 'a' }, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(1_000), .clock = .awake } })).?.key.key);
+    try testing.expectEqual(morse.Key.down, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(-1), .clock = .awake } })).?.key.key);
+
+    // A lone escape with a long timeout of its own is still held at a
+    // short deadline, and the rest of its sequence makes it the key it
+    // starts on the next read.
+    p.type_("\x1b");
+    try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(20), .clock = .awake } }));
+    p.type_("[A");
+    try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
+
+    // And one whose own timeout ends first is the Escape key.
+    var quick = inputOver(&p.tty, &parser, &read, 10);
+    p.type_("\x1b");
+    try testing.expectEqual(morse.Key.escape, (try quick.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(2_000), .clock = .awake } })).?.key.key);
 }
 
 test "a resize wakes the wait and carries the size and pixels the system has now" {
@@ -675,4 +741,5 @@ test "the pump is compiled for every target, the Windows wait included" {
     // Every other test here is skipped on Windows before it reaches `next`,
     // so this is what makes the cross-compiled check analyse the wait there.
     _ = &Input.next;
+    _ = &Input.nextWithin;
 }

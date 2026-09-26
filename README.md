@@ -173,7 +173,7 @@ with a `try`. Resizing allocates.
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -338,7 +338,10 @@ type. The lone `ESC` is settled on the caller's timeout, on Windows too; a
 resize wakes the wait through a pipe the signal handler writes to and comes
 back as the same `resize` event an in-band report is, with pixels. It starts
 no thread and keeps no clock: it blocks on the caller's `std.Io`, and
-cancelling the task it runs in is what stops it.
+cancelling the task it runs in is what stops it. `Input.nextWithin` is the
+same read with the caller's deadline beside it, null when the deadline passes
+in silence, which is how a probe's quiet period is waited out without a
+second task or a cancelled read.
 
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.

@@ -135,6 +135,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     divider's columns without drawing over what is there.
   - `Sparkline.mode = .level`: each point the nearest of the eight heights,
     never nothing, which is the sparkline a line of text wants.
+- `Input.nextWithin`: the next event, or null when the caller's timeout
+  passes first. What is buffered is handed over even past the deadline, and a
+  lone `ESC` still waiting at it stays held for the next read, so a wait that
+  ends on silence — a probe's quiet period after the device attributes —
+  needs no second task and loses nothing to a cancelled read.
 - `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
   and the way back. A screen entered this way is undone by `Tty.restore`,
   `Tty.close`, `restoreGlobal` and `Panic` too — modes, alternate screen and
