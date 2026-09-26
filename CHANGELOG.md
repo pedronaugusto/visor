@@ -140,6 +140,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   visor imports links no C library on Linux. On Windows the input handle
   no longer asks for window-size records, which a terminal-sequence read
   never returns.
+- **Breaking:** the renderer's own steps -- `prevRow`, `shiftPrev`,
+  `hideForWrite`, `price`, `setStyle`, `setLink` -- are no longer public
+  methods of `Renderer`. They were public only so the scroll detection in
+  another file could call them, which made them part of the API by accident.
 - **Breaking:** `Palette.update`, `Winsize.update` and `Caps.Probe.feed`
   take the typed replies `Input` hands back (`Event.reply`) rather than
   bytes to parse; `Caps.Probe.feed` takes a `morse.Event`.

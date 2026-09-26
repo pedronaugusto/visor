@@ -544,13 +544,13 @@ pub const Renderer = struct {
     //=====================================================================
 
     /// One row of the previous frame.
-    pub fn prevRow(r: *const Renderer, row: u16) []const Cell {
+    fn prevRow(r: *const Renderer, row: u16) []const Cell {
         return r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
     }
 
     /// Moves the previous frame's rows the way the terminal just moved the
     /// real ones, and marks the rows it vacated to be written whole.
-    pub fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
+    fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
         const cols = r.size.cols;
         const blank: Cell = .blank(.{});
         const region = r.prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
@@ -641,7 +641,7 @@ pub const Renderer = struct {
     ///
     /// Called by the render pass, including from the scroll detector; not
     /// part of what a program using this package calls.
-    pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
+    fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
         if (r.shown == false) return;
         try morse.cursorVisible.set(out, false);
         r.shown = false;
@@ -855,7 +855,7 @@ pub const Renderer = struct {
 
     /// What one way of writing a row costs, in bytes, without emitting it or
     /// changing the renderer.
-    pub fn price(
+    fn price(
         r: *Renderer,
         s: *Screen,
         caps: Caps,
@@ -1328,7 +1328,7 @@ pub const Renderer = struct {
 
     /// Writes the shortest SGR between the style the terminal is in and the
     /// one it should be in.
-    pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
+    fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
         if (std.mem.eql(u8, std.mem.asBytes(&r.style), std.mem.asBytes(&to))) return;
         const from = r.style;
         if (r.style_sequences.get(from, to)) |sequence| {
@@ -1351,7 +1351,7 @@ pub const Renderer = struct {
     }
 
     /// Opens, closes or swaps the OSC 8 link the terminal has open.
-    pub fn setLink(
+    fn setLink(
         r: *Renderer,
         out: *Writer,
         s: *const Screen,
@@ -1734,6 +1734,27 @@ const erase_cost = 4;
 /// `CSI 0 K` and `OSC 8 ; ; ST` respectively.
 const clear_line_cost = 4;
 const hyperlink_end_cost = 7;
+
+/// What the scroll detection needs of a renderer, and
+/// nothing a program reaches: `Renderer` is re-exported, this file's own
+/// declarations are not, so these are the package's and not its API.
+pub const internal = struct {
+    pub fn prevRow(r: *const Renderer, row: u16) []const Cell {
+        return r.prevRow(row);
+    }
+    pub fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
+        r.shiftPrev(top, bottom, distance, up);
+    }
+    pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
+        return r.hideForWrite(out);
+    }
+    pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Renderer.Stats) Error!void {
+        return r.setStyle(out, to, stats);
+    }
+    pub fn setLink(r: *Renderer, out: *Writer, s: *Screen, to: Link, caps: Caps, stats: *Renderer.Stats) Error!void {
+        return r.setLink(out, s, to, caps, stats);
+    }
+};
 
 /// Whether every cell is shown exactly as the grid holds it, so a row can be
 /// compared and remembered as memory rather than cell by cell through

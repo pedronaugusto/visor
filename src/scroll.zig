@@ -42,10 +42,10 @@ pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u
 
     // The vacated rows are filled with the terminal's current background, so
     // the style has to be the one a blank cell is in.
-    try r.hideForWrite(out);
+    try render.internal.hideForWrite(r, out);
     var ignored: Renderer.Stats = .{};
-    try r.setStyle(out, .{}, &ignored);
-    try r.setLink(out, s, .none, caps, &ignored);
+    try render.internal.setStyle(r, out, .{}, &ignored);
+    try render.internal.setLink(r, out, s, .none, caps, &ignored);
 
     const whole = found.top == 0 and found.bottom == rows - 1;
     if (!whole) try morse.scrollRegion(out, found.top + 1, found.bottom + 1);
@@ -57,7 +57,7 @@ pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u
     if (!whole) try morse.scrollRegionReset(out);
     r.cursor = null;
 
-    r.shiftPrev(found.top, found.bottom, found.distance, found.up);
+    render.internal.shiftPrev(r, found.top, found.bottom, found.distance, found.up);
     return @as(u32, found.bottom - found.top) + 1;
 }
 
@@ -86,7 +86,7 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     const was = r.hashes[rows..][0..rows];
     for (0..rows) |i| {
         now[i] = hashRow(s.rowAt(@intCast(i)), caps);
-        was[i] = hashRow(r.prevRow(@intCast(i)), caps);
+        was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), caps);
     }
 
     const offset = bestOffset(now, was) orelse return null;
@@ -104,7 +104,7 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     var i = band.first;
     while (i <= band.last) : (i += 1) {
         const source: u16 = if (up) i + distance else i - distance;
-        if (!rowsEqual(s.rowAt(i), r.prevRow(source), caps)) return null;
+        if (!rowsEqual(s.rowAt(i), render.internal.prevRow(r, source), caps)) return null;
     }
 
     // A region whose edge runs through text drawn more than one row tall
@@ -112,8 +112,8 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     // and a terminal clears a block it no longer holds whole. Either frame
     // is enough to refuse, because the terminal holds the one and is about
     // to be given the other.
-    if (top > 0 and (tallAcross(r.prevRow(top - 1), r.prevRow(top)) or tallAcross(s.rowAt(top - 1), s.rowAt(top)))) return null;
-    if (bottom + 1 < rows and (tallAcross(r.prevRow(bottom), r.prevRow(bottom + 1)) or tallAcross(s.rowAt(bottom), s.rowAt(bottom + 1)))) return null;
+    if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(s.rowAt(top - 1), s.rowAt(top)))) return null;
+    if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(s.rowAt(bottom), s.rowAt(bottom + 1)))) return null;
     return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
 }
 
