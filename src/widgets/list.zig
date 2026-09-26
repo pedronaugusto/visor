@@ -81,7 +81,7 @@ pub const List = struct {
         const rows = win.rows();
         l.scrollIntoView(rows, state);
 
-        const marker_width = visor.width(l.marker, .unicode);
+        const marker_width = win.width(l.marker);
         var row: u16 = 0;
         while (row < rows and state.offset + row < l.items.len) : (row += 1) {
             const i = state.offset + row;
@@ -266,3 +266,17 @@ test "whatever the window and the selection, the selected item is on screen" {
         }
     }
 }
+
+test "the marker is measured the way the screen measures" {
+    // A sign with a presentation selector is one column measured by
+    // codepoint and two measured whole: the text starts after the one the
+    // screen draws.
+    var h: Harness = try .initMeasured(testing.allocator, 6, 1, .wcwidth);
+    defer h.deinit();
+    var state: List.State = .{ .selected = 0 };
+    try (List{ .items = &.{.{ .text = "ab" }}, .marker = sign, .highlight_row = false }).draw(h.window(), &state);
+    _ = try h.frame();
+    try testing.expectEqualStrings("a", h.term.screen().textAt(1, 0));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

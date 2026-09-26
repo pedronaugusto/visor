@@ -128,7 +128,7 @@ pub const Calendar = struct {
                 month_names[c.month - 1],
                 c.year,
             }) catch return;
-            const taken = @min(visor.width(text, .unicode), win.cols());
+            const taken = @min(win.width(text), win.cols());
             _ = try win.printSegment(
                 .{ .text = text, .style = c.header_style },
                 .{

@@ -27,15 +27,17 @@ pub const Tabs = struct {
     /// Cells of space each side of every title.
     padding: u16 = 1,
 
-    /// Where one title sits in the row, in the window's own columns.
+    /// Where one title sits in the row, in the window's own columns, with
+    /// the titles measured the way the screen they are drawn on measures
+    /// (`Screen.method`).
     ///
     /// The padding is part of the span, so a click on the space beside a
     /// title chooses it, which is what a person aiming at a tab means.
-    pub fn spanOf(t: Tabs, which: usize) struct { col: u16, cols: u16 } {
+    pub fn spanOf(t: Tabs, which: usize, method: visor.Method) struct { col: u16, cols: u16 } {
         var col: u16 = 0;
-        const divider = visor.width(t.divider, .unicode);
+        const divider = visor.width(t.divider, method);
         for (t.titles, 0..) |title, i| {
-            const cols = visor.width(title, .unicode) + t.padding * 2;
+            const cols = visor.width(title, method) + t.padding * 2;
             if (i == which) return .{ .col = col, .cols = cols };
             col +|= cols +| divider;
         }
@@ -43,27 +45,28 @@ pub const Tabs = struct {
     }
 
     /// Which title a column falls in, or null between or beyond them.
-    pub fn indexAt(t: Tabs, col: u16) ?usize {
+    pub fn indexAt(t: Tabs, col: u16, method: visor.Method) ?usize {
         for (t.titles, 0..) |_, i| {
-            const span = t.spanOf(i);
+            const span = t.spanOf(i, method);
             if (col >= span.col and col < span.col + span.cols) return i;
         }
         return null;
     }
 
     /// How many columns every title and divider takes together.
-    pub fn width(t: Tabs) u16 {
+    pub fn width(t: Tabs, method: visor.Method) u16 {
         if (t.titles.len == 0) return 0;
-        const last = t.spanOf(t.titles.len - 1);
+        const last = t.spanOf(t.titles.len - 1, method);
         return last.col +| last.cols;
     }
 
     /// Draws the titles on the window's first row.
     pub fn draw(t: Tabs, win: Window) std.mem.Allocator.Error!void {
         if (win.rect.isEmpty()) return;
-        const divider = visor.width(t.divider, .unicode);
+        const method = win.screen.method;
+        const divider = win.width(t.divider);
         for (t.titles, 0..) |title, i| {
-            const span = t.spanOf(i);
+            const span = t.spanOf(i, method);
             if (span.col >= win.cols()) return;
             const style = if (i == t.selected) t.selected_style else t.style;
             win.fill(
@@ -103,13 +106,13 @@ test "tabs draw with a divider between them" {
 
 test "a column falls in the tab it is under, padding included" {
     const t: Tabs = .{ .titles = &titles };
-    try testing.expectEqual(@as(?usize, 0), t.indexAt(0));
-    try testing.expectEqual(@as(?usize, 0), t.indexAt(4));
-    try testing.expectEqual(@as(?usize, null), t.indexAt(5));
-    try testing.expectEqual(@as(?usize, 1), t.indexAt(6));
-    try testing.expectEqual(@as(?usize, 2), t.indexAt(12));
-    try testing.expectEqual(@as(?usize, null), t.indexAt(99));
-    try testing.expectEqual(@as(u16, 19), t.width());
+    try testing.expectEqual(@as(?usize, 0), t.indexAt(0, .unicode));
+    try testing.expectEqual(@as(?usize, 0), t.indexAt(4, .unicode));
+    try testing.expectEqual(@as(?usize, null), t.indexAt(5, .unicode));
+    try testing.expectEqual(@as(?usize, 1), t.indexAt(6, .unicode));
+    try testing.expectEqual(@as(?usize, 2), t.indexAt(12, .unicode));
+    try testing.expectEqual(@as(?usize, null), t.indexAt(99, .unicode));
+    try testing.expectEqual(@as(u16, 19), t.width(.unicode));
 }
 
 test "tabs wider than the window stop at its edge" {
@@ -121,3 +124,17 @@ test "tabs wider than the window stop at its edge" {
         \\
     );
 }
+
+test "titles are measured the way the screen measures" {
+    const t: Tabs = .{ .titles = &.{ sign, "b" }, .padding = 0, .divider = "|" };
+    try testing.expectEqual(@as(u16, 3), t.width(.wcwidth));
+    try testing.expectEqual(@as(u16, 4), t.width(.unicode));
+    try testing.expectEqual(@as(?usize, 1), t.indexAt(2, .wcwidth));
+    var h: Harness = try .initMeasured(testing.allocator, 5, 1, .wcwidth);
+    defer h.deinit();
+    try t.draw(h.window());
+    _ = try h.frame();
+    try testing.expectEqualStrings("b", h.term.screen().textAt(2, 0));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

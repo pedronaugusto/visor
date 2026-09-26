@@ -110,6 +110,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   because a terminal that measures that way gives each codepoint that takes
   columns cells of its own. `Parts` names those cells and `combinesOnly`
   says whether a cluster is one of them.
+- **Breaking:** `Tabs.spanOf`, `Tabs.indexAt` and `Tabs.width` take the
+  width method, so the spans a program hit-tests are the ones drawn on its
+  screen.
 - **Breaking:** `Tty.size` returns a `Winsize`, with the text area in pixels
   where the operating system has it, instead of a `Size`.
 - **Breaking:** `Renderer.enter(w, caps, mode, modes)` takes the input modes
@@ -184,6 +187,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waiting to wrap only past the first column. A base and its marks in that
   one column now go out with mode 2027 off around them, and a terminal
   measuring by codepoint joins the marks to the base there.
+- Tabs, List, Table, Gauge, BarChart, Chart and Calendar measured their
+  text by cluster whatever the screen measured by, so on a terminal
+  measuring by codepoint a marker, a label or an alignment could be off by a
+  column for every cluster the two measures disagree about. Every widget now
+  measures the way the window's screen does.
 - **Text was left on the screen after a resize.** A resize or a repaint gave
   the renderer a blank previous frame, and a row the new frame held blank was
   skipped as already blank, so whatever the terminal still showed there -- a

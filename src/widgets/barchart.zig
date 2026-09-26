@@ -104,7 +104,7 @@ pub const BarChart = struct {
     /// Bars that grow rightward, one row each, their labels to the left.
     fn drawLying(c: BarChart, win: Window, top: u64) std.mem.Allocator.Error!void {
         var label_width: u16 = 0;
-        for (c.bars) |b| label_width = @max(label_width, visor.width(b.label, .unicode));
+        for (c.bars) |b| label_width = @max(label_width, win.width(b.label));
         if (label_width != 0) label_width += 1;
         const cols = win.cols() -| label_width;
         if (cols == 0) return;
@@ -157,7 +157,7 @@ pub const BarChart = struct {
         room: u16,
     ) std.mem.Allocator.Error!void {
         if (text.len == 0) return;
-        const taken = @min(visor.width(text, .unicode), room);
+        const taken = @min(win.width(text), room);
         _ = try win.printSegment(
             .{ .text = text, .style = c.label_style },
             .{ .col = col + layout.offset(room, taken, .center), .row = row, .wrap = .none },
@@ -249,3 +249,21 @@ test "a bar carries its value unless told not to" {
         \\
     );
 }
+
+test "lying bars start after the widest label, measured the way the screen measures" {
+    var h: Harness = try .initMeasured(testing.allocator, 8, 1, .wcwidth);
+    defer h.deinit();
+    try (BarChart{
+        .bars = &.{.{ .value = 2, .label = sign }},
+        .max = 2,
+        .direction = .horizontal,
+        .show_values = false,
+    }).draw(h.window());
+    _ = try h.frame();
+    // The label is one column measured by codepoint: the bar starts after
+    // it and the space beside it.
+    try testing.expectEqualStrings(" ", h.term.screen().textAt(1, 0));
+    try testing.expect(!std.mem.eql(u8, " ", h.term.screen().textAt(2, 0)));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

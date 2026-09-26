@@ -75,7 +75,7 @@ pub const Chart = struct {
         if (win.rect.isEmpty()) return;
 
         var gutter: u16 = 0;
-        for (c.y.labels) |l| gutter = @max(gutter, visor.width(l, .unicode));
+        for (c.y.labels) |l| gutter = @max(gutter, win.width(l));
         const label_row: u16 = if (c.x.labels.len != 0) 1 else 0;
 
         // The axis lines, and the plot inside them.
@@ -122,14 +122,14 @@ pub const Chart = struct {
         if (gutter == 0 or c.y.labels.len == 0) return;
         for (c.y.labels, 0..) |text, i| {
             const row = rowFor(i, c.y.labels.len, axis_row);
-            const taken = @min(visor.width(text, .unicode), gutter);
+            const taken = @min(win.width(text), gutter);
             _ = try win.printSegment(
                 .{ .text = text, .style = c.y.label_style },
                 .{ .col = gutter - taken, .row = row, .wrap = .none },
             );
         }
         if (c.y.title) |t| {
-            const taken = @min(visor.width(t, .unicode), gutter);
+            const taken = @min(win.width(t), gutter);
             _ = try win.printSegment(
                 .{ .text = t, .style = c.y.label_style },
                 .{ .col = gutter - taken, .row = 0, .wrap = .none },
@@ -149,7 +149,7 @@ pub const Chart = struct {
         const room = win.cols() -| from;
         if (room == 0) return;
         for (c.x.labels, 0..) |text, i| {
-            const taken = @min(visor.width(text, .unicode), room);
+            const taken = @min(win.width(text), room);
             const where: Align = if (i == 0)
                 .left
             else if (i + 1 == c.x.labels.len)
@@ -175,7 +175,7 @@ pub const Chart = struct {
         var named: u16 = 0;
         for (c.datasets) |d| {
             if (d.name.len == 0) continue;
-            widest = @max(widest, visor.width(d.name, .unicode));
+            widest = @max(widest, plot.width(d.name));
             named += 1;
         }
         if (named == 0 or widest + 2 > plot.cols() or named + 2 > plot.rows()) return;
@@ -298,3 +298,19 @@ test "a chart in a window too small for its gutter draws nothing" {
     }).draw(h.window());
     try h.expectFrame("\n");
 }
+
+test "the gutter is as wide as the widest label, measured the way the screen measures" {
+    var h: Harness = try .initMeasured(testing.allocator, 8, 4, .wcwidth);
+    defer h.deinit();
+    try (Chart{
+        .datasets = &.{},
+        .x = .{ .bounds = .{ 0, 1 } },
+        .y = .{ .bounds = .{ 0, 1 }, .labels = &.{ "0", sign } },
+        .legend = false,
+    }).draw(h.window());
+    _ = try h.frame();
+    // One column of gutter, then the axis.
+    try testing.expectEqualStrings("\u{2502}", h.term.screen().textAt(1, 0));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

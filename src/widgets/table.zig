@@ -81,7 +81,7 @@ pub const Table = struct {
     pub fn draw(t: Table, win: Window, state: *State) std.mem.Allocator.Error!void {
         if (win.rect.isEmpty() or t.widths.len == 0) return;
 
-        const marker_width = visor.width(t.marker, .unicode);
+        const marker_width = win.width(t.marker);
         const body = win.child(.{ .col = marker_width, .cols = win.cols() -| marker_width });
 
         var columns: [max_columns]visor.Rect = undefined;
@@ -145,7 +145,7 @@ pub const Table = struct {
                 .rows = 1,
             });
             const text = r.cells[i];
-            const taken = @min(visor.width(text, .unicode), rect.cols);
+            const taken = @min(body.width(text), rect.cols);
             _ = try cell.printSegment(.{ .text = text, .style = style }, .{
                 .col = layout.offset(rect.cols, taken, t.where),
                 .wrap = .none,
@@ -275,3 +275,19 @@ test "whatever the window, the selected row is under the header and on screen" {
         }
     }
 }
+
+test "a column's text is measured the way the screen measures" {
+    var h: Harness = try .initMeasured(testing.allocator, 4, 1, .wcwidth);
+    defer h.deinit();
+    var state: Table.State = .{};
+    try (Table{
+        .rows = &.{.{ .cells = &.{sign ++ "x"} }},
+        .widths = &.{.{ .fixed = 4 }},
+        .where = .right,
+    }).draw(h.window(), &state);
+    _ = try h.frame();
+    // Two columns measured by codepoint, so two to the left of it.
+    try testing.expectEqualStrings(sign, h.term.screen().textAt(2, 0));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

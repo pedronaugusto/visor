@@ -60,7 +60,7 @@ pub const Gauge = struct {
         }
 
         if (g.label) |text| {
-            const taken = @min(visor.width(text, .unicode), cols);
+            const taken = @min(win.width(text), cols);
             _ = try win.printSegment(
                 .{ .text = text, .style = g.label_style orelse g.filled_style },
                 .{
@@ -170,3 +170,14 @@ test "a line gauge puts its label first and the line after it" {
         \\
     );
 }
+
+test "the label is centred the way the screen measures it" {
+    var h: Harness = try .initMeasured(testing.allocator, 5, 1, .wcwidth);
+    defer h.deinit();
+    try (Gauge{ .ratio = 0, .label = sign ++ "ok" }).draw(h.window());
+    _ = try h.frame();
+    // Three columns in five: one either side.
+    try testing.expectEqualStrings(sign, h.term.screen().textAt(1, 0));
+}
+
+const sign = "\u{26a0}\u{fe0f}";

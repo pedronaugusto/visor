@@ -30,15 +30,21 @@ pub const Harness = struct {
 
     /// A grid that size, measured by cluster, with a terminal to match.
     pub fn init(gpa: std.mem.Allocator, cols: u16, rows: u16) !Harness {
+        return initMeasured(gpa, cols, rows, .unicode);
+    }
+
+    /// A grid that size, measured `method`'s way, with a terminal that
+    /// measures the same way.
+    pub fn initMeasured(gpa: std.mem.Allocator, cols: u16, rows: u16, method: visor.Method) !Harness {
         const size: visor.Size = .{ .cols = cols, .rows = rows };
         var screen: visor.Screen = try .init(gpa, size);
         errdefer screen.deinit(gpa);
-        screen.method = .unicode;
+        screen.method = method;
         var renderer: visor.Renderer = try .init(gpa, size);
         errdefer renderer.deinit(gpa);
         var term: visor.Term = try .init(gpa, size);
         errdefer term.deinit();
-        term.setMethod(.unicode);
+        term.setMethod(method);
         return .{
             .gpa = gpa,
             .screen = screen,
@@ -46,7 +52,7 @@ pub const Harness = struct {
             .term = term,
             .out = .init(gpa),
             .text = .init(gpa),
-            .caps = .{ .width_method = .unicode, .truecolor = true, .osc8 = true },
+            .caps = .{ .width_method = method, .truecolor = true, .osc8 = true },
         };
     }
 
