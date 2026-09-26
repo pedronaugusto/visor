@@ -59,26 +59,40 @@ pub fn forget(r: *const Renderer) void {
     if (armed == r) armed = null;
 }
 
-/// The pipe a resize writes into, read end first; `-1` when nothing is
-/// watched. Global because a signal handler is handed nothing else.
-var resize_pipe: [2]if (is_windows) i32 else std.posix.fd_t = .{ -1, -1 };
-/// The `SIGWINCH` handler that was there before `watchResize`.
+/// A pipe's descriptor, `-1` for none.
+const Fd = if (is_windows) i32 else std.posix.fd_t;
+
+/// The write end of every watching `Tty`'s resize pipe, `-1` for a free
+/// slot. The signal is the process's, so the one handler has to reach every
+/// terminal that watches it; each `Tty` owns its pipe and only names its
+/// write end here. Atomic because the handler reads it at any moment.
+var watchers: [max_watchers]std.atomic.Value(Fd) = @splat(.init(-1));
+/// How many terminals can watch at once. A program has one terminal; a
+/// test, or a program that also drives a pseudo-terminal of its own, a few.
+const max_watchers = 8;
+/// How many slots are taken, which says when the handler goes in and when
+/// the one it replaced comes back.
+var watching: usize = 0;
+/// The `SIGWINCH` handler that was there before the first watcher.
 var resize_was: if (is_windows) void else std.posix.Sigaction = undefined;
 
-/// The handler: one byte into a pipe, which is all a signal handler may do.
-/// A full pipe already holds a wake, so a write that would block is dropped.
+/// The handler: one byte into each watcher's pipe, which is all a signal
+/// handler may do. A full pipe already holds a wake, so a write that would
+/// block is dropped.
 fn onWinch(_: std.posix.SIG) callconv(.c) void {
     const byte: [1]u8 = .{'w'};
-    _ = std.posix.system.write(resize_pipe[1], &byte, 1);
+    for (&watchers) |*w| {
+        const fd = w.load(.acquire);
+        if (fd != -1) _ = std.posix.system.write(fd, &byte, 1);
+    }
 }
 
-/// Empties the resize pipe; whether there was anything in it. `Input` calls
-/// this after the pipe woke it.
-pub fn drainResizePipe() bool {
+/// Empties a resize pipe's read end; whether there was anything in it.
+fn drainPipe(fd: Fd) bool {
     var any = false;
     var sink: [64]u8 = undefined;
     while (true) {
-        const rc = std.posix.system.read(resize_pipe[0], &sink, sink.len);
+        const rc = std.posix.system.read(fd, &sink, sink.len);
         if (std.posix.errno(rc) != .SUCCESS or rc == 0) return any;
         any = true;
     }
@@ -112,6 +126,9 @@ pub const Tty = struct {
     /// What the terminal was before `raw`, or null when it has not been
     /// changed.
     saved: ?Saved = null,
+    /// This terminal's resize pipe, read end first, while it watches for a
+    /// resize; `-1` otherwise.
+    resize_pipe: [2]Fd = .{ -1, -1 },
 
     /// Anything opening the terminal can fail with.
     pub const OpenError = Io.File.OpenError || error{NotATerminal};
@@ -300,23 +317,27 @@ pub const Tty = struct {
     }
 
     /// Has a resize wake the reader: a handler for `SIGWINCH` that writes a
-    /// byte into a pipe, which `Input.next` waits on beside the terminal and
-    /// turns into a `resize` event carrying the size and pixels the
-    /// operating system has now.
+    /// byte into this terminal's own pipe, which `Input.next` waits on beside
+    /// the terminal and turns into a `resize` event carrying the size and
+    /// pixels the operating system has now.
     ///
-    /// Installed only when asked for, because a library that installs a
+    /// The pipe is this `Tty`'s, so two terminals watching -- a program's
+    /// own and one it drives, or two in a test -- each get their wake and
+    /// neither's `unwatchResize` takes the other's away. The signal is the
+    /// process's, so its handler is installed once, when the first terminal
+    /// watches, and only when asked for, because a library that installs a
     /// signal handler takes something from the program that the program
-    /// cannot get back; `unwatchResize` and `close` put the one it found
-    /// back. The handler does nothing but that write, so a burst of signals
-    /// is one wake and one event.
+    /// cannot get back; the last terminal to stop watching puts back the one
+    /// the first found. The handler does nothing but write, so a burst of
+    /// signals is one wake and one event.
     ///
     /// A terminal that answers for mode 2048 makes this unnecessary: the
     /// resize arrives on the input stream, in step with everything else. On
     /// Windows there is no signal and this does nothing.
     pub fn watchResize(t: *Tty) error{ SystemResources, Unexpected }!void {
-        _ = t;
         if (is_windows) return;
-        if (resize_pipe[0] != -1) return;
+        if (t.resize_pipe[0] != -1) return;
+        if (watching == max_watchers) return error.SystemResources;
         var fds: [2]std.posix.fd_t = undefined;
         switch (std.posix.errno(std.posix.system.pipe(&fds))) {
             .SUCCESS => {},
@@ -330,41 +351,58 @@ pub const Tty = struct {
             try fcntlSet(fd, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
             try fcntlSet(fd, std.posix.F.SETFD, std.posix.FD_CLOEXEC);
         }
-        resize_pipe = fds;
-        const action: std.posix.Sigaction = .{
-            .handler = .{ .handler = onWinch },
-            .mask = std.posix.sigemptyset(),
-            .flags = std.posix.SA.RESTART,
-        };
-        std.posix.sigaction(.WINCH, &action, &resize_was);
+        for (&watchers) |*w| {
+            if (w.load(.acquire) != -1) continue;
+            w.store(fds[1], .release);
+            break;
+        }
+        t.resize_pipe = fds;
+        watching += 1;
+        if (watching == 1) {
+            const action: std.posix.Sigaction = .{
+                .handler = .{ .handler = onWinch },
+                .mask = std.posix.sigemptyset(),
+                .flags = std.posix.SA.RESTART,
+            };
+            std.posix.sigaction(.WINCH, &action, &resize_was);
+        }
     }
 
-    /// Puts back the `SIGWINCH` handler `watchResize` found, and closes the
-    /// pipe. Safe to call when nothing is being watched.
+    /// Stops this terminal watching, and closes its pipe; when it was the
+    /// last one watching, puts back the `SIGWINCH` handler the first one
+    /// found. Safe to call when nothing is being watched.
     pub fn unwatchResize(t: *Tty) void {
-        _ = t;
-        if (is_windows or resize_pipe[0] == -1) return;
-        std.posix.sigaction(.WINCH, &resize_was, null);
-        for (resize_pipe) |fd| {
+        if (is_windows or t.resize_pipe[0] == -1) return;
+        for (&watchers) |*w| {
+            if (w.load(.acquire) == t.resize_pipe[1]) w.store(-1, .release);
+        }
+        watching -= 1;
+        if (watching == 0) std.posix.sigaction(.WINCH, &resize_was, null);
+        for (t.resize_pipe) |fd| {
             _ = std.posix.system.close(fd);
         }
-        resize_pipe = .{ -1, -1 };
+        t.resize_pipe = .{ -1, -1 };
     }
 
     /// Whether the terminal has changed size since this was last asked, for
     /// a program with a loop of its own rather than an `Input`. Never
     /// blocks; false when nothing is being watched.
     pub fn resized(t: *Tty) bool {
-        _ = t;
-        if (is_windows or resize_pipe[0] == -1) return false;
-        return drainResizePipe();
+        if (is_windows or t.resize_pipe[0] == -1) return false;
+        return drainPipe(t.resize_pipe[0]);
     }
 
-    /// The read end of the resize pipe, when a resize is being watched.
+    /// Empties this terminal's resize pipe, which woke a wait. `Input` calls
+    /// this after the pipe woke it.
+    pub fn drainResize(t: *Tty) void {
+        if (is_windows or t.resize_pipe[0] == -1) return;
+        _ = drainPipe(t.resize_pipe[0]);
+    }
+
+    /// The read end of this terminal's resize pipe, while it watches.
     pub fn resizeFile(t: *const Tty) ?Io.File {
-        _ = t;
-        if (is_windows or resize_pipe[0] == -1) return null;
-        return .{ .handle = resize_pipe[0], .flags = .{ .nonblocking = true } };
+        if (is_windows or t.resize_pipe[0] == -1) return null;
+        return .{ .handle = t.resize_pipe[0], .flags = .{ .nonblocking = true } };
     }
 
     /// The file keys and replies arrive on.

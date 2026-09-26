@@ -221,7 +221,7 @@ pub const Input = struct {
             if (done.index == 1) {
                 // The pipe does not block: whatever this read took, the rest
                 // is taken here so the next wait does not wake for it again.
-                _ = tty_mod.drainResizePipe();
+                in.tty.drainResize();
                 in.resize_due = true;
                 continue;
             }
@@ -455,6 +455,36 @@ test "watching a resize puts back the handler it found" {
     try testing.expect(p.tty.resizeFile() != null);
     p.tty.unwatchResize();
     try testing.expect(p.tty.resizeFile() == null);
+    var after: std.posix.Sigaction = undefined;
+    std.posix.sigaction(.WINCH, null, &after);
+    try testing.expectEqual(before.handler.handler, after.handler.handler);
+}
+
+test "two terminals watching each hear a resize, and one stopping leaves the other" {
+    if (is_windows) return error.SkipZigTest;
+    var a: Piped = try .init();
+    defer a.deinit();
+    var b: Piped = try .init();
+    defer b.deinit();
+    var before: std.posix.Sigaction = undefined;
+    std.posix.sigaction(.WINCH, null, &before);
+
+    try a.tty.watchResize();
+    try b.tty.watchResize();
+    try testing.expect(a.tty.resizeFile().?.handle != b.tty.resizeFile().?.handle);
+    try std.posix.raise(.WINCH);
+    try testing.expect(a.tty.resized());
+    try testing.expect(b.tty.resized());
+
+    // The first stops: the second still hears, and the handler stays.
+    a.tty.unwatchResize();
+    try testing.expect(a.tty.resizeFile() == null);
+    try std.posix.raise(.WINCH);
+    try testing.expect(!a.tty.resized());
+    try testing.expect(b.tty.resized());
+
+    // The last stops: the handler found before the first is back.
+    b.tty.unwatchResize();
     var after: std.posix.Sigaction = undefined;
     std.posix.sigaction(.WINCH, null, &after);
     try testing.expectEqual(before.handler.handler, after.handler.handler);

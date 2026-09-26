@@ -46,6 +46,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is read; a burst of signals is one event. `resized` is the same wake,
   asked without blocking, for a program with a loop of its own.
 - `Tty.inputFile`, the file keys and replies arrive on.
+- Each `Tty` that watches for a resize owns its pipe (`resizeFile`,
+  `drainResize`), so two terminals watching each hear the signal and one
+  stopping does not take the other's wake away; the handler goes in with the
+  first watcher and the one it replaced comes back with the last.
 - `Layers.repaint`: the next frame places every declared picture again, as
   though the terminal could have moved or dropped any of them. `Renderer`
   calls it on every repaint.
