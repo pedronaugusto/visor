@@ -68,23 +68,25 @@ pub const Palette = struct {
     /// background or one of the sixteen slots. Returns whether anything
     /// changed; every other event is left alone.
     pub fn update(p: *Palette, event: morse.Event) bool {
-        const bytes = switch (event) {
-            .unhandled => |b| b,
+        const reply = switch (event) {
+            .reply => |r| r,
             else => return false,
         };
-        if (morse.parseColorReply(bytes)) |report| {
-            const slot: *?Rgb = switch (report.target) {
-                .foreground => &p.fg,
-                .background => &p.bg,
-                .cursor => return false,
-            };
-            return set(slot, report.color.to8());
+        switch (reply) {
+            .color => |report| {
+                const slot: *?Rgb = switch (report.target) {
+                    .foreground => &p.fg,
+                    .background => &p.bg,
+                    .cursor => return false,
+                };
+                return set(slot, report.color.to8());
+            },
+            .palette => |report| {
+                if (report.index >= 16) return false;
+                return set(&p.entries[report.index], report.color.to8());
+            },
+            else => return false,
         }
-        if (morse.parsePaletteReply(bytes)) |report| {
-            if (report.index >= 16) return false;
-            return set(&p.entries[report.index], report.color.to8());
-        }
-        return false;
     }
 
     fn set(slot: *?Rgb, to: Rgb) bool {
@@ -156,11 +158,11 @@ test "the terminal's answers fold in, and a colour resolves to what it looks lik
     try testing.expect(!p.known());
     try testing.expectEqual(@as(?Rgb, null), p.resolve(.default, .fg));
 
-    try testing.expect(p.update(.{ .unhandled = "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" }));
-    try testing.expect(p.update(.{ .unhandled = "\x1b]11;rgb:1e1e/1e1e/2e2e\x07" }));
-    try testing.expect(p.update(.{ .unhandled = "\x1b]4;1;rgb:f3/8b/a8\x1b\\" }));
-    try testing.expect(!p.update(.{ .unhandled = "\x1b]4;1;rgb:f3/8b/a8\x1b\\" }));
-    try testing.expect(!p.update(.{ .unhandled = "\x1b[?62c" }));
+    try testing.expect(p.update(answer("\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\")));
+    try testing.expect(p.update(answer("\x1b]11;rgb:1e1e/1e1e/2e2e\x07")));
+    try testing.expect(p.update(answer("\x1b]4;1;rgb:f3/8b/a8\x1b\\")));
+    try testing.expect(!p.update(answer("\x1b]4;1;rgb:f3/8b/a8\x1b\\")));
+    try testing.expect(!p.update(answer("\x1b[?62c")));
     try testing.expect(!p.update(.{ .key = .{ .key = .escape } }));
     try testing.expect(p.known());
 
@@ -189,4 +191,9 @@ test "asking is one write of eighteen questions" {
     try testing.expect(std.mem.startsWith(u8, asked, "\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;0;?\x1b\\"));
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b]4;15;?\x1b\\"));
     try testing.expectEqual(@as(usize, 18), std.mem.count(u8, asked, "?\x1b\\"));
+}
+
+/// A reply as the input reads it.
+fn answer(bytes: []const u8) morse.Event {
+    return .{ .reply = morse.Reply.parse(bytes).? };
 }

@@ -92,8 +92,11 @@ pub const Winsize = struct {
                 .cells = .{ .cols = clamp16(r.cols), .rows = clamp16(r.rows) },
                 .area = .{ .width = r.xpixels, .height = r.ypixels },
             }),
-            .unhandled => |bytes| {
-                const report = morse.parseWindowSize(bytes) orelse return false;
+            .reply => |reply| {
+                const report = switch (reply) {
+                    .window_size => |w| w,
+                    else => return false,
+                };
                 const was = ws.*;
                 switch (report.what) {
                     .cell_pixels => ws.cell = .{ .width = report.width, .height = report.height },
@@ -137,7 +140,7 @@ test "a cell the terminal reported is the cell, whatever the area says" {
     try testing.expect(!derived.reported);
     try testing.expectEqual(@as(f32, 9.2), derived.width);
 
-    try testing.expect(ws.update(.{ .unhandled = "\x1b[6;20;9t" }));
+    try testing.expect(ws.update(answer("\x1b[6;20;9t")));
     const reported = ws.cellSize().?;
     try testing.expect(reported.reported);
     try testing.expectEqual(@as(f32, 9), reported.width);
@@ -173,12 +176,17 @@ test "a resize to the same size changes nothing and keeps the cell" {
 
 test "the size answers fold in, and anything else is ignored" {
     var ws: Winsize = .{};
-    try testing.expect(ws.update(.{ .unhandled = "\x1b[8;24;80t" }));
+    try testing.expect(ws.update(answer("\x1b[8;24;80t")));
     try testing.expectEqual(Size{ .cols = 80, .rows = 24 }, ws.cells);
-    try testing.expect(ws.update(.{ .unhandled = "\x1b[4;480;720t" }));
+    try testing.expect(ws.update(answer("\x1b[4;480;720t")));
     try testing.expectEqual(Pixels{ .width = 720, .height = 480 }, ws.area);
-    try testing.expect(!ws.update(.{ .unhandled = "\x1b[4;480;720t" }));
-    try testing.expect(!ws.update(.{ .unhandled = "\x1b[?62c" }));
+    try testing.expect(!ws.update(answer("\x1b[4;480;720t")));
+    try testing.expect(!ws.update(answer("\x1b[?62c")));
     try testing.expect(!ws.update(.{ .key = .{ .key = .escape } }));
-    try testing.expect(!ws.update(.{ .unhandled = "\x1b[9;50;200t" }));
+    try testing.expect(!ws.update(answer("\x1b[9;50;200t")));
+}
+
+/// A reply as the input reads it.
+fn answer(bytes: []const u8) morse.Event {
+    return .{ .reply = morse.Reply.parse(bytes).? };
 }

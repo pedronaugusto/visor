@@ -928,10 +928,12 @@ test "the probe finds what the second emulator has, reset modes included" {
     var parse_buf: [4096]u8 = undefined;
     var parser: visor.morse.KeyParser = .init(&parse_buf);
     var events = parser.feed(answers[0..answered]);
-    while (events.next()) |ev| switch (ev) {
-        .unhandled => |bytes| probe.feed(bytes),
-        else => {},
-    };
+    while (events.next()) |ev| {
+        // Every answer is read as one: nothing the probe asked comes back
+        // as bytes for it to parse.
+        try testing.expect(ev != .unhandled);
+        probe.feed(ev);
+    }
 
     try testing.expect(probe.settled());
     // Neither mode is on when the probe asks -- the emulator answers

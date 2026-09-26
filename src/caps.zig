@@ -138,61 +138,56 @@ pub const Caps = struct {
             try morse.queryDeviceAttributes(w);
         }
 
-        /// Folds one reply in. Anything unrecognised is ignored, because a
-        /// terminal answering a question nobody asked is not this package's
-        /// problem to diagnose.
-        pub fn feed(p: *Probe, bytes: []const u8) void {
-            if (morse.parseModeReply(bytes)) |reply| {
-                // The question is whether the terminal has the mode, and
-                // DECRQM answers whether it is on. Set, reset and
-                // permanently set are a terminal that has it -- one asked
-                // before anything turned it on answers reset -- and not
-                // recognised and permanently reset are one that does not.
-                const has = switch (reply.state) {
-                    .set, .reset, .permanently_set => true,
-                    .not_recognized, .permanently_reset => false,
-                };
-                // Synchronised output is a bracket written around a frame,
-                // and in-band resize reports are turned on by `enter`:
-                // neither is on when asked about.
-                if (reply.mode == morse.syncOutput.number) p.caps.sync = has;
-                if (reply.mode == morse.inBandResize.number) p.caps.in_band_resize = has;
-                // A terminal that measures clusters whatever anyone asks
-                // answers permanently set; one that can be asked will be,
-                // by `enter`.
-                if (reply.mode == morse.unicodeCore.number) p.caps.width_method = if (has) .unicode else .wcwidth;
-                return;
-            }
-            if (morse.parseKittyKeyboardReply(bytes)) |_| {
-                p.caps.kitty_keyboard = true;
-                return;
-            }
-            if (morse.parseCapabilityReply(bytes)) |reply| {
-                var it = reply.iterator();
-                while (it.next()) |capability| {
-                    var name: [8]u8 = undefined;
-                    const n = capability.decodeName(&name) catch continue;
-                    if (reply.known and
-                        (std.mem.eql(u8, n, "Tc") or std.mem.eql(u8, n, "RGB")))
-                    {
-                        p.caps.truecolor = true;
+        /// Folds one event from the input in: the answers to the questions,
+        /// read. Anything else is ignored, because a terminal answering a
+        /// question nobody asked is not this package's problem to diagnose.
+        pub fn feed(p: *Probe, event: morse.Event) void {
+            const reply = switch (event) {
+                .reply => |r| r,
+                else => return,
+            };
+            switch (reply) {
+                .mode => |m| {
+                    // The question is whether the terminal has the mode, and
+                    // DECRQM answers whether it is on. Set, reset and
+                    // permanently set are a terminal that has it -- one asked
+                    // before anything turned it on answers reset -- and not
+                    // recognised and permanently reset are one that does not.
+                    const has = switch (m.state) {
+                        .set, .reset, .permanently_set => true,
+                        .not_recognized, .permanently_reset => false,
+                    };
+                    // Synchronised output is a bracket written around a frame,
+                    // and in-band resize reports are turned on by `enter`:
+                    // neither is on when asked about.
+                    if (m.mode == morse.syncOutput.number) p.caps.sync = has;
+                    if (m.mode == morse.inBandResize.number) p.caps.in_band_resize = has;
+                    // A terminal that measures clusters whatever anyone asks
+                    // answers permanently set; one that can be asked will be,
+                    // by `enter`.
+                    if (m.mode == morse.unicodeCore.number) p.caps.width_method = if (has) .unicode else .wcwidth;
+                },
+                .kitty_keyboard => p.caps.kitty_keyboard = true,
+                .capability => |c| {
+                    var it = c.iterator();
+                    while (it.next()) |capability| {
+                        var name: [8]u8 = undefined;
+                        const n = capability.decodeName(&name) catch continue;
+                        if (c.known and
+                            (std.mem.eql(u8, n, "Tc") or std.mem.eql(u8, n, "RGB")))
+                        {
+                            p.caps.truecolor = true;
+                        }
                     }
-                }
-                return;
-            }
-            if (morse.parseGraphicsResponse(bytes)) |reply| {
+                },
                 // Any answer to the question, `OK` or an error, is a
                 // terminal that speaks the protocol; an answer about some
                 // other image is not an answer to it.
-                if (reply.id == p.graphics_id) p.caps.kitty_graphics = true;
-                return;
-            }
-            if (morse.parseDeviceAttributes(bytes)) |da| {
-                // A terminal that reports sixel support reports graphics of
-                // some kind; the kitty protocol is answered for separately.
-                p.done = true;
-                _ = da;
-                return;
+                .graphics => |g| if (g.id == p.graphics_id) {
+                    p.caps.kitty_graphics = true;
+                },
+                .device_attributes => p.done = true,
+                else => {},
             }
         }
 
@@ -237,9 +232,9 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     for ([_][]const u8{ "1", "2", "3" }) |state| {
         var p: Caps.Probe = .{ .graphics_id = 1 };
         var buf: [3][32]u8 = undefined;
-        p.feed(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state}));
-        p.feed(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state}));
-        p.feed(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state}));
+        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})));
         try testing.expect(p.caps.sync);
         try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
         try testing.expect(p.caps.in_band_resize);
@@ -248,9 +243,9 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
         var p: Caps.Probe = .{ .graphics_id = 1 };
         p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true };
         var buf: [3][32]u8 = undefined;
-        p.feed(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state}));
-        p.feed(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state}));
-        p.feed(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state}));
+        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})));
         try testing.expect(!p.caps.sync);
         try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
         try testing.expect(!p.caps.in_band_resize);
@@ -259,18 +254,18 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
 
 test "the probe settles on the device attributes answer and not before" {
     var p: Caps.Probe = .{ .graphics_id = 1 };
-    p.feed("\x1b[?2026;1$y");
+    p.feed(answer("\x1b[?2026;1$y"));
     try testing.expect(!p.settled());
-    p.feed("\x1b[?62;4;22c");
+    p.feed(answer("\x1b[?62;4;22c"));
     try testing.expect(p.settled());
 }
 
 test "an unrecognised reply changes nothing" {
     var p: Caps.Probe = .{ .graphics_id = 1 };
     const before = p.caps;
-    p.feed("nonsense");
-    p.feed("\x1b[");
-    p.feed("");
+    p.feed(answer("nonsense"));
+    p.feed(answer("\x1b["));
+    p.feed(answer(""));
     try testing.expectEqual(before, p.caps);
     try testing.expect(!p.settled());
 }
@@ -278,22 +273,29 @@ test "an unrecognised reply changes nothing" {
 test "a 256-colour count is not evidence of truecolor" {
     var p: Caps.Probe = .{ .graphics_id = 1 };
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
-    p.feed("\x1bP1+r436f=323536\x1b\\");
+    p.feed(answer("\x1bP1+r436f=323536\x1b\\"));
     try testing.expect(!p.caps.truecolor);
 }
 
 test "a truecolor-specific capability enables truecolor" {
     var p: Caps.Probe = .{ .graphics_id = 1 };
-    p.feed("\x1bP1+r5463\x1b\\");
+    p.feed(answer("\x1bP1+r5463\x1b\\"));
     try testing.expect(p.caps.truecolor);
 }
 
 test "the graphics answer is the one carrying the id the program chose" {
     var p: Caps.Probe = .{ .graphics_id = 1 };
     // An answer about a picture is not an answer to the question.
-    p.feed("\x1b_Gi=31;OK\x1b\\");
+    p.feed(answer("\x1b_Gi=31;OK\x1b\\"));
     try testing.expect(!p.caps.kitty_graphics);
     // A refusal of the question still says the protocol is there.
-    p.feed("\x1b_Gi=1;EINVAL:dimensions required\x1b\\");
+    p.feed(answer("\x1b_Gi=1;EINVAL:dimensions required\x1b\\"));
     try testing.expect(p.caps.kitty_graphics);
+}
+
+/// An answer as the input reads it: a reply when it is one, the bytes
+/// framed and unread when it is not.
+fn answer(bytes: []const u8) morse.Event {
+    if (morse.Reply.parse(bytes)) |r| return .{ .reply = r };
+    return .{ .unhandled = bytes };
 }

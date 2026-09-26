@@ -6,9 +6,11 @@
 //! the program's own timeout, and a resize woken out of that wait. This is
 //! that pump and nothing more. The events are morse's own, as the parser
 //! produces them — keys, text, paste, focus, resizes, colour-scheme reports,
-//! and every reply the terminal sends back handed over whole as `unhandled`
-//! for the program to read with the parser that reads it. No reply is
-//! dropped and there is no second event type to translate into.
+//! the mouse, and every answer to a question read as a typed `reply`: a
+//! colour, a size, a mode, a graphics acknowledgement. A program never
+//! parses what it is handed a second time, and a value it has to keep is a
+//! value, not bytes to copy under a cap. No reply is dropped and there is no
+//! second event type to translate into.
 //!
 //! It starts no thread and keeps no clock. `next` blocks on the caller's
 //! `std.Io`, so a program runs it wherever it likes — on its main loop, or
@@ -80,8 +82,10 @@ pub const Input = struct {
 
     /// The next event, waiting for one as long as it takes.
     ///
-    /// Anything the event borrows — `text`, `unhandled` — is valid until the
-    /// next call. A resize, when `Tty.watchResize` is on, comes back as the
+    /// Anything the event borrows — `text`, `unhandled`, the bytes a reply
+    /// carries — is valid until the next call. Whether SGR mouse reports
+    /// are in pixels is `parser.mouse_pixels`, which a program that asked
+    /// for them sets. A resize, when `Tty.watchResize` is on, comes back as the
     /// same `resize` event an in-band report is, with the size and the
     /// pixels the operating system has now.
     pub fn next(in: *Input) Error!morse.Event {
@@ -281,10 +285,10 @@ test "keys, text and replies come through as the parser makes them" {
     const a = try in.next();
     try testing.expectEqual(morse.Key{ .char = 'a' }, a.key.key);
     try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
-    // A reply is handed over whole, for the program's own parser.
-    const reply = (try in.next()).unhandled;
-    try testing.expectEqualStrings("\x1b_Gi=5;OK\x1b\\", reply);
-    try testing.expect(morse.parseGraphicsResponse(reply).?.ok());
+    // A reply is handed over read.
+    const reply = (try in.next()).reply.graphics;
+    try testing.expectEqual(@as(?u32, 5), reply.id);
+    try testing.expect(reply.ok());
     try testing.expectEqualStrings("hello", (try in.next()).text);
     try testing.expect((try in.next()) == .focus_in);
     try testing.expectError(error.EndOfStream, in.next());
@@ -448,6 +452,8 @@ fn describe(log: *std.Io.Writer.Allocating, text: *std.Io.Writer.Allocating, eve
     }
     switch (event) {
         .unhandled => |u| try log.writer.print("U:{s}\n", .{u}),
+        .reply => |r| try log.writer.print("Y:{any}\n", .{r}),
+        .mouse => |m| try log.writer.print("M:{any}\n", .{m}),
         .key => |k| try log.writer.print("K:{any}\n", .{k}),
         .resize => |r| try log.writer.print("R:{any}\n", .{r}),
         .color_scheme => |c| try log.writer.print("C:{t}\n", .{c}),

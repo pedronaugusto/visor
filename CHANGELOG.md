@@ -29,8 +29,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before the new one on — and `leave` undoes what is on at the time.
 - `Input`: the terminal's input, read. `next` reads the `Tty`, frames the
   bytes with `morse.KeyParser` and hands back morse's own events one at a
-  time — every reply the terminal sends as `unhandled`, whole, for the
-  program's parser. A lone `ESC`, `ESC [` or `ESC O` waits the caller's
+  time — the mouse as `mouse` and every answer to a question as a typed
+  `reply`, so a program parses nothing twice and keeps values rather than
+  bytes copied under a cap. A lone `ESC`, `ESC [` or `ESC O` waits the caller's
   timeout for the rest of a sequence and is then the key it also is; the end
   of the stream settles whatever was pending before it reports
   `EndOfStream`. It starts no thread: `next` blocks on the caller's `std.Io`
@@ -132,6 +133,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking:** `Palette.update`, `Winsize.update` and `Caps.Probe.feed`
+  take the typed replies `Input` hands back (`Event.reply`) rather than
+  bytes to parse; `Caps.Probe.feed` takes a `morse.Event`.
 - **Breaking:** `graphemeWidth` returns a `u16`. Measured by codepoint a
   cluster is the sum of its codepoints' widths, no longer clamped at two,
   because a terminal that measures that way gives each codepoint that takes
