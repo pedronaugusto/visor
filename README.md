@@ -165,7 +165,7 @@ with a `try`. Resizing allocates.
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
+| The views | `Window` — `child`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
@@ -351,6 +351,19 @@ passes by pointer; the widget reads it, moves it when the selection would
 otherwise be off screen, and forgets it. There is no retained tree, no
 callback and no focus model, so there is nothing to keep in step with the
 program's own state.
+
+**A program's look is an ink, not a pass over the screen.** A look that
+depends on where a cell lands -- every other row faded, a region brought up
+from the background -- or that watches what is drawn cannot be said in a
+widget's style options, and drawing a widget on a scratch screen to restyle
+its cells afterwards costs an allocation and a comparison of every cell. A
+window may carry a `Window.Ink`, a function the program owns that turns the
+style a cell was written in into the style it is drawn in, given where on
+the screen it lands and what it holds. Children inherit it, every write goes
+through it, and widgets know nothing of it. It is held by pointer so a
+window stays three words, and with none a write pays one branch: on a page
+of widgets that is below what moving the same code elsewhere in the binary
+costs, which is as far as a measurement can see.
 
 **Layout is splitting, not solving.** A rectangle is divided by fixed sizes,
 percentages, floors, ceilings and shares of what is left, in one pass over

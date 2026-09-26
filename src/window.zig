@@ -38,6 +38,62 @@ pub const Window = struct {
     /// Where the view is and how big, in the screen's own coordinates,
     /// already clipped to it.
     rect: Rect,
+    /// What every cell written through this window is drawn in, or null
+    /// for the style it was written in. Children inherit it. A pointer, so
+    /// the window a widget is handed stays three words, and the ink is the
+    /// caller's to keep for as long as the window is used.
+    ink: ?*const Ink = null,
+
+    /// A program's look, applied to every cell a window writes: the style a
+    /// cell asked for, turned into the style it is drawn in, knowing where
+    /// on the screen it lands and what it holds.
+    ///
+    /// It is how a program whose look depends on where a cell is (every
+    /// other row dimmed, a region faded in) or that watches what is written
+    /// (to light what is drawn in a bright style) draws widgets that know
+    /// nothing of it, straight into the screen. It is called once for each
+    /// grapheme a window writes and for each cell a fill or a border writes,
+    /// and never for a cell a scroll moves; with no ink a write costs one
+    /// branch more.
+    pub const Ink = struct {
+        /// The program's own, handed back on every call.
+        ctx: *anyopaque,
+        /// The style a stroke is drawn in.
+        apply: *const fn (ctx: *anyopaque, stroke: Stroke) Style,
+
+        /// One cell about to be written.
+        pub const Stroke = struct {
+            /// Where, in the screen's own coordinates.
+            col: u16,
+            /// The row, in the screen's own coordinates.
+            row: u16,
+            /// How many columns it covers.
+            cols: u16,
+            /// What it holds: a grapheme, or a space for a blank.
+            text: []const u8,
+            /// The style it was written in.
+            style: Style,
+        };
+    };
+
+    /// The same view, drawing in `ink`.
+    pub fn inked(w: Window, ink: ?*const Ink) Window {
+        var out = w;
+        out.ink = ink;
+        return out;
+    }
+
+    /// The style a cell written at a place of this window is drawn in.
+    fn styled(w: Window, col: u16, row: u16, span: u16, text: []const u8, style: Style) Style {
+        const ink = w.ink orelse return style;
+        return ink.apply(ink.ctx, .{
+            .col = w.rect.col + col,
+            .row = w.rect.row + row,
+            .cols = span,
+            .text = text,
+            .style = style,
+        });
+    }
 
     /// Text with one style and one link.
     pub const Segment = struct {
@@ -194,7 +250,7 @@ pub const Window = struct {
             .rows = opts.rows orelse w.rect.rows -| opts.row,
         };
         const outer = asked.intersect(w.rect);
-        var c: Window = .{ .screen = w.screen, .rect = outer };
+        var c: Window = .{ .screen = w.screen, .rect = outer, .ink = w.ink };
         if (!opts.border.where.any() or outer.isEmpty()) return c;
 
         c.drawBorder(opts.border);
@@ -210,19 +266,23 @@ pub const Window = struct {
             inner.cols -|= 1;
         }
         if (b.right) inner.cols -|= 1;
-        return .{ .screen = w.screen, .rect = inner };
+        return .{ .screen = w.screen, .rect = inner, .ink = w.ink };
     }
 
     /// One cell, in this window's coordinates, clipped.
     pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
-        w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, c);
+        var drawn = c;
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), w.screen.textOf(&c), c.style));
+        w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, drawn);
     }
 
     /// Copies a cell from another screen into this window.
     pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) std.mem.Allocator.Error!void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
-        try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, c);
+        var drawn = c;
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), source.textOf(&c), c.style));
+        try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, drawn);
     }
 
     /// What is there, or null outside the window.
@@ -241,7 +301,8 @@ pub const Window = struct {
         link: Link,
     ) std.mem.Allocator.Error!void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
-        try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, style, link);
+        const drawn = if (w.ink == null) style else w.styled(col, row, textmod.graphemeWidth(grapheme, w.screen.method), grapheme, style);
+        try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, drawn, link);
     }
 
     /// A grapheme drawn `scale` cells tall and `scale` times its width
@@ -261,13 +322,23 @@ pub const Window = struct {
         if (col >= w.rect.cols or row >= w.rect.rows) return false;
         if (@as(u32, col) + @as(u32, wide) * tall > w.rect.cols) return false;
         if (@as(u32, row) + tall > w.rect.rows) return false;
-        return w.screen.writeScaled(w.rect.col + col, w.rect.row + row, grapheme, style, link, scale);
+        const drawn = if (w.ink == null) style else w.styled(col, row, wide * tall, grapheme, style);
+        return w.screen.writeScaled(w.rect.col + col, w.rect.row + row, grapheme, drawn, link, scale);
     }
 
     /// A rectangle of one cell, in this window's coordinates.
     pub fn fill(w: Window, rect: Rect, c: Cell) void {
         const inside = rect.intersect(.fromSize(w.size()));
         if (inside.isEmpty()) return;
+        if (w.ink != null) {
+            // Cell by cell, because the ink may draw each differently.
+            var row = inside.row;
+            while (row < inside.bottom()) : (row += 1) {
+                var col = inside.col;
+                while (col < inside.right()) : (col += 1) w.writeOwnedCell(col, @intCast(row), c);
+            }
+            return;
+        }
         w.screen.fill(.{
             .col = w.rect.col + inside.col,
             .row = w.rect.row + inside.row,
@@ -785,4 +856,87 @@ test "a row's text comes back as the terminal shows it, trailing blanks left off
     out.clearRetainingCapacity();
     try win.copyText(&out.writer, 0, 1, 4);
     try testing.expectEqualStrings(" b\u{4e2d}", out.written());
+}
+
+/// A look for the tests: every odd row of the screen dimmed, and every
+/// stroke that carries a glyph counted, as a program lighting what it drew
+/// would count them.
+const Dimmer = struct {
+    glyphs: usize = 0,
+    strokes: usize = 0,
+    last: Point = .{},
+
+    fn ink(d: *Dimmer) Window.Ink {
+        return .{ .ctx = d, .apply = apply };
+    }
+
+    fn apply(ctx: *anyopaque, stroke: Window.Ink.Stroke) Style {
+        const d: *Dimmer = @ptrCast(@alignCast(ctx));
+        d.strokes += 1;
+        if (!std.mem.eql(u8, stroke.text, " ")) d.glyphs += 1;
+        d.last = .{ .col = stroke.col, .row = stroke.row };
+        var out = stroke.style;
+        if (stroke.row % 2 == 1) out.dim = true;
+        return out;
+    }
+};
+
+test "an ink draws every cell a window writes, where it lands on the screen, and a child inherits it" {
+    var s = try made(10, 4);
+    defer s.deinit(testing.allocator);
+    var d: Dimmer = .{};
+    const ink = d.ink();
+    const root = s.window().inked(&ink);
+    const inner = root.child(.{ .col = 2, .row = 1, .cols = 6, .rows = 2, .border = .{ .where = .{ .left = true } } });
+    try testing.expect(inner.ink != null);
+    _ = try inner.printSegment(.{ .text = "ab", .style = .{ .bold = true } }, .{});
+    // In screen coordinates: the border took column 2, so "b" is at 4,1.
+    try testing.expectEqual(Point{ .col = 4, .row = 1 }, d.last);
+    try testing.expect(s.readCell(3, 1).?.style.dim and s.readCell(3, 1).?.style.bold);
+    // The border's own cells went through it too.
+    try testing.expect(s.readCell(2, 1).?.style.dim);
+    try testing.expect(!s.readCell(2, 2).?.style.dim);
+    try testing.expectEqual(@as(usize, 4), d.glyphs);
+
+    // A fill is cell by cell: a style that depends on the row lands row by
+    // row, and each blank is a stroke with no glyph.
+    const strokes = d.strokes;
+    root.fill(.{ .col = 0, .row = 0, .cols = 3, .rows = 2 }, .blank(.{ .italic = true }));
+    try testing.expectEqual(strokes + 6, d.strokes);
+    try testing.expect(!s.readCell(0, 0).?.style.dim);
+    try testing.expect(s.readCell(0, 1).?.style.dim and s.readCell(0, 1).?.style.italic);
+
+    // Without one, the style is the style asked for.
+    _ = try s.window().printSegment(.{ .text = "c", .style = .{ .bold = true } }, .{ .row = 3 });
+    try testing.expect(!s.readCell(0, 3).?.style.dim);
+}
+
+test "a widget drawn through an ink is the widget drawn plain with the look applied after" {
+    // What a program without an ink has to do: draw on a scratch screen,
+    // then carry every cell over in its look. The ink gives the same cells
+    // with no scratch screen.
+    var plain = try made(12, 5);
+    defer plain.deinit(testing.allocator);
+    const panel: Window.ChildOptions = .{ .cols = 12, .rows = 5, .border = .{ .where = .all, .glyphs = .rounded, .style = .{ .bold = true } } };
+    _ = try plain.window().child(panel).print(&.{
+        .{ .text = "one two ", .style = .{ .italic = true } },
+        .{ .text = "\u{4e2d} three four", .style = .{ .fg = .ansi(.cyan) } },
+    }, .{ .wrap = .word });
+    for (0..plain.size.rows) |r| {
+        if (r % 2 == 0) continue;
+        for (plain.rowAtMut(@intCast(r))) |*c| {
+            if (!c.eql(.blank(.{}))) c.style.dim = true;
+        }
+    }
+
+    var inked = try made(12, 5);
+    defer inked.deinit(testing.allocator);
+    var d: Dimmer = .{};
+    const ink = d.ink();
+    _ = try inked.window().inked(&ink).child(panel).print(&.{
+        .{ .text = "one two ", .style = .{ .italic = true } },
+        .{ .text = "\u{4e2d} three four", .style = .{ .fg = .ansi(.cyan) } },
+    }, .{ .wrap = .word });
+
+    for (plain.cells, inked.cells) |a, b| try testing.expect(a.eql(b));
 }

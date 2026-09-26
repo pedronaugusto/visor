@@ -72,6 +72,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   colour into the RGB it is drawn in, or null while its slot is unanswered,
   with the standard cube and grey ramp above the sixteen. `mix` is the step
   between two colours, which is what a tint toward the background is.
+- `Window.ink`, `Window.inked` and `Window.Ink`: a program's look applied to
+  every cell a window writes. The ink is a function the program owns, given
+  each stroke -- where on the screen it lands, how many columns it covers,
+  what it holds and the style it was written in -- and answering the style
+  it is drawn in; it may also watch the strokes, to light what is drawn in a
+  bright style. Children inherit it, and a widget drawn through an inked
+  window is the widget drawn plain with the look applied after, with no
+  scratch screen. With no ink a write pays one branch; on a page of widgets
+  the difference is below what the same code moved within the binary costs.
 - `Window.linkAt`, the OSC 8 target under a cell — what a click there opens,
   with no table of where links were drawn, because a cell carries its link —
   and `Window.copyText`, one row's text between two columns as the terminal
