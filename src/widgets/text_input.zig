@@ -239,6 +239,7 @@ pub const TextInput = struct {
 
 const testing = std.testing;
 const Harness = @import("harness.zig").Harness;
+const corpus = @import("corpus");
 
 fn allRows(text: []const u8, cols: u16) ![]TextInput.Row {
     var list: std.ArrayList(TextInput.Row) = .empty;
@@ -398,15 +399,38 @@ const pieces = [_][]const u8{
     "\t",   "\xff",     "\xe4\xb8", "\u{26a0}\u{fe0f}",           "x.y/z",
 };
 
-fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
+/// What the layout property drew over the corpus, for the test that proves
+/// it explores.
+const Tally = struct {
+    /// Which piece each part of the text was.
+    pieces: corpus.Spread = .{},
+    /// How long the text was, in pieces.
+    parts: corpus.Spread = .{},
+    /// How wide the window was.
+    cols: corpus.Spread = .{},
+    /// Which way it measured, cluster (1) or codepoint (0).
+    method: corpus.Spread = .{},
+};
+
+fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     var text: std.ArrayList(u8) = .empty;
     defer text.deinit(gpa);
-    while (text.items.len < 200 and !smith.eos()) {
-        try text.appendSlice(gpa, pieces[smith.index(pieces.len)]);
+    const parts = dice.valueRangeAtMost(u8, 0, 60);
+    var part: u8 = 0;
+    while (part < parts and text.items.len < 200) : (part += 1) {
+        const which = dice.index(pieces.len);
+        if (tally) |tl| tl.pieces.add(which);
+        try text.appendSlice(gpa, pieces[which]);
     }
     const t = text.items;
-    const cols: u16 = smith.valueRangeAtMost(u8, 1, 12);
-    const method: Method = if (smith.value(bool)) .unicode else .wcwidth;
+    const cols = dice.valueRangeAtMost(u16, 1, 12);
+    const method: Method = if (dice.value(bool)) .unicode else .wcwidth;
+    if (tally) |tl| {
+        tl.parts.add(part);
+        tl.cols.add(cols);
+        tl.method.add(@intFromBool(method == .unicode));
+    }
 
     // The rows cover the text: every byte in exactly one, in order.
     var owned: usize = 0;
@@ -455,8 +479,8 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
     // inside it.
     var h: Harness = try .init(gpa, cols, 3);
     defer h.deinit();
-    var state: TextInput.State = .{ .first = smith.value(u8) };
-    const cursor = smith.index(t.len + 1);
+    var state: TextInput.State = .{ .first = dice.value(u8) };
+    const cursor = dice.index(t.len + 1);
     try (TextInput{ .text = t, .cursor = cursor }).draw(h.window(), &state);
     try testing.expect(h.screen.cursor.visible);
     try testing.expect(h.screen.cursor.row < 3);
@@ -467,12 +491,19 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 test "the layout covers every byte and every cluster has a place that leads back to it" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try layoutHolds(gpa, smith);
+            try layoutHolds(gpa, smith, null);
         }
-    }.one, .{ .corpus = &.{
-        "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e",
-        "\x05\x05\x05\x04\x04\x03\x09\x0a\x0b\x0c\x02\x02\x01\x00",
-        "\x01\x02\x01\x02\x01\x02\x01\x02\x06\x07\x08\x0b",
-        "\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\x00\x0e\x0e",
-    } });
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the layout's corpus draws every piece, every width, both methods and long texts" {
+    var t: Tally = .{};
+    for (corpus.entries) |entry| {
+        var smith: std.testing.Smith = .{ .in = entry };
+        try layoutHolds(testing.allocator, &smith, &t);
+    }
+    try testing.expect(t.pieces.covers(0, pieces.len - 1));
+    try testing.expect(t.cols.covers(1, 12));
+    try testing.expect(t.method.covers(0, 1));
+    try testing.expect(t.parts.least == 0 and t.parts.most >= 40);
 }

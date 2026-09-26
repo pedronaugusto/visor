@@ -137,6 +137,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The properties had been testing almost nothing.** `std.testing.Smith`
+  reads eight bytes for every value and answers the lowest in range when
+  those bytes are out of it, and it ends a loop at the first byte that is not
+  zero, so every replayed entry drew a one-by-one grid and not one frame,
+  and the input pump drew an empty stream.
+  Every property -- the round trips, the pump, the text input's layout and
+  the split -- now reads through `corpus.Dice`, which answers a replayed
+  entry from a generator the entry seeds and hands every question to the
+  fuzzer under `--fuzz`, and a test beside each one fails unless the corpus
+  draws the whole of every range. The resize property draws everything the
+  others do, scaled text and clusters the width models disagree about
+  included. What that found is below.
+- Text drawn at a scale could be left torn in the grid after a scroll. When
+  a scroll moved one block's head beside another block, clearing the torn
+  block blanked the other block's cells inside its rectangle. `heal` now
+  decides heads in reading order, a cell belongs to the first head that
+  keeps it, and a cleared head gives back only its own cells.
+- Scroll detection could choose a region whose edge ran through text drawn
+  more than one row tall. The rows inside moved and the rest of the block
+  did not, and the terminal cleared the block it no longer held whole. Such
+  a region is now refused and the frame drawn the ordinary way.
+- Bytes that are not UTF-8 could swallow the text after them. `Graphemes`
+  decoded an ill-formed sequence through the byte that ended it, so a
+  sequence cut short before a flag took the flag's first byte and left three
+  stray continuation bytes. It now decodes the way a terminal does, one
+  replacement character for each maximal subpart, and the next codepoint is
+  whole. Found by the text input's fuzz.
 - **Text was left on the screen after a resize.** A resize or a repaint gave
   the renderer a blank previous frame, and a row the new frame held blank was
   skipped as already blank, so whatever the terminal still showed there -- a

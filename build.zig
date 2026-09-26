@@ -118,7 +118,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .error_tracing = fuzzable,
-            .imports = &.{.{ .name = "visor", .module = module }},
+            .imports = &.{
+                .{ .name = "visor", .module = module },
+                .{ .name = "corpus", .module = corpus },
+            },
         }),
     });
     test_step.dependOn(&b.addRunArtifact(widget_tests).step);

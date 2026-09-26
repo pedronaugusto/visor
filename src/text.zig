@@ -37,17 +37,84 @@ pub const Wrap = enum {
     word,
 };
 
+/// The codepoints of a string of UTF-8, decoded the way a terminal decodes
+/// them: each maximal subpart of an ill-formed sequence is one replacement
+/// character and consumes only its own bytes (Unicode's "substitution of
+/// maximal subparts"). A byte that ends an ill-formed sequence by not
+/// continuing it is where the next codepoint starts, so `"\xe4\xb8"` before
+/// a flag is one replacement character and the flag is still a flag.
+const Utf8 = struct {
+    /// Where the next codepoint starts, which the grapheme iterator reads.
+    i: usize = 0,
+    bytes: []const u8,
+
+    fn init(bytes: []const u8) Utf8 {
+        return .{ .bytes = bytes };
+    }
+
+    pub fn next(it: *Utf8) ?u21 {
+        const bytes = it.bytes;
+        if (it.i >= bytes.len) return null;
+        const start = it.i;
+        const lead = bytes[start];
+        if (lead < 0x80) {
+            it.i += 1;
+            return lead;
+        }
+        // How many bytes follow, and the range the first of them must be
+        // in: the ranges past the lead are what rule out overlong forms,
+        // surrogates and codepoints past U+10FFFF.
+        const shape: struct { more: u8, lo: u8, hi: u8, bits: u8 } = switch (lead) {
+            0xc2...0xdf => .{ .more = 1, .lo = 0x80, .hi = 0xbf, .bits = 0x1f },
+            0xe0 => .{ .more = 2, .lo = 0xa0, .hi = 0xbf, .bits = 0x0f },
+            0xe1...0xec, 0xee, 0xef => .{ .more = 2, .lo = 0x80, .hi = 0xbf, .bits = 0x0f },
+            0xed => .{ .more = 2, .lo = 0x80, .hi = 0x9f, .bits = 0x0f },
+            0xf0 => .{ .more = 3, .lo = 0x90, .hi = 0xbf, .bits = 0x07 },
+            0xf1...0xf3 => .{ .more = 3, .lo = 0x80, .hi = 0xbf, .bits = 0x07 },
+            0xf4 => .{ .more = 3, .lo = 0x80, .hi = 0x8f, .bits = 0x07 },
+            else => {
+                it.i += 1;
+                return replacement;
+            },
+        };
+        var cp: u21 = lead & shape.bits;
+        var k: usize = 1;
+        while (k <= shape.more) : (k += 1) {
+            const at = start + k;
+            if (at >= bytes.len) {
+                it.i = at;
+                return replacement;
+            }
+            const b = bytes[at];
+            const lo: u8 = if (k == 1) shape.lo else 0x80;
+            const hi: u8 = if (k == 1) shape.hi else 0xbf;
+            if (b < lo or b > hi) {
+                it.i = at;
+                return replacement;
+            }
+            cp = (cp << 6) | (b & 0x3f);
+        }
+        it.i = start + 1 + shape.more;
+        return cp;
+    }
+
+    const replacement: u21 = 0xfffd;
+};
+
 /// An iterator over the grapheme clusters of a string.
+///
+/// Bytes that are not UTF-8 are clusters of their own, one a maximal
+/// subpart, which is what a terminal draws a replacement character for.
 pub const Graphemes = struct {
     bytes: []const u8,
-    inner: uucode.grapheme.Iterator(uucode.utf8.Iterator),
+    inner: uucode.grapheme.Iterator(Utf8),
     ascii_at: ?usize = null,
 
     /// The clusters of `bytes`, in order.
     pub fn init(bytes: []const u8) Graphemes {
         return .{
             .bytes = bytes,
-            .inner = uucode.grapheme.utf8Iterator(bytes),
+            .inner = .init(.init(bytes)),
             .ascii_at = if (printableAscii(bytes)) 0 else null,
         };
     }
@@ -87,7 +154,7 @@ pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
     switch (method) {
         .wcwidth => {
             var total: usize = 0;
-            var it: uucode.utf8.Iterator = .init(grapheme);
+            var it: Utf8 = .init(grapheme);
             while (it.next()) |cp| total += codepointWidth(cp);
             return @intCast(@min(total, 2));
         },
@@ -291,6 +358,31 @@ test "the clusters come out whole" {
     try testing.expectEqualStrings("\u{1f469}\u{200d}\u{1f680}", it.next().?);
     try testing.expectEqualStrings("\u{4e2d}", it.next().?);
     try testing.expectEqual(@as(?[]const u8, null), it.next());
+}
+
+test "bytes that are not UTF-8 are a replacement each maximal subpart, and the next codepoint is whole" {
+    // A three-byte sequence cut after two bytes, then a flag: the cut
+    // sequence is one cluster and the flag is still a flag. Found by the
+    // text input's fuzz, where the decoder took the flag's first byte into
+    // the bad sequence and left three stray continuation bytes.
+    const cases = [_]struct { text: []const u8, clusters: []const []const u8 }{
+        .{ .text = "\xe4\xb8\u{1f1e6}\u{1f1e7}", .clusters = &.{ "\xe4\xb8", "\u{1f1e6}\u{1f1e7}" } },
+        .{ .text = "a\xffb", .clusters = &.{ "a", "\xff", "b" } },
+        .{ .text = "\xc3", .clusters = &.{"\xc3"} },
+        .{ .text = "\xf0\x9f\x87e\u{301}", .clusters = &.{ "\xf0\x9f\x87", "e\u{301}" } },
+        // An overlong lead and a surrogate are one byte and one subpart.
+        .{ .text = "\xc0\xaf", .clusters = &.{ "\xc0", "\xaf" } },
+        .{ .text = "\xed\xa0\x80x", .clusters = &.{ "\xed", "\xa0", "\x80", "x" } },
+        .{ .text = "\xf4\x90\x80\x80", .clusters = &.{ "\xf4", "\x90", "\x80", "\x80" } },
+    };
+    for (cases) |case| {
+        var it: Graphemes = .init(case.text);
+        for (case.clusters) |want| try testing.expectEqualStrings(want, it.next().?);
+        try testing.expectEqual(@as(?[]const u8, null), it.next());
+    }
+    // Measured by codepoint, a cut sequence is the one column its
+    // replacement takes.
+    try testing.expectEqual(@as(u16, 3), width("\xe4\xb8\u{1f1e6}\u{1f1e7}", .wcwidth));
 }
 
 test "wrapping by grapheme cuts wherever it must" {

@@ -83,11 +83,6 @@ const alphabet = [_][]const u8{
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
 };
 
-/// The graphemes the resize property draws from: the narrow and the wide,
-/// and none whose width the two models disagree about or whose marks
-/// combine.
-const resize_alphabet = [_][]const u8{ "a", "b", " ", "~", "\u{e9}", "\u{4e2d}", "\u{ff21}" };
-
 /// The styles it draws from: enough to exercise every arm of the colour
 /// union and both halves of the bold-and-dim off code.
 const styles = [_]cellmod.Style{
@@ -118,6 +113,9 @@ const Harness = struct {
     renderer: Renderer,
     out: std.Io.Writer.Allocating,
     caps: Caps,
+    /// Where the generator's draws are counted, for the test that proves the
+    /// corpus explores; null everywhere else.
+    tally: ?*Tally = null,
 
     fn init(gpa: Allocator, size: geom.Size, method: textmod.Method) !Harness {
         var s: Screen = try .init(gpa, size);
@@ -215,79 +213,87 @@ fn checkDamage(s: *const Screen, before: []const Cell) !void {
     }
 }
 
-/// What a generator may do to the grid.
-const Ops = struct {
-    /// The graphemes it writes.
-    graphemes: []const []const u8,
-    /// Whether it writes text drawn at more than one cell's size.
-    scaled: bool,
+/// What the generators drew over a run of the corpus, one `Spread` a
+/// question: the evidence that the properties explore the grid rather than
+/// replaying one small case.
+const Tally = struct {
+    /// The grid's width, at the start and after every resize.
+    cols: corpus.Spread = .{},
+    /// Its height, the same.
+    rows: corpus.Spread = .{},
+    /// Which grid operation, `operate`'s switch.
+    ops: corpus.Spread = .{},
+    /// Which grapheme a write took.
+    graphemes: corpus.Spread = .{},
+    /// How many frames (or resize steps) one input ran to.
+    frames: corpus.Spread = .{},
+    /// Which picture operation, the image property's switch.
+    picture_ops: corpus.Spread = .{},
+    /// How far down the terminal the prompt left an inline screen.
+    prompt: corpus.Spread = .{},
+    /// How many times an inline screen changed size.
+    resizes: corpus.Spread = .{},
 };
 
-/// Everything: the whole alphabet, and scaled text.
-const every_op: Ops = .{ .graphemes = &alphabet, .scaled = true };
-
-/// What the resize property draws: text one cell tall, from the graphemes
-/// both width models agree on. Where a block of scaled text lands when the
-/// grid it was drawn on is cut is the grid's own question, asked by the
-/// properties above; this one asks where the terminal's rows and cells end
-/// up.
-const resize_ops: Ops = .{ .graphemes = &resize_alphabet, .scaled = false };
-
 /// One random operation on the grid.
-fn operate(h: *Harness, smith: anytype, ops: Ops) !void {
+fn operate(h: *Harness, dice: *corpus.Dice) !void {
     const s = &h.screen;
     const cols = s.size.cols;
     const rows = s.size.rows;
-    const graphemes = ops.graphemes;
-    switch (smith.valueRangeAtMost(u8, 0, if (ops.scaled) 7 else 6)) {
+    const graphemes = &alphabet;
+    const op = dice.valueRangeAtMost(u8, 0, 7);
+    if (h.tally) |tl| tl.ops.add(op);
+    switch (op) {
         0, 1, 2 => {
-            const col: u16 = @intCast(smith.index(cols));
-            const row: u16 = @intCast(smith.index(rows));
-            const g = graphemes[smith.index(graphemes.len)];
-            const style = styles[smith.index(styles.len)];
-            const which = smith.index(uris.len);
+            const col: u16 = @intCast(dice.index(cols));
+            const row: u16 = @intCast(dice.index(rows));
+            const which_grapheme = dice.index(graphemes.len);
+            if (h.tally) |tl| tl.graphemes.add(which_grapheme);
+            const g = graphemes[which_grapheme];
+            const style = styles[dice.index(styles.len)];
+            const which = dice.index(uris.len);
             const link = try s.link(h.gpa, uris[which], params[which]);
             try s.write(col, row, g, style, link);
         },
         7 => {
-            const col: u16 = @intCast(smith.index(cols));
-            const row: u16 = @intCast(smith.index(rows));
-            const g = graphemes[smith.index(graphemes.len)];
-            const style = styles[smith.index(styles.len)];
-            _ = try s.writeScaled(col, row, g, style, .none, smith.valueRangeAtMost(u3, 2, 3));
+            const col: u16 = @intCast(dice.index(cols));
+            const row: u16 = @intCast(dice.index(rows));
+            const g = graphemes[dice.index(graphemes.len)];
+            const style = styles[dice.index(styles.len)];
+            _ = try s.writeScaled(col, row, g, style, .none, dice.valueRangeAtMost(u3, 2, 3));
         },
         3 => {
-            const col: u16 = @intCast(smith.index(cols));
-            const row: u16 = @intCast(smith.index(rows));
-            s.writeOwnedCell(col, row, .blank(styles[smith.index(styles.len)]));
+            const col: u16 = @intCast(dice.index(cols));
+            const row: u16 = @intCast(dice.index(rows));
+            s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
         },
         4 => {
-            const rect = randomRect(smith, cols, rows);
-            s.fill(rect, .blank(styles[smith.index(styles.len)]));
+            const rect = randomRect(dice, cols, rows);
+            s.fill(rect, .blank(styles[dice.index(styles.len)]));
         },
         5 => {
-            const rect = randomRect(smith, cols, rows);
-            s.scroll(rect, smith.valueRangeAtMost(i32, -3, 3));
+            const rect = randomRect(dice, cols, rows);
+            s.scroll(rect, dice.valueRangeAtMost(i32, -3, 3));
         },
         6 => {
-            s.cursor.visible = smith.value(bool);
-            s.cursor.col = @intCast(smith.index(cols));
-            s.cursor.row = @intCast(smith.index(rows));
-            s.cursor.shape = @enumFromInt(smith.valueRangeAtMost(u8, 0, 6));
+            s.cursor.visible = dice.value(bool);
+            s.cursor.col = @intCast(dice.index(cols));
+            s.cursor.row = @intCast(dice.index(rows));
+            s.cursor.shape = @enumFromInt(dice.valueRangeAtMost(u8, 0, 6));
         },
         else => unreachable,
     }
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(smith: anytype, cols: u16, rows: u16) geom.Rect {
-    const col: u16 = @intCast(smith.index(cols));
-    const row: u16 = @intCast(smith.index(rows));
+fn randomRect(dice: *corpus.Dice, cols: u16, rows: u16) geom.Rect {
+    const col: u16 = @intCast(dice.index(cols));
+    const row: u16 = @intCast(dice.index(rows));
     return .{
         .col = col,
         .row = row,
-        .cols = @intCast(smith.index(cols - col) + 1),
-        .rows = @intCast(smith.index(rows - row) + 1),
+        .cols = @intCast(dice.index(cols - col) + 1),
+        .rows = @intCast(dice.index(rows - row) + 1),
     };
 }
 
@@ -299,14 +305,20 @@ fn terminalMethod(method: textmod.Method) textmod.Method {
 }
 
 /// The four properties, once, over a generated sequence of frames.
-fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
+fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     const size: geom.Size = .{
-        .cols = @intCast(smith.valueRangeAtMost(u8, 1, 24)),
-        .rows = @intCast(smith.valueRangeAtMost(u8, 1, 12)),
+        .cols = dice.valueRangeAtMost(u16, 1, 24),
+        .rows = dice.valueRangeAtMost(u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
+    h.tally = tally;
+    if (tally) |tl| {
+        tl.cols.add(size.cols);
+        tl.rows.add(size.rows);
+    }
     var t: Term = try .init(gpa, size);
     defer t.deinit();
     t.setMethod(terminalMethod(method));
@@ -315,13 +327,13 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
     defer gpa.free(before);
 
     var frames: usize = 0;
-    while (frames < 6 and !smith.eos()) : (frames += 1) {
+    while (frames < 6 and !dice.eos()) : (frames += 1) {
         @memcpy(before, h.screen.cells);
         h.screen.damage.clear();
 
         var ops: usize = 0;
-        const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith, every_op);
+        const count = dice.valueRangeAtMost(u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, &dice);
 
         try checkGrid(&h.screen);
         try checkDamage(&h.screen, before);
@@ -337,9 +349,10 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
         h.screen.damageAll();
         try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
     }
+    if (tally) |tl| tl.frames.add(frames);
 
     // A repaint recovers from any state the renderer drifted into.
-    corrupt(&h.renderer, smith);
+    corrupt(&h.renderer, &dice);
     h.renderer.repaint();
     _ = try h.frame(&t);
     try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
@@ -362,13 +375,13 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
 /// Puts the renderer's idea of the terminal out of step with it, the way a
 /// dropped write or a program writing to the terminal behind the renderer's
 /// back would.
-fn corrupt(r: *Renderer, smith: *Smith) void {
+fn corrupt(r: *Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
-    const count = smith.valueRangeAtMost(u8, 1, 8);
+    const count = dice.valueRangeAtMost(u8, 1, 8);
     while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[smith.index(r.prev.len)] = .blank(styles[smith.index(styles.len)]);
+        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
-    r.style = styles[smith.index(styles.len)];
+    r.style = styles[dice.index(styles.len)];
     r.cursor = null;
     r.shown = null;
 }
@@ -376,7 +389,7 @@ fn corrupt(r: *Renderer, smith: *Smith) void {
 test "the round trip holds against a terminal measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .wcwidth);
+            try roundTrip(gpa, smith, .wcwidth, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -384,7 +397,7 @@ test "the round trip holds against a terminal measuring by codepoint" {
 test "the round trip holds against a terminal measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .unicode);
+            try roundTrip(gpa, smith, .unicode, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -392,7 +405,7 @@ test "the round trip holds against a terminal measuring by cluster" {
 test "the round trip holds against a terminal told every width" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .explicit);
+            try roundTrip(gpa, smith, .explicit, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -401,11 +414,10 @@ test "the round trip holds against a terminal told every width" {
 /// keeps whatever fitted, the program hears of it afterwards, and frames
 /// drawn at the old size land on the terminal after it changed. The next
 /// frame at the size the program was told must leave the terminal showing
-/// exactly the screen, the rows it has nothing new to write included.
-///
-/// Driven by `corpus.Dice`, so every entry is a run over the whole range of
-/// sizes rather than the one-cell terminal the input's own answers give.
-fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
+/// exactly the screen, the rows it has nothing new to write included. The
+/// frames draw everything the other properties do, clusters the width
+/// models disagree about and text drawn at a scale among it.
+fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
     var dice: corpus.Dice = .init(smith);
     var size: geom.Size = .{
         .cols = dice.valueRangeAtMost(u16, 1, 24),
@@ -414,6 +426,7 @@ fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
 
     var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
+    h.tally = tally;
     var t: Term = try .init(gpa, size);
     defer t.deinit();
     t.setMethod(terminalMethod(method));
@@ -425,8 +438,13 @@ fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
     _ = try h.frame(&t);
 
     const steps = dice.valueRangeAtMost(u8, 1, 5);
+    if (tally) |tl| tl.frames.add(steps);
     for (0..steps) |step| {
         const to = nextSize(&dice, size);
+        if (tally) |tl| {
+            tl.cols.add(to.cols);
+            tl.rows.add(to.rows);
+        }
         var hops = dice.valueRangeAtMost(u8, 0, 3);
         const told_each = dice.value(bool);
         // The terminal passes through sizes on the way, frames drawn at the
@@ -475,7 +493,7 @@ fn scribble(h: *Harness, dice: *corpus.Dice) !void {
     if (dice.value(bool)) h.screen.clear();
     var ops: usize = 0;
     const count = dice.valueRangeAtMost(u8, 1, 12);
-    while (ops < count) : (ops += 1) try operate(h, dice, resize_ops);
+    while (ops < count) : (ops += 1) try operate(h, dice);
 }
 
 /// A size in the generator's range, reached from `from` the way a window's
@@ -493,7 +511,7 @@ fn nextSize(dice: *corpus.Dice, from: geom.Size) geom.Size {
 test "the round trip holds across resizes against a terminal measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .wcwidth);
+            try roundTripResize(gpa, smith, .wcwidth, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -501,7 +519,7 @@ test "the round trip holds across resizes against a terminal measuring by codepo
 test "the round trip holds across resizes against a terminal measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .unicode);
+            try roundTripResize(gpa, smith, .unicode, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -509,7 +527,7 @@ test "the round trip holds across resizes against a terminal measuring by cluste
 test "the round trip holds across resizes against a terminal told every width" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .explicit);
+            try roundTripResize(gpa, smith, .explicit, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -549,40 +567,49 @@ fn linksEqual(want: *const Screen, got: *const Screen, a: cellmod.Link, b: cellm
 /// The properties again for an inline screen: rows of a taller terminal,
 /// taken at a cursor the prompt left somewhere down it, the screen growing
 /// and shrinking between frames, and the cursor left below it at the end.
-fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
-    const cols: u16 = @intCast(smith.valueRangeAtMost(u8, 1, 24));
-    const terminal_rows = smith.valueRangeAtMost(u8, 2, 16);
-    const prompt = smith.valueRangeAtMost(u8, 0, terminal_rows - 1);
-    var size: geom.Size = .{ .cols = cols, .rows = smith.valueRangeAtMost(u8, 1, terminal_rows) };
+fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
+    const cols = dice.valueRangeAtMost(u16, 1, 24);
+    const terminal_rows = dice.valueRangeAtMost(u16, 2, 16);
+    const prompt = dice.valueRangeAtMost(u16, 0, terminal_rows - 1);
+    var size: geom.Size = .{ .cols = cols, .rows = dice.valueRangeAtMost(u16, 1, terminal_rows) };
+    if (tally) |tl| {
+        tl.cols.add(size.cols);
+        tl.rows.add(size.rows);
+        tl.prompt.add(prompt);
+    }
 
     var t: Term = try .init(gpa, .{ .cols = cols, .rows = terminal_rows });
     defer t.deinit();
     t.setMethod(terminalMethod(method));
-    var i: u8 = 0;
+    var i: u16 = 0;
     while (i < prompt) : (i += 1) try t.feed("$\r\n");
 
     var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
+    h.tally = tally;
     h.caps.scroll_detection = false;
     try h.renderer.enter(&h.out.writer, h.caps, .@"inline", .{});
     try t.feed(h.out.written());
     try expectRegionEqual(&h.screen, &t);
 
     var frames: usize = 0;
-    while (frames < 6 and !smith.eos()) : (frames += 1) {
+    while (frames < 6 and !dice.eos()) : (frames += 1) {
         // Now and then the screen changes size, in rows or in columns; the
-        // terminal is the same terminal.
-        if (smith.valueRangeAtMost(u8, 0, 3) == 0) {
+        // terminal is the same terminal, so the screen is never wider than
+        // it.
+        if (dice.valueRangeAtMost(u8, 0, 3) == 0) {
             size = .{
-                .cols = @intCast(smith.valueRangeAtMost(u8, 1, 24)),
-                .rows = smith.valueRangeAtMost(u8, 1, terminal_rows),
+                .cols = dice.valueRangeAtMost(u16, 1, cols),
+                .rows = dice.valueRangeAtMost(u16, 1, terminal_rows),
             };
+            if (tally) |tl| tl.resizes.add(1);
             try h.screen.resize(gpa, size);
             try h.renderer.resize(gpa, size);
         }
         var ops: usize = 0;
-        const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith, every_op);
+        const count = dice.valueRangeAtMost(u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, &dice);
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
@@ -598,8 +625,10 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
         try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
     }
 
+    if (tally) |tl| tl.frames.add(frames);
+
     // A repaint recovers, from the origin.
-    corrupt(&h.renderer, smith);
+    corrupt(&h.renderer, &dice);
     h.renderer.repaint();
     h.out.clearRetainingCapacity();
     _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
@@ -620,7 +649,7 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
 test "the round trip holds for an inline screen measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripInline(gpa, smith, .wcwidth);
+            try roundTripInline(gpa, smith, .wcwidth, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -628,7 +657,7 @@ test "the round trip holds for an inline screen measuring by codepoint" {
 test "the round trip holds for an inline screen measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripInline(gpa, smith, .unicode);
+            try roundTripInline(gpa, smith, .unicode, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -663,14 +692,20 @@ const Shown = struct {
 
 /// Random placements, moves, deletions, stacking changes and acknowledgements
 /// over a few frames, with text drawn beside them.
-fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
+fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     const size: geom.Size = .{
-        .cols = @intCast(smith.valueRangeAtMost(u8, 2, 24)),
-        .rows = @intCast(smith.valueRangeAtMost(u8, 2, 12)),
+        .cols = dice.valueRangeAtMost(u16, 2, 24),
+        .rows = dice.valueRangeAtMost(u16, 2, 12),
     };
     var h: Harness = try .init(gpa, size, .unicode);
     defer h.deinit();
-    h.caps.kitty_graphics = smith.valueRangeAtMost(u8, 0, 3) != 0;
+    h.tally = tally;
+    if (tally) |tl| {
+        tl.cols.add(size.cols);
+        tl.rows.add(size.rows);
+    }
+    h.caps.kitty_graphics = dice.valueRangeAtMost(u8, 0, 3) != 0;
     h.caps.scroll_detection = false;
 
     // Two terminals: one given every byte, one given each frame only up to
@@ -697,26 +732,28 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
     defer resent.deinit(gpa);
 
     var frames: usize = 0;
-    while (frames < 6 and !smith.eos()) : (frames += 1) {
+    while (frames < 6 and !dice.eos()) : (frames += 1) {
         const previous = try gpa.dupe(Shown, showing.items);
         defer gpa.free(previous);
         resent.clearRetainingCapacity();
 
         var ops: usize = 0;
-        const count = smith.valueRangeAtMost(u8, 1, 8);
+        const count = dice.valueRangeAtMost(u8, 1, 8);
         while (ops < count) : (ops += 1) {
-            switch (smith.valueRangeAtMost(u8, 0, 6)) {
+            const picture_op = dice.valueRangeAtMost(u8, 0, 6);
+            if (tally) |tl| tl.picture_ops.add(picture_op);
+            switch (picture_op) {
                 0, 1 => {
                     // A new picture, or the same one moved.
                     const shown: Shown = .{
-                        .image = smith.valueRangeAtMost(u32, 1, 4),
-                        .placement = smith.valueRangeAtMost(u32, 1, 3),
-                        .rect = randomRect(smith, size.cols, size.rows),
-                        .under = smith.value(bool),
+                        .image = dice.valueRangeAtMost(u32, 1, 4),
+                        .placement = dice.valueRangeAtMost(u32, 1, 3),
+                        .rect = randomRect(&dice, size.cols, size.rows),
+                        .under = dice.value(bool),
                         .order = .{
-                            .layer = smith.valueRangeAtMost(i32, -2, 2),
-                            .z = smith.valueRangeAtMost(i32, -2, 2),
-                            .sibling = smith.valueRangeAtMost(i32, -2, 2),
+                            .layer = dice.valueRangeAtMost(i32, -2, 2),
+                            .z = dice.valueRangeAtMost(i32, -2, 2),
+                            .sibling = dice.valueRangeAtMost(i32, -2, 2),
                         },
                     };
                     for (showing.items) |*held| {
@@ -727,31 +764,31 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
                     } else try showing.append(gpa, shown);
                 },
                 2 => {
-                    if (showing.items.len != 0) _ = showing.swapRemove(smith.index(showing.items.len));
+                    if (showing.items.len != 0) _ = showing.swapRemove(dice.index(showing.items.len));
                 },
-                3 => switch (smith.valueRangeAtMost(u8, 0, 2)) {
+                3 => switch (dice.valueRangeAtMost(u8, 0, 2)) {
                     // Pixels sent under an id, perhaps one on screen, which
                     // the terminal takes down while they land.
                     0 => {
-                        const id = smith.valueRangeAtMost(u32, 1, 4);
+                        const id = dice.valueRangeAtMost(u32, 1, 4);
                         const px = [_]u8{ 0, 0, 0, 255 } ** 4;
                         _ = try h.screen.layers.transmit(gpa, &side.writer, id, &px, .{
                             .width = 2,
                             .height = 2,
-                            .answer = smith.value(bool),
+                            .answer = dice.value(bool),
                             .now_ms = @intCast(frames * 16),
                         });
                         try resent.append(gpa, id);
                     },
                     // The terminal answers for an image, or refuses it.
                     1 => h.screen.layers.ack(.{
-                        .id = smith.valueRangeAtMost(u32, 1, 4),
-                        .message = if (smith.value(bool)) "OK" else "ENOENT",
+                        .id = dice.valueRangeAtMost(u32, 1, 4),
+                        .message = if (dice.value(bool)) "OK" else "ENOENT",
                     }),
                     // An image freed: its placements go with it, and nothing
                     // is left for the frame to delete.
                     2 => {
-                        const id = smith.valueRangeAtMost(u32, 1, 4);
+                        const id = dice.valueRangeAtMost(u32, 1, 4);
                         try h.screen.layers.free(&side.writer, id);
                         try resent.append(gpa, id);
                         var i: usize = 0;
@@ -770,7 +807,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
                         held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
                     }
                 },
-                5, 6 => try operate(&h, smith, every_op),
+                5, 6 => try operate(&h, &dice),
                 else => unreachable,
             }
         }
@@ -824,6 +861,8 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
         try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, h.caps)).bytes);
     }
 
+    if (tally) |tl| tl.frames.add(frames);
+
     // Everything taken down: one deletion each, then nothing.
     const remaining = showing.items.len;
     showing.clearRetainingCapacity();
@@ -839,9 +878,68 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
 test "pictures placed, moved, stacked and taken down keep every frame idempotent and out of the text pass" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try imageRoundTrip(gpa, smith);
+            try imageRoundTrip(gpa, smith, null);
         }
     }.one, .{ .corpus = &corpus.entries });
+}
+
+//=========================================================================
+// The corpus explores. Each property is replayed over every entry with its
+// draws counted, and the counts must cover the whole of every range the
+// property asks for: every size from one cell to the largest, every
+// operation, every grapheme, and runs of more than one frame. A generator
+// that answered every entry with the same small case -- which is what
+// `Smith` alone does on a replayed entry -- fails here, not silently.
+//=========================================================================
+
+/// Every entry of the corpus through `property`, with its draws counted.
+fn replayCounted(comptime property: anytype, args: anytype, tally: *Tally) !void {
+    for (corpus.entries) |entry| {
+        var smith: Smith = .{ .in = entry };
+        try @call(.auto, property, .{ testing.allocator, &smith } ++ args ++ .{tally});
+    }
+}
+
+test "the round trip's corpus draws every size, every operation and every grapheme" {
+    var t: Tally = .{};
+    try replayCounted(roundTrip, .{textmod.Method.unicode}, &t);
+    try testing.expect(t.cols.covers(1, 24));
+    try testing.expect(t.rows.covers(1, 12));
+    try testing.expect(t.ops.covers(0, 7));
+    try testing.expect(t.graphemes.covers(0, alphabet.len - 1));
+    try testing.expect(t.frames.covers(1, 6));
+}
+
+test "the inline round trip's corpus draws every width, prompt and height, and resizes" {
+    var t: Tally = .{};
+    try replayCounted(roundTripInline, .{textmod.Method.unicode}, &t);
+    try testing.expect(t.cols.covers(1, 24));
+    try testing.expect(t.rows.covers(1, 16));
+    try testing.expect(t.prompt.covers(0, 15));
+    try testing.expect(t.ops.covers(0, 7));
+    try testing.expect(t.frames.covers(1, 6));
+    // And the screen changes size in about one frame in four.
+    try testing.expect(t.resizes.count > corpus.len / 2);
+}
+
+test "the resize round trip's corpus draws every size and several steps" {
+    var t: Tally = .{};
+    try replayCounted(roundTripResize, .{textmod.Method.unicode}, &t);
+    try testing.expect(t.cols.covers(1, 24));
+    try testing.expect(t.rows.covers(1, 12));
+    try testing.expect(t.ops.covers(0, 7));
+    try testing.expect(t.graphemes.covers(0, alphabet.len - 1));
+    try testing.expect(t.frames.covers(1, 5));
+}
+
+test "the picture property's corpus draws every size and every picture operation" {
+    var t: Tally = .{};
+    try replayCounted(imageRoundTrip, .{}, &t);
+    try testing.expect(t.cols.covers(2, 24));
+    try testing.expect(t.rows.covers(2, 12));
+    try testing.expect(t.picture_ops.covers(0, 6));
+    try testing.expect(t.ops.covers(0, 7));
+    try testing.expect(t.frames.covers(1, 6));
 }
 
 test "every cluster written to the last row reaches the terminal" {

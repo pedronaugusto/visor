@@ -317,6 +317,7 @@ pub fn offset(outer: u16, inner: u16, how: Align) u16 {
 }
 
 const std_testing = std.testing;
+const corpus = @import("corpus");
 
 /// The whole grid as a rectangle, for the tests below.
 fn grid(cols: u16, rows: u16) Rect {
@@ -463,33 +464,54 @@ test "a rectangle is placed where the alignment says" {
     try std_testing.expectEqual(@as(u16, 0), offset(10, 20, .right));
 }
 
+/// What the split property drew over the corpus, for the test that proves
+/// it explores.
+const Tally = struct {
+    /// How many parts a split had.
+    parts: corpus.Spread = .{},
+    /// Which kind of constraint each part took.
+    kinds: corpus.Spread = .{},
+    /// How long the axis was.
+    axis: corpus.Spread = .{},
+    /// Which way the split ran, down (0) or across (1).
+    direction: corpus.Spread = .{},
+};
+
 /// Every split, whatever the constraints: the parts are in order, none
 /// overlaps another, none leaves the area, and together with the spacing
 /// they never claim more of the axis than there is.
-fn splitHolds(smith: *std.testing.Smith) !void {
+fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     var constraints: [8]Constraint = undefined;
-    const n = smith.valueRangeAtMost(u8, 1, 8);
+    const n = dice.valueRangeAtMost(u8, 1, 8);
     for (constraints[0..n]) |*c| {
-        c.* = switch (smith.valueRangeAtMost(u8, 0, 4)) {
-            0 => .{ .fixed = smith.valueRangeAtMost(u16, 0, 40) },
-            1 => .{ .percent = smith.valueRangeAtMost(u8, 0, 120) },
-            2 => .{ .min = smith.valueRangeAtMost(u16, 0, 40) },
-            3 => .{ .max = smith.valueRangeAtMost(u16, 0, 40) },
-            else => .{ .fill = smith.valueRangeAtMost(u16, 0, 4) },
+        const kind = dice.valueRangeAtMost(u8, 0, 4);
+        if (tally) |t| t.kinds.add(kind);
+        c.* = switch (kind) {
+            0 => .{ .fixed = dice.valueRangeAtMost(u16, 0, 40) },
+            1 => .{ .percent = dice.valueRangeAtMost(u8, 0, 120) },
+            2 => .{ .min = dice.valueRangeAtMost(u16, 0, 40) },
+            3 => .{ .max = dice.valueRangeAtMost(u16, 0, 40) },
+            else => .{ .fill = dice.valueRangeAtMost(u16, 0, 4) },
         };
     }
     const whole: Rect = .{
-        .col = smith.valueRangeAtMost(u16, 0, 5),
-        .row = smith.valueRangeAtMost(u16, 0, 5),
-        .cols = smith.valueRangeAtMost(u16, 0, 40),
-        .rows = smith.valueRangeAtMost(u16, 0, 20),
+        .col = dice.valueRangeAtMost(u16, 0, 5),
+        .row = dice.valueRangeAtMost(u16, 0, 5),
+        .cols = dice.valueRangeAtMost(u16, 0, 40),
+        .rows = dice.valueRangeAtMost(u16, 0, 20),
     };
     const l: Layout = .{
-        .direction = if (smith.value(bool)) .horizontal else .vertical,
+        .direction = if (dice.value(bool)) .horizontal else .vertical,
         .constraints = constraints[0..n],
-        .spacing = smith.valueRangeAtMost(u16, 0, 3),
-        .margin = .all(smith.valueRangeAtMost(u16, 0, 2)),
+        .spacing = dice.valueRangeAtMost(u16, 0, 3),
+        .margin = .all(dice.valueRangeAtMost(u16, 0, 2)),
     };
+    if (tally) |t| {
+        t.parts.add(n);
+        t.direction.add(@intFromBool(l.direction == .horizontal));
+        t.axis.add(if (l.direction == .horizontal) whole.cols else whole.rows);
+    }
 
     var out: [8]Rect = @splat(.{});
     const parts = l.split(whole, out[0..n]);
@@ -525,31 +547,22 @@ fn splitHolds(smith: *std.testing.Smith) !void {
 test "a split of anything by anything stays inside what it was given" {
     try std.testing.fuzz(void{}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try splitHolds(smith);
+            try splitHolds(smith, null);
         }
-    }.one, .{ .corpus = &corpus });
+    }.one, .{ .corpus = &corpus.entries });
 }
 
-/// Deterministic inputs for the split property, generated rather than kept
-/// as files so that every optimize mode and every machine runs the same
-/// ones.
-const corpus: [128][]const u8 = blk: {
-    @setEvalBranchQuota(1 << 20);
-    var data: [128][48]u8 = undefined;
-    var x: u64 = 0x2545f4914f6cdd1d;
-    for (&data) |*entry| {
-        for (entry) |*b| {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            b.* = @truncate(x);
-        }
+test "the split's corpus draws every count, every kind of constraint and both ways" {
+    var t: Tally = .{};
+    for (corpus.entries) |entry| {
+        var smith: std.testing.Smith = .{ .in = entry };
+        try splitHolds(&smith, &t);
     }
-    const frozen = data;
-    var slices: [128][]const u8 = undefined;
-    for (&slices, 0..) |*s, i| s.* = frozen[i][0..];
-    break :blk slices;
-};
+    try std_testing.expect(t.parts.covers(1, 8));
+    try std_testing.expect(t.kinds.covers(0, 4));
+    try std_testing.expect(t.direction.covers(0, 1));
+    try std_testing.expect(t.axis.least == 0 and t.axis.most >= 30);
+}
 
 test "spacing that does not fit leaves no part outside the area" {
     const parts = (Layout{

@@ -449,10 +449,14 @@ checks the invariants and the damage map after every operation, a
 bytes, a frame in which one cell changed fewer than 64, and a frame in which
 nothing changed writes nothing. The generated corpus in `src/corpus.zig` runs
 on every push, and both builds replay the same bytes; `zig build test --fuzz`
-keeps searching beyond it. The resize properties draw from `corpus.Dice`, a
-generator seeded by each entry: the standard library's `Smith` answers a
-ranged question from eight bytes and gives the lowest value whenever they are
-out of range, so random bytes asked for a size answer one column and one row.
+keeps searching beyond it. Every property reads its input through
+`corpus.Dice`: under the fuzzer each answer is the fuzzer's, and on a replayed
+entry the answers come from a generator the entry seeds. The standard
+library's `Smith` answers a ranged question from eight bytes and gives the
+lowest value whenever they are out of range, so random bytes asked for a size
+answer one column and one row. Each property has a test beside it that
+replays the corpus with its draws counted and fails unless they cover every
+size, every operation and every grapheme it can ask for.
 
 What a frame costs, measured here on a 200 by 50 grid of 10,000 cells, ReleaseFast
 on an Apple M3 Max, best of five passes of a thousand frames each:

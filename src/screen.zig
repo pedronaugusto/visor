@@ -562,6 +562,13 @@ pub const Screen = struct {
     /// longer whole is cleared, a tail nothing covers is blanked, and a tail
     /// a head does cover is made that head's, whichever grapheme left it
     /// there -- as a terminal makes the cell after a wide character its own.
+    ///
+    /// Heads are decided in reading order, and a cell belongs to the first
+    /// head that keeps it. Two blocks a move left overlapping are one kept
+    /// and one cleared, and clearing the second gives back only its head:
+    /// its tails are then either the first block's, or nobody's and blank.
+    /// Clearing the second block's whole rectangle would blank the first
+    /// block's cells inside it and leave that block torn.
     fn heal(s: *Screen, top: u16, bottom: u16) void {
         var row_n = top;
         while (row_n <= bottom and row_n < s.size.rows) : (row_n += 1) {
@@ -570,13 +577,7 @@ pub const Screen = struct {
                 const i = s.index(col, row_n);
                 const c = s.cells[i];
                 if (c.isTail()) {
-                    // Heads come before their tails in this sweep, so a head
-                    // found here is one whose block was kept.
-                    if (s.headOf(col, row_n)) |head| {
-                        var own = s.cells[s.index(head.col, head.row)];
-                        own.shape.kind = .spacer_tail;
-                        s.place(i, own);
-                    } else s.place(i, .blank(c.style));
+                    s.adoptTail(col, row_n);
                     continue;
                 }
                 if (c.width() == 1 and c.rows() == 1) continue;
@@ -588,13 +589,39 @@ pub const Screen = struct {
                     s.place(i, spacer);
                     continue;
                 }
-                if (!s.blockWhole(col, row_n, c)) s.clearBlock(col, row_n);
+                if (s.blockWhole(col, row_n, c)) continue;
+                // The head goes. Its tails inside the sweep are met later
+                // and settled there; the ones below it are settled now,
+                // because the sweep will not reach them.
+                s.place(i, .blank(c.style));
+                const span = c.width();
+                const tall = c.rows();
+                var dr: u16 = 1;
+                while (dr < tall and row_n + dr < s.size.rows) : (dr += 1) {
+                    if (row_n + dr <= bottom) continue;
+                    var dc: u16 = 0;
+                    while (dc < span and col + dc < s.size.cols) : (dc += 1) {
+                        if (s.cells[s.index(col + dc, row_n + dr)].isTail()) s.adoptTail(col + dc, row_n + dr);
+                    }
+                }
             }
         }
     }
 
+    /// A tail made the cell of the head that covers it, or a blank when
+    /// none does. Every head before it in reading order has been decided,
+    /// so a head found here is one whose block was kept.
+    fn adoptTail(s: *Screen, col: u16, row_n: u16) void {
+        const i = s.index(col, row_n);
+        if (s.headOf(col, row_n)) |head| {
+            var own = s.cells[s.index(head.col, head.row)];
+            own.shape.kind = .spacer_tail;
+            s.place(i, own);
+        } else s.place(i, .blank(s.cells[i].style));
+    }
+
     /// Whether every cell a head covers is a tail of its own scale, inside
-    /// the grid.
+    /// the grid, that no head before it in reading order already covers.
     fn blockWhole(s: *const Screen, col: u16, row_n: u16, head: Cell) bool {
         const span = head.width();
         const tall = head.rows();
@@ -606,9 +633,27 @@ pub const Screen = struct {
                 if (dr == 0 and dc == 0) continue;
                 const t = s.cells[s.index(col + dc, row_n + dr)];
                 if (!t.isTail() or t.shape.scale != head.shape.scale) return false;
+                if (s.coveredBefore(col + dc, row_n + dr, .{ .col = col, .row = row_n })) return false;
             }
         }
         return true;
+    }
+
+    /// Whether a head that comes before `head` in reading order covers the
+    /// cell. Only a head up to `max_reach` rows above and `max_span`
+    /// columns to the left can.
+    fn coveredBefore(s: *const Screen, col: u16, row_n: u16, head: Point) bool {
+        var r = row_n -| max_reach;
+        while (r <= row_n) : (r += 1) {
+            var c = col -| max_span;
+            while (c <= col) : (c += 1) {
+                if (r > head.row or (r == head.row and c >= head.col)) break;
+                const h = s.cells[s.index(c, r)];
+                if (h.isTail()) continue;
+                if (c + h.width() > col and r + h.rows() > row_n) return true;
+            }
+        }
+        return false;
     }
 
     /// Copies a run of cells from one row to another, marking what changed.
@@ -895,6 +940,39 @@ test "a scroll that tears a block clears what is left of it" {
     s.scroll(.fromSize(s.size), 1);
     try testing.expectEqualStrings("a", s.textAt(1, 1));
     try testing.expect(s.readCell(2, 2).?.isTail());
+    try checkInvariants(&s);
+}
+
+test "a scroll that moves a block's head into another block clears the moved one and keeps the other" {
+    // Found by the round trip once its generator explored: the head of a
+    // block three tall, lifted a row by a scroll one column wide, landed
+    // beside the lower half of a block two tall, and clearing the torn
+    // block took that half with it.
+    var s = try made(7, 11);
+    defer s.deinit(testing.allocator);
+    try testing.expect(try s.writeScaled(3, 4, "a", .{}, .none, 2));
+    try testing.expect(try s.writeScaled(2, 6, "~", .{ .bold = true }, .none, 3));
+    s.scroll(.{ .col = 2, .row = 0, .cols = 1, .rows = 8 }, 1);
+    try checkInvariants(&s);
+    // The block that did not move is whole.
+    try testing.expectEqualStrings("a", s.textAt(3, 4));
+    try testing.expectEqual(@as(u3, 2), s.readCell(3, 4).?.shape.scale);
+    for ([_]Point{ .{ .col = 4, .row = 4 }, .{ .col = 3, .row = 5 }, .{ .col = 4, .row = 5 } }) |at| {
+        try testing.expectEqual(Point{ .col = 3, .row = 4 }, s.headOf(at.col, at.row).?);
+    }
+    // And nothing is left of the one that did.
+    for (s.cells) |c| try testing.expect(c.shape.scale != 3);
+}
+
+test "two blocks a scroll leaves overlapping are one block, the first in reading order" {
+    var s = try made(8, 6);
+    defer s.deinit(testing.allocator);
+    // One block high on the left, one lower down beside it; lifting the
+    // lower block's column by a row lays its head over the first block's
+    // lower half.
+    try testing.expect(try s.writeScaled(0, 0, "a", .{}, .none, 2));
+    try testing.expect(try s.writeScaled(1, 2, "b", .{}, .none, 2));
+    s.scroll(.{ .col = 1, .row = 0, .cols = 1, .rows = 4 }, 1);
     try checkInvariants(&s);
 }
 

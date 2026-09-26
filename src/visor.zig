@@ -199,6 +199,7 @@ test {
     _ = window_mod;
     _ = winsize_mod;
     _ = @import("roundtrip.zig");
+    _ = @import("corpus");
     _ = @import("bench.zig");
 }
 

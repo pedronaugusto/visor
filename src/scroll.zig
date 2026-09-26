@@ -106,7 +106,26 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
         const source: u16 = if (up) i + distance else i - distance;
         if (!rowsEqual(s.rowAt(i), r.prevRow(source), caps)) return null;
     }
+
+    // A region whose edge runs through text drawn more than one row tall
+    // tears it: the rows inside move and the rest of the block does not,
+    // and a terminal clears a block it no longer holds whole. Either frame
+    // is enough to refuse, because the terminal holds the one and is about
+    // to be given the other.
+    if (top > 0 and (tallAcross(r.prevRow(top - 1), r.prevRow(top)) or tallAcross(s.rowAt(top - 1), s.rowAt(top)))) return null;
+    if (bottom + 1 < rows and (tallAcross(r.prevRow(bottom), r.prevRow(bottom + 1)) or tallAcross(s.rowAt(bottom), s.rowAt(bottom + 1)))) return null;
     return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
+}
+
+/// Whether a block of text drawn more than one row tall may run from one
+/// row into the next: both hold a cell of such a block in the same column.
+/// Two blocks that only touch answer yes too, which costs a repaint and
+/// never a torn block.
+fn tallAcross(above: []const Cell, below: []const Cell) bool {
+    for (above, below) |a, b| {
+        if (a.shape.scale > 1 and b.shape.scale > 1) return true;
+    }
+    return false;
 }
 
 /// The row offset that explains the most rows that really changed, or null
@@ -327,4 +346,37 @@ test "a scroll the rows do not really make is refused" {
     while (row < 12) : (row += 1) try f.screen.write(6, row, "!", .{}, .none);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
+}
+
+test "a region whose edge runs through tall text is refused, and the terminal keeps the text whole" {
+    // Found by the round trip once its generator explored: rows moved up
+    // one inside a band whose last row held the top half of text drawn two
+    // rows tall, so a region ending there tore the block, and the terminal
+    // cleared it.
+    const gpa = testing.allocator;
+    var f: Fixture = try .init(gpa, 10, 9);
+    defer f.deinit();
+    f.caps.scaled_text = true;
+    var t: @import("term.zig").Term = try .init(gpa, f.screen.size);
+    defer t.deinit();
+    t.setMethod(.unicode);
+    f.renderer.shown = null;
+    f.renderer.cursor = null;
+
+    for ([_]u16{ 2, 8 }) |row| try f.screen.write(1, row, "\u{4e2d}", .{}, .none);
+    try f.screen.write(5, 2, "\u{4e2d}", .{}, .none);
+    try testing.expect(try f.screen.writeScaled(8, 4, "\u{e9}", .{ .bold = true }, .none, 2));
+    _ = try f.draw();
+    try t.feed(f.out.written());
+
+    // Rows two to five up by one, and then the row that now holds the
+    // block's lower half changed as well: the rows that moved and still
+    // match end at the block's head row, so a region over them would end
+    // there and cut the block in two.
+    f.screen.scroll(.{ .col = 0, .row = 1, .cols = 10, .rows = 5 }, 1);
+    try f.screen.write(0, 4, "x", .{}, .none);
+    const stats = try f.draw();
+    try t.feed(f.out.written());
+    try testing.expectEqual(@as(u32, 0), stats.scrolled);
+    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
 }

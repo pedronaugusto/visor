@@ -222,6 +222,7 @@ pub const Input = struct {
 
 const testing = std.testing;
 const testing_pty = tty_mod.testing_pty;
+const corpus = @import("corpus");
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.
 const Piped = struct {
@@ -455,17 +456,40 @@ fn describe(log: *std.Io.Writer.Allocating, text: *std.Io.Writer.Allocating, eve
     }
 }
 
-fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
+/// What the pump property drew over the corpus, for the test that proves
+/// it explores.
+const Tally = struct {
+    /// How long each stream was, in bytes.
+    bytes: corpus.Spread = .{},
+    /// Which fragment each piece took; a raw piece is `fragments.len`.
+    pieces: corpus.Spread = .{},
+    /// How many bytes each read took at most.
+    read_len: corpus.Spread = .{},
+};
+
+fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     var stream: std.ArrayList(u8) = .empty;
     defer stream.deinit(gpa);
-    while (stream.items.len < 2048 and !smith.eos()) {
-        if (smith.value(u8) < 32) {
+    const count = dice.valueRangeAtMost(u16, 0, 256);
+    var piece: u16 = 0;
+    while (piece < count and stream.items.len < 2048) : (piece += 1) {
+        if (dice.valueRangeAtMost(u8, 0, 7) == 0) {
             var raw: [8]u8 = undefined;
-            const n = smith.slice(&raw);
+            const n = dice.slice(&raw);
             try stream.appendSlice(gpa, raw[0..n]);
-        } else try stream.appendSlice(gpa, fragments[smith.index(fragments.len)]);
+            if (tally) |t| t.pieces.add(fragments.len);
+        } else {
+            const which = dice.index(fragments.len);
+            try stream.appendSlice(gpa, fragments[which]);
+            if (tally) |t| t.pieces.add(which);
+        }
     }
-    const read_len: usize = smith.valueRangeAtMost(u8, 1, 32);
+    const read_len: usize = dice.valueRangeAtMost(u8, 1, 32);
+    if (tally) |t| {
+        t.bytes.add(stream.items.len);
+        t.read_len.add(read_len);
+    }
 
     // The parser over the whole stream, and what is left settled at its end.
     var want_log: std.Io.Writer.Allocating = .init(gpa);
@@ -510,7 +534,20 @@ test "the pump hands over what the parser makes of the whole stream, however it 
     if (is_windows) return error.SkipZigTest;
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try pumpMatchesParser(gpa, smith);
+            try pumpMatchesParser(gpa, smith, null);
         }
-    }.one, .{ .corpus = &@import("corpus").entries });
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the pump's corpus draws every fragment, raw bytes, every read size and long streams" {
+    if (is_windows) return error.SkipZigTest;
+    var t: Tally = .{};
+    for (corpus.entries) |entry| {
+        var smith: std.testing.Smith = .{ .in = entry };
+        try pumpMatchesParser(testing.allocator, &smith, &t);
+    }
+    try testing.expect(t.pieces.covers(0, fragments.len));
+    try testing.expect(t.read_len.covers(1, 32));
+    try testing.expect(t.bytes.least == 0);
+    try testing.expect(t.bytes.most > 1024);
 }
