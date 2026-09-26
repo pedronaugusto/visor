@@ -172,7 +172,7 @@ with a `try`. Resizing allocates.
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`, `SharedMemory`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -305,6 +305,25 @@ them, so a program writes no graphics command of its own. Nothing waits on the
 terminal's word unless asked to: an image sent quietly is shown at once, and
 one sent asking for an answer is shown on the answer or when the caller's grace
 period runs out, and a terminal that never answers is not waited for twice.
+
+**A picture on the same machine goes through shared memory.** With
+`Layers.shared_memory` set, the pixels are put in a shared memory object and
+only its name goes through the terminal's input: no deflate and no base64 on
+the program's thread. The first one asks for an answer; an error, or no answer
+within the grace period, turns the medium off for good, and that picture is
+refused so the program sends it again in the escape code, which is what a
+terminal on another machine, over ssh, gets from then on. An object the
+terminal did not read is unlinked, never left behind.
+
+**A picture on the same machine goes through shared memory.** With
+`Layers.shared_memory` set, the pixels are put in a shared memory object and
+only its name goes through the terminal's input: no deflate, no base64, and a
+picture that cost a frame costs a copy (a full-screen picture on a 4K display,
+from about 15 ms to under 3). The first one asks for an answer; an error, or no
+answer within the grace period, turns the medium off for good, and that picture
+is refused so the program sends it again in the escape code, which is what a
+terminal on another machine, over ssh, gets from then on. An object the
+terminal did not read is unlinked, never left behind.
 
 **After a resize, nothing on the terminal is taken as known.** A terminal
 that changes size keeps what fitted, cuts it, moves its rows up with the

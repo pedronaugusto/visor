@@ -8,6 +8,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Pictures through shared memory.** `Layers.shared_memory`, set by a
+  program whose terminal may be on the same machine, puts each picture in a
+  POSIX shared memory object (`shm_open`, or `/dev/shm` on Linux without
+  libc) and sends its name (`t=s`) instead of the pixels: no deflate and no
+  base64 on the program's thread. The medium is tried on the first picture and
+  turned off for good on an error or silence, that picture refused so it is
+  sent again in the escape code; an object the terminal did not read is
+  unlinked.
+- **Pictures through shared memory.** `Layers.shared_memory`, set by a
+  program whose terminal may be on the same machine, puts each picture in a
+  POSIX shared memory object (`shm_open`, or `/dev/shm` on Linux without
+  libc) and sends its name (`t=s`) instead of the pixels: no deflate and no
+  base64 on the program's thread. The medium is tried on the first picture and
+  turned off for good on an error or silence, that picture refused so it is
+  sent again in the escape code; an object the terminal did not read is
+  unlinked.
 - **`Caps.sgr_pixels` is answered.** The probe asks for mode 1016 with the
   other modes, and a terminal that has it (set or reset) sets the field, so a
   program knows before it asks for the mouse in pixels.

@@ -153,6 +153,8 @@ pub const Image = layer_mod.Image;
 pub const Layer = layer_mod.Layer;
 /// What this frame shows.
 pub const Layers = layer_mod.Layers;
+/// Pictures through shared memory, where the program allows it.
+pub const SharedMemory = layer_mod.SharedMemory;
 
 //=========================================================================
 // The terminal, and a terminal to test against.
@@ -205,6 +207,7 @@ test {
     _ = pool_mod;
     _ = render_mod;
     _ = @import("moved_rows.zig");
+    _ = @import("shm.zig");
     _ = screen_mod;
     _ = term_mod;
     _ = text_mod;

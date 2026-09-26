@@ -32,6 +32,7 @@ const morse = @import("morse");
 
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
+const shm = @import("shm.zig");
 
 const Allocator = std.mem.Allocator;
 const Rect = geom.Rect;
@@ -53,6 +54,9 @@ pub const Image = struct {
     state: State = .ready,
     /// When it was sent, on the caller's clock, in milliseconds.
     sent_ms: i64 = 0,
+    /// The shared memory object it was sent through, until the terminal
+    /// answers: then it is unlinked, read or not.
+    shm: ?shm.Name = null,
 
     /// Whether the terminal has an image.
     pub const State = enum {
@@ -128,6 +132,21 @@ pub const Layer = struct {
     }
 };
 
+/// Pictures through shared memory: the pixels are put where the terminal
+/// reads them and only a name goes through its input, with no compression
+/// and no base64 — on the same machine, the difference between a picture
+/// that costs a frame and one that costs a copy. The terminal that takes
+/// them is found by trying: the first picture asks for an answer, and an
+/// error or a grace period with no answer turns the medium off for good,
+/// that picture refused so the caller sends it again, in the escape code.
+pub const SharedMemory = struct {
+    /// What `/dev/shm` is written through where there is no libc.
+    io: std.Io,
+    state: enum { trying, yes, no } = .trying,
+    /// The next object's number.
+    seq: u32 = 0,
+};
+
 /// How an image is sent.
 pub const Transmit = struct {
     /// The shape of the bytes: RGBA, RGB or PNG.
@@ -182,9 +201,15 @@ pub const Layers = struct {
     /// Whether the next `emit` places every declared layer, whatever `shown`
     /// says, because the terminal may have moved or dropped any of them.
     replace_all: bool = false,
+    /// Pictures through shared memory, where the program allows it (the
+    /// terminal is on this machine, or may be): null sends every picture
+    /// in the escape code.
+    shared_memory: ?SharedMemory = null,
 
-    /// Gives the lists and the window back.
+    /// Gives the lists and the window back, and unlinks any picture still
+    /// in shared memory.
     pub fn deinit(l: *Layers, gpa: Allocator) void {
+        for (l.images.items) |*held| l.release(held);
         l.images.deinit(gpa);
         l.declared.deinit(gpa);
         l.shown.deinit(gpa);
@@ -205,9 +230,12 @@ pub const Layers = struct {
         return null;
     }
 
-    /// Sends an image under `id`, chunked, deflated when that helps, and
-    /// quiet unless an answer was asked for. Returns how many bytes of
-    /// pixels went, after compression and before base64.
+    /// Sends an image under `id`: through shared memory where that is
+    /// allowed and the terminal takes it (`shared_memory`), else chunked
+    /// in the escape code, deflated when that helps; quiet unless an
+    /// answer was asked for. Returns how many bytes went through the
+    /// terminal's input: the name, or the pixels after compression and
+    /// before base64.
     ///
     /// Sending to an id the terminal is showing replaces the pixels, and the
     /// terminal drops that image's placements while they land; the next
@@ -226,6 +254,9 @@ pub const Layers = struct {
         pixels: []const u8,
         how: Transmit,
     ) (Writer.Error || Allocator.Error)!usize {
+        if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
+            if (try l.transmitShared(gpa, w, sm, id, pixels, how)) |n| return n;
+        };
         var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l.deflated);
         defer l.deflated = packed_pixels.toArrayList();
         packed_pixels.clearRetainingCapacity();
@@ -250,16 +281,13 @@ pub const Layers = struct {
 
         // Record first: a write that fails part way has still told the
         // terminal something, and the record is what makes it freeable.
-        const record: Image = .{
+        try l.record(gpa, .{
             .id = id,
             .width = how.width,
             .height = how.height,
             .state = if (how.answer) .loading else .ready,
             .sent_ms = how.now_ms,
-        };
-        if (l.find(id)) |held| held.* = record else try l.images.append(gpa, record);
-        // The terminal takes this image's placements down while it lands.
-        l.forgetShown(id);
+        });
 
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
@@ -270,6 +298,57 @@ pub const Layers = struct {
             .quiet = if (how.answer) .answers else .silent,
         }, payload);
         return payload.len;
+    }
+
+    /// The record of an image sent, replacing the one under its id; the
+    /// terminal takes that image's placements down while it lands.
+    fn record(l: *Layers, gpa: Allocator, rec: Image) Allocator.Error!void {
+        if (l.find(rec.id)) |held| {
+            l.release(held);
+            held.* = rec;
+        } else try l.images.append(gpa, rec);
+        l.forgetShown(rec.id);
+    }
+
+    /// The picture put in shared memory and its name sent, or null when it
+    /// could not be put there (the medium is then off, and the caller's
+    /// picture goes in the escape code). While the medium is on trial the
+    /// terminal is asked to answer, whatever the caller asked.
+    fn transmitShared(l: *Layers, gpa: Allocator, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) (Writer.Error || Allocator.Error)!?usize {
+        const name = shm.nameOf(sm.seq);
+        sm.seq +%= 1;
+        shm.put(sm.io, name, pixels) catch {
+            sm.state = .no;
+            return null;
+        };
+        const trying = sm.state == .trying;
+        try l.record(gpa, .{
+            .id = id,
+            .width = how.width,
+            .height = how.height,
+            .state = if (how.answer or trying) .loading else .ready,
+            .sent_ms = how.now_ms,
+            .shm = name,
+        });
+        try morse.transmitImage(w, .{
+            .image = .{ .id = id },
+            .format = how.format,
+            .medium = .shared_memory,
+            .width = how.width,
+            .height = how.height,
+            .size = @intCast(pixels.len),
+            .quiet = if (how.answer or trying) .answers else .silent,
+        }, name.slice());
+        return name.len;
+    }
+
+    /// An image's shared memory object, unlinked if it is still there:
+    /// the terminal unlinks what it reads, and what it could not read is
+    /// this program's to take away.
+    fn release(l: *Layers, held: *Image) void {
+        const name = held.shm orelse return;
+        held.shm = null;
+        if (l.shared_memory) |sm| shm.unlink(sm.io, name);
     }
 
     /// Whether the terminal has the image, so a layer can show it.
@@ -291,6 +370,15 @@ pub const Layers = struct {
                     return true;
                 }
                 if (now_ms - held.sent_ms < grace_ms) return false;
+                // A picture in shared memory is not taken on trust: a
+                // terminal that never said it read one is one that is
+                // not given another, and this one is sent again.
+                if (held.shm != null) {
+                    l.release(held);
+                    if (l.shared_memory) |*sm| sm.state = .no;
+                    held.state = .failed;
+                    return false;
+                }
                 held.state = .ready;
                 l.fallbacks += 1;
                 if (l.answers == null) l.answers = false;
@@ -307,6 +395,15 @@ pub const Layers = struct {
         const held = l.find(id) orelse return;
         l.answers = true;
         held.state = if (response.ok()) .ready else .failed;
+        if (held.shm != null) {
+            l.release(held);
+            if (l.shared_memory) |*sm| {
+                if (sm.state == .trying) sm.state = if (response.ok()) .yes else .no;
+                // a medium that worked and now fails (a terminal reached
+                // through ssh by a later attach, say) is off from here
+                if (!response.ok()) sm.state = .no;
+            }
+        }
     }
 
     /// Frees an image: its pixels and every placement of it, in the
@@ -317,6 +414,7 @@ pub const Layers = struct {
         var i: usize = 0;
         while (i < l.images.items.len) {
             if (l.images.items[i].id == id) {
+                l.release(&l.images.items[i]);
                 _ = l.images.swapRemove(i);
             } else i += 1;
         }
@@ -1017,4 +1115,61 @@ test "sending pictures again allocates nothing once the buffers have grown" {
     try testing.expect(grown > 0);
     for (0..4) |_| _ = try layers.transmit(gpa, &sink.writer, 7, &pixels, .{ .width = 64, .height = 64 });
     try testing.expectEqual(grown, counting.allocations);
+}
+
+test "a picture through shared memory: the name goes, the terminal's word settles the medium" {
+    if (!shm.supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const pixels = [_]u8{ 9, 8, 7, 6 };
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+
+    // tried, and read: the medium is on for good, the object gone
+    var l: Layers = .{ .shared_memory = .{ .io = io } };
+    defer l.deinit(gpa);
+    const n = try l.transmit(gpa, &out.writer, 5, &pixels, .{ .width = 1, .height = 1 });
+    try testing.expect(std.mem.indexOf(u8, out.written(), "t=s") != null);
+    try testing.expect(std.mem.indexOf(u8, out.written(), "S=4") != null);
+    const name = l.image(5).?.shm.?;
+    try testing.expectEqual(name.len, n);
+    // on trial, the terminal is asked to answer even when the caller was not
+    try testing.expect(!l.ready(5, 0, 1000));
+    l.ack(.{ .id = 5, .message = "OK" });
+    try testing.expect(l.ready(5, 0, 1000));
+    try testing.expect(l.shared_memory.?.state == .yes);
+    try testing.expect(l.image(5).?.shm == null);
+    // the object was unlinked: its name can be put again
+    try shm.put(io, name, &pixels);
+    shm.unlink(io, name);
+}
+
+test "a terminal that cannot read shared memory gets the picture again in the escape code" {
+    if (!shm.supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const pixels = [_]u8{ 1, 2, 3, 4 };
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+
+    // refused: the medium is off, the picture failed and is sent again
+    var l: Layers = .{ .shared_memory = .{ .io = io } };
+    defer l.deinit(gpa);
+    _ = try l.transmit(gpa, &out.writer, 7, &pixels, .{ .width = 1, .height = 1 });
+    l.ack(.{ .id = 7, .message = "EBADF:no such object" });
+    try testing.expect(l.shared_memory.?.state == .no);
+    try testing.expect(!l.ready(7, 0, 1000));
+    out.clearRetainingCapacity();
+    _ = try l.transmit(gpa, &out.writer, 7, &pixels, .{ .width = 1, .height = 1, .compress = false });
+    try testing.expect(std.mem.indexOf(u8, out.written(), "t=s") == null);
+    try testing.expect(l.ready(7, 0, 1000));
+
+    // silence: a terminal that never answers is not trusted with another
+    var q: Layers = .{ .shared_memory = .{ .io = io } };
+    defer q.deinit(gpa);
+    _ = try q.transmit(gpa, &out.writer, 8, &pixels, .{ .width = 1, .height = 1, .now_ms = 0 });
+    try testing.expect(!q.ready(8, 10, 1000));
+    try testing.expect(!q.ready(8, 2000, 1000));
+    try testing.expect(q.shared_memory.?.state == .no);
+    try testing.expect(q.image(8).?.shm == null);
 }
