@@ -259,6 +259,44 @@ pub const Layout = struct {
         return out;
     }
 
+    /// How many parts of at least `min` cells fit along an axis of `axis`
+    /// cells with `spacing` between each two. What a row of columns that
+    /// must each hold something readable asks before it decides how many to
+    /// show; a program that always shows one clamps the answer itself.
+    pub fn fitCount(axis: u16, min: u16, spacing: u16) u16 {
+        const per: u32 = @as(u32, min) + spacing;
+        if (per == 0) return axis;
+        return @intCast((@as(u32, axis) + spacing) / per);
+    }
+
+    /// `out.len` parts of one size along `area`, `spacing` between each two,
+    /// from the start of it. The cells that do not divide evenly are left
+    /// over at the end rather than given to some parts, so every part is
+    /// the same size and a grid of them lines up whatever their number.
+    pub fn repeat(direction: Direction, area: Rect, spacing: u16, out: []Rect) []Rect {
+        const n = out.len;
+        if (n == 0) return out;
+        const axis: u32 = switch (direction) {
+            .horizontal => area.cols,
+            .vertical => area.rows,
+        };
+        const gaps: u32 = @as(u32, spacing) * @as(u32, @intCast(n - 1));
+        const size: u32 = if (gaps >= axis) 0 else (axis - gaps) / @as(u32, @intCast(n));
+        for (out, 0..) |*r, i| {
+            const at: u32 = @min(axis, @as(u32, @intCast(i)) * (size + spacing));
+            const len: u16 = @intCast(@min(size, axis - at));
+            r.* = switch (direction) {
+                .horizontal => .{ .col = area.col +| @as(u16, @intCast(at)), .row = area.row, .cols = len, .rows = area.rows },
+                .vertical => .{ .col = area.col, .row = area.row +| @as(u16, @intCast(at)), .cols = area.cols, .rows = len },
+            };
+            if (r.cols == 0 or r.rows == 0) {
+                r.cols = 0;
+                r.rows = 0;
+            }
+        }
+        return out;
+    }
+
     /// How long a rectangle is along the split's axis.
     fn axisOf(l: Layout, r: Rect) u16 {
         return switch (l.direction) {
@@ -574,4 +612,45 @@ test "spacing that does not fit leaves no part outside the area" {
         try std_testing.expect(r.bottom() <= 2);
         try std_testing.expect(r.isEmpty());
     }
+}
+
+test "as many columns as fit, each at least so wide, with the spacing between" {
+    // 24 wide with 3 between: 51 holds two, 78 three, 23 none.
+    try std_testing.expectEqual(@as(u16, 2), Layout.fitCount(51, 24, 3));
+    try std_testing.expectEqual(@as(u16, 2), Layout.fitCount(77, 24, 3));
+    try std_testing.expectEqual(@as(u16, 3), Layout.fitCount(78, 24, 3));
+    try std_testing.expectEqual(@as(u16, 0), Layout.fitCount(23, 24, 3));
+    try std_testing.expectEqual(@as(u16, 7), Layout.fitCount(7, 0, 0));
+}
+
+test "repeated parts are one size, the spacing between them, the rest left at the end" {
+    var out: [3]Rect = undefined;
+    const parts = Layout.repeat(.horizontal, .{ .col = 2, .row = 1, .cols = 80, .rows = 5 }, 3, &out);
+    // (80 - 6) / 3 = 24, two cells over.
+    try std_testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 24, .rows = 5 }, parts[0]);
+    try std_testing.expectEqual(Rect{ .col = 29, .row = 1, .cols = 24, .rows = 5 }, parts[1]);
+    try std_testing.expectEqual(Rect{ .col = 56, .row = 1, .cols = 24, .rows = 5 }, parts[2]);
+
+    // Whatever the area, the count and the spacing, every part is inside
+    // the area, the same size as the others, and after the one before.
+    var area_cols: u16 = 0;
+    while (area_cols <= 30) : (area_cols += 1) {
+        for (1..6) |n| {
+            for (0..4) |spacing| {
+                var many: [5]Rect = undefined;
+                const area: Rect = .{ .col = 3, .row = 0, .cols = area_cols, .rows = 2 };
+                const got = Layout.repeat(.horizontal, area, @intCast(spacing), many[0..n]);
+                var edge: u32 = area.col;
+                for (got) |r| {
+                    try std_testing.expectEqual(got[0].cols, r.cols);
+                    if (r.cols == 0) continue;
+                    try std_testing.expect(r.col >= edge and r.right() <= area.right());
+                    edge = r.right() + @as(u32, @intCast(spacing));
+                }
+            }
+        }
+    }
+    // And down, the same.
+    const rows = Layout.repeat(.vertical, .{ .rows = 7, .cols = 4 }, 1, out[0..2]);
+    try std_testing.expectEqual(Rect{ .row = 4, .cols = 4, .rows = 3 }, rows[1]);
 }

@@ -22,8 +22,10 @@ pub const Tabs = struct {
     selected_style: Style = .{ .bold = true, .reverse = true },
     /// Drawn between two titles. Empty for none.
     divider: []const u8 = "\u{2502}",
-    /// The style the divider draws in.
-    divider_style: Style = .{ .dim = true },
+    /// The style the divider draws in, or null to leave the columns between
+    /// two titles as they are: spacing the tabs apart without drawing over
+    /// what is under them.
+    divider_style: ?Style = .{ .dim = true },
     /// Cells of space each side of every title.
     padding: u16 = 1,
 
@@ -78,8 +80,9 @@ pub const Tabs = struct {
                 .{ .col = span.col + t.padding, .row = 0, .wrap = .none },
             );
             if (divider != 0 and i + 1 < t.titles.len) {
+                const divider_style = t.divider_style orelse continue;
                 _ = try win.printSegment(
-                    .{ .text = t.divider, .style = t.divider_style },
+                    .{ .text = t.divider, .style = divider_style },
                     .{ .col = span.col + span.cols, .row = 0, .wrap = .none },
                 );
             }
@@ -138,3 +141,20 @@ test "titles are measured the way the screen measures" {
 }
 
 const sign = "\u{26a0}\u{fe0f}";
+
+test "a divider with no style is a gap left as it was" {
+    var h: Harness = try .init(testing.allocator, 8, 1);
+    defer h.deinit();
+    h.window().fill(.fromSize(h.window().size()), .init(.{ .text = .inlined("."), .style = .{ .italic = true } }));
+    const t: Tabs = .{ .titles = &.{ "a", "b" }, .padding = 0, .divider = "  ", .divider_style = null };
+    try t.draw(h.window());
+    try h.expectFrame(
+        \\a..b....
+        \\
+    );
+    try testing.expect(h.styleAt(1, 0).italic);
+    // The gap still counts: the second title is past it, and a column in
+    // it chooses nothing.
+    try testing.expectEqual(@as(?usize, null), t.indexAt(1, .unicode));
+    try testing.expectEqual(@as(?usize, 1), t.indexAt(3, .unicode));
+}

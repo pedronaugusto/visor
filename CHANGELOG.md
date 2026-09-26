@@ -95,6 +95,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     for a terminal that draws no pictures; and `Marker.sextant` for `Canvas`.
   - `Block.corners`: corner marks with no lines between them, which take no
     room from the inside.
+  - `Layout.repeat`, parts of one size with the spacing between them and the
+    cells that do not divide left at the end, so a grid of columns lines up
+    whatever their number; and `Layout.fitCount`, how many parts of at least
+    a width fit.
+  - `Tabs.divider_style` may be null, which spaces the titles apart by the
+    divider's columns without drawing over what is there.
   - `Sparkline.mode = .level`: each point the nearest of the eight heights,
     never nothing, which is the sparkline a line of text wants.
 - `Tty.enter` and `Tty.leave`: raw mode and a renderer's `enter` in one call,
