@@ -168,7 +168,7 @@ with a `try`. Resizing allocates.
 | The views | `Window` — `child`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
-| What the terminal can do | `Caps`, `Caps.Probe`. |
+| What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
@@ -335,7 +335,9 @@ cancelling the task it runs in is what stops it.
 
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
-`Caps.Probe` writes the questions and folds the answers in; a caller who would
+`Caps.Probe` writes morse's probe and folds the answers in, and is settled
+when every question is answered or, after the device attributes, when the
+terminal has been quiet for the caller's quiet period; a caller who would
 rather trust the environment sets the fields itself. A mode the terminal
 answers set or reset is one it has: nothing has turned synchronised output or
 in-band resize reports on when the probe asks, so a terminal that has them

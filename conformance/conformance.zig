@@ -917,7 +917,7 @@ test "the probe finds what the second emulator has, reset modes included" {
     var stream: vt.TerminalStream = .init(.{ .allocator = gpa, .handler = handler });
     defer stream.deinit();
 
-    var probe: visor.Caps.Probe = .{ .graphics_id = 1 };
+    var probe: visor.Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
     var questions: std.Io.Writer.Allocating = .init(gpa);
     defer questions.deinit();
     try probe.write(&questions.writer);
@@ -932,10 +932,17 @@ test "the probe finds what the second emulator has, reset modes included" {
         // Every answer is read as one: nothing the probe asked comes back
         // as bytes for it to parse.
         try testing.expect(ev != .unhandled);
-        probe.feed(ev);
+        probe.feed(ev, 0);
     }
 
-    try testing.expect(probe.settled());
+    // The emulator as it runs here leaves some questions unanswered -- the
+    // colours and the sizes, which it answers through handlers this build
+    // does not install -- so the probe is settled by the device attributes
+    // and a quiet period after the last answer, not at once.
+    try testing.expect(probe.answered.contains(.device_attributes));
+    try testing.expect(!probe.settled(0, 50));
+    try testing.expect(probe.settled(50, 50));
+    try testing.expect(probe.caps.truecolor);
     // Neither mode is on when the probe asks -- the emulator answers
     // reset -- and both are there to be used.
     try testing.expect(probe.caps.sync);

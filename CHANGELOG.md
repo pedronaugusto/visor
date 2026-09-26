@@ -169,6 +169,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `error.OutOfMemory`, on the screen's own allocator.
 - A layer's placement is written before a departed layer's deletion, so a
   picture replaced by one under another id is covered before it goes.
+- **Breaking:** `Caps.Probe` asks `morse.Probe`'s questions, in morse's
+  order, and settles the way morse says a probe must: the device
+  attributes answer proves the input path works and is not the end of the
+  answers, because a multiplexer can give it while a question it forwarded
+  is still on its way. `Caps.Probe.questions` is the `morse.Probe` asked
+  (so the same write asks the colours and sizes for `Palette` and
+  `Winsize`); `feed(event, now_ms)` records when the last answer came;
+  `complete()` says every question asked has been answered; and
+  `settled(now_ms, quiet_ms)` is complete, or the device attributes
+  answered and quiet since the last answer for the caller's quiet period,
+  on the caller's clock. The probe's own set of questions and its settling
+  on DA1 are gone.
 - **Breaking:** `Caps.Probe` has a `graphics_id` with no default, carried by
   the graphics question in place of the fixed 31, and only an answer carrying
   it sets `kitty_graphics`: an answer about one of the program's pictures is

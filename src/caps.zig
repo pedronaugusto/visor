@@ -105,43 +105,50 @@ pub const Caps = struct {
     /// the cursor is and asking.
     sixel_cursor_right: bool = false,
 
-    /// The questions, as bytes.
+    /// What the terminal can do, asked: `morse.Probe`'s questions, and its
+    /// answers folded into a `Caps`.
     ///
-    /// `write` asks them all in one go and ends with a primary device
-    /// attributes request, which every terminal answers: when that answer
-    /// arrives, everything a terminal was going to say has been said, and
-    /// `settled` returns true. Silence to any single question is the answer
-    /// "no", which is why they are asked together and why nothing here
-    /// waits.
+    /// The questions are morse's, in morse's order, slow and forwarded ones
+    /// first and the primary device attributes last. That answer proves the
+    /// input path works and is not the end of the answers: a multiplexer can
+    /// give it at once while a question it forwarded is still on its way. So
+    /// the probe is settled when every question it asked has been answered,
+    /// or when the device attributes have come and the terminal has then
+    /// been quiet for the caller's quiet period, on the caller's clock.
+    /// Silence to a single question is the answer "no", which is why they
+    /// are asked together and why nothing here waits.
+    ///
+    /// The same write asks the colours and sizes a program folds into
+    /// `Palette` and `Winsize`; hand every event to all three.
     pub const Probe = struct {
-        /// The image id the graphics question carries, which the answer
-        /// echoes back. No default: the program chooses one it never sends a
-        /// picture under, because the graphics answer is told from an
-        /// answer about a picture by this id alone, and an id that collides
-        /// with a picture's would read one as the other.
-        graphics_id: u32,
-        /// What the questions have answered so far.
+        /// The questions, morse's. `questions.graphics_id` has no default:
+        /// the program chooses an id it never sends a picture under, because
+        /// the graphics answer is told from an answer about a picture by
+        /// this id alone.
+        questions: morse.Probe,
+        /// What the answers have said so far.
         caps: Caps = .{},
-        /// Whether the closing DA1 reply has come back.
-        done: bool = false,
+        /// Which questions have been answered.
+        answered: std.EnumSet(morse.Probe.Question) = .initEmpty(),
+        /// When the last answer came, on the caller's clock, in
+        /// milliseconds; null before the first.
+        last_ms: ?i64 = null,
 
-        /// Writes every question, DA1 last.
+        /// Asks every question, in one write.
         pub fn write(p: *const Probe, w: *std.Io.Writer) std.Io.Writer.Error!void {
-            try morse.queryMode(w, morse.syncOutput.number);
-            try morse.queryMode(w, morse.unicodeCore.number);
-            try morse.queryMode(w, morse.inBandResize.number);
-            try morse.kittyKeyboardQuery(w);
-            try morse.queryCapability(w, "Tc");
-            try morse.queryCapability(w, "RGB");
-            try morse.queryVersion(w);
-            try morse.queryGraphics(w, p.graphics_id);
-            try morse.queryDeviceAttributes(w);
+            try p.questions.write(w);
         }
 
         /// Folds one event from the input in: the answers to the questions,
         /// read. Anything else is ignored, because a terminal answering a
         /// question nobody asked is not this package's problem to diagnose.
-        pub fn feed(p: *Probe, event: morse.Event) void {
+        pub fn feed(p: *Probe, event: morse.Event, now_ms: i64) void {
+            const question = morse.probeAnswered(event) orelse return;
+            // A graphics answer about one of the program's pictures answers
+            // nothing here.
+            if (question == .graphics and event.reply.graphics.id != p.questions.graphics_id) return;
+            p.answered.insert(question);
+            p.last_ms = now_ms;
             const reply = switch (event) {
                 .reply => |r| r,
                 else => return,
@@ -183,18 +190,28 @@ pub const Caps = struct {
                 // Any answer to the question, `OK` or an error, is a
                 // terminal that speaks the protocol; an answer about some
                 // other image is not an answer to it.
-                .graphics => |g| if (g.id == p.graphics_id) {
-                    p.caps.kitty_graphics = true;
-                },
-                .device_attributes => p.done = true,
+                .graphics => p.caps.kitty_graphics = true,
                 else => {},
             }
         }
 
-        /// Whether the closing DA1 answer has come back, after which no
-        /// further reply is expected.
-        pub fn settled(p: *const Probe) bool {
-            return p.done;
+        /// Whether every question asked has been answered, after which no
+        /// answer is owed.
+        pub fn complete(p: *const Probe) bool {
+            for (std.enums.values(morse.Probe.Question)) |q| {
+                if (p.questions.asks(q) and !p.answered.contains(q)) return false;
+            }
+            return true;
+        }
+
+        /// Whether to stop waiting: every question answered, or the device
+        /// attributes answered and nothing more for `quiet_ms` since the
+        /// last answer, on the caller's clock. The caller's overall timeout
+        /// still ends a probe the terminal never answers at all.
+        pub fn settled(p: *const Probe, now_ms: i64, quiet_ms: i64) bool {
+            if (p.complete()) return true;
+            if (!p.answered.contains(.device_attributes)) return false;
+            return now_ms - (p.last_ms orelse now_ms) >= quiet_ms;
         }
     };
 };
@@ -211,18 +228,21 @@ test "the defaults are what is safe on the oldest terminal" {
     }) |flag| try testing.expect(!flag);
 }
 
-test "the probe asks its questions and ends with the one always answered" {
+test "the probe asks morse's questions, in morse's order, and nothing of its own" {
     var buffer: [512]u8 = undefined;
     var out: std.Io.Writer = .fixed(&buffer);
-    const p: Caps.Probe = .{ .graphics_id = 1 };
+    const p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
     try p.write(&out);
+    var theirs_buf: [512]u8 = undefined;
+    var theirs: std.Io.Writer = .fixed(&theirs_buf);
+    try (morse.Probe{ .graphics_id = 1 }).write(&theirs);
+    try testing.expectEqualStrings(theirs.buffered(), out.buffered());
+    // Among them the ones a `Caps` is made of, and the one always answered
+    // last.
     const asked = out.buffered();
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2026$p") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2027$p") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1b[?2048$p") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q5463\x1b\\") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1bP+q524742\x1b\\") != null);
-    try testing.expect(std.mem.indexOf(u8, asked, "\x1b_Ga=q,i=1,") != null);
+    for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
+        try testing.expect(std.mem.indexOf(u8, asked, q) != null);
+    }
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
 }
 
@@ -230,66 +250,106 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     // What a terminal with each of them says before anything turned them
     // on: reset. That is a yes.
     for ([_][]const u8{ "1", "2", "3" }) |state| {
-        var p: Caps.Probe = .{ .graphics_id = 1 };
+        var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
         var buf: [3][32]u8 = undefined;
-        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})));
-        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})));
-        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
         try testing.expect(p.caps.sync);
         try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
         try testing.expect(p.caps.in_band_resize);
     }
     for ([_][]const u8{ "0", "4" }) |state| {
-        var p: Caps.Probe = .{ .graphics_id = 1 };
+        var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
         p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true };
         var buf: [3][32]u8 = undefined;
-        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})));
-        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})));
-        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})));
+        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
+        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
         try testing.expect(!p.caps.sync);
         try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
         try testing.expect(!p.caps.in_band_resize);
     }
 }
 
-test "the probe settles on the device attributes answer and not before" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
-    p.feed(answer("\x1b[?2026;1$y"));
-    try testing.expect(!p.settled());
-    p.feed(answer("\x1b[?62;4;22c"));
-    try testing.expect(p.settled());
+test "the device attributes answer does not settle the probe while a forwarded answer may still come" {
+    // A multiplexer answers the device attributes itself while a question it
+    // forwarded is still on its way: the probe waits for the caller's quiet
+    // period after the last answer, on the caller's clock.
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    p.feed(answer("\x1b[?2026;1$y"), 100);
+    try testing.expect(!p.settled(100, 50));
+    p.feed(answer("\x1b[?62;4;22c"), 110);
+    try testing.expect(!p.settled(120, 50));
+    // The forwarded answer lands, and the quiet period starts again.
+    p.feed(answer("\x1b]11;rgb:1e1e/1e1e/2e2e\x07"), 150);
+    try testing.expect(!p.settled(180, 50));
+    try testing.expect(p.settled(200, 50));
+    // Without the device attributes no quiet period settles it: silence
+    // there is a terminal that has not answered yet, for the caller's own
+    // timeout to end.
+    var q: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    q.feed(answer("\x1b[?2026;1$y"), 0);
+    try testing.expect(!q.settled(10_000, 50));
+}
+
+test "a probe answered in full is settled at once" {
+    var p: Caps.Probe = .{ .questions = .{
+        .graphics_id = 1,
+        .cursor_position = false,
+        .foreground_color = false,
+        .background_color = false,
+        .cursor_color = false,
+        .color_scheme = false,
+        .unicode_core = false,
+        .in_band_resize = false,
+        .kitty_keyboard = false,
+        .modify_other_keys = false,
+        .graphics = false,
+        .extra_cursors = false,
+        .truecolor = false,
+        .version = false,
+        .text_area_cells = false,
+        .cell_pixels = false,
+        .secondary_device_attributes = false,
+    } };
+    p.feed(answer("\x1b[?62;4;22c"), 5);
+    try testing.expect(!p.complete());
+    p.feed(answer("\x1b[?2026;2$y"), 6);
+    try testing.expect(p.complete() and p.settled(6, 1000));
+    try testing.expect(p.caps.sync);
 }
 
 test "an unrecognised reply changes nothing" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
     const before = p.caps;
-    p.feed(answer("nonsense"));
-    p.feed(answer("\x1b["));
-    p.feed(answer(""));
+    p.feed(answer("nonsense"), 0);
+    p.feed(answer("\x1b["), 0);
+    p.feed(answer(""), 0);
     try testing.expectEqual(before, p.caps);
-    try testing.expect(!p.settled());
+    try testing.expect(!p.settled(1000, 0));
 }
 
 test "a 256-colour count is not evidence of truecolor" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
-    p.feed(answer("\x1bP1+r436f=323536\x1b\\"));
+    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
     try testing.expect(!p.caps.truecolor);
 }
 
 test "a truecolor-specific capability enables truecolor" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
-    p.feed(answer("\x1bP1+r5463\x1b\\"));
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    p.feed(answer("\x1bP1+r5463\x1b\\"), 0);
     try testing.expect(p.caps.truecolor);
 }
 
 test "the graphics answer is the one carrying the id the program chose" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
     // An answer about a picture is not an answer to the question.
-    p.feed(answer("\x1b_Gi=31;OK\x1b\\"));
+    p.feed(answer("\x1b_Gi=31;OK\x1b\\"), 0);
     try testing.expect(!p.caps.kitty_graphics);
     // A refusal of the question still says the protocol is there.
-    p.feed(answer("\x1b_Gi=1;EINVAL:dimensions required\x1b\\"));
+    p.feed(answer("\x1b_Gi=1;EINVAL:dimensions required\x1b\\"), 0);
     try testing.expect(p.caps.kitty_graphics);
 }
 
