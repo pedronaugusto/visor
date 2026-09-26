@@ -174,7 +174,7 @@ with a `try`. Resizing allocates.
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
-| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
+| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
 ### `visor.widgets`

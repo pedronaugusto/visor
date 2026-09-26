@@ -83,6 +83,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   colour into the RGB it is drawn in, or null while its slot is unanswered,
   with the standard cube and grey ramp above the sixteen. `mix` is the step
   between two colours, which is what a tint toward the background is.
+- `dumpScreenWith` and `DumpOptions`: the grid as text with a filler written
+  for a wide cluster's covered column, so every line is as many characters as
+  the grid has columns, for a program that reads a column back by its place
+  in the line. `dumpScreen`'s documentation said it wrote such a filler, which
+  it never did; it holds each cluster once, as before, and now says so.
 - `Window.sub`: the child over a rectangle of the window's own cells, the
   shape `Layout.split` and `Layout.repeat` hand back, clipped to the window.
 - `Window.ink`, `Window.inked` and `Window.Ink`: a program's look applied to

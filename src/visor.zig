@@ -187,6 +187,10 @@ pub const expectScreensEqual = term_mod.expectScreensEqual;
 pub const firstDifference = term_mod.firstDifference;
 /// A screen as text, one row a line.
 pub const dumpScreen = term_mod.dumpScreen;
+/// A screen as text, with a filler written for a wide cluster's covered column.
+pub const dumpScreenWith = term_mod.dumpScreenWith;
+/// What `dumpScreenWith` writes for a covered column.
+pub const DumpOptions = term_mod.DumpOptions;
 /// A screen's styles as one identifier a cell, with the legend above.
 pub const dumpScreenStyles = term_mod.dumpScreenStyles;
 

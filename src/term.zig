@@ -775,16 +775,30 @@ pub const Term = struct {
     }
 };
 
-/// The grid as text, one row a line, a tail written for a wide grapheme's
-/// covered column so the line is as wide as the grid.
+/// The grid as text, one row a line, each cluster once: a wide cluster's
+/// covered column writes nothing (`dumpScreenWith` writes a filler there).
 pub fn dumpScreen(s: *const Screen, w: *Writer) Writer.Error!void {
+    return dumpScreenWith(s, w, .{});
+}
+
+/// How `dumpScreenWith` writes a grid as text.
+pub const DumpOptions = struct {
+    /// What a wide cluster's covered column is written as. Nothing, the
+    /// default, holds each cluster once; a space makes every line as many
+    /// characters as the grid has columns, for a program that reads a column
+    /// back by its position in the line.
+    tail: []const u8 = "",
+};
+
+/// The grid as text, one row a line, a wide cluster's covered column
+/// written as `opts.tail`.
+pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Error!void {
     var row: u16 = 0;
     while (row < s.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
-            const c = s.cells[s.index(col, row)];
-            if (c.isTail()) continue;
-            try w.writeAll(s.textOf(&s.cells[s.index(col, row)]));
+            const c = &s.cells[s.index(col, row)];
+            try w.writeAll(if (c.isTail()) opts.tail else s.textOf(c));
         }
         try w.writeByte('\n');
     }
@@ -1667,6 +1681,11 @@ test "the dumps a program keeps its goldens in are these bytes" {
     defer glyphs.deinit();
     try dumpScreen(&screen, &glyphs.writer);
     try testing.expectEqualStrings("ab\u{4E2D}l \nr     \n", glyphs.written());
+
+    // and with a filler for the covered column, a line a column a character
+    glyphs.clearRetainingCapacity();
+    try dumpScreenWith(&screen, &glyphs.writer, .{ .tail = " " });
+    try testing.expectEqualStrings("ab\u{4E2D} l \nr     \n", glyphs.written());
 }
 
 test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first appearance" {
