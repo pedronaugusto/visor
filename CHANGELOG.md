@@ -48,6 +48,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Layers.repaint`: the next frame places every declared picture again, as
   though the terminal could have moved or dropped any of them. `Renderer`
   calls it on every repaint.
+- The conformance build replays the corpus through the same generator as
+  the package's suite, proves that it explores, and draws every grapheme
+  across resizes too.
 - Round-trip properties across resizes, in the package's own suite and
   against the second emulator: the terminal resized first and keeping what
   fitted, frames at the old size landing after it, drags through sizes the
@@ -102,6 +105,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking:** `graphemeWidth` returns a `u16`. Measured by codepoint a
+  cluster is the sum of its codepoints' widths, no longer clamped at two,
+  because a terminal that measures that way gives each codepoint that takes
+  columns cells of its own. `Parts` names those cells and `combinesOnly`
+  says whether a cluster is one of them.
 - **Breaking:** `Tty.size` returns a `Winsize`, with the text area in pixels
   where the operating system has it, instead of a `Size`.
 - **Breaking:** `Renderer.enter(w, caps, mode, modes)` takes the input modes
@@ -164,6 +172,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stray continuation bytes. It now decodes the way a terminal does, one
   replacement character for each maximal subpart, and the next codepoint is
   whole. Found by the text input's fuzz.
+- **Measured by codepoint, a cluster of several wide codepoints was drawn
+  over the cells after it.** The grid held the astronaut (a woman, a joiner
+  and a rocket) as one cell two columns wide; a terminal measuring by
+  codepoint shows the woman in two columns and the rocket in the next two,
+  over whatever the grid had there. `Screen.write` now puts such a cluster in
+  the cells the terminal gives it, and `Term` prints it the same way. Found
+  by the conformance round trip once its generator explored.
+- On a screen one column wide measuring clusters, a mark after its base was
+  lost: the second emulator joins a codepoint to the cell under a cursor
+  waiting to wrap only past the first column. A base and its marks in that
+  one column now go out with mode 2027 off around them, and a terminal
+  measuring by codepoint joins the marks to the base there.
 - **Text was left on the screen after a resize.** A resize or a repaint gave
   the renderer a blank previous frame, and a row the new frame held blank was
   skipped as already blank, so whatever the terminal still showed there -- a

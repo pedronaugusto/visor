@@ -185,10 +185,20 @@ pub const Term = struct {
         }
     }
 
-    /// A run of printable bytes, as grapheme clusters in cells.
+    /// A run of printable bytes, as grapheme clusters in cells. Measuring by
+    /// codepoint, a cluster goes in the cells such a terminal gives it: each
+    /// codepoint that takes columns begins a cell of its own, and the ones
+    /// that take none stay with it.
     fn printRun(t: *Term, run: []const u8) Allocator.Error!void {
         var it: textmod.Graphemes = .init(run);
-        while (it.next()) |g| try t.put(g);
+        while (it.next()) |g| {
+            if (t.scr.method != .wcwidth) {
+                try t.put(g);
+                continue;
+            }
+            var parts: textmod.Parts = .init(g);
+            while (parts.next()) |part| try t.put(part.bytes);
+        }
     }
 
     /// One grapheme cluster into a cell, wrapping and scrolling as a
@@ -202,8 +212,8 @@ pub const Term = struct {
     fn putAs(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
         const cols = t.scr.size.cols;
         if (cols == 0 or t.scr.size.rows == 0) return;
-        const w = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
-        if (w == 0) return;
+        const w: u16 = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
+        if (w == 0 or w > 2) return;
 
         if (t.wrap_pending) {
             if (!t.autowrap) return;
@@ -706,8 +716,8 @@ pub const Term = struct {
         const cols = t.scr.size.cols;
         const rows = t.scr.size.rows;
         if (cols == 0 or rows == 0) return;
-        const w = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
-        if (w == 0) return;
+        const w: u16 = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
+        if (w == 0 or w > 2) return;
         if (t.wrap_pending) {
             if (!t.autowrap) return;
             t.col = 0;
@@ -1118,6 +1128,20 @@ fn rowText(t: *const Term, row: u16, buf: []u8) []const u8 {
         n += g.len;
     }
     return buf[0..n];
+}
+
+test "measuring by codepoint, a cluster of wide codepoints is printed a cell each" {
+    var t: Term = try .init(testing.allocator, .{ .cols = 6, .rows = 2 });
+    defer t.deinit();
+    t.setMethod(.wcwidth);
+    try t.feed("\u{1f469}\u{200d}\u{1f680}x");
+    try testing.expectEqualStrings("\u{1f469}\u{200d}", t.screen().textAt(0, 0));
+    try testing.expectEqualStrings("\u{1f680}", t.screen().textAt(2, 0));
+    try testing.expectEqualStrings("x", t.screen().textAt(4, 0));
+    // A cell of its own that does not fit wraps on its own.
+    try t.feed("\u{1f468}\u{200d}\u{1f469}");
+    try testing.expectEqualStrings("\u{1f468}\u{200d}", t.screen().textAt(0, 1));
+    try testing.expectEqualStrings("\u{1f469}", t.screen().textAt(2, 1));
 }
 
 test "plain text lands where the cursor is" {

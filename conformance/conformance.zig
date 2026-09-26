@@ -58,13 +58,6 @@ const alphabet = [_][]const u8{
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
 };
 
-/// The graphemes the resize property draws from: the narrow and the wide,
-/// and none whose width the two models disagree about or whose marks
-/// combine, so that what it checks is where rows and cells end up across a
-/// resize and not how a cluster is measured, which the properties above
-/// are for.
-const resize_alphabet = [_][]const u8{ "a", "b", " ", "~", "\u{e9}", "\u{4e2d}", "\u{ff21}" };
-
 /// The styles it draws from: enough to exercise every arm of the colour
 /// union and both halves of the bold-and-dim off code.
 const styles = [_]visor.Style{
@@ -312,6 +305,21 @@ fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
 // The property.
 //=========================================================================
 
+/// What the generators drew over a run of the corpus, one `Spread` a
+/// question.
+const Tally = struct {
+    /// The grid's width, at the start and after every resize.
+    cols: corpus.Spread = .{},
+    /// Its height, the same.
+    rows: corpus.Spread = .{},
+    /// Which grid operation.
+    ops: corpus.Spread = .{},
+    /// Which grapheme a write took.
+    graphemes: corpus.Spread = .{},
+    /// How many frames one input ran to.
+    frames: corpus.Spread = .{},
+};
+
 /// Everything one round needs.
 const Harness = struct {
     gpa: Allocator,
@@ -319,6 +327,9 @@ const Harness = struct {
     renderer: visor.Renderer,
     out: std.Io.Writer.Allocating,
     caps: visor.Caps,
+    /// Where the generator's draws are counted, for the test that proves the
+    /// corpus explores; null everywhere else.
+    tally: ?*Tally = null,
 
     fn init(gpa: Allocator, size: visor.Size, method: visor.Method) !Harness {
         var s: visor.Screen = try .init(gpa, size);
@@ -387,66 +398,76 @@ const Harness = struct {
 
 /// One random operation on the grid. The same set the suite inside the
 /// package draws from, written against the public API.
-fn operate(h: *Harness, smith: anytype, graphemes: []const []const u8) !void {
+fn operate(h: *Harness, dice: *corpus.Dice) !void {
     const s = &h.screen;
     const cols = s.size.cols;
     const rows = s.size.rows;
-    switch (smith.valueRangeAtMost(u8, 0, 6)) {
+    const op = dice.valueRangeAtMost(u8, 0, 6);
+    if (h.tally) |t| t.ops.add(op);
+    switch (op) {
         0, 1, 2 => {
-            const col: u16 = @intCast(smith.index(cols));
-            const row: u16 = @intCast(smith.index(rows));
-            const g = graphemes[smith.index(graphemes.len)];
-            const style = styles[smith.index(styles.len)];
-            const which = smith.index(uris.len);
-            const link = try s.link(h.gpa, uris[which], params[which]);
+            const col: u16 = @intCast(dice.index(cols));
+            const row: u16 = @intCast(dice.index(rows));
+            const which = dice.index(alphabet.len);
+            if (h.tally) |t| t.graphemes.add(which);
+            const g = alphabet[which];
+            const style = styles[dice.index(styles.len)];
+            const target = dice.index(uris.len);
+            const link = try s.link(h.gpa, uris[target], params[target]);
             try s.write(col, row, g, style, link);
         },
         3 => {
-            const col: u16 = @intCast(smith.index(cols));
-            const row: u16 = @intCast(smith.index(rows));
-            s.writeOwnedCell(col, row, .blank(styles[smith.index(styles.len)]));
+            const col: u16 = @intCast(dice.index(cols));
+            const row: u16 = @intCast(dice.index(rows));
+            s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
         },
-        4 => s.fill(randomRect(smith, cols, rows), .blank(styles[smith.index(styles.len)])),
-        5 => s.scroll(randomRect(smith, cols, rows), smith.valueRangeAtMost(i32, -3, 3)),
+        4 => s.fill(randomRect(dice, cols, rows), .blank(styles[dice.index(styles.len)])),
+        5 => s.scroll(randomRect(dice, cols, rows), dice.valueRangeAtMost(i32, -3, 3)),
         6 => {
-            s.cursor.visible = smith.value(bool);
-            s.cursor.col = @intCast(smith.index(cols));
-            s.cursor.row = @intCast(smith.index(rows));
-            s.cursor.shape = @enumFromInt(smith.valueRangeAtMost(u8, 0, 6));
+            s.cursor.visible = dice.value(bool);
+            s.cursor.col = @intCast(dice.index(cols));
+            s.cursor.row = @intCast(dice.index(rows));
+            s.cursor.shape = @enumFromInt(dice.valueRangeAtMost(u8, 0, 6));
         },
         else => unreachable,
     }
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(smith: anytype, cols: u16, rows: u16) visor.Rect {
-    const col: u16 = @intCast(smith.index(cols));
-    const row: u16 = @intCast(smith.index(rows));
+fn randomRect(dice: *corpus.Dice, cols: u16, rows: u16) visor.Rect {
+    const col: u16 = @intCast(dice.index(cols));
+    const row: u16 = @intCast(dice.index(rows));
     return .{
         .col = col,
         .row = row,
-        .cols = @intCast(smith.index(cols - col) + 1),
-        .rows = @intCast(smith.index(rows - row) + 1),
+        .cols = @intCast(dice.index(cols - col) + 1),
+        .rows = @intCast(dice.index(rows - row) + 1),
     };
 }
 
 /// The four properties, once, over a generated sequence of frames.
-fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
+fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally) !void {
+    var dice: corpus.Dice = .init(smith);
     const size: visor.Size = .{
-        .cols = @intCast(smith.valueRangeAtMost(u8, 1, 24)),
-        .rows = @intCast(smith.valueRangeAtMost(u8, 1, 12)),
+        .cols = dice.valueRangeAtMost(u16, 1, 24),
+        .rows = dice.valueRangeAtMost(u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
     defer h.deinit();
+    h.tally = tally;
+    if (tally) |t| {
+        t.cols.add(size.cols);
+        t.rows.add(size.rows);
+    }
     const o = try Oracle.init(gpa, size, method);
     defer o.deinit();
 
     var frames: usize = 0;
-    while (frames < 6 and !smith.eos()) : (frames += 1) {
+    while (frames < 6 and !dice.eos()) : (frames += 1) {
         var ops: usize = 0;
-        const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith, &alphabet);
+        const count = dice.valueRangeAtMost(u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, &dice);
 
         // The terminal shows the screen.
         _ = try h.frame(o);
@@ -459,9 +480,10 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
         h.screen.damageAll();
         try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
     }
+    if (tally) |t| t.frames.add(frames);
 
     // A repaint recovers from any state the renderer drifted into.
-    corrupt(&h.renderer, smith);
+    corrupt(&h.renderer, &dice);
     h.renderer.repaint();
     _ = try h.frame(o);
     try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
@@ -482,13 +504,13 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
 
 /// Puts the renderer's model out of step with the terminal, as a dropped
 /// write or an out-of-band terminal write would.
-fn corrupt(r: *visor.Renderer, smith: *Smith) void {
+fn corrupt(r: *visor.Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
-    const count = smith.valueRangeAtMost(u8, 1, 8);
+    const count = dice.valueRangeAtMost(u8, 1, 8);
     while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[smith.index(r.prev.len)] = .blank(styles[smith.index(styles.len)]);
+        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
-    r.style = styles[smith.index(styles.len)];
+    r.style = styles[dice.index(styles.len)];
     r.cursor = null;
     r.shown = null;
 }
@@ -496,7 +518,7 @@ fn corrupt(r: *visor.Renderer, smith: *Smith) void {
 test "the second emulator agrees, measuring by codepoint" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .wcwidth);
+            try roundTrip(gpa, smith, .wcwidth, null);
         }
     }.one, .{ .corpus = &corpus.entries });
 }
@@ -504,9 +526,55 @@ test "the second emulator agrees, measuring by codepoint" {
 test "the second emulator agrees, measuring by cluster" {
     try std.testing.fuzz(testing.allocator, struct {
         fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .unicode);
+            try roundTrip(gpa, smith, .unicode, null);
         }
     }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the corpus draws every size, every operation and every grapheme against the second emulator" {
+    var t: Tally = .{};
+    for (corpus.entries) |entry| {
+        var smith: Smith = .{ .in = entry };
+        try roundTrip(testing.allocator, &smith, .unicode, &t);
+    }
+    try testing.expect(t.cols.covers(1, 24));
+    try testing.expect(t.rows.covers(1, 12));
+    try testing.expect(t.ops.covers(0, 6));
+    try testing.expect(t.graphemes.covers(0, alphabet.len - 1));
+    try testing.expect(t.frames.covers(1, 6));
+}
+
+test "a mark on a terminal one column wide stays with its base" {
+    // The emulator joins a codepoint to the cell under the cursor only past
+    // the first column, so in one column, measuring clusters, the mark after
+    // a base that filled the column was dropped.
+    const gpa = testing.allocator;
+    var h: Harness = try .init(gpa, .{ .cols = 1, .rows = 2 }, .unicode);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, h.screen.size, .unicode);
+    defer o.deinit();
+    try h.screen.write(0, 0, "e\u{301}", .{}, .none);
+    try h.screen.write(0, 1, "a\u{301}\u{302}", .{ .bold = true }, .none);
+    _ = try h.frame(o);
+    try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+}
+
+test "measured by codepoint, a cluster of wide codepoints is in the cells the terminal gives each" {
+    // The woman, the joiner and the rocket: the emulator measuring by
+    // codepoint puts the woman and the joiner in two columns and the rocket
+    // in the next two, and so does the grid.
+    const gpa = testing.allocator;
+    var h: Harness = try .init(gpa, .{ .cols = 10, .rows = 2 }, .wcwidth);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, h.screen.size, .wcwidth);
+    defer o.deinit();
+    try h.screen.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none);
+    try h.screen.write(4, 0, "x", .{}, .none);
+    try h.screen.write(5, 1, "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}", .{}, .none);
+    _ = try h.frame(o);
+    try testing.expectEqualStrings("\u{1f680}", h.screen.textAt(2, 0));
+    try testing.expectEqualStrings("x", h.screen.textAt(4, 0));
+    try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
 }
 
 //=========================================================================
@@ -524,10 +592,10 @@ test "the second emulator agrees, measuring by cluster" {
 
 /// A size somewhere in the generator's range, reached from `from` the way a
 /// window's edge moves: both ways, the width alone, or the height alone.
-fn nextSize(smith: anytype, from: visor.Size) visor.Size {
-    const cols = smith.valueRangeAtMost(u16, 1, 24);
-    const rows = smith.valueRangeAtMost(u16, 1, 12);
-    return switch (smith.valueRangeAtMost(u8, 0, 2)) {
+fn nextSize(dice: *corpus.Dice, from: visor.Size) visor.Size {
+    const cols = dice.valueRangeAtMost(u16, 1, 24);
+    const rows = dice.valueRangeAtMost(u16, 1, 12);
+    return switch (dice.valueRangeAtMost(u8, 0, 2)) {
         0 => .{ .cols = cols, .rows = rows },
         1 => .{ .cols = cols, .rows = from.rows },
         else => .{ .cols = from.cols, .rows = rows },
@@ -537,11 +605,11 @@ fn nextSize(smith: anytype, from: visor.Size) visor.Size {
 /// What a program draws after a resize: now and then the whole layout
 /// again from nothing, as a program whose layout moved does, then some
 /// random operations.
-fn scribble(h: *Harness, smith: anytype) !void {
-    if (smith.value(bool)) h.screen.clear();
+fn scribble(h: *Harness, dice: *corpus.Dice) !void {
+    if (dice.value(bool)) h.screen.clear();
     var ops: usize = 0;
-    const count = smith.valueRangeAtMost(u8, 1, 12);
-    while (ops < count) : (ops += 1) try operate(h, smith, &resize_alphabet);
+    const count = dice.valueRangeAtMost(u8, 1, 12);
+    while (ops < count) : (ops += 1) try operate(h, dice);
 }
 
 /// ASCII along a row, one cell a byte.
@@ -551,7 +619,7 @@ fn put(s: *visor.Screen, col: u16, row: u16, text: []const u8, style: visor.Styl
 
 /// The terminal passes through a size the program may never hear of, with
 /// a frame drawn at the program's size arriving after it, or not.
-fn dragThrough(h: *Harness, o: *Oracle, dice: *Dice, to: visor.Size) !void {
+fn dragThrough(h: *Harness, o: *Oracle, dice: *corpus.Dice, to: visor.Size) !void {
     if (dice.value(bool)) {
         try scribble(h, dice);
         const stale = try h.render();
@@ -560,37 +628,8 @@ fn dragThrough(h: *Harness, o: *Oracle, dice: *Dice, to: visor.Size) !void {
     } else try o.resize(to);
 }
 
-/// The generator's questions answered from a seeded generator rather than
-/// from the input itself.
-///
-/// `Smith` reads eight bytes for every value it is asked for and answers
-/// the lowest value in range when those bytes are out of it, so a corpus
-/// entry of random bytes answers every ranged question with its minimum --
-/// a one-column, one-row terminal, every time. Seeded from the input, a
-/// run gets the whole range, and the corpus is that many different runs.
-const Dice = struct {
-    prng: std.Random.DefaultPrng,
-
-    fn init(smith: *Smith) Dice {
-        return .{ .prng = .init(smith.value(u64)) };
-    }
-
-    fn valueRangeAtMost(d: *Dice, comptime T: type, at_least: T, at_most: T) T {
-        return d.prng.random().intRangeAtMost(T, at_least, at_most);
-    }
-
-    fn index(d: *Dice, len: usize) usize {
-        return d.prng.random().uintLessThan(usize, len);
-    }
-
-    fn value(d: *Dice, comptime T: type) T {
-        comptime std.debug.assert(T == bool);
-        return d.prng.random().boolean();
-    }
-};
-
 fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
-    var dice: Dice = .init(smith);
+    var dice: corpus.Dice = .init(smith);
     var size: visor.Size = .{
         .cols = dice.valueRangeAtMost(u16, 1, 24),
         .rows = dice.valueRangeAtMost(u16, 1, 12),
@@ -790,7 +829,7 @@ fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
 /// size -- sometimes in the same cells, sometimes moved -- and every one
 /// where the terminal has it.
 fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
-    var dice: Dice = .init(smith);
+    var dice: corpus.Dice = .init(smith);
     var size: visor.Size = .{
         .cols = dice.valueRangeAtMost(u16, 4, 24),
         .rows = dice.valueRangeAtMost(u16, 4, 12),

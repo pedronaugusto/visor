@@ -274,6 +274,13 @@ pub const Screen = struct {
     /// not UTF-8 are written as the replacement character, which is what a
     /// terminal would have shown for them, so the grid never holds bytes the
     /// terminal would read differently from the way they were measured.
+    ///
+    /// Measured by codepoint, a cluster of more than one codepoint that
+    /// takes columns goes in the cells a terminal measuring that way gives
+    /// it, one after another along the row (`textmod.Parts`), as far as the
+    /// row reaches: the astronaut that is a woman, a joiner and a rocket is
+    /// the woman and the joiner in two columns and the rocket in the next
+    /// two, which is what such a terminal shows.
     pub fn write(
         s: *Screen,
         col: u16,
@@ -286,8 +293,25 @@ pub const Screen = struct {
         if (grapheme.len == 0) return;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
+        if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) {
+            var parts: textmod.Parts = .init(grapheme);
+            var at = col;
+            while (parts.next()) |part| {
+                if (part.cols == 0) continue;
+                if (at >= s.size.cols) break;
+                try s.writeOne(at, row, part.bytes, part.cols, style, to);
+                at += part.cols;
+            }
+            return;
+        }
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
         if (w == 0) return;
+        return s.writeOne(col, row, grapheme, @intCast(w), style, to);
+    }
+
+    /// One cell's worth of text, already measured at one or two columns.
+    fn writeOne(s: *Screen, col: u16, row: u16, grapheme: []const u8, w: u2, style: Style, to: Link) Allocator.Error!void {
+        const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         const t = try s.graphemes.intern(s.gpa, grapheme);
         s.writeOwnedCell(col, row, .{
             .text = t,
@@ -327,6 +351,9 @@ pub const Screen = struct {
         if (grapheme.len == 0) return false;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
+        // A cluster a terminal measuring by codepoint splits across cells
+        // is not one glyph to scale.
+        if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) return false;
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
         if (w == 0) return false;
         if (@as(u32, col) + @as(u32, w) * scale > s.size.cols) return false;
@@ -836,6 +863,33 @@ test "a wide grapheme with one column left becomes a blank" {
     const c = s.readCell(2, 0).?;
     try testing.expectEqualStrings(" ", s.textAt(2, 0));
     try testing.expect(c.style.bold);
+    try checkInvariants(&s);
+}
+
+test "measured by codepoint, a cluster of wide codepoints takes a cell each, as far as the row goes" {
+    var s: Screen = try .init(testing.allocator, .{ .cols = 7, .rows = 1 });
+    defer s.deinit(testing.allocator);
+    s.method = .wcwidth;
+    try s.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{ .bold = true }, .none);
+    try testing.expectEqualStrings("\u{1f469}\u{200d}", s.textAt(0, 0));
+    try testing.expect(s.readCell(1, 0).?.isTail());
+    try testing.expectEqualStrings("\u{1f680}", s.textAt(2, 0));
+    try testing.expect(s.readCell(2, 0).?.style.bold);
+    try testing.expect(s.readCell(3, 0).?.isTail());
+    // Three wide codepoints from the fourth column: two fit, the third is
+    // past the row's end, and the second has one column left and is a
+    // spacer, as any wide cell there is.
+    try s.write(4, 0, "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}", .{}, .none);
+    try testing.expectEqualStrings("\u{1f468}\u{200d}", s.textAt(4, 0));
+    try testing.expectEqual(Cell.Kind.spacer_head, s.readCell(6, 0).?.shape.kind);
+    try checkInvariants(&s);
+    // And a cluster measured whole is one cell, and not one to draw at a
+    // scale measured by codepoint.
+    try testing.expect(!try s.writeScaled(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none, 2));
+    s.method = .unicode;
+    try s.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none);
+    try testing.expectEqualStrings("\u{1f469}\u{200d}\u{1f680}", s.textAt(0, 0));
+    try testing.expect(s.readCell(1, 0).?.isTail());
     try checkInvariants(&s);
 }
 

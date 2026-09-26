@@ -123,8 +123,14 @@ pub const Wrap = text_mod.Wrap;
 pub const Graphemes = text_mod.Graphemes;
 /// The columns a string takes.
 pub const width = text_mod.width;
-/// The columns one cluster takes: 0, 1 or 2.
+/// The columns one cluster takes: 0, 1 or 2 measured whole, the sum of its
+/// codepoints' measured by codepoint.
 pub const graphemeWidth = text_mod.graphemeWidth;
+/// The cells a terminal measuring by codepoint puts one cluster in.
+pub const Parts = text_mod.Parts;
+/// Whether a cluster is a base and codepoints that take no column of their
+/// own, one cell whichever way it is measured.
+pub const combinesOnly = text_mod.combinesOnly;
 /// Whether the two width models disagree about a cluster.
 pub const disagrees = text_mod.disagrees;
 /// Breaks a string into rows of at most so many columns.

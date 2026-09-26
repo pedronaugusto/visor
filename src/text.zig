@@ -142,24 +142,71 @@ pub const Graphemes = struct {
     }
 };
 
-/// The columns one grapheme cluster takes: 0, 1 or 2.
+/// The columns one grapheme cluster takes.
 ///
-/// `.wcwidth` sums its codepoints the way a terminal with no cluster support
-/// does, `wcwidth(3)` a codepoint, and clamps at two: a mark that combines, a
-/// variation selector and a joiner take no column of their own; `.unicode` and `.explicit` measure the cluster
-/// whole, which is what puts a flag or a family emoji in two columns instead
-/// of eight.
-pub fn graphemeWidth(grapheme: []const u8, method: Method) u2 {
+/// Measured whole (`.unicode`, `.explicit`) that is 0, 1 or 2, which is what
+/// puts a flag or a family emoji in two columns instead of eight. Measured
+/// by codepoint (`.wcwidth`) it is the sum of what `wcwidth(3)` gives each
+/// codepoint, because a terminal that measures that way places every
+/// codepoint that takes columns in cells of its own: a mark that combines, a
+/// variation selector and a joiner take none and stay with the codepoint
+/// before them, and the astronaut that is a woman, a joiner and a rocket is a
+/// woman in two columns and a rocket in the next two. `Parts` says where
+/// those cells begin.
+pub fn graphemeWidth(grapheme: []const u8, method: Method) u16 {
     if (grapheme.len == 1 and grapheme[0] >= 0x20 and grapheme[0] < 0x7f) return 1;
     switch (method) {
         .wcwidth => {
             var total: usize = 0;
             var it: Utf8 = .init(grapheme);
             while (it.next()) |cp| total += codepointWidth(cp);
-            return @intCast(@min(total, 2));
+            return @intCast(@min(total, std.math.maxInt(u16)));
         },
         .unicode, .explicit => return @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2)),
     }
+}
+
+/// The cells a terminal measuring by codepoint puts one grapheme cluster
+/// in: each codepoint that takes columns begins one, and the codepoints that
+/// take none go with it. A cluster of one such codepoint, which is nearly
+/// every cluster, is one part.
+pub const Parts = struct {
+    it: Utf8,
+
+    /// The parts of `grapheme`, in order.
+    pub fn init(grapheme: []const u8) Parts {
+        return .{ .it = .init(grapheme) };
+    }
+
+    /// The next part and the columns it takes (0, 1 or 2), or null at the
+    /// end. A part of no columns is only ever the first, when the cluster
+    /// begins with a codepoint that takes none.
+    pub fn next(p: *Parts) ?struct { bytes: []const u8, cols: u2 } {
+        const bytes = p.it.bytes;
+        const start = p.it.i;
+        const first = p.it.next() orelse return null;
+        const cols = codepointWidth(first);
+        while (true) {
+            const at = p.it.i;
+            const cp = p.it.next() orelse break;
+            if (codepointWidth(cp) != 0) {
+                p.it.i = at;
+                break;
+            }
+        }
+        return .{ .bytes = bytes[start..p.it.i], .cols = @intCast(@min(cols, 2)) };
+    }
+};
+
+/// Whether every codepoint of a cluster after its first takes no column of
+/// its own when measured by codepoint: a base and the marks, selectors and
+/// joiners that combine with it, and nothing that a terminal measuring by
+/// codepoint would put in a cell of its own.
+pub fn combinesOnly(grapheme: []const u8) bool {
+    var it: Utf8 = .init(grapheme);
+    _ = it.next() orelse return true;
+    while (it.next()) |cp| if (codepointWidth(cp) != 0) return false;
+    return true;
 }
 
 /// One codepoint's columns as `wcwidth(3)` counts them. uucode's
@@ -324,31 +371,58 @@ test "ascii is one column a byte" {
 }
 
 test "a cluster measured whole is two columns and measured per codepoint is not" {
-    const family = "\u{1f469}\u{200d}\u{1f680}";
-    try testing.expectEqual(@as(u2, 2), graphemeWidth(family, .unicode));
-    // Summed per codepoint the two emoji are two each, clamped at the cell
-    // pair a terminal will actually draw.
-    try testing.expectEqual(@as(u2, 2), graphemeWidth(family, .wcwidth));
-    try testing.expectEqual(@as(u2, 2), graphemeWidth("\u{4e2d}", .unicode));
-    try testing.expectEqual(@as(u2, 1), graphemeWidth("a", .unicode));
-    try testing.expectEqual(@as(u2, 1), graphemeWidth("\u{e9}", .unicode));
+    const astronaut = "\u{1f469}\u{200d}\u{1f680}";
+    try testing.expectEqual(@as(u16, 2), graphemeWidth(astronaut, .unicode));
+    // A terminal that measures by codepoint gives the woman two columns and
+    // the rocket the next two, the joiner none: four in all, and the grid
+    // has to hold them where the terminal does.
+    try testing.expectEqual(@as(u16, 4), graphemeWidth(astronaut, .wcwidth));
+    try testing.expectEqual(@as(u16, 2), graphemeWidth("\u{4e2d}", .unicode));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth("a", .unicode));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth("\u{e9}", .unicode));
+}
+
+test "the parts of a cluster measured by codepoint are the cells a terminal gives it" {
+    const cases = [_]struct { cluster: []const u8, parts: []const []const u8, cols: []const u2 }{
+        .{ .cluster = "\u{1f469}\u{200d}\u{1f680}", .parts = &.{ "\u{1f469}\u{200d}", "\u{1f680}" }, .cols = &.{ 2, 2 } },
+        .{ .cluster = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}", .parts = &.{ "\u{1f468}\u{200d}", "\u{1f469}\u{200d}", "\u{1f467}" }, .cols = &.{ 2, 2, 2 } },
+        .{ .cluster = "e\u{301}", .parts = &.{"e\u{301}"}, .cols = &.{1} },
+        .{ .cluster = "\u{26a0}\u{fe0f}", .parts = &.{"\u{26a0}\u{fe0f}"}, .cols = &.{1} },
+        .{ .cluster = "\u{1f44b}\u{1f3fd}", .parts = &.{ "\u{1f44b}", "\u{1f3fd}" }, .cols = &.{ 2, 2 } },
+        .{ .cluster = "\u{301}", .parts = &.{"\u{301}"}, .cols = &.{0} },
+    };
+    for (cases) |case| {
+        var parts: Parts = .init(case.cluster);
+        var total: u16 = 0;
+        for (case.parts, case.cols) |want, cols| {
+            const got = parts.next().?;
+            try testing.expectEqualStrings(want, got.bytes);
+            try testing.expectEqual(cols, got.cols);
+            total += got.cols;
+        }
+        try testing.expect(parts.next() == null);
+        try testing.expectEqual(graphemeWidth(case.cluster, .wcwidth), total);
+    }
+    try testing.expect(combinesOnly("e\u{301}\u{302}"));
+    try testing.expect(combinesOnly("a"));
+    try testing.expect(!combinesOnly("\u{1f469}\u{200d}\u{1f680}"));
 }
 
 test "a combining mark adds no columns to the cluster it joins" {
     // e followed by a combining acute is one cluster of one column.
-    try testing.expectEqual(@as(u2, 1), graphemeWidth("e\u{301}", .unicode));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth("e\u{301}", .unicode));
     try testing.expectEqual(@as(u16, 1), width("e\u{301}", .unicode));
 }
 
 test "measured per codepoint, a mark, a selector and a joiner take no column" {
     // wcwidth(3) counts a nonspacing mark as nothing, even with no base.
-    try testing.expectEqual(@as(u2, 1), graphemeWidth("e\u{301}", .wcwidth));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth("e\u{301}", .wcwidth));
     try testing.expectEqual(@as(u16, 1), width("c\u{30e}", .wcwidth));
-    try testing.expectEqual(@as(u2, 0), graphemeWidth("\u{301}", .wcwidth));
-    try testing.expectEqual(@as(u2, 1), graphemeWidth("\u{2764}\u{fe0f}", .wcwidth));
+    try testing.expectEqual(@as(u16, 0), graphemeWidth("\u{301}", .wcwidth));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth("\u{2764}\u{fe0f}", .wcwidth));
     // a skin tone is an emoji of its own to wcwidth(3)
-    try testing.expectEqual(@as(u2, 2), graphemeWidth("\u{1f3fd}", .wcwidth));
-    try testing.expectEqual(@as(u2, 2), graphemeWidth("\u{1f44b}\u{1f3fd}", .wcwidth));
+    try testing.expectEqual(@as(u16, 2), graphemeWidth("\u{1f3fd}", .wcwidth));
+    try testing.expectEqual(@as(u16, 4), graphemeWidth("\u{1f44b}\u{1f3fd}", .wcwidth));
 }
 
 test "the clusters come out whole" {
@@ -380,9 +454,11 @@ test "bytes that are not UTF-8 are a replacement each maximal subpart, and the n
         for (case.clusters) |want| try testing.expectEqualStrings(want, it.next().?);
         try testing.expectEqual(@as(?[]const u8, null), it.next());
     }
-    // Measured by codepoint, a cut sequence is the one column its
-    // replacement takes.
-    try testing.expectEqual(@as(u16, 3), width("\xe4\xb8\u{1f1e6}\u{1f1e7}", .wcwidth));
+    // A cut sequence is the one column its replacement takes, whatever the
+    // measure, and what follows it is measured as itself.
+    for ([_]Method{ .wcwidth, .unicode }) |m| {
+        try testing.expectEqual(1 + width("\u{1f1e6}\u{1f1e7}", m), width("\xe4\xb8\u{1f1e6}\u{1f1e7}", m));
+    }
 }
 
 test "wrapping by grapheme cuts wherever it must" {

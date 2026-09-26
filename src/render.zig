@@ -981,6 +981,9 @@ pub const Renderer = struct {
                 // OSC 66, one one-digit width key, the metadata terminator
                 // and ST.
                 cost += 11 + text.len;
+            } else if (r.marksApart(c, text, caps)) {
+                // Mode 2027 off and on again around it.
+                cost += 16 + text.len;
             } else {
                 cost += text.len;
             }
@@ -1237,6 +1240,10 @@ pub const Renderer = struct {
             } else if (toldWidth(c, caps)) {
                 try morse.textSize(out, .{ .width = c.glyphWidth() }, text);
                 stats.told += 1;
+            } else if (r.marksApart(c, text, caps)) {
+                try morse.unicodeCore.set(out, false);
+                try out.writeAll(text);
+                try morse.unicodeCore.set(out, true);
             } else {
                 try out.writeAll(text);
             }
@@ -1253,6 +1260,29 @@ pub const Renderer = struct {
             }
             r.advance(col, row);
         }
+    }
+
+    /// Whether a cluster goes out with mode 2027 off around it: a base and
+    /// the marks that combine with it, in the one column of a screen one
+    /// column wide, on a terminal measuring clusters.
+    ///
+    /// A terminal measuring clusters decides whether a codepoint joins the
+    /// cell before the cursor or the one under it, and the one under it is
+    /// only taken when the cursor is past the first column: after the base
+    /// fills the only column, the cursor waits there to wrap, and one such
+    /// terminal (Ghostty, whose grid the conformance build reads) drops the
+    /// mark that follows rather than join it. Measuring by codepoint, a
+    /// terminal joins a codepoint of no width to the cell under a cursor
+    /// waiting to wrap, so the cluster is written that way. Only clusters
+    /// that are nothing but a base and codepoints of no width to either
+    /// measure qualify: anything else would take a cell of its own measured
+    /// by codepoint, and wrap.
+    fn marksApart(r: *const Renderer, c: Cell, text: []const u8, caps: Caps) bool {
+        if (r.size.cols != 1 or caps.width_method != .unicode) return false;
+        if (c.isScaled() or c.width() != 1 or text.len < 2) return false;
+        const codepoints = std.unicode.utf8CountCodepoints(text) catch return false;
+        if (codepoints < 2) return false;
+        return textmod.combinesOnly(text) and textmod.graphemeWidth(text, .wcwidth) == 1;
     }
 
     /// The last column of the run starting at `col`.
@@ -3075,4 +3105,31 @@ test "the renderer gives its memory back under a failing allocator" {
             try r.resize(gpa, .{ .cols = 10, .rows = 4 });
         }
     }.run, .{});
+}
+
+test "a base and its marks in the only column go out with cluster measuring off around them" {
+    var f: Fixture = try .init(testing.allocator, 1, 2);
+    defer f.deinit();
+    try f.screen.write(0, 0, "e\u{301}", .{}, .none);
+    try f.screen.write(0, 1, "a", .{}, .none);
+    const stats = try f.draw();
+    const bytes = f.written();
+    try testing.expectEqual(bytes.len, stats.bytes);
+    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2027le\u{301}\x1b[?2027h") != null);
+    // Only there: a plain letter, and the same cluster where there is room
+    // for the cursor to move past it, go out as they are.
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, bytes, "2027l"));
+    var wide: Fixture = try .init(testing.allocator, 3, 1);
+    defer wide.deinit();
+    try wide.screen.write(2, 0, "e\u{301}", .{}, .none);
+    _ = try wide.draw();
+    try testing.expect(std.mem.indexOf(u8, wide.written(), "2027") == null);
+    // Nor measured by codepoint, where the terminal joins the mark anyway.
+    var narrow: Fixture = try .init(testing.allocator, 1, 1);
+    defer narrow.deinit();
+    narrow.caps.width_method = .wcwidth;
+    narrow.screen.method = .wcwidth;
+    try narrow.screen.write(0, 0, "e\u{301}", .{}, .none);
+    _ = try narrow.draw();
+    try testing.expect(std.mem.indexOf(u8, narrow.written(), "2027") == null);
 }

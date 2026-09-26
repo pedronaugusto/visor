@@ -166,7 +166,7 @@ with a `try`. Resizing allocates.
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `layers`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `child`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`. `Rect`, `Point`, `Size`. |
-| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
+| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
@@ -225,6 +225,14 @@ absolute move, the column, the row, the four relative moves, the carriage
 return, and backspaces — and the shortest wins, with the absolute move as the
 tie-break, because it is the one that is right whatever the terminal did with
 the last one.
+
+**Measured by codepoint, the grid holds what such a terminal shows.** A
+terminal that measures by codepoint gives every codepoint that takes columns
+cells of its own and joins the ones that take none to the cell before them,
+so the astronaut that is a woman, a joiner and a rocket is a woman in two
+columns and a rocket in the next two. `graphemeWidth` counts it that way and
+`Screen.write` puts such a cluster in those cells, so the grid never claims a
+cluster in two columns that the terminal spreads over four.
 
 **A row the terminal might measure differently is never diffed.** Whether the
 two width models disagree about a cluster is worked out once, when the cell is
