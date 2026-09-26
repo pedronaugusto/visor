@@ -169,7 +169,7 @@ with a `try`. Resizing allocates.
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `disagrees`, `wrap`, `Row`, `fit`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `count` — `Transmit`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -291,6 +291,21 @@ terminal's word unless asked to: an image sent quietly is shown at once, and
 one sent asking for an answer is shown on the answer or when the caller's grace
 period runs out, and a terminal that never answers is not waited for twice.
 
+**After a resize, nothing on the terminal is taken as known.** A terminal
+that changes size keeps what fitted, cuts it, moves its rows up with the
+cursor, or takes in a frame drawn at the old size after it changed, and says
+nothing about which. So `Renderer.resize`, like `repaint`, forgets the
+previous frame: the next `draw` writes every row whole, a row with nothing on
+it erased to the end of the line rather than taken to be blank already, and
+places every picture again, a placement with the same ids replacing the one
+the terminal kept wherever it went. There is no erase of the whole display
+first, because that takes every picture down with it. A program that hears of
+its size in band (mode 2048) hears of it after the terminal's grid changed,
+so its next frame lands on the new grid. The signal can come before the grid
+changes, and a frame drawn in that gap stays wrong until the next repaint, so
+`enter` turns 2048 on wherever `Caps.in_band_resize` says the terminal has
+it.
+
 **A cell's pixel size is the terminal's word, not a division.** The
 operating system and a resize report give the text area, which a terminal may
 pad, so the area divided by the grid is a little too large and the error grows
@@ -311,7 +326,10 @@ cancelling the task it runs in is what stops it.
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
 `Caps.Probe` writes the questions and folds the answers in; a caller who would
-rather trust the environment sets the fields itself.
+rather trust the environment sets the fields itself. A mode the terminal
+answers set or reset is one it has: nothing has turned synchronised output or
+in-band resize reports on when the probe asks, so a terminal that has them
+answers reset.
 
 **A frame is one write.** `draw` writes to a `*std.Io.Writer` and never
 flushes it, so batching is yours. `Stats.bytes` says how large the buffer
@@ -385,7 +403,11 @@ because the rule that repaints a drifting row exists for the case where the
 two disagree, and the protocol is the other way to settle it. The first three
 run again for an inline screen, taken at a cursor the prompt left somewhere
 down a taller terminal and growing and shrinking between frames, with the
-rows above it and the cursor below it at the end checked too.
+rows above it and the cursor below it at the end checked too. And once more
+across resizes: the terminal takes a new size first and keeps what fitted,
+frames drawn at the old size land after it, a drag passes through sizes the
+program never hears of, and the next frame at the size the program was told
+must leave the terminal showing exactly the screen.
 
 `zig build conformance` runs the same four properties again, over the same
 inputs, against a terminal emulator that is not this one's. `Term` ships with
@@ -396,7 +418,10 @@ through its own grid — every column's grapheme, its width, its style and its
 link, with two links that differ only by their `id` being two links. It is a
 build of its own under `conformance/`, with its own manifest pinning that
 emulator by commit, so nothing that builds a program on this package fetches
-one. CI runs it on Linux and macOS.
+one. The resize property runs there too, against the emulator's own resize,
+with pictures placed and moved across it and checked where the emulator has
+them; and the probe's questions go to the emulator and its answers back. CI
+runs it on Linux and macOS.
 
 Every widget is tested the same way round: drawn into a grid, rendered to
 bytes, fed to the emulator, and the picture the terminal shows compared with
@@ -424,7 +449,10 @@ checks the invariants and the damage map after every operation, a
 bytes, a frame in which one cell changed fewer than 64, and a frame in which
 nothing changed writes nothing. The generated corpus in `src/corpus.zig` runs
 on every push, and both builds replay the same bytes; `zig build test --fuzz`
-keeps searching beyond it.
+keeps searching beyond it. The resize properties draw from `corpus.Dice`, a
+generator seeded by each entry: the standard library's `Smith` answers a
+ranged question from eight bytes and gives the lowest value whenever they are
+out of range, so random bytes asked for a size answer one column and one row.
 
 What a frame costs, measured here on a 200 by 50 grid of 10,000 cells, ReleaseFast
 on an Apple M3 Max, best of five passes of a thousand frames each:

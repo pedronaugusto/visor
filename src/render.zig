@@ -118,6 +118,12 @@ fn mouseChange(w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!vo
     }
 }
 
+/// What the previous frame holds where the renderer does not know what the
+/// terminal shows: a cell with no grapheme at all, which no write puts on a
+/// screen. No row of a screen is ever equal to it or blank beside it, so a
+/// row of it is always written whole, blanks erased rather than skipped.
+const unknown: Cell = .{ .text = .{ .buf = @splat(0), .len = 0 }, .style = .{}, .link = .none, .shape = .{} };
+
 /// Anything `draw`, `enter` or `leave` can fail with.
 pub const Error = Writer.Error || error{
     /// The screen is not the size the renderer was made or resized to.
@@ -269,9 +275,11 @@ pub const Renderer = struct {
         r.* = undefined;
     }
 
-    /// A new size. The next draw writes every cell, because the terminal
-    /// reflowed whatever was on it and nothing about the old frame is known
-    /// any more.
+    /// A new size. The next draw writes every cell of every row, blank ones
+    /// included: what the terminal did to its rows on the way -- kept what
+    /// fitted, cut it, moved it up with the cursor, or took in a frame drawn
+    /// at the old size after it had changed -- is its own business, and
+    /// nothing about what it now shows is known.
     pub fn resize(r: *Renderer, gpa: Allocator, size: Size) Allocator.Error!void {
         var next: Renderer = .{
             .gpa = gpa,
@@ -295,16 +303,22 @@ pub const Renderer = struct {
         r.repaint();
     }
 
-    /// The next `draw` writes every cell.
+    /// The next `draw` writes every cell, as though the terminal could be
+    /// showing anything: the previous frame is forgotten, so a row the
+    /// screen holds blank is erased rather than taken to be blank already.
     pub fn repaint(r: *Renderer) void {
         r.repaint_all = true;
         r.cursor = null;
+        @memset(r.prev, unknown);
     }
 
-    /// One row written whole, absolutely positioned. What a drifting row
-    /// gets, and what a caller that suspects one row gives it.
+    /// One row written whole, absolutely positioned, as though the terminal
+    /// could be showing anything on it. What a caller that suspects one row
+    /// gives it.
     pub fn repaintRow(r: *Renderer, row: u16) void {
-        if (row < r.force.len) r.force[row] = true;
+        if (row >= r.force.len) return;
+        r.force[row] = true;
+        @memset(r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols], unknown);
     }
 
     /// Writes the difference between the last frame and this one. Allocates
@@ -338,7 +352,11 @@ pub const Renderer = struct {
         var frame: Frame = .init(w, r.buf, caps.sync and !caps.sync_unwanted);
         const out = &frame.writer;
 
-        if (r.repaint_all) try r.beginRepaint(out, caps);
+        if (r.repaint_all) {
+            try r.beginRepaint(out, caps);
+            // The terminal's pictures are as unknown as its text.
+            s.layers.repaint();
+        }
         if (body) {
             if (caps.scroll_detection and r.region == null) {
                 if (try scroll_detect.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
@@ -630,7 +648,15 @@ pub const Renderer = struct {
     }
 
     /// The terminal is in a state the renderer does not know, so it is put
-    /// into one it does.
+    /// into one it does: the style, the link and the cursor reset, and every
+    /// row written whole over whatever the previous frame, now `unknown`,
+    /// could not say.
+    ///
+    /// On the alternate screen there is no erase first. An erase of the
+    /// display takes every picture on it down with it, and the rule this
+    /// package keeps is that drawing text never disturbs a picture. Every
+    /// row written whole, its blanks erased to the end of the line, leaves
+    /// no cell of the terminal's grid unwritten without it.
     fn beginRepaint(r: *Renderer, out: *Writer, caps: Caps) Error!void {
         try r.hideForWrite(out);
         if (caps.osc8) try morse.hyperlinkEnd(out);
@@ -2143,7 +2169,9 @@ test "a failed frame is written in full when retried" {
     var failing: Writer = .fixed(&short);
     try testing.expectError(error.WriteFailed, f.renderer.draw(&failing, &f.screen, f.caps));
 
-    try f.expectBytes("\x1b]8;;\x1b\\\x1b[0m\x1b[2;1H    x\x1b[0K");
+    // Every row, the blank one erased: what part of the failed frame got
+    // through is not known.
+    try f.expectBytes("\x1b]8;;\x1b\\\x1b[0m\x1b[1;1H\x1b[0K\x1b[2d    x\x1b[0K");
     try f.expectBytes("");
 }
 
@@ -2847,6 +2875,52 @@ test "growing an inline screen takes more rows and keeps what was above" {
     try expectRowText(&t, 2, "b");
     try expectRowText(&t, 3, "");
     try expectRowText(&t, 4, "d");
+    try f.expectBytes("");
+}
+
+test "after a resize every row is written, the blank ones erased" {
+    var f: Fixture = try .init(testing.allocator, 6, 3);
+    defer f.deinit();
+    try f.screen.write(0, 2, "x", .{}, .none);
+    _ = try f.draw();
+
+    // The window grows a row. The terminal kept the "x" where it was; the
+    // new layout has nothing there, and the old frame is not what the
+    // terminal is known to show, so the row is erased, not skipped.
+    const size: Size = .{ .cols = 6, .rows = 4 };
+    try f.screen.resize(testing.allocator, size);
+    try f.renderer.resize(testing.allocator, size);
+    f.screen.clear();
+    try f.screen.write(0, 3, "y", .{}, .none);
+    try f.expectBytes("\x1b]8;;\x1b\\\x1b[0m" ++
+        "\x1b[1;1H\x1b[0K\x1b[2d\x1b[0K\x1b[3d\x1b[0K" ++
+        "\x1b[4dy\x1b[0K");
+    try f.expectBytes("");
+}
+
+test "a repaint erases a row the previous frame took to be blank" {
+    var f: Fixture = try .init(testing.allocator, 6, 2);
+    defer f.deinit();
+    var t: Term = try .init(testing.allocator, .{ .cols = 6, .rows = 2 });
+    defer t.deinit();
+    t.setMethod(.unicode);
+    _ = try f.draw();
+
+    // Something wrote to the terminal behind the renderer's back; the
+    // screen has nothing on that row, and a repaint is the way back.
+    try t.feed("\x1b[1;1Hjunk");
+    f.renderer.repaint();
+    _ = try f.draw();
+    try t.feed(f.written());
+    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+}
+
+test "a row repainted on suspicion is written whole even where it is blank" {
+    var f: Fixture = try .init(testing.allocator, 6, 2);
+    defer f.deinit();
+    _ = try f.draw();
+    f.renderer.repaintRow(1);
+    try f.expectBytes("\x1b[2d\x1b[0K");
     try f.expectBytes("");
 }
 

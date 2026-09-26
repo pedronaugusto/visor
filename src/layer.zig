@@ -175,6 +175,9 @@ pub const Layers = struct {
     /// The deflate window, made the first time a picture is compressed and
     /// kept for the next.
     window: []u8 = &.{},
+    /// Whether the next `emit` places every declared layer, whatever `shown`
+    /// says, because the terminal may have moved or dropped any of them.
+    replace_all: bool = false,
 
     /// Gives the lists and the window back.
     pub fn deinit(l: *Layers, gpa: Allocator) void {
@@ -370,6 +373,22 @@ pub const Layers = struct {
         }
     }
 
+    /// The next `emit` places every declared layer again, as though the
+    /// terminal could have moved or dropped any placement it had.
+    ///
+    /// Which it can: a terminal that changes size moves its rows about, and
+    /// a placement is pinned to a row; one a frame at the old size scrolled
+    /// goes up with the text, and one on a row the terminal gave up is
+    /// gone. A placement with the same image and placement id replaces the
+    /// one there without flicker, wherever it went, and brings back one
+    /// that went, so placing again is right either way. A layer that is no
+    /// longer declared is still deleted by name, wherever the terminal has
+    /// it. `Renderer` calls this on every repaint, so a program that
+    /// resizes need not.
+    pub fn repaint(l: *Layers) void {
+        l.replace_all = true;
+    }
+
     /// The placements and the deletions, after the text pass, in one block:
     /// every placement first, then the deletions, so a picture that replaces
     /// another covers it before it goes.
@@ -384,10 +403,10 @@ pub const Layers = struct {
         // Here: a placement command, which replaces whatever was at the same
         // image and placement id without flicker.
         for (l.declared.items, 0..) |now, i| {
-            if (findSameIndex(l.shown.items, now)) |before_i| {
+            if (!l.replace_all) if (findSameIndex(l.shown.items, now)) |before_i| {
                 const before = l.shown.items[before_i];
                 if (before.eql(now) and zOf(now, i) == zOf(before, before_i)) continue;
-            }
+            };
             try writePlace(w, now, zOf(now, i));
             written += 1;
         }
@@ -406,6 +425,7 @@ pub const Layers = struct {
     /// frame. Kept separate from `emit` so a failed output write can retry
     /// both placements and deletions unchanged.
     pub fn commitFrame(l: *Layers, caps: Caps) void {
+        l.replace_all = false;
         if (!caps.kitty_graphics) {
             l.declared.clearRetainingCapacity();
             return;
@@ -615,6 +635,34 @@ test "a layer that left is deleted by name and its bytes are kept" {
     try testing.expect(std.mem.indexOf(u8, bytes, "p=3") != null);
     try testing.expect(std.mem.indexOf(u8, bytes, "d=I") == null);
     try testing.expect(std.mem.indexOf(u8, bytes, "d=a") == null);
+}
+
+test "after a resize every picture is placed again, and one that left is still deleted" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    const stays: Layer = .{ .image = 1, .rect = .{ .col = 0, .row = 4, .cols = 4, .rows = 2 } };
+    const leaves: Layer = .{ .image = 2, .rect = .{ .col = 8, .row = 0, .cols = 4, .rows = 2 } };
+    try f.screen.layers.declare(testing.allocator, stays);
+    try f.screen.layers.declare(testing.allocator, leaves);
+    _ = try f.draw();
+
+    // The terminal took a new size and may have moved or dropped either;
+    // the one the layout keeps in the same cells is placed there again.
+    const size: geom.Size = .{ .cols = 24, .rows = 6 };
+    try f.screen.resize(testing.allocator, size);
+    try f.renderer.resize(testing.allocator, size);
+    try f.screen.layers.declare(testing.allocator, stays);
+    const stats = try f.draw();
+    try testing.expectEqual(@as(u32, 2), stats.placements);
+    const bytes = f.written();
+    try testing.expect(std.mem.indexOf(u8, bytes, "a=p") != null);
+    try testing.expect(std.mem.indexOf(u8, bytes, "i=1") != null);
+    try testing.expect(std.mem.indexOf(u8, bytes, "a=d") != null);
+    try testing.expect(std.mem.indexOf(u8, bytes, "i=2") != null);
+
+    // And once placed, it is known where it is again.
+    try f.screen.layers.declare(testing.allocator, stays);
+    try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
 }
 
 test "a picture swapped for another is placed before the old one goes" {

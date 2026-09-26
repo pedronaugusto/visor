@@ -22,6 +22,12 @@
 //! in mode 2027 measuring whole clusters, because the rule that repaints a
 //! drifting row exists for the case where the two models disagree.
 //!
+//! Then the same comparison across resizes, the emulator resizing its own
+//! grid the way it does for a window and frames at the old size landing
+//! after it, with pictures placed across them and checked where the
+//! emulator has them; and the probe's questions put to the emulator and its
+//! answers read back.
+//!
 //! This file is a module of its own. Nothing in the package imports it, and
 //! the dependency it needs is lazy, so a consumer of `visor` never fetches a
 //! terminal emulator.
@@ -51,6 +57,13 @@ const alphabet = [_][]const u8{
     "\u{1f469}\u{200d}\u{1f680}",
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
 };
+
+/// The graphemes the resize property draws from: the narrow and the wide,
+/// and none whose width the two models disagree about or whose marks
+/// combine, so that what it checks is where rows and cells end up across a
+/// resize and not how a cluster is measured, which the properties above
+/// are for.
+const resize_alphabet = [_][]const u8{ "a", "b", " ", "~", "\u{e9}", "\u{4e2d}", "\u{ff21}" };
 
 /// The styles it draws from: enough to exercise every arm of the colour
 /// union and both halves of the bold-and-dim off code.
@@ -126,6 +139,12 @@ const Oracle = struct {
         const gpa = o.gpa;
         o.term.deinit(gpa);
         gpa.destroy(o);
+    }
+
+    /// The window resized: the terminal's grid changes size, which it does
+    /// on its own and before any program hears of it.
+    fn resize(o: *Oracle, size: visor.Size) !void {
+        try o.term.resize(o.gpa, .{ .cols = size.cols, .rows = size.rows });
     }
 
     /// The bytes a frame wrote.
@@ -333,6 +352,28 @@ const Harness = struct {
         h.out.deinit();
     }
 
+    /// The alternate screen taken the way a program takes it.
+    fn enter(h: *Harness, o: *Oracle) !void {
+        h.out.clearRetainingCapacity();
+        try h.renderer.enter(&h.out.writer, h.caps, .alt, .{});
+        o.feed(h.out.written());
+    }
+
+    /// The program told of a new size: the grid and the renderer follow.
+    fn resize(h: *Harness, size: visor.Size) !void {
+        try h.screen.resize(h.gpa, size);
+        try h.renderer.resize(h.gpa, size);
+    }
+
+    /// A frame drawn and not yet delivered: its bytes, which the caller
+    /// feeds when it decides they arrive.
+    fn render(h: *Harness) ![]const u8 {
+        h.out.clearRetainingCapacity();
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        try testing.expectEqual(h.out.written().len, stats.bytes);
+        return h.out.written();
+    }
+
     /// One frame: draw, feed the bytes to the other terminal, compare.
     fn frame(h: *Harness, o: *Oracle) !visor.Renderer.Stats {
         h.out.clearRetainingCapacity();
@@ -346,7 +387,7 @@ const Harness = struct {
 
 /// One random operation on the grid. The same set the suite inside the
 /// package draws from, written against the public API.
-fn operate(h: *Harness, smith: *Smith) !void {
+fn operate(h: *Harness, smith: anytype, graphemes: []const []const u8) !void {
     const s = &h.screen;
     const cols = s.size.cols;
     const rows = s.size.rows;
@@ -354,7 +395,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
         0, 1, 2 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
-            const g = alphabet[smith.index(alphabet.len)];
+            const g = graphemes[smith.index(graphemes.len)];
             const style = styles[smith.index(styles.len)];
             const which = smith.index(uris.len);
             const link = try s.link(h.gpa, uris[which], params[which]);
@@ -378,7 +419,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(smith: *Smith, cols: u16, rows: u16) visor.Rect {
+fn randomRect(smith: anytype, cols: u16, rows: u16) visor.Rect {
     const col: u16 = @intCast(smith.index(cols));
     const row: u16 = @intCast(smith.index(rows));
     return .{
@@ -405,7 +446,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
     while (frames < 6 and !smith.eos()) : (frames += 1) {
         var ops: usize = 0;
         const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith);
+        while (ops < count) : (ops += 1) try operate(&h, smith, &alphabet);
 
         // The terminal shows the screen.
         _ = try h.frame(o);
@@ -466,6 +507,399 @@ test "the second emulator agrees, measuring by cluster" {
             try roundTrip(gpa, smith, .unicode);
         }
     }.one, .{ .corpus = &corpus.entries });
+}
+
+//=========================================================================
+// Resizing.
+//
+// A window being dragged is the terminal changing size on its own, the
+// program hearing of it afterwards, and frames in flight across both. The
+// program here hears of a size only after the terminal has taken it, which
+// is the order an in-band report (mode 2048) guarantees: the terminal sends
+// it once its grid is the new size. What the terminal does to its rows and
+// its cursor on the way is its own business; the property is that the next
+// frame drawn at the size the program was told leaves the terminal showing
+// exactly the screen, whatever came before.
+//=========================================================================
+
+/// A size somewhere in the generator's range, reached from `from` the way a
+/// window's edge moves: both ways, the width alone, or the height alone.
+fn nextSize(smith: anytype, from: visor.Size) visor.Size {
+    const cols = smith.valueRangeAtMost(u16, 1, 24);
+    const rows = smith.valueRangeAtMost(u16, 1, 12);
+    return switch (smith.valueRangeAtMost(u8, 0, 2)) {
+        0 => .{ .cols = cols, .rows = rows },
+        1 => .{ .cols = cols, .rows = from.rows },
+        else => .{ .cols = from.cols, .rows = rows },
+    };
+}
+
+/// What a program draws after a resize: now and then the whole layout
+/// again from nothing, as a program whose layout moved does, then some
+/// random operations.
+fn scribble(h: *Harness, smith: anytype) !void {
+    if (smith.value(bool)) h.screen.clear();
+    var ops: usize = 0;
+    const count = smith.valueRangeAtMost(u8, 1, 12);
+    while (ops < count) : (ops += 1) try operate(h, smith, &resize_alphabet);
+}
+
+/// ASCII along a row, one cell a byte.
+fn put(s: *visor.Screen, col: u16, row: u16, text: []const u8, style: visor.Style) !void {
+    for (text, 0..) |b, i| try s.write(col + @as(u16, @intCast(i)), row, &.{b}, style, .none);
+}
+
+/// The terminal passes through a size the program may never hear of, with
+/// a frame drawn at the program's size arriving after it, or not.
+fn dragThrough(h: *Harness, o: *Oracle, dice: *Dice, to: visor.Size) !void {
+    if (dice.value(bool)) {
+        try scribble(h, dice);
+        const stale = try h.render();
+        try o.resize(to);
+        o.feed(stale);
+    } else try o.resize(to);
+}
+
+/// The generator's questions answered from a seeded generator rather than
+/// from the input itself.
+///
+/// `Smith` reads eight bytes for every value it is asked for and answers
+/// the lowest value in range when those bytes are out of it, so a corpus
+/// entry of random bytes answers every ranged question with its minimum --
+/// a one-column, one-row terminal, every time. Seeded from the input, a
+/// run gets the whole range, and the corpus is that many different runs.
+const Dice = struct {
+    prng: std.Random.DefaultPrng,
+
+    fn init(smith: *Smith) Dice {
+        return .{ .prng = .init(smith.value(u64)) };
+    }
+
+    fn valueRangeAtMost(d: *Dice, comptime T: type, at_least: T, at_most: T) T {
+        return d.prng.random().intRangeAtMost(T, at_least, at_most);
+    }
+
+    fn index(d: *Dice, len: usize) usize {
+        return d.prng.random().uintLessThan(usize, len);
+    }
+
+    fn value(d: *Dice, comptime T: type) T {
+        comptime std.debug.assert(T == bool);
+        return d.prng.random().boolean();
+    }
+};
+
+fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
+    var dice: Dice = .init(smith);
+    var size: visor.Size = .{
+        .cols = dice.valueRangeAtMost(u16, 1, 24),
+        .rows = dice.valueRangeAtMost(u16, 1, 12),
+    };
+
+    var h: Harness = try .init(gpa, size, method);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, size, method);
+    defer o.deinit();
+    try h.enter(o);
+
+    try scribble(&h, &dice);
+    _ = try h.frame(o);
+
+    var drawn = true;
+    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    for (0..steps) |_| {
+        const to = nextSize(&dice, size);
+        switch (dice.valueRangeAtMost(u8, 0, 3)) {
+            // The terminal takes the size, then the program hears of it.
+            0 => {
+                try o.resize(to);
+                try h.resize(to);
+            },
+            // A frame drawn at the old size is still on its way when the
+            // terminal takes the new one, and lands after it.
+            1 => {
+                try dragThrough(&h, o, &dice, to);
+                try h.resize(to);
+            },
+            // A drag: the terminal passes through sizes the program never
+            // hears of, frames at the old size landing between them.
+            2 => {
+                var hops = dice.valueRangeAtMost(u8, 1, 3);
+                while (hops > 0) : (hops -= 1) try dragThrough(&h, o, &dice, nextSize(&dice, size));
+                try dragThrough(&h, o, &dice, to);
+                try h.resize(to);
+            },
+            // A drag the program hears every step of, drawing after none
+            // of them but the last.
+            else => {
+                var hops = dice.valueRangeAtMost(u8, 1, 3);
+                while (hops > 0) : (hops -= 1) {
+                    const mid = nextSize(&dice, size);
+                    try o.resize(mid);
+                    try h.resize(mid);
+                }
+                try o.resize(to);
+                try h.resize(to);
+            },
+        }
+        size = to;
+
+        // A frame now, or not until the next size.
+        drawn = dice.valueRangeAtMost(u8, 0, 3) != 0;
+        if (drawn) {
+            try scribble(&h, &dice);
+            _ = try h.frame(o);
+            try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+        }
+    }
+    if (!drawn) {
+        try scribble(&h, &dice);
+        _ = try h.frame(o);
+        try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+    }
+}
+
+test "the second emulator agrees across resizes, measuring by codepoint" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try resizeTrip(gpa, smith, .wcwidth);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the second emulator agrees across resizes, measuring by cluster" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try resizeTrip(gpa, smith, .unicode);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "a label is not left on the row it moved from when the window grows" {
+    const gpa = testing.allocator;
+    const small: visor.Size = .{ .cols = 20, .rows = 6 };
+    const tall: visor.Size = .{ .cols = 20, .rows = 8 };
+    var h: Harness = try .init(gpa, small, .unicode);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, small, .unicode);
+    defer o.deinit();
+    try h.enter(o);
+
+    // A mode label on the last row.
+    try put(&h.screen, 0, small.rows - 1, "H O L O M A P", .{ .bold = true });
+    _ = try h.frame(o);
+
+    // The window grows; the label moves to the new last row and the row it
+    // was on is blank in the new layout.
+    try o.resize(tall);
+    try h.resize(tall);
+    h.screen.clear();
+    try put(&h.screen, 0, tall.rows - 1, "H O L O M A P", .{ .bold = true });
+    _ = try h.frame(o);
+}
+
+test "a frame at the old size landing after the terminal shrank leaves nothing behind" {
+    const gpa = testing.allocator;
+    const wide: visor.Size = .{ .cols = 16, .rows = 5 };
+    const narrow: visor.Size = .{ .cols = 9, .rows = 3 };
+    var h: Harness = try .init(gpa, wide, .unicode);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, wide, .unicode);
+    defer o.deinit();
+    try h.enter(o);
+
+    for (0..wide.rows) |row| try put(&h.screen, 0, @intCast(row), "0123456789abcdef", .{});
+    _ = try h.frame(o);
+
+    // The program draws again at the width it knows; the terminal has
+    // already shrunk when the bytes arrive, so they wrap and scroll.
+    for (0..wide.rows) |row| try put(&h.screen, 0, @intCast(row), "fedcba9876543210", .{ .italic = true });
+    const stale = try h.render();
+    try o.resize(narrow);
+    o.feed(stale);
+
+    try h.resize(narrow);
+    h.screen.clear();
+    try put(&h.screen, 0, 1, "ok", .{});
+    _ = try h.frame(o);
+}
+
+/// Where the second emulator has a placement of an image, in cells, or
+/// null when it has none.
+fn placementOf(o: *const Oracle, image: u32, placement: u32) ?visor.Rect {
+    const screen = o.term.screens.active;
+    var it = screen.kitty_images.placements.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        if (key.image_id != image or key.placement_id.tag != .external or key.placement_id.id != placement) continue;
+        const pin = switch (entry.value_ptr.location) {
+            .pin => |pin| pin,
+            else => return null,
+        };
+        if (pin.garbage) return null;
+        const at = screen.pages.pointFromPin(.active, pin.*) orelse return null;
+        return .{
+            .col = @intCast(at.active.x),
+            .row = @intCast(at.active.y),
+            .cols = @intCast(entry.value_ptr.columns),
+            .rows = @intCast(entry.value_ptr.rows),
+        };
+    }
+    return null;
+}
+
+/// How many placements the second emulator has, garbage aside.
+fn placementCount(o: *const Oracle) usize {
+    var n: usize = 0;
+    var it = o.term.screens.active.kitty_images.placements.iterator();
+    while (it.next()) |entry| switch (entry.value_ptr.location) {
+        .pin => |pin| if (!pin.garbage) {
+            n += 1;
+        },
+        else => n += 1,
+    };
+    return n;
+}
+
+/// Every layer the screen shows is where the second emulator has it, and
+/// it has nothing else.
+fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
+    for (h.screen.layers.shown.items) |layer| {
+        const at = placementOf(o, layer.image, layer.placement) orelse {
+            std.debug.print("image {d}/{d}: drawn at {any}, the terminal has none\n", .{ layer.image, layer.placement, layer.rect });
+            return error.PlacementMissing;
+        };
+        if (!std.meta.eql(at, layer.rect)) {
+            std.debug.print("image {d}/{d}: drawn at {any}, the terminal has it at {any}\n", .{ layer.image, layer.placement, layer.rect, at });
+            return error.PlacementMoved;
+        }
+    }
+    try testing.expectEqual(h.screen.layers.shown.items.len, placementCount(o));
+}
+
+/// A picture of `id`, four by four pixels, sent the way a program sends one.
+fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
+    const pixels: [4 * 4 * 4]u8 = @splat(0x80);
+    h.out.clearRetainingCapacity();
+    _ = try h.screen.layers.transmit(h.gpa, &h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
+    o.feed(h.out.written());
+}
+
+/// Pictures across resizes: a few layers laid out, the terminal resized as
+/// the text property resizes it, the layers laid out again for the new
+/// size -- sometimes in the same cells, sometimes moved -- and every one
+/// where the terminal has it.
+fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
+    var dice: Dice = .init(smith);
+    var size: visor.Size = .{
+        .cols = dice.valueRangeAtMost(u16, 4, 24),
+        .rows = dice.valueRangeAtMost(u16, 4, 12),
+    };
+    var h: Harness = try .init(gpa, size, .unicode);
+    defer h.deinit();
+    h.caps.kitty_graphics = true;
+    const o = try Oracle.init(gpa, size, .unicode);
+    defer o.deinit();
+    try h.enter(o);
+
+    const pictures = dice.valueRangeAtMost(u32, 1, 3);
+    var id: u32 = 1;
+    while (id <= pictures) : (id += 1) try sendPicture(&h, o, id);
+
+    var rects: [3]visor.Rect = undefined;
+    for (rects[0..pictures]) |*r| r.* = randomRect(&dice, size.cols, size.rows);
+    try layOut(&h, rects[0..pictures]);
+    _ = try h.frame(o);
+    try expectLayersAgree(&h, o);
+
+    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    for (0..steps) |_| {
+        const to = nextSize(&dice, size);
+        var hops = dice.valueRangeAtMost(u8, 0, 2);
+        while (hops > 0) : (hops -= 1) try dragThrough(&h, o, &dice, nextSize(&dice, size));
+        try dragThrough(&h, o, &dice, to);
+        try h.resize(to);
+        size = to;
+
+        // Each picture keeps its cells where they still fit, or moves.
+        for (rects[0..pictures]) |*r| {
+            const fits = r.col + r.cols <= size.cols and r.row + r.rows <= size.rows;
+            if (!fits or dice.value(bool)) r.* = randomRect(&dice, size.cols, size.rows);
+        }
+        try layOut(&h, rects[0..pictures]);
+        try scribble(&h, &dice);
+        _ = try h.frame(o);
+        try expectLayersAgree(&h, o);
+        // The same layers again: nothing to write.
+        try layOut(&h, rects[0..pictures]);
+        try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+    }
+}
+
+/// This frame's layers: picture `i + 1` at `rects[i]`.
+fn layOut(h: *Harness, rects: []const visor.Rect) !void {
+    for (rects, 1..) |r, i| try h.screen.layers.declare(h.gpa, .{ .image = @intCast(i), .rect = r });
+}
+
+test "pictures stay where the program put them across resizes" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try layerResizeTrip(gpa, smith);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+//=========================================================================
+// The probe.
+//=========================================================================
+
+/// Everything the second emulator answered, for the probe to read.
+var answers: [4096]u8 = undefined;
+var answered: usize = 0;
+
+fn writePty(_: *vt.TerminalStream.Handler, data: []const u8) void {
+    @memcpy(answers[answered..][0..data.len], data);
+    answered += data.len;
+}
+
+fn deviceAttributes(_: *vt.TerminalStream.Handler) @typeInfo(@typeInfo(@typeInfo(@FieldType(vt.TerminalStream.Handler.Effects, "device_attributes")).optional.child).pointer.child).@"fn".return_type.? {
+    return .{};
+}
+
+test "the probe finds what the second emulator has, reset modes included" {
+    const gpa = testing.allocator;
+    var tiny: vt.TinyIo = .init;
+    var term: vt.Terminal = try .init(tiny.io(), gpa, .{ .cols = 80, .rows = 24 });
+    defer term.deinit(gpa);
+    var handler: vt.TerminalStream.Handler = .init(&term);
+    handler.effects.write_pty = &writePty;
+    handler.effects.device_attributes = &deviceAttributes;
+    var stream: vt.TerminalStream = .init(.{ .allocator = gpa, .handler = handler });
+    defer stream.deinit();
+
+    var probe: visor.Caps.Probe = .{ .graphics_id = 1 };
+    var questions: std.Io.Writer.Allocating = .init(gpa);
+    defer questions.deinit();
+    try probe.write(&questions.writer);
+    answered = 0;
+    stream.nextSlice(questions.written());
+
+    // Each answer framed the way a program's input reader frames it.
+    var parse_buf: [4096]u8 = undefined;
+    var parser: visor.morse.KeyParser = .init(&parse_buf);
+    var events = parser.feed(answers[0..answered]);
+    while (events.next()) |ev| switch (ev) {
+        .unhandled => |bytes| probe.feed(bytes),
+        else => {},
+    };
+
+    try testing.expect(probe.settled());
+    // Neither mode is on when the probe asks -- the emulator answers
+    // reset -- and both are there to be used.
+    try testing.expect(probe.caps.sync);
+    try testing.expect(probe.caps.in_band_resize);
+    try testing.expectEqual(visor.Method.unicode, probe.caps.width_method);
+    try testing.expect(probe.caps.kitty_keyboard);
 }
 
 test "two links that differ only by their id are two links to the second emulator" {

@@ -11,6 +11,15 @@
 //! This file is its own module so that the suite inside the package and the
 //! conformance build outside it replay the same bytes. Add to it rather than
 //! pruning it: every entry that ever failed is worth keeping.
+//!
+//! One caution about what the entries do. `std.testing.Smith` reads eight
+//! bytes for every value it is asked for and answers the lowest value in
+//! range whenever those eight bytes are out of it, which random bytes almost
+//! always are: a property that asks the input for a size gets one column and
+//! one row, every entry. `Dice` is the way round it -- a generator seeded
+//! from the input, which answers from the whole range.
+
+const std = @import("std");
 
 /// How many inputs there are.
 pub const len = 256;
@@ -34,4 +43,36 @@ pub const entries: [len][]const u8 = blk: {
     var slices: [len][]const u8 = undefined;
     for (&slices, 0..) |*s, i| s.* = frozen[i][0..];
     break :blk slices;
+};
+
+/// A property's questions answered by a generator seeded from the input,
+/// rather than by the input itself.
+///
+/// It answers the same questions `std.testing.Smith` does, by the same
+/// names, so a generator written against one takes the other. Each corpus
+/// entry is then a different run over the whole range of every question,
+/// and under `--fuzz` the fuzzer steers the seed.
+pub const Dice = struct {
+    prng: std.Random.DefaultPrng,
+
+    /// Seeded from the next eight bytes of the input.
+    pub fn init(smith: *std.testing.Smith) Dice {
+        return .{ .prng = .init(smith.value(u64)) };
+    }
+
+    /// A value from `at_least` to `at_most`, both included.
+    pub fn valueRangeAtMost(d: *Dice, comptime T: type, at_least: T, at_most: T) T {
+        return d.prng.random().intRangeAtMost(T, at_least, at_most);
+    }
+
+    /// An index below `count`, which must not be zero.
+    pub fn index(d: *Dice, count: usize) usize {
+        return d.prng.random().uintLessThan(usize, count);
+    }
+
+    /// A coin. `T` is `bool`, the one type the properties ask for whole.
+    pub fn value(d: *Dice, comptime T: type) T {
+        comptime std.debug.assert(T == bool);
+        return d.prng.random().boolean();
+    }
 };

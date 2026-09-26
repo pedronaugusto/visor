@@ -559,7 +559,9 @@ pub const Screen = struct {
 
     /// Puts rows `top` through `bottom` back inside the invariants after
     /// their cells moved without their neighbours: a head whose block is no
-    /// longer whole is cleared, and a tail nothing covers is blanked.
+    /// longer whole is cleared, a tail nothing covers is blanked, and a tail
+    /// a head does cover is made that head's, whichever grapheme left it
+    /// there -- as a terminal makes the cell after a wide character its own.
     fn heal(s: *Screen, top: u16, bottom: u16) void {
         var row_n = top;
         while (row_n <= bottom and row_n < s.size.rows) : (row_n += 1) {
@@ -568,7 +570,13 @@ pub const Screen = struct {
                 const i = s.index(col, row_n);
                 const c = s.cells[i];
                 if (c.isTail()) {
-                    if (s.headOf(col, row_n) == null) s.place(i, .blank(c.style));
+                    // Heads come before their tails in this sweep, so a head
+                    // found here is one whose block was kept.
+                    if (s.headOf(col, row_n)) |head| {
+                        var own = s.cells[s.index(head.col, head.row)];
+                        own.shape.kind = .spacer_tail;
+                        s.place(i, own);
+                    } else s.place(i, .blank(c.style));
                     continue;
                 }
                 if (c.width() == 1 and c.rows() == 1) continue;
@@ -979,6 +987,24 @@ test "a scroll that cuts a wide grapheme in half leaves two blanks" {
     try s.write(1, 1, "\u{4e2d}", .{}, .none);
     s.scroll(.{ .col = 2, .row = 0, .cols = 4, .rows = 2 }, 1);
     try checkInvariants(&s);
+}
+
+test "a wide grapheme moved beside another's covered column takes that column as its own" {
+    var s: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer s.deinit(testing.allocator);
+    s.method = .unicode;
+    try s.write(1, 0, "\u{4e2d}", .{ .bold = true }, .none);
+    try s.write(1, 1, "\u{ff21}", .{ .italic = true }, .none);
+
+    // The rectangle holds the heads and not the columns they cover, so the
+    // second head arrives beside the first one's covered column.
+    s.scroll(.{ .col = 0, .row = 0, .cols = 2, .rows = 2 }, 1);
+    var own = s.readCell(1, 0).?;
+    try testing.expectEqualStrings("\u{ff21}", s.textAt(1, 0));
+    own.shape.kind = .spacer_tail;
+    try testing.expect(s.readCell(2, 0).?.eql(own));
+    // And the column it left, with nothing over it now, is blank.
+    try testing.expect(s.readCell(2, 1).?.isBlankIn(.{ .italic = true }));
 }
 
 test "a resize keeps what still fits and damages everything" {

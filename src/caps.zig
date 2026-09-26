@@ -143,21 +143,24 @@ pub const Caps = struct {
         /// problem to diagnose.
         pub fn feed(p: *Probe, bytes: []const u8) void {
             if (morse.parseModeReply(bytes)) |reply| {
-                const on = reply.state == .set or reply.state == .permanently_set;
-                if (reply.mode == morse.syncOutput.number) p.caps.sync = on;
-                if (reply.mode == morse.inBandResize.number) p.caps.in_band_resize = on;
-                if (reply.mode == morse.unicodeCore.number) {
-                    // Not "is the mode set". A terminal that measures
-                    // clusters whatever anyone asks answers permanently set;
-                    // one that cannot answers permanently reset. Set, reset
-                    // and permanently set all mean clusters are measured,
-                    // because a terminal that can be asked will be; not
-                    // recognised and permanently reset mean they are not.
-                    p.caps.width_method = switch (reply.state) {
-                        .set, .reset, .permanently_set => .unicode,
-                        .not_recognized, .permanently_reset => .wcwidth,
-                    };
-                }
+                // The question is whether the terminal has the mode, and
+                // DECRQM answers whether it is on. Set, reset and
+                // permanently set are a terminal that has it -- one asked
+                // before anything turned it on answers reset -- and not
+                // recognised and permanently reset are one that does not.
+                const has = switch (reply.state) {
+                    .set, .reset, .permanently_set => true,
+                    .not_recognized, .permanently_reset => false,
+                };
+                // Synchronised output is a bracket written around a frame,
+                // and in-band resize reports are turned on by `enter`:
+                // neither is on when asked about.
+                if (reply.mode == morse.syncOutput.number) p.caps.sync = has;
+                if (reply.mode == morse.inBandResize.number) p.caps.in_band_resize = has;
+                // A terminal that measures clusters whatever anyone asks
+                // answers permanently set; one that can be asked will be,
+                // by `enter`.
+                if (reply.mode == morse.unicodeCore.number) p.caps.width_method = if (has) .unicode else .wcwidth;
                 return;
             }
             if (morse.parseKittyKeyboardReply(bytes)) |_| {
@@ -228,16 +231,30 @@ test "the probe asks its questions and ends with the one always answered" {
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
 }
 
-test "a mode reply turns its field on and a reset one turns it off" {
-    var p: Caps.Probe = .{ .graphics_id = 1 };
-    p.feed("\x1b[?2026;1$y");
-    try testing.expect(p.caps.sync);
-    p.feed("\x1b[?2026;2$y");
-    try testing.expect(!p.caps.sync);
-    p.feed("\x1b[?2027;1$y");
-    try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
-    p.feed("\x1b[?2048;1$y");
-    try testing.expect(p.caps.in_band_resize);
+test "a mode the terminal answers set or reset is one it has, and not recognised is one it lacks" {
+    // What a terminal with each of them says before anything turned them
+    // on: reset. That is a yes.
+    for ([_][]const u8{ "1", "2", "3" }) |state| {
+        var p: Caps.Probe = .{ .graphics_id = 1 };
+        var buf: [3][32]u8 = undefined;
+        p.feed(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state}));
+        p.feed(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state}));
+        p.feed(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state}));
+        try testing.expect(p.caps.sync);
+        try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
+        try testing.expect(p.caps.in_band_resize);
+    }
+    for ([_][]const u8{ "0", "4" }) |state| {
+        var p: Caps.Probe = .{ .graphics_id = 1 };
+        p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true };
+        var buf: [3][32]u8 = undefined;
+        p.feed(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state}));
+        p.feed(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state}));
+        p.feed(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state}));
+        try testing.expect(!p.caps.sync);
+        try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
+        try testing.expect(!p.caps.in_band_resize);
+    }
 }
 
 test "the probe settles on the device attributes answer and not before" {

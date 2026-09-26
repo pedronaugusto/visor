@@ -95,15 +95,22 @@ pub const Term = struct {
         return &t.scr;
     }
 
-    /// A new size. Everything on the terminal is lost, as it is on a real
-    /// one that reflowed.
+    /// A new size, the way a terminal's alternate screen takes one: the rows
+    /// and columns that still fit keep what they held, the rest is blank,
+    /// the cursor stays where it was as far as the new size allows, and the
+    /// scrolling region is the whole screen again.
+    ///
+    /// What survives is what a renderer must not assume away. A real
+    /// terminal keeps it -- or cuts it, or moves it up with the cursor, or
+    /// reflows it -- and says nothing, so a renderer that takes a resized
+    /// terminal to be blank leaves the old frame showing wherever the new
+    /// one has nothing to write.
     pub fn resize(t: *Term, size: Size) Allocator.Error!void {
         try t.scr.resize(t.gpa, size);
-        t.scr.clear();
         t.scroll_top = 0;
         t.scroll_bottom = if (size.rows == 0) 0 else size.rows - 1;
-        t.col = 0;
-        t.row = 0;
+        t.col = @min(t.col, if (size.cols == 0) 0 else size.cols - 1);
+        t.row = @min(t.row, if (size.rows == 0) 0 else size.rows - 1);
         t.wrap_pending = false;
     }
 

@@ -45,6 +45,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is read; a burst of signals is one event. `resized` is the same wake,
   asked without blocking, for a program with a loop of its own.
 - `Tty.inputFile`, the file keys and replies arrive on.
+- `Layers.repaint`: the next frame places every declared picture again, as
+  though the terminal could have moved or dropped any of them. `Renderer`
+  calls it on every repaint.
+- Round-trip properties across resizes, in the package's own suite and
+  against the second emulator: the terminal resized first and keeping what
+  fitted, frames at the old size landing after it, drags through sizes the
+  program never hears of, and pictures placed across them. The conformance
+  build also puts the probe's questions to the emulator.
 - `Layers` owns an image's whole life, so a program writes no graphics
   command itself. `transmit` sends pixels under an id, chunked, deflated when
   that makes them smaller, and quiet unless an answer is asked for; `ready`
@@ -129,6 +137,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Text was left on the screen after a resize.** A resize or a repaint gave
+  the renderer a blank previous frame, and a row the new frame held blank was
+  skipped as already blank, so whatever the terminal still showed there -- a
+  label on the row it moved from, a frame drawn at the old size landing after
+  the terminal changed -- stayed. The previous frame is now forgotten on a
+  repaint (and on `repaintRow` for that row), so every row is written, a
+  blank one erased to the end of the line. `Term.resize` keeps what fits, as
+  a terminal's alternate screen does, instead of clearing, which is what hid
+  this from the suite. A failed frame's retry now erases its blank rows too.
+- **A picture could be left where a resize put it.** The terminal moves a
+  placement with its row, or drops it with the row; the renderer took the
+  placement to be where it had put it. Every declared picture is placed again
+  on a repaint.
+- **`Caps.Probe` read a terminal that has synchronised output or in-band
+  resize reports as one without them.** Both are off when the probe asks, so
+  such a terminal answers reset, and the probe took reset for no. Set, reset
+  and permanently set now all mean the terminal has the mode. With it,
+  `enter` turns in-band resize reports on where the terminal has them, and
+  frames are bracketed where they are large enough.
+- A wide grapheme moved beside another's covered column (a scroll whose
+  rectangle holds the head and not the column) left that column carrying the
+  other grapheme's text and style. The column is now the new head's.
 - Bytes that are not UTF-8, written into the grid, reached the terminal as
   they were and were measured as something they were not. `Screen.write` and
   `writeScaled` now store the replacement character for them, which is what

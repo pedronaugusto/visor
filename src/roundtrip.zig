@@ -22,6 +22,12 @@
 //! shrinking between frames, with the rows above it and the cursor below it
 //! at the end checked too.
 //!
+//! And the first two across resizes: the terminal takes a new size before
+//! the program hears of it and keeps what fitted, frames drawn at the old
+//! size land after it, and the next frame at the new size must leave the
+//! terminal showing exactly the screen, the rows it has nothing to write on
+//! included.
+//!
 //! Pictures get the same treatment: random placements, moves, deletions,
 //! stacking changes and acknowledgements over the layers, with the checks
 //! that a frame with nothing new writes nothing, that the text pass is whole
@@ -76,6 +82,11 @@ const alphabet = [_][]const u8{
     "\u{1f469}\u{200d}\u{1f680}",
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
 };
+
+/// The graphemes the resize property draws from: the narrow and the wide,
+/// and none whose width the two models disagree about or whose marks
+/// combine.
+const resize_alphabet = [_][]const u8{ "a", "b", " ", "~", "\u{e9}", "\u{4e2d}", "\u{ff21}" };
 
 /// The styles it draws from: enough to exercise every arm of the colour
 /// union and both halves of the bold-and-dim off code.
@@ -162,7 +173,12 @@ fn checkGrid(s: *const Screen) !void {
             }
             if (c.link.index()) |li| try testing.expect(li < s.links.count());
             if (c.isTail()) {
-                try testing.expect(s.headOf(col, @intCast(r)) != null);
+                // A tail is its head's, content and all: the renderer never
+                // writes one, and the terminal makes its own from the head.
+                const head = s.headOf(col, @intCast(r)) orelse return error.OrphanTail;
+                var own = s.cells[s.index(head.col, head.row)];
+                own.shape.kind = .spacer_tail;
+                try testing.expect(c.eql(own));
                 col += 1;
                 continue;
             }
@@ -199,16 +215,35 @@ fn checkDamage(s: *const Screen, before: []const Cell) !void {
     }
 }
 
+/// What a generator may do to the grid.
+const Ops = struct {
+    /// The graphemes it writes.
+    graphemes: []const []const u8,
+    /// Whether it writes text drawn at more than one cell's size.
+    scaled: bool,
+};
+
+/// Everything: the whole alphabet, and scaled text.
+const every_op: Ops = .{ .graphemes = &alphabet, .scaled = true };
+
+/// What the resize property draws: text one cell tall, from the graphemes
+/// both width models agree on. Where a block of scaled text lands when the
+/// grid it was drawn on is cut is the grid's own question, asked by the
+/// properties above; this one asks where the terminal's rows and cells end
+/// up.
+const resize_ops: Ops = .{ .graphemes = &resize_alphabet, .scaled = false };
+
 /// One random operation on the grid.
-fn operate(h: *Harness, smith: *Smith) !void {
+fn operate(h: *Harness, smith: anytype, ops: Ops) !void {
     const s = &h.screen;
     const cols = s.size.cols;
     const rows = s.size.rows;
-    switch (smith.valueRangeAtMost(u8, 0, 7)) {
+    const graphemes = ops.graphemes;
+    switch (smith.valueRangeAtMost(u8, 0, if (ops.scaled) 7 else 6)) {
         0, 1, 2 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
-            const g = alphabet[smith.index(alphabet.len)];
+            const g = graphemes[smith.index(graphemes.len)];
             const style = styles[smith.index(styles.len)];
             const which = smith.index(uris.len);
             const link = try s.link(h.gpa, uris[which], params[which]);
@@ -217,7 +252,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
         7 => {
             const col: u16 = @intCast(smith.index(cols));
             const row: u16 = @intCast(smith.index(rows));
-            const g = alphabet[smith.index(alphabet.len)];
+            const g = graphemes[smith.index(graphemes.len)];
             const style = styles[smith.index(styles.len)];
             _ = try s.writeScaled(col, row, g, style, .none, smith.valueRangeAtMost(u3, 2, 3));
         },
@@ -245,7 +280,7 @@ fn operate(h: *Harness, smith: *Smith) !void {
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(smith: *Smith, cols: u16, rows: u16) geom.Rect {
+fn randomRect(smith: anytype, cols: u16, rows: u16) geom.Rect {
     const col: u16 = @intCast(smith.index(cols));
     const row: u16 = @intCast(smith.index(rows));
     return .{
@@ -286,7 +321,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
 
         var ops: usize = 0;
         const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith);
+        while (ops < count) : (ops += 1) try operate(&h, smith, every_op);
 
         try checkGrid(&h.screen);
         try checkDamage(&h.screen, before);
@@ -362,6 +397,123 @@ test "the round trip holds against a terminal told every width" {
     }.one, .{ .corpus = &corpus.entries });
 }
 
+/// The properties across resizes: the terminal takes a new size first and
+/// keeps whatever fitted, the program hears of it afterwards, and frames
+/// drawn at the old size land on the terminal after it changed. The next
+/// frame at the size the program was told must leave the terminal showing
+/// exactly the screen, the rows it has nothing new to write included.
+///
+/// Driven by `corpus.Dice`, so every entry is a run over the whole range of
+/// sizes rather than the one-cell terminal the input's own answers give.
+fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method) !void {
+    var dice: corpus.Dice = .init(smith);
+    var size: geom.Size = .{
+        .cols = dice.valueRangeAtMost(u16, 1, 24),
+        .rows = dice.valueRangeAtMost(u16, 1, 12),
+    };
+
+    var h: Harness = try .init(gpa, size, method);
+    defer h.deinit();
+    var t: Term = try .init(gpa, size);
+    defer t.deinit();
+    t.setMethod(terminalMethod(method));
+    h.out.clearRetainingCapacity();
+    try h.renderer.enter(&h.out.writer, h.caps, .alt, .{});
+    try t.feed(h.out.written());
+
+    try scribble(&h, &dice);
+    _ = try h.frame(&t);
+
+    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    for (0..steps) |step| {
+        const to = nextSize(&dice, size);
+        var hops = dice.valueRangeAtMost(u8, 0, 3);
+        const told_each = dice.value(bool);
+        // The terminal passes through sizes on the way, frames drawn at the
+        // size the program knows landing after each; the program hears of
+        // every one or only of the last.
+        while (hops > 0) : (hops -= 1) {
+            const mid = nextSize(&dice, size);
+            try stale(&h, &t, &dice, mid);
+            if (told_each) {
+                try h.screen.resize(gpa, mid);
+                try h.renderer.resize(gpa, mid);
+            }
+        }
+        try stale(&h, &t, &dice, to);
+        try h.screen.resize(gpa, to);
+        try h.renderer.resize(gpa, to);
+        try checkGrid(&h.screen);
+        size = to;
+
+        // A frame now, or not until the next size; always after the last.
+        if (step + 1 == steps or dice.valueRangeAtMost(u8, 0, 3) != 0) {
+            try scribble(&h, &dice);
+            _ = try h.frame(&t);
+            try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
+            h.screen.damageAll();
+            try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
+        }
+    }
+}
+
+/// The terminal resized to `to`, and now and then a frame drawn at the size
+/// the program still knows landing after it.
+fn stale(h: *Harness, t: *Term, dice: *corpus.Dice, to: geom.Size) !void {
+    if (dice.value(bool)) {
+        try scribble(h, dice);
+        h.out.clearRetainingCapacity();
+        _ = try h.renderer.draw(&h.out.writer, &h.screen, h.caps);
+        try t.resize(to);
+        try t.feed(h.out.written());
+    } else try t.resize(to);
+}
+
+/// What a program draws after a resize: now and then its whole layout again
+/// from nothing, then some operations.
+fn scribble(h: *Harness, dice: *corpus.Dice) !void {
+    if (dice.value(bool)) h.screen.clear();
+    var ops: usize = 0;
+    const count = dice.valueRangeAtMost(u8, 1, 12);
+    while (ops < count) : (ops += 1) try operate(h, dice, resize_ops);
+}
+
+/// A size in the generator's range, reached from `from` the way a window's
+/// edge moves: both ways, the width alone, or the height alone.
+fn nextSize(dice: *corpus.Dice, from: geom.Size) geom.Size {
+    const cols = dice.valueRangeAtMost(u16, 1, 24);
+    const rows = dice.valueRangeAtMost(u16, 1, 12);
+    return switch (dice.valueRangeAtMost(u8, 0, 2)) {
+        0 => .{ .cols = cols, .rows = rows },
+        1 => .{ .cols = cols, .rows = from.rows },
+        else => .{ .cols = from.cols, .rows = rows },
+    };
+}
+
+test "the round trip holds across resizes against a terminal measuring by codepoint" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTripResize(gpa, smith, .wcwidth);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the round trip holds across resizes against a terminal measuring by cluster" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTripResize(gpa, smith, .unicode);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
+test "the round trip holds across resizes against a terminal told every width" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
+            try roundTripResize(gpa, smith, .explicit);
+        }
+    }.one, .{ .corpus = &corpus.entries });
+}
+
 /// The rows of a terminal the inline screen occupies, compared with the
 /// screen cell by cell the way `expectScreensEqual` does, from the row the
 /// saved origin names.
@@ -430,7 +582,7 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method) !void 
         }
         var ops: usize = 0;
         const count = smith.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, smith);
+        while (ops < count) : (ops += 1) try operate(&h, smith, every_op);
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
@@ -618,7 +770,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith) !void {
                         held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
                     }
                 },
-                5, 6 => try operate(&h, smith),
+                5, 6 => try operate(&h, smith, every_op),
                 else => unreachable,
             }
         }
