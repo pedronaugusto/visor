@@ -16,6 +16,12 @@ pub fn build(b: *std.Build) void {
     //=====================================================================
 
     const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
+    // `conduit` owns the terminal's own calls -- raw mode and the way back,
+    // the size, the device's name -- for this package and for programs that
+    // run a child on a pseudo-terminal alike. Only its `conduit.tty` module
+    // is imported, which on Linux links no C library; the suite also takes
+    // `conduit` whole for the pseudo-terminal it tests against.
+    const conduit = b.dependency("conduit", .{ .target = target, .optimize = optimize });
     const uucode = b.dependency("uucode", .{
         .target = target,
         .optimize = optimize,
@@ -25,6 +31,7 @@ pub fn build(b: *std.Build) void {
     const imports = [_]std.Build.Module.Import{
         .{ .name = "morse", .module = morse.module("morse") },
         .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
     };
 
     //=====================================================================
@@ -89,6 +96,7 @@ pub fn build(b: *std.Build) void {
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
                 .{ .name = "manifest", .module = manifest_options.createModule() },
+                .{ .name = "conduit", .module = conduit.module("conduit") },
             }),
         }),
     });

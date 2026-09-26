@@ -140,9 +140,12 @@ only the base leaves the second line out. `morse` comes with it, re-exported
 as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
 program that wants the writers on their own.
 
-Two dependencies: [`morse`](https://github.com/pedronaugusto/morse) for every
-escape sequence written and every reply parsed, and `uucode` for grapheme
-segmentation and width. Both are pinned by commit. `uucode` builds its tables
+Three dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
+every escape sequence written and every reply parsed,
+[`conduit`](https://github.com/pedronaugusto/conduit) for the terminal's own
+calls — raw mode and the way back, the size, the device's name — of which only
+its `conduit.tty` module is imported, which on Linux links no C library, and
+`uucode` for grapheme segmentation and width. All are pinned by commit. `uucode` builds its tables
 at build time, and visor asks for six fields and no more — `grapheme_break`
 and `grapheme_break_no_control` for where one cluster ends and the next begins,
 `wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
@@ -401,11 +404,13 @@ the examples without running them, and CI does that for `x86_64-linux-gnu`,
 [`ci/linux.sh`](ci/linux.sh) runs the suite in Docker from any machine; it is
 a local script and no CI job calls it.
 
-`Tty` is the one file that calls an operating system. It is compiled on all
+`Tty` is the one file that reaches the operating system, through
+`conduit.tty`, which owns the terminal's calls for this package and for
+programs that run a child on a pseudo-terminal alike. It is compiled on all
 three platforms in CI, and on Linux and macOS the suite runs it against a
-pseudo-terminal it opens itself: the size with its pixels, entering and
-leaving, the panic path's way back, and a resize waking `Input`. The Windows
-half is compiled and not run.
+pseudo-terminal conduit opens: the size with its pixels, entering and leaving,
+the panic path's way back, and a resize waking `Input`. The Windows half is
+compiled and not run.
 
 ## Testing
 

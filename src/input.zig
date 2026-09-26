@@ -225,7 +225,7 @@ pub const Input = struct {
 };
 
 const testing = std.testing;
-const testing_pty = tty_mod.testing_pty;
+const conduit = @import("conduit");
 const corpus = @import("corpus");
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.
@@ -235,7 +235,7 @@ const Piped = struct {
     open_write: bool = true,
 
     fn init() !Piped {
-        const fds = try testing_pty.pipe();
+        const fds = try tty_mod.pipe();
         return .{
             .tty = .adopt(testing.io, .{ .handle = fds[0], .flags = .{ .nonblocking = false } }),
             .write_end = fds[1],
@@ -350,10 +350,9 @@ test "the end of the stream settles what was pending, then says so" {
 
 test "a resize wakes the wait and carries the size and pixels the system has now" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try testing_pty.open(testing.io);
-    defer pair.close();
-    try pair.setSize(.{ .row = 30, .col = 100, .xpixel = 900, .ypixel = 600 });
-    var t: Tty = .adopt(testing.io, pair.slave);
+    var pair = try conduit.Pty.open(.{ .rows = 30, .cols = 100, .x_pixel = 900, .y_pixel = 600 });
+    defer pair.close(testing.io);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
     try t.watchResize();
     defer t.unwatchResize();
 
@@ -367,7 +366,7 @@ test "a resize wakes the wait and carries the size and pixels the system has now
 
     // Several signals before the reader looks are one wake and one event,
     // with the size as it is by then.
-    try pair.setSize(.{ .row = 20, .col = 80, .xpixel = 720, .ypixel = 400 });
+    try pair.resize(.{ .rows = 20, .cols = 80, .x_pixel = 720, .y_pixel = 400 });
     try std.posix.raise(.WINCH);
     try std.posix.raise(.WINCH);
     const again = try in.next();

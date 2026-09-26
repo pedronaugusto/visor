@@ -14,12 +14,20 @@
 //! that is currently in raw mode, so `restoreGlobal` can put it back from a
 //! panic handler, where there is nothing to pass and nothing that may fail.
 //!
+//! The terminal's own calls -- raw mode and the way back, the size, the
+//! device's name and its foreground group -- are conduit's (`conduit.tty`),
+//! which owns them for this package and for the programs that run a child on
+//! a pseudo-terminal alike. What is here is what a screen needs on top: the
+//! controlling terminal opened, the modes a renderer entered undone on every
+//! way out, and a resize woken into the input.
+//!
 //! What this file will never hold: a parser, a screen, a frame, a clock, or
 //! a thread.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const morse = @import("morse");
+const terminal = @import("conduit.tty");
 
 const Winsize = @import("winsize.zig").Winsize;
 const render = @import("render.zig");
@@ -81,15 +89,16 @@ fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
     if (std.posix.errno(rc) != .SUCCESS) return error.Unexpected;
 }
 
-/// What the terminal was before this program touched it.
+/// What the terminal was before this program touched it: the mode of each
+/// handle, which on Windows is two.
 const Saved = if (is_windows) struct {
     input: windows.HANDLE,
     output: windows.HANDLE,
-    input_mode: windows.DWORD,
-    output_mode: windows.DWORD,
+    input_mode: terminal.Saved,
+    output_mode: terminal.Saved,
 } else struct {
     handle: std.posix.fd_t,
-    mode: std.posix.termios,
+    mode: terminal.Saved,
 };
 
 /// The descriptor, the saved mode, and the way back.
@@ -188,54 +197,22 @@ pub const Tty = struct {
     pub fn raw(t: *Tty) ModeError!void {
         if (t.saved != null) return;
         if (is_windows) {
-            var input_mode: windows.DWORD = 0;
-            var output_mode: windows.DWORD = 0;
-            if (GetConsoleMode(t.input.handle, &input_mode) == .FALSE) {
-                return error.NotATerminal;
-            }
-            if (GetConsoleMode(t.file.handle, &output_mode) == .FALSE) {
-                return error.NotATerminal;
-            }
+            const input_mode = terminal.rawMode(t.input.handle) catch |err| return modeError(err);
+            const output_mode = terminal.rawMode(t.file.handle) catch |err| {
+                terminal.restore(t.input.handle, input_mode) catch {};
+                return modeError(err);
+            };
             const saved: Saved = .{
                 .input = t.input.handle,
                 .output = t.file.handle,
                 .input_mode = input_mode,
                 .output_mode = output_mode,
             };
-            var want_in = input_mode;
-            want_in &= ~@as(windows.DWORD, ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT |
-                ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE);
-            want_in |= ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
-            var want_out = output_mode;
-            want_out |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
             t.saved = saved;
-            errdefer t.restore();
-            if (SetConsoleMode(t.input.handle, want_in) == .FALSE) return error.Unexpected;
-            if (SetConsoleMode(t.file.handle, want_out) == .FALSE) return error.Unexpected;
             open_tty = saved;
             return;
         }
-        const was = std.posix.tcgetattr(t.file.handle) catch return error.NotATerminal;
-        var want = was;
-        want.iflag.IGNBRK = false;
-        want.iflag.BRKINT = false;
-        want.iflag.PARMRK = false;
-        want.iflag.ISTRIP = false;
-        want.iflag.INLCR = false;
-        want.iflag.IGNCR = false;
-        want.iflag.ICRNL = false;
-        want.iflag.IXON = false;
-        want.oflag.OPOST = false;
-        want.lflag.ECHO = false;
-        want.lflag.ECHONL = false;
-        want.lflag.ICANON = false;
-        want.lflag.ISIG = false;
-        want.lflag.IEXTEN = false;
-        want.cflag.PARENB = false;
-        want.cflag.CSIZE = .CS8;
-        want.cc[@intFromEnum(std.posix.V.MIN)] = 1;
-        want.cc[@intFromEnum(std.posix.V.TIME)] = 0;
-        std.posix.tcsetattr(t.file.handle, .FLUSH, want) catch return error.Unexpected;
+        const was = terminal.rawMode(t.file.handle) catch |err| return modeError(err);
         const saved: Saved = .{ .handle = t.file.handle, .mode = was };
         t.saved = saved;
         open_tty = saved;
@@ -294,21 +271,13 @@ pub const Tty = struct {
     /// the input stream, in step with everything else, rather than out of
     /// band and after the fact.
     pub fn size(t: *Tty) SizeError!Winsize {
-        if (is_windows) {
-            var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
-            if (GetConsoleScreenBufferInfo(t.file.handle, &info) == .FALSE) {
-                return error.NotATerminal;
-            }
-            const cols = info.srWindow.Right - info.srWindow.Left + 1;
-            const rows = info.srWindow.Bottom - info.srWindow.Top + 1;
-            return .{ .cells = .{ .cols = @intCast(@max(cols, 0)), .rows = @intCast(@max(rows, 0)) } };
-        }
-        var ws: std.posix.winsize = undefined;
-        const err = std.posix.system.ioctl(t.file.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
-        if (std.posix.errno(err) != .SUCCESS) return error.NotATerminal;
+        const got = terminal.winSize(t.file.handle) catch |err| return switch (err) {
+            error.NotATerminal => error.NotATerminal,
+            error.Unexpected => error.Unexpected,
+        };
         return .{
-            .cells = .{ .cols = ws.col, .rows = ws.row },
-            .area = .{ .width = ws.xpixel, .height = ws.ypixel },
+            .cells = .{ .cols = got.cols, .rows = got.rows },
+            .area = .{ .width = got.x_pixel, .height = got.y_pixel },
         };
     }
 
@@ -409,28 +378,23 @@ pub const Tty = struct {
 /// process group, which belongs to one session and so to one terminal.
 /// Null when no standard stream is on it. macOS only.
 fn deviceOf(ctty: std.posix.fd_t, buf: *[std.posix.PATH_MAX]u8) ?[]const u8 {
-    const group = foregroundGroup(ctty) orelse return null;
+    const group = terminal.foregroundGroup(ctty) catch return null;
     for ([_]std.posix.fd_t{ 0, 1, 2 }) |fd| {
-        const theirs = foregroundGroup(fd) orelse continue;
+        const theirs = terminal.foregroundGroup(fd) catch continue;
         if (theirs != group) continue;
-        @memset(buf, 0);
-        if (std.posix.errno(std.posix.system.fcntl(fd, std.posix.F.GETPATH, @intFromPtr(buf))) != .SUCCESS) continue;
-        const path = std.mem.sliceTo(buf, 0);
+        const path = terminal.ttyName(fd, buf) catch continue;
         if (!std.mem.startsWith(u8, path, "/dev/") or std.mem.eql(u8, path, "/dev/tty")) continue;
         return path;
     }
     return null;
 }
 
-/// The foreground process group of the terminal `fd` is open on, or null
-/// when it is not a terminal. By ioctl, because Zig's libc bindings for
-/// macOS have neither `tcgetpgrp` nor the request's name. macOS only.
-fn foregroundGroup(fd: std.posix.fd_t) ?std.posix.pid_t {
-    const tiocgpgrp = 0x40047477; // _IOR('t', 119, int)
-    var group: std.posix.pid_t = 0;
-    const rc = std.posix.system.ioctl(fd, ioctlRequest(tiocgpgrp), @intFromPtr(&group));
-    if (std.posix.errno(rc) != .SUCCESS) return null;
-    return group;
+/// A primitive's failure as this file's.
+fn modeError(err: terminal.RawModeError) Tty.ModeError {
+    return switch (err) {
+        error.NotATerminal => error.NotATerminal,
+        error.ProcessOrphaned, error.Unexpected => error.Unexpected,
+    };
 }
 
 /// Puts the one open terminal back: the modes a renderer entered through
@@ -477,35 +441,14 @@ fn restoreSaved(was: Saved) void {
         writeRaw(if (is_windows) was.output else was.handle, out.buffered());
     }
     if (is_windows) {
-        _ = SetConsoleMode(was.input, was.input_mode);
-        _ = SetConsoleMode(was.output, was.output_mode);
+        terminal.restore(was.input, was.input_mode) catch {};
+        terminal.restore(was.output, was.output_mode) catch {};
         return;
     }
-    // At once, not after the output drains: a terminal that is not reading
-    // (paused, or gone) would hold a panicking program here for ever. What
-    // was written is already queued and is sent either way.
-    discardInput(was.handle);
-    std.posix.tcsetattr(was.handle, .NOW, was.mode) catch {};
-}
-
-/// Throws away what the terminal sent that nobody read, without waiting on
-/// the output: a late answer to a probe would otherwise land in the shell.
-fn discardInput(handle: std.posix.fd_t) void {
-    const T = std.posix.T;
-    if (@hasDecl(T, "CFLSH")) {
-        // TCIFLUSH, which is zero on every Linux architecture
-        _ = std.posix.system.ioctl(handle, ioctlRequest(T.CFLSH), @as(usize, 0));
-    } else if (@hasDecl(T, "IOCFLUSH")) {
-        var which: c_int = 1; // FREAD
-        _ = std.posix.system.ioctl(handle, ioctlRequest(T.IOCFLUSH), @intFromPtr(&which));
-    }
-}
-
-/// The request argument as this system's `ioctl` spells its type: a
-/// `c_int` through libc, where the high bit of a request is a sign bit.
-const IoctlRequest = if (is_windows) u32 else @typeInfo(@TypeOf(std.posix.system.ioctl)).@"fn".params[1].type.?;
-fn ioctlRequest(v: u32) IoctlRequest {
-    return if (@typeInfo(IoctlRequest).int.signedness == .signed) @bitCast(v) else @intCast(v);
+    // At once, not after the output drains, and with unread input thrown
+    // away: conduit's `restore` never waits on a terminal that is not reading
+    // (paused, or gone), which would hold a panicking program here for ever.
+    terminal.restore(was.handle, was.mode) catch {};
 }
 
 /// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
@@ -541,36 +484,11 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
 // C is involved. Nothing below is reached off Windows.
 //=========================================================================
 
-const ENABLE_PROCESSED_INPUT: windows.DWORD = 0x0001;
-const ENABLE_LINE_INPUT: windows.DWORD = 0x0002;
-const ENABLE_ECHO_INPUT: windows.DWORD = 0x0004;
-const ENABLE_WINDOW_INPUT: windows.DWORD = 0x0008;
-const ENABLE_EXTENDED_FLAGS: windows.DWORD = 0x0080;
-const ENABLE_QUICK_EDIT_MODE: windows.DWORD = 0x0040;
-const ENABLE_VIRTUAL_TERMINAL_INPUT: windows.DWORD = 0x0200;
-const ENABLE_VIRTUAL_TERMINAL_PROCESSING: windows.DWORD = 0x0004;
-const DISABLE_NEWLINE_AUTO_RETURN: windows.DWORD = 0x0008;
-
 const GENERIC_READ: windows.DWORD = 0x80000000;
 const GENERIC_WRITE: windows.DWORD = 0x40000000;
 const FILE_SHARE_READ: windows.DWORD = 0x00000001;
 const FILE_SHARE_WRITE: windows.DWORD = 0x00000002;
 const OPEN_EXISTING: windows.DWORD = 3;
-
-const SMALL_RECT = extern struct {
-    Left: windows.SHORT,
-    Top: windows.SHORT,
-    Right: windows.SHORT,
-    Bottom: windows.SHORT,
-};
-
-const CONSOLE_SCREEN_BUFFER_INFO = extern struct {
-    dwSize: windows.COORD,
-    dwCursorPosition: windows.COORD,
-    wAttributes: windows.WORD,
-    srWindow: SMALL_RECT,
-    dwMaximumWindowSize: windows.COORD,
-};
 
 extern "kernel32" fn CreateFileW(
     lpFileName: windows.LPCWSTR,
@@ -582,27 +500,12 @@ extern "kernel32" fn CreateFileW(
     hTemplateFile: ?windows.HANDLE,
 ) callconv(.winapi) windows.HANDLE;
 
-extern "kernel32" fn GetConsoleMode(
-    hConsoleHandle: windows.HANDLE,
-    lpMode: *windows.DWORD,
-) callconv(.winapi) windows.BOOL;
-
-extern "kernel32" fn SetConsoleMode(
-    hConsoleHandle: windows.HANDLE,
-    dwMode: windows.DWORD,
-) callconv(.winapi) windows.BOOL;
-
 extern "kernel32" fn WriteFile(
     hFile: windows.HANDLE,
     lpBuffer: [*]const u8,
     nNumberOfBytesToWrite: windows.DWORD,
     lpNumberOfBytesWritten: ?*windows.DWORD,
     lpOverlapped: ?*anyopaque,
-) callconv(.winapi) windows.BOOL;
-
-extern "kernel32" fn GetConsoleScreenBufferInfo(
-    hConsoleOutput: windows.HANDLE,
-    lpConsoleScreenBufferInfo: *CONSOLE_SCREEN_BUFFER_INFO,
 ) callconv(.winapi) windows.BOOL;
 
 const testing = std.testing;
@@ -647,9 +550,9 @@ fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
 
 test "entering through the terminal arms the way back, and the panic path undoes exactly that" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try testing_pty.open(testing.io);
-    defer pair.close();
-    var t: Tty = .adopt(testing.io, pair.slave);
+    var pair = try conduit.Pty.open(.{});
+    defer pair.close(testing.io);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
     const before = try std.posix.tcgetattr(t.file.handle);
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
@@ -671,7 +574,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     try copy.leave(&want);
 
     var seen: [1024]u8 = undefined;
-    const entered = try readAtLeast(testing.io, pair.master, &seen, 1);
+    const entered = try readAtLeast(testing.io, pair.readFile(), &seen, 1);
     try testing.expect(std.mem.startsWith(u8, entered, "\x1b[?1049h\x1b[>2u"));
 
     // The panic path: no argument, no allocation, no failure, and no wait
@@ -682,7 +585,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     try testing.expectEqual(@as(?Saved, null), open_tty);
     // what is left of the way in, then the way out, whole
     var out: [1024]u8 = undefined;
-    const undone = try readUntil(testing.io, pair.master, &out, "\x1b[<u\x1b[?1049l");
+    const undone = try readUntil(testing.io, pair.readFile(), &out, "\x1b[<u\x1b[?1049l");
     try testing.expect(std.mem.endsWith(u8, undone, want.buffered()));
     try testing.expect(std.mem.endsWith(u8, undone, "\x1b[<u\x1b[?1049l"));
     var after = try std.posix.tcgetattr(t.file.handle);
@@ -699,27 +602,27 @@ test "entering through the terminal arms the way back, and the panic path undoes
 
 test "leaving through the terminal disarms, and a renderer that goes away is forgotten" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try testing_pty.open(testing.io);
-    defer pair.close();
-    var t: Tty = .adopt(testing.io, pair.slave);
+    var pair = try conduit.Pty.open(.{});
+    defer pair.close(testing.io);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
     try t.enter(&r, .{}, .alt, .{ .paste = true });
     var seen: [256]u8 = undefined;
-    const bytes = try readUntil(testing.io, pair.master, &seen, "\x1b[?2004h");
+    const bytes = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?2004h");
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2004h") != null);
 
     // left with nothing reading the master: the way out must not wait on it
     try t.leave(&r);
     try testing.expect(armed == null);
     try testing.expect(t.saved == null);
-    const undone = try readUntil(testing.io, pair.master, &seen, "\x1b[?1049l");
+    const undone = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?1049l");
     try testing.expect(std.mem.indexOf(u8, undone, "\x1b[?2004l") != null);
 
     // Entered again, and the renderer goes away without leaving: the way
     // back forgets it rather than reaching for it.
     try t.enter(&r, .{}, .alt, .{});
-    _ = try readAtLeast(testing.io, pair.master, &seen, 1);
+    _ = try readAtLeast(testing.io, pair.readFile(), &seen, 1);
     r.deinit(testing.allocator);
     try testing.expect(armed == null);
     t.restore();
@@ -736,11 +639,10 @@ test "opening this program's terminal compiles and fails cleanly without one" {
 
 test "the size carries the text area in pixels where the terminal set it" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try testing_pty.open(testing.io);
-    defer pair.close();
-    try pair.setSize(.{ .row = 40, .col = 132, .xpixel = 1188, .ypixel = 800 });
+    var pair = try conduit.Pty.open(.{ .rows = 40, .cols = 132, .x_pixel = 1188, .y_pixel = 800 });
+    defer pair.close(testing.io);
 
-    var t: Tty = .adopt(testing.io, pair.slave);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
     const ws = try t.size();
     try testing.expectEqual(@as(u16, 132), ws.cells.cols);
     try testing.expectEqual(@as(u16, 40), ws.cells.rows);
@@ -753,7 +655,7 @@ test "the size carries the text area in pixels where the terminal set it" {
 
 test "a file that is not a terminal has no size" {
     if (is_windows) return error.SkipZigTest;
-    const fds = try testing_pty.pipe();
+    const fds = try pipe();
     defer {
         _ = std.posix.system.close(fds[0]);
         _ = std.posix.system.close(fds[1]);
@@ -762,64 +664,13 @@ test "a file that is not a terminal has no size" {
     try testing.expectError(error.NotATerminal, t.size());
 }
 
-/// A pseudo-terminal for the suite, opened without libc: the master from
-/// `/dev/ptmx`, unlocked and named by the ioctls each kernel spells its own
-/// way, and the slave by that name. Test-only.
-pub const testing_pty = struct {
-    pub const Pair = struct {
-        io: Io,
-        master: Io.File,
-        slave: Io.File,
+/// The pseudo-terminal the suite runs against is conduit's, as the
+/// terminal primitives are.
+const conduit = @import("conduit");
 
-        pub fn setSize(p: *Pair, ws: std.posix.winsize) !void {
-            const rc = std.posix.system.ioctl(p.master.handle, set_winsize, @intFromPtr(&ws));
-            if (std.posix.errno(rc) != .SUCCESS) return error.Unexpected;
-        }
-
-        pub fn close(p: *Pair) void {
-            p.slave.close(p.io);
-            p.master.close(p.io);
-        }
-    };
-
-    const set_winsize = ioctlRequest(switch (builtin.os.tag) {
-        .linux => std.os.linux.T.IOCSWINSZ,
-        else => 0x80087467,
-    });
-
-    pub fn open(io: Io) !Pair {
-        const master = try Io.Dir.openFileAbsolute(io, "/dev/ptmx", .{ .mode = .read_write });
-        errdefer master.close(io);
-        var name_buf: [128]u8 = @splat(0);
-        const name: []const u8 = switch (builtin.os.tag) {
-            .linux => blk: {
-                var unlock: c_int = 0;
-                if (std.posix.errno(std.posix.system.ioctl(master.handle, std.os.linux.T.IOCSPTLCK, @intFromPtr(&unlock))) != .SUCCESS)
-                    return error.Unexpected;
-                var n: c_uint = 0;
-                if (std.posix.errno(std.posix.system.ioctl(master.handle, std.os.linux.T.IOCGPTN, @intFromPtr(&n))) != .SUCCESS)
-                    return error.Unexpected;
-                break :blk try std.fmt.bufPrint(&name_buf, "/dev/pts/{d}", .{n});
-            },
-            .macos => blk: {
-                const grant = ioctlRequest(0x20007454); // TIOCPTYGRANT
-                const unlock = ioctlRequest(0x20007452); // TIOCPTYUNLK
-                const get_name = ioctlRequest(0x40807453); // TIOCPTYGNAME
-                if (std.posix.errno(std.posix.system.ioctl(master.handle, grant, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
-                if (std.posix.errno(std.posix.system.ioctl(master.handle, unlock, @as(usize, 0))) != .SUCCESS) return error.Unexpected;
-                if (std.posix.errno(std.posix.system.ioctl(master.handle, get_name, @intFromPtr(&name_buf))) != .SUCCESS)
-                    return error.Unexpected;
-                break :blk std.mem.sliceTo(&name_buf, 0);
-            },
-            else => return error.SkipZigTest,
-        };
-        const slave = try Io.Dir.openFileAbsolute(io, name, .{ .mode = .read_write });
-        return .{ .io = io, .master = master, .slave = slave };
-    }
-
-    pub fn pipe() ![2]std.posix.fd_t {
-        var fds: [2]std.posix.fd_t = undefined;
-        if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
-        return fds;
-    }
-};
+/// A pipe, for a test that wants a file that is not a terminal.
+pub fn pipe() ![2]std.posix.fd_t {
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
+    return fds;
+}

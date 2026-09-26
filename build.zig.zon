@@ -7,6 +7,7 @@
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
         .morse = .{ .path = "../morse" },
+        .conduit = .{ .path = "../conduit" },
     },
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xfc47eb8a53109791,
