@@ -175,6 +175,10 @@ pub const Layers = struct {
     /// The deflate window, made the first time a picture is compressed and
     /// kept for the next.
     window: []u8 = &.{},
+    /// Where a picture is deflated to, kept and reused for the next, so
+    /// sending pictures frame after frame allocates nothing once the buffer
+    /// has grown to the largest of them.
+    deflated: std.ArrayList(u8) = .empty,
     /// Whether the next `emit` places every declared layer, whatever `shown`
     /// says, because the terminal may have moved or dropped any of them.
     replace_all: bool = false,
@@ -185,6 +189,7 @@ pub const Layers = struct {
         l.declared.deinit(gpa);
         l.shown.deinit(gpa);
         gpa.free(l.window);
+        l.deflated.deinit(gpa);
         l.* = .{};
     }
 
@@ -221,8 +226,9 @@ pub const Layers = struct {
         pixels: []const u8,
         how: Transmit,
     ) (Writer.Error || Allocator.Error)!usize {
-        var packed_pixels: std.Io.Writer.Allocating = .init(gpa);
-        defer packed_pixels.deinit();
+        var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l.deflated);
+        defer l.deflated = packed_pixels.toArrayList();
+        packed_pixels.clearRetainingCapacity();
         var payload = pixels;
         var compressed = false;
         if (how.compress and how.format != .png and pixels.len > 64) {
@@ -995,4 +1001,20 @@ test "a program that asks for clicks gets clicks and no motion" {
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1003h") == null);
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1002l") != null);
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1003l") != null);
+}
+
+test "sending pictures again allocates nothing once the buffers have grown" {
+    var counting: std.testing.FailingAllocator = .init(testing.allocator, .{});
+    const gpa = counting.allocator();
+    var layers: Layers = .{};
+    defer layers.deinit(gpa);
+    var sink: std.Io.Writer.Discarding = .init(&.{});
+
+    // A dark picture, which deflates to a fraction of itself.
+    const pixels: [64 * 64 * 4]u8 = @splat(0);
+    _ = try layers.transmit(gpa, &sink.writer, 7, &pixels, .{ .width = 64, .height = 64 });
+    const grown = counting.allocations;
+    try testing.expect(grown > 0);
+    for (0..4) |_| _ = try layers.transmit(gpa, &sink.writer, 7, &pixels, .{ .width = 64, .height = 64 });
+    try testing.expectEqual(grown, counting.allocations);
 }
