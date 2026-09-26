@@ -266,6 +266,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Layers.transmit` allocated a buffer to deflate into on every call. The
   buffer is kept with the layers and reused, so sending pictures frame
   after frame allocates nothing once it has grown to the largest.
+- `visor.version` was a literal kept equal to the manifest by a test. It is
+  read from `build.zig.zon` at build time and documented as what it is:
+  the last release the source is or descends from, with what has changed
+  since under `[Unreleased]`.
 - **Text was left on the screen after a resize.** A resize or a repaint gave
   the renderer a blank previous frame, and a row the new frame held blank was
   skipped as already blank, so whatever the terminal still showed there -- a

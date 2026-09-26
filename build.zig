@@ -28,10 +28,18 @@ pub fn build(b: *std.Build) void {
         .fields = @as([]const []const u8, &uucode_fields),
     });
 
+    // The manifest's version, handed to the module so `visor.version` is
+    // the manifest's and cannot drift from it: there is no second literal to
+    // forget at a release.
+    const manifest_options = b.addOptions();
+    manifest_options.addOption([]const u8, "version", manifest.version);
+    const manifest_module = manifest_options.createModule();
+
     const imports = [_]std.Build.Module.Import{
         .{ .name = "morse", .module = morse.module("morse") },
         .{ .name = "uucode", .module = uucode.module("uucode") },
         .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
+        .{ .name = "manifest", .module = manifest_module },
     };
 
     //=====================================================================
@@ -80,11 +88,6 @@ pub fn build(b: *std.Build) void {
 
     const fuzzable = false;
 
-    // The manifest's version, handed to the suite so the exported constant
-    // is compared with the released one and not with a literal beside it.
-    const manifest_options = b.addOptions();
-    manifest_options.addOption([]const u8, "version", manifest.version);
-
     const tests = b.addTest(.{
         .name = "visor-tests",
         .use_llvm = needsLlvm(target, optimize),
@@ -95,7 +98,6 @@ pub fn build(b: *std.Build) void {
             .error_tracing = fuzzable,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
-                .{ .name = "manifest", .module = manifest_options.createModule() },
                 .{ .name = "conduit", .module = conduit.module("conduit") },
             }),
         }),

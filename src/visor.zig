@@ -47,8 +47,11 @@ const winsize_mod = @import("winsize.zig");
 /// adding a second dependency.
 pub const morse = @import("morse");
 
-/// The semantic version of this package, as a string.
-pub const version = "0.2.1";
+/// The version of the last release this source is, or descends from, as the
+/// manifest states it: a tree with changes under `[Unreleased]` in the
+/// changelog is that release and those changes. Read from `build.zig.zon`
+/// at build time, so there is no second copy to fall behind it.
+pub const version = @import("manifest").version;
 
 //=========================================================================
 // The grid's contents.
@@ -209,6 +212,6 @@ test {
     _ = @import("bench.zig");
 }
 
-test "the exported version matches the released package" {
-    try std.testing.expectEqualStrings(@import("manifest").version, version);
+test "the exported version is a semantic version" {
+    _ = try std.SemanticVersion.parse(version);
 }
