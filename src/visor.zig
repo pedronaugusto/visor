@@ -197,7 +197,7 @@ test {
     _ = palette_mod;
     _ = pool_mod;
     _ = render_mod;
-    _ = @import("scroll.zig");
+    _ = @import("moved_rows.zig");
     _ = screen_mod;
     _ = term_mod;
     _ = text_mod;

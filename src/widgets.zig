@@ -98,8 +98,6 @@ pub const Dataset = @import("widgets/chart.zig").Dataset;
 pub const Axis = @import("widgets/chart.zig").Axis;
 /// One bar of a bar chart.
 pub const Bar = @import("widgets/barchart.zig").Bar;
-/// One row of a table.
-pub const Row = @import("widgets/table.zig").Row;
 /// One line of a paragraph.
 pub const Line = @import("widgets/paragraph.zig").Line;
 /// One item of a list.

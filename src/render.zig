@@ -29,7 +29,7 @@ const morse = @import("morse");
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
-const scroll_detect = @import("scroll.zig");
+const moved_rows = @import("moved_rows.zig");
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
@@ -359,7 +359,7 @@ pub const Renderer = struct {
         }
         if (body) {
             if (caps.scroll_detection and r.region == null) {
-                if (try scroll_detect.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
+                if (try moved_rows.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
             }
             try r.drawRows(out, s, caps, &stats);
         }

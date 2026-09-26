@@ -13,8 +13,9 @@ const Constraint = layout.Constraint;
 const Style = visor.Style;
 const Window = visor.Window;
 
-/// One row of a table: one string a column.
-pub const Row = struct {
+/// One row of a table: one string a column. Named `Table.Row` outside this
+/// file.
+const TableRow = struct {
     /// The cells, left to right. A row with fewer than the table has
     /// columns leaves the rest blank.
     cells: []const []const u8,
@@ -31,6 +32,9 @@ pub const max_columns = 64;
 
 /// Rows in columns, with a header and a selection.
 pub const Table = struct {
+    /// One row: one string a column, and the style it draws in.
+    pub const Row = TableRow;
+
     /// The rows, in order.
     rows: []const Row,
     /// How wide each column is. One constraint a column.
@@ -169,7 +173,7 @@ pub const Table = struct {
 const testing = std.testing;
 const Harness = @import("harness.zig").Harness;
 
-const rows = [_]Row{
+const rows = [_]Table.Row{
     .{ .cells = &.{ "one", "1" } },
     .{ .cells = &.{ "two", "22" } },
     .{ .cells = &.{ "three", "333" } },
@@ -244,7 +248,7 @@ test "the columns are aligned where the table says" {
 }
 
 test "whatever the window, the selected row is under the header and on screen" {
-    const many = [_]Row{
+    const many = [_]Table.Row{
         .{ .cells = &.{"0"} }, .{ .cells = &.{"1"} }, .{ .cells = &.{"2"} },
         .{ .cells = &.{"3"} }, .{ .cells = &.{"4"} }, .{ .cells = &.{"5"} },
     };
