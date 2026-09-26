@@ -122,7 +122,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `marker_style` for both markers, a `gap` after them, an `ellipsis` for
     what is cut, an `aside_gap`, and `text_min`, how far the text gives way
     to the aside before the aside is cut instead. `selected_style` may be
-    null, for a program that styles the chosen item's runs itself.
+    null, for a program that styles the chosen item's runs itself, and so
+    may `style`, which leaves the rows as they are and writes only the
+    markers and the runs: a list laid over a panel whose ground is not the
+    list's to set.
     `List.visible` says which items a window shows and how many it does not,
     for a head that says "N more". A test draws a picker by hand at
     worked-out columns and through the list and finds the same cells, and

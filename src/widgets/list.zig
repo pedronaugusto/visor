@@ -46,8 +46,11 @@ pub const Item = struct {
 pub const List = struct {
     /// The items, in order.
     items: []const Item,
-    /// The style every row of an item is blanked to first.
-    style: Style = .{},
+    /// The style every row of an item is blanked to first, or null to leave
+    /// the rows as they are and write only the markers and the runs: a list
+    /// laid over what the program has already drawn, or a panel whose ground
+    /// is not the list's to set.
+    style: ?Style = .{},
     /// The style the selected item draws in, over its runs' own, or null to
     /// draw it in its runs' own styles, for a program that styles the chosen
     /// item's runs itself.
@@ -175,21 +178,21 @@ pub const List = struct {
         for (l.items[shown.first..][0..shown.count], shown.first..) |item, i| {
             const chosen = state.selected == i;
             const over: ?Style = if (chosen) l.selected_style else null;
-            const fill: Style = if (chosen and l.highlight_row) over orelse l.style else l.style;
+            const fill: ?Style = if (chosen and l.highlight_row) over orelse l.style else l.style;
 
             var line: usize = 0;
             while (line < item.rows() and row < win.rows()) : ({
                 line += 1;
                 row += 1;
             }) {
-                win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(fill));
+                if (fill) |ground| win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(ground));
                 const content = win.child(.{ .col = indent, .row = row, .rows = 1 });
                 if (line > 0) {
                     try l.drawRuns(content, item.below[line - 1], over, content.cols());
                     continue;
                 }
                 if (marker_width != 0) {
-                    const mark_style = l.marker_style orelse over orelse l.style;
+                    const mark_style = l.marker_style orelse over orelse l.style orelse Style{};
                     const mark = if (chosen) l.marker else l.blank_marker orelse blank: {
                         win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(mark_style));
                         break :blank "";
@@ -392,6 +395,38 @@ test "moving the selection stops at both ends" {
     try testing.expectEqual(@as(?usize, 2), state.selected);
     state.next(0);
     try testing.expectEqual(@as(?usize, null), state.selected);
+}
+
+test "a list with no ground leaves the rows as they were but for what it writes" {
+    var h: Harness = try .init(testing.allocator, 10, 2);
+    defer h.deinit();
+    // what was there: a row of dots in a style of their own
+    for (0..2) |row| for (0..10) |col| try h.window().write(@intCast(col), @intCast(row), ".", .{ .italic = true }, .none);
+    var state: List.State = .{ .selected = 1 };
+    try (List{
+        .items = &.{ .{ .text = "ab" }, .{ .text = "cd" } },
+        .style = null,
+        .selected_style = null,
+        .marker = ">",
+        .blank_marker = " ",
+    }).draw(h.window(), &state);
+    try h.expectFrame(
+        \\ ab.......
+        \\>cd.......
+        \\
+    );
+    // the marker, the runs and nothing else: the dots keep their style
+    try testing.expect(h.styleAt(5, 0).italic);
+    try testing.expect(!h.styleAt(1, 0).italic);
+    // and a selected style still reaches the edge where it is asked to
+    try (List{
+        .items = &.{ .{ .text = "ab" }, .{ .text = "cd" } },
+        .style = null,
+        .selected_style = .{ .bold = true },
+    }).draw(h.window(), &state);
+    _ = try h.frame();
+    try testing.expect(h.styleAt(9, 1).bold);
+    try testing.expect(h.styleAt(9, 0).italic);
 }
 
 test "the selected row is filled to the window's edge when it is highlighted" {
