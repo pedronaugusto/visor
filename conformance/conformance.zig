@@ -44,7 +44,8 @@ const testing = std.testing;
 
 /// The graphemes the generator draws from: ASCII, a combining pair, a wide
 /// one, a cluster too long to live in a cell, and the ones the two width
-/// models disagree about.
+/// models disagree about, and the ones a terminal measuring clusters would join
+/// to the cell beside them.
 const alphabet = [_][]const u8{
     "a",
     "b",
@@ -57,6 +58,15 @@ const alphabet = [_][]const u8{
     "\u{26a0}\u{fe0f}",
     "\u{1f469}\u{200d}\u{1f680}",
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
+    // Clusters a terminal measuring clusters joins to the cell on their left
+    // when the break rules say so: two regional indicators, a skin-tone
+    // modifier beside the emoji it modifies, a spacing mark beside anything.
+    "\u{1f1e6}",
+    "\u{1f1e7}",
+    "\u{1f44d}",
+    "\u{1f3fb}",
+    "\u{915}",
+    "\u{903}",
 };
 
 /// The styles it draws from: enough to exercise every arm of the colour
@@ -561,6 +571,41 @@ test "a mark on a terminal one column wide stays with its base" {
     try h.screen.write(0, 1, "a\u{301}\u{302}", .{ .bold = true }, .none);
     _ = try h.frame(o);
     try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+}
+
+test "cells the program drew apart stay apart on the second emulator, where it would join them" {
+    // The emulator joins a codepoint to the cell on the left of the cursor
+    // wherever the break rules find no break: regional indicators pair, a
+    // skin tone joins a thumb, a spacing mark joins anything. Each row puts
+    // such cells side by side, three regional indicators and a row of marks
+    // among them, drawn and then drawn again.
+    const gpa = testing.allocator;
+    const rows = [_][]const []const u8{
+        &.{ "\u{1f1e6}", "\u{1f1e7}", "\u{1f1e6}", "z" },
+        &.{ "\u{1f44d}", "\u{1f3fb}", "a", "\u{1f3fb}" },
+        &.{ "\u{915}", "\u{903}", "\u{903}", "\u{903}", "\u{903}", "\u{903}", "a", "\u{903}" },
+        &.{ "\u{4e2d}", "\u{903}", " ", "\u{903}", "\u{1f1e6}", "a" },
+    };
+    var h: Harness = try .init(gpa, .{ .cols = 16, .rows = rows.len }, .unicode);
+    defer h.deinit();
+    const o = try Oracle.init(gpa, h.screen.size, .unicode);
+    defer o.deinit();
+    try h.enter(o);
+    for (rows, 0..) |cells, row| {
+        var col: u16 = 0;
+        for (cells) |g| {
+            try h.screen.write(col, @intCast(row), g, .{}, .none);
+            col += visor.graphemeWidth(g, .unicode);
+        }
+    }
+    _ = try h.frame(o);
+    try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
+    // And the right-hand cells drawn again on their own, their neighbours
+    // unchanged on the terminal.
+    try h.screen.write(2, 0, "\u{1f1e7}", .{ .bold = true }, .none);
+    try h.screen.write(2, 1, "\u{1f3fb}", .{ .bold = true }, .none);
+    try h.screen.write(1, 2, "\u{903}", .{ .bold = true }, .none);
+    _ = try h.frame(o);
 }
 
 test "measured by codepoint, a cluster of wide codepoints is in the cells the terminal gives each" {

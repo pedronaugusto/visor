@@ -852,7 +852,7 @@ pub const Renderer = struct {
             if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
             cost += text.len;
             col += c.width();
-            if (caps.rep and repeatable(c, text)) {
+            if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, end - 1, visible(c, caps), caps);
                 if (@as(usize, same) > 3 + digits(same)) {
                     cost += 3 + digits(same);
@@ -991,14 +991,14 @@ pub const Renderer = struct {
                 // OSC 66, one one-digit width key, the metadata terminator
                 // and ST.
                 cost += 11 + text.len;
-            } else if (r.marksApart(c, text, caps)) {
+            } else if (r.marksApart(c, text, caps) or joinsApart(s, row, col, c, text, caps)) {
                 // Mode 2027 off and on again around it.
                 cost += 16 + text.len;
             } else {
                 cost += text.len;
             }
             col += c.width();
-            if (caps.rep and repeatable(c, text)) {
+            if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, to, visible(c, caps), caps);
                 if (@as(usize, same) > 3 + digits(same)) {
                     cost += 3 + digits(same);
@@ -1250,7 +1250,7 @@ pub const Renderer = struct {
             } else if (toldWidth(c, caps)) {
                 try morse.textSize(out, .{ .width = c.glyphWidth() }, text);
                 stats.told += 1;
-            } else if (r.marksApart(c, text, caps)) {
+            } else if (r.marksApart(c, text, caps) or joinsApart(s, row, col, c, text, caps)) {
                 try morse.unicodeCore.set(out, false);
                 try out.writeAll(text);
                 try morse.unicodeCore.set(out, true);
@@ -1259,7 +1259,7 @@ pub const Renderer = struct {
             }
             stats.cells += 1;
             col += c.width();
-            if (caps.rep and repeatable(c, text)) {
+            if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, to, visible(c, caps), caps);
                 if (@as(usize, same) > 3 + digits(same)) {
                     try morse.repeatChar(out, same);
@@ -1828,10 +1828,40 @@ fn toldWidth(c: Cell, caps: Caps) bool {
 
 /// Whether `REP` may stand in for further copies of a cell: one column, one
 /// codepoint, and measured the same way by every width model.
-fn repeatable(c: Cell, text: []const u8) bool {
+fn repeatable(c: Cell, text: []const u8, caps: Caps) bool {
     if (c.width() != 1 or c.shape.drift) return false;
     const len = std.unicode.utf8ByteSequenceLength(text[0]) catch return false;
-    return len == text.len;
+    if (len != text.len) return false;
+    // A repeat prints the codepoint again, and a terminal measuring clusters
+    // would join a spacing mark, say, to the copy before it.
+    return caps.width_method != .unicode or !textmod.joinsCell(text, text);
+}
+
+/// Whether a cluster goes out with mode 2027 off around it because a
+/// terminal measuring clusters would join it to the cell on its left.
+///
+/// Such a terminal joins by position: printing a codepoint, it runs the
+/// break rules over what the cell to the left of the cursor holds, and
+/// where there is no break the codepoint goes into that cell
+/// (`textmod.joinsCell`). A regional indicator beside another, a skin-tone
+/// modifier beside the emoji it modifies, a spacing mark beside anything:
+/// cells this package keeps apart would be one on the terminal. With mode
+/// 2027 off the terminal measures by codepoint and joins only codepoints of
+/// no width, so the cluster lands in a cell of its own -- the same cell,
+/// for the clusters that qualify: nothing after the first codepoint takes a
+/// column measured by codepoint, and the width comes out the same either
+/// way. The left cell is what the terminal holds there: this row is written
+/// from left to right, so it is the cell as this frame has it.
+fn joinsApart(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Caps) bool {
+    if (caps.width_method != .unicode or col == 0) return false;
+    if (c.isScaled() or c.width() == 0) return false;
+    const cells = s.rowAt(row);
+    var left = col - 1;
+    // The covered column of a wide cluster: the cluster is in its head.
+    if (visible(cells[left], caps).isTail() and left > 0) left -= 1;
+    const held: []const u8 = if (cells[left].isTail()) " " else s.textOf(&cells[left]);
+    if (!textmod.joinsCell(held, text)) return false;
+    return textmod.combinesOnly(text) and textmod.graphemeWidth(text, .wcwidth) == c.width();
 }
 
 /// How many cells from `col` show exactly `same`, stopping at `to`.
@@ -3136,6 +3166,62 @@ test "the renderer gives its memory back under a failing allocator" {
             try r.resize(gpa, .{ .cols = 10, .rows = 4 });
         }
     }.run, .{});
+}
+
+test "a cell a clustering terminal would join to the one beside it goes out with cluster measuring off" {
+    // Two regional indicators, a thumb and its skin tone, a letter and a
+    // spacing mark: cells apart here, one cell on a terminal that joins by
+    // the break rules. Each second one is written with mode 2027 off.
+    const joined = [_][2][]const u8{
+        .{ "\u{1f1e6}", "\u{1f1e7}" },
+        .{ "\u{1f44d}", "\u{1f3fb}" },
+        .{ "\u{915}", "\u{903}" },
+    };
+    for (joined) |pair| {
+        var f: Fixture = try .init(testing.allocator, 6, 1);
+        defer f.deinit();
+        try f.screen.write(0, 0, pair[0], .{}, .none);
+        try f.screen.write(textmod.graphemeWidth(pair[0], .unicode), 0, pair[1], .{}, .none);
+        const stats = try f.draw();
+        const bytes = f.written();
+        try testing.expectEqual(bytes.len, stats.bytes);
+        var want: [32]u8 = undefined;
+        const around = try std.fmt.bufPrint(&want, "\x1b[?2027l{s}\x1b[?2027h", .{pair[1]});
+        try testing.expect(std.mem.indexOf(u8, bytes, around) != null);
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, bytes, "2027l"));
+    }
+    // Apart already: a letter and a skin tone, a regional indicator and a
+    // letter, two letters. Nothing is switched.
+    const apart = [_][2][]const u8{
+        .{ "a", "\u{1f3fb}" },
+        .{ "\u{1f1e6}", "a" },
+        .{ "a", "b" },
+    };
+    for (apart) |pair| {
+        var f: Fixture = try .init(testing.allocator, 6, 1);
+        defer f.deinit();
+        try f.screen.write(0, 0, pair[0], .{}, .none);
+        try f.screen.write(textmod.graphemeWidth(pair[0], .unicode), 0, pair[1], .{}, .none);
+        _ = try f.draw();
+        try testing.expect(std.mem.indexOf(u8, f.written(), "2027") == null);
+    }
+    // A row of spacing marks is never a repeat: each copy would join the one
+    // before it.
+    var marks: Fixture = try .init(testing.allocator, 12, 1);
+    defer marks.deinit();
+    marks.caps.rep = true;
+    for (0..12) |col| try marks.screen.write(@intCast(col), 0, "\u{903}", .{}, .none);
+    _ = try marks.draw();
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, marks.written(), "b"));
+    // Measured by codepoint the terminal joins nothing of the kind.
+    var narrow: Fixture = try .init(testing.allocator, 6, 1);
+    defer narrow.deinit();
+    narrow.caps.width_method = .wcwidth;
+    narrow.screen.method = .wcwidth;
+    try narrow.screen.write(0, 0, "\u{1f1e6}", .{}, .none);
+    try narrow.screen.write(2, 0, "\u{1f1e7}", .{}, .none);
+    _ = try narrow.draw();
+    try testing.expect(std.mem.indexOf(u8, narrow.written(), "2027") == null);
 }
 
 test "a base and its marks in the only column go out with cluster measuring off around them" {

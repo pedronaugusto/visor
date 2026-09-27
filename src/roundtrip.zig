@@ -68,7 +68,8 @@ const testing = std.testing;
 
 /// The graphemes the generator draws from: ASCII, a combining pair, a wide
 /// one, a cluster too long to live in a cell, and the one the two width
-/// models disagree about.
+/// models disagree about, and the ones a terminal measuring clusters would join
+/// to the cell beside them.
 const alphabet = [_][]const u8{
     "a",
     "b",
@@ -81,6 +82,15 @@ const alphabet = [_][]const u8{
     "\u{26a0}\u{fe0f}",
     "\u{1f469}\u{200d}\u{1f680}",
     "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
+    // Clusters a terminal measuring clusters joins to the cell on their left
+    // when the break rules say so: two regional indicators, a skin-tone
+    // modifier beside the emoji it modifies, a spacing mark beside anything.
+    "\u{1f1e6}",
+    "\u{1f1e7}",
+    "\u{1f44d}",
+    "\u{1f3fb}",
+    "\u{915}",
+    "\u{903}",
 };
 
 /// The styles it draws from: enough to exercise every arm of the colour

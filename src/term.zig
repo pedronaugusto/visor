@@ -62,6 +62,10 @@ pub const Term = struct {
     saved: ?struct { col: u16, row: u16, style: Style } = null,
     /// The last codepoint printed, which is what `REP` repeats.
     previous: ?u21 = null,
+    /// Mode 2027 turned off with `CSI ? 2027 l`. Measuring clusters, the
+    /// terminal joins what it prints to the cell on the left of the cursor
+    /// where the break rules say so (`join`); with the mode off it does not.
+    clusters_off: bool = false,
 
     /// A terminal of a size, showing nothing.
     pub fn init(gpa: Allocator, size: Size) Allocator.Error!Term {
@@ -210,6 +214,13 @@ pub const Term = struct {
     /// The same, with the width the cluster was told to take rather than
     /// the one this terminal would measure.
     fn putAs(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
+        if (t.scr.size.cols == 0 or t.scr.size.rows == 0) return;
+        if (told == null and try t.join(grapheme)) return;
+        return t.place(grapheme, told);
+    }
+
+    /// A grapheme into a cell of its own, joined to nothing.
+    fn place(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
         const cols = t.scr.size.cols;
         if (cols == 0 or t.scr.size.rows == 0) return;
         const w: u16 = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
@@ -252,6 +263,65 @@ pub const Term = struct {
         }
     }
 
+    /// Measuring clusters, a grapheme the break rules join to the cell on the
+    /// left of the cursor goes into that cell, as Ghostty does: that is the
+    /// cell before the cursor, or the one under it when a write filled the
+    /// last column and the cursor waits to wrap, and never one in the first
+    /// column's place. The joined cell takes the width of what it now holds,
+    /// and the cursor moves past it. True when the grapheme was joined.
+    ///
+    /// A blank cell is taken as holding a space, which joins a spacing mark,
+    /// though a terminal's erased cell holds nothing and joins nothing: this
+    /// terminal cannot tell the two apart, and the renderer keeps a mark from
+    /// both alike.
+    fn join(t: *Term, grapheme: []const u8) Allocator.Error!bool {
+        if (t.scr.method != .unicode or t.clusters_off or t.col == 0) return false;
+        const cols = t.scr.size.cols;
+        var at: u16 = if (t.wrap_pending) t.col else t.col - 1;
+        if (t.scr.readCell(at, t.row)) |c| {
+            if (c.isTail() and at > 0) at -= 1;
+        }
+        const left = t.scr.readCell(at, t.row) orelse return false;
+        if (left.isTail() or left.isScaled()) return false;
+        const held = t.scr.textOf(&left);
+        if (!textmod.joinsCell(held, grapheme)) return false;
+
+        var buf: [64]u8 = undefined;
+        if (held.len + grapheme.len > buf.len) return false;
+        @memcpy(buf[0..held.len], held);
+        @memcpy(buf[held.len..][0..grapheme.len], grapheme);
+        const joined = buf[0 .. held.len + grapheme.len];
+        const w: u16 = @max(left.width(), @min(textmod.graphemeWidth(joined, .unicode), 2));
+        var head = at;
+        var row = t.row;
+        if (head + w > cols) {
+            // Grown too wide for the end of the row: a spacer where it was,
+            // and the whole cluster at the start of the next.
+            var spacer: Cell = .blank(t.style);
+            spacer.shape.kind = .spacer_head;
+            t.scr.writeOwnedCell(head, row, spacer);
+            t.col = 0;
+            t.lineFeed();
+            head = 0;
+            row = t.row;
+        }
+        const text = try t.scr.intern(t.gpa, joined);
+        t.scr.writeOwnedCell(head, row, .init(.{
+            .text = text,
+            .style = left.style,
+            .link = left.link,
+            .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(joined) },
+        }));
+        t.previous = lastCodepoint(grapheme);
+        t.wrap_pending = false;
+        t.col = head + w;
+        if (t.col >= cols) {
+            t.col = cols - 1;
+            t.wrap_pending = true;
+        }
+        return true;
+    }
+
     /// `CSI n b`, REP: the last codepoint printed, printed again `n` times,
     /// wrapping and scrolling exactly as printing it would.
     fn repeat(t: *Term, n: u32) Allocator.Error!void {
@@ -259,7 +329,7 @@ pub const Term = struct {
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(cp, &buf) catch return;
         var i: u32 = 0;
-        while (i < n) : (i += 1) try t.put(buf[0..len]);
+        while (i < n) : (i += 1) try t.place(buf[0..len], null);
     }
 
     /// Down one row, scrolling the region when there is nowhere to go.
@@ -409,6 +479,7 @@ pub const Term = struct {
             switch (n) {
                 25 => t.scr.cursor.visible = on,
                 7 => t.autowrap = on,
+                2027 => t.clusters_off = !on,
                 else => {},
             }
         }
@@ -1455,6 +1526,33 @@ test "a repeat prints the last codepoint again and wraps as printing would" {
     try testing.expectEqualStrings("xxxx", rowText(&t, 0, &buf));
     try testing.expectEqualStrings("xx  ", rowText(&t, 1, &buf));
     try testing.expectEqual(@as(u16, 2), t.col);
+}
+
+test "measuring clusters, a codepoint the break rules join goes into the cell on the left, wherever the cursor came from" {
+    // A regional indicator printed after a move, beside another: one flag.
+    var t = try made(8, 1);
+    defer t.deinit();
+    try t.feed("\u{1f1e6}\x1b[1;3H\u{1f1e7}z");
+    try testing.expectEqualStrings("\u{1f1e6}\u{1f1e7}", textAt(&t, 0, 0));
+    try testing.expectEqualStrings("z", textAt(&t, 2, 0));
+    // A spacing mark widens the letter it joins.
+    var mark = try made(8, 1);
+    defer mark.deinit();
+    try mark.feed("a\x1b[1;2H\u{903}z");
+    try testing.expectEqualStrings("a\u{903}", textAt(&mark, 0, 0));
+    try testing.expectEqual(Cell.Kind.wide, mark.screen().readCell(0, 0).?.shape.kind);
+    try testing.expectEqualStrings("z", textAt(&mark, 2, 0));
+    // With mode 2027 off, or in the first column, nothing joins.
+    var off = try made(8, 1);
+    defer off.deinit();
+    try off.feed("\u{1f1e6}\x1b[?2027l\u{1f1e7}\x1b[?2027h");
+    try testing.expectEqualStrings("\u{1f1e6}", textAt(&off, 0, 0));
+    try testing.expectEqualStrings("\u{1f1e7}", textAt(&off, 2, 0));
+    var first = try made(8, 2);
+    defer first.deinit();
+    try first.feed("a\x1b[2;1H\u{903}");
+    try testing.expectEqualStrings("a", textAt(&first, 0, 0));
+    try testing.expectEqualStrings("\u{903}", textAt(&first, 0, 1));
 }
 
 test "a repeat after a cluster repeats its last codepoint, as a terminal does" {

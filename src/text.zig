@@ -198,6 +198,31 @@ pub const Parts = struct {
     }
 };
 
+/// Whether a terminal measuring clusters puts `next` in the cell that holds
+/// `held` rather than in a cell of its own, when `next` is printed with the
+/// cursor just after that cell.
+///
+/// Such a terminal decides by position, not by what was written with it: it
+/// runs the Unicode break rules over the codepoints the cell to the left
+/// already holds and the first codepoint that arrives, and joins the two when
+/// there is no break. So two cells a program drew apart can meet in one: a
+/// regional indicator beside another is a flag, a skin-tone modifier beside
+/// an emoji it can modify is that emoji's skin tone, and a spacing mark joins
+/// whatever is to its left. Ghostty, whose grid the conformance build reads,
+/// does exactly this, with the rules in uucode that this package measures by.
+pub fn joinsCell(held: []const u8, next: []const u8) bool {
+    var state: uucode.grapheme.BreakState = .default;
+    var it: Utf8 = .init(held);
+    var previous = it.next() orelse return false;
+    while (it.next()) |cp| {
+        _ = uucode.grapheme.isBreakNoControl(previous, cp, &state);
+        previous = cp;
+    }
+    var rest: Utf8 = .init(next);
+    const first = rest.next() orelse return false;
+    return !uucode.grapheme.isBreakNoControl(previous, first, &state);
+}
+
 /// Whether every codepoint of a cluster after its first takes no column of
 /// its own when measured by codepoint: a base and the marks, selectors and
 /// joiners that combine with it, and nothing that a terminal measuring by
@@ -601,4 +626,25 @@ test "the canonical disagreement is the warning sign with a presentation selecto
     try testing.expect(disagrees("\u{26a0}\u{fe0f}"));
     try testing.expect(!disagrees("a"));
     try testing.expect(!disagrees("\u{4e2d}"));
+}
+
+test "a clustering terminal joins a cell to the one before it by the break rules, as Ghostty does" {
+    // Regional indicators pair, and only pair: a third starts a new flag.
+    try testing.expect(joinsCell("\u{1f1e6}", "\u{1f1e7}"));
+    try testing.expect(!joinsCell("\u{1f1e6}\u{1f1e7}", "\u{1f1e8}"));
+    try testing.expect(!joinsCell("a", "\u{1f1e7}"));
+    try testing.expect(!joinsCell("\u{1f1e6}", "a"));
+    // A skin-tone modifier joins an emoji it modifies and nothing else.
+    try testing.expect(joinsCell("\u{1f44d}", "\u{1f3fb}"));
+    try testing.expect(!joinsCell("a", "\u{1f3fb}"));
+    // A spacing mark joins whatever it follows, a space and a wide base
+    // included.
+    try testing.expect(joinsCell("\u{915}", "\u{903}"));
+    try testing.expect(joinsCell("a", "\u{903}"));
+    try testing.expect(joinsCell(" ", "\u{903}"));
+    try testing.expect(joinsCell("\u{4e2d}", "\u{903}"));
+    // And what a program writes every day joins nothing.
+    try testing.expect(!joinsCell("a", "b"));
+    try testing.expect(!joinsCell("\u{4e2d}", "\u{4e2d}"));
+    try testing.expect(!joinsCell("", "\u{903}"));
 }

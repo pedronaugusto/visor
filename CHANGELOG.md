@@ -263,6 +263,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Cells a clustering terminal would join stay apart.** A terminal in mode
+  2027 joins a codepoint to the cell on the left of the cursor wherever the
+  break rules find no break, so two regional indicators, a thumb and a skin
+  tone, or anything and a spacing mark, drawn in cells of their own, showed
+  as one cell. Such a cell now goes out with mode 2027 off around it, and a
+  codepoint that would join its own copy is never repeated with `REP`.
+  `Term`, the package's own emulator, joins the way the conformance build's
+  emulator does, and the round trip draws these clusters in both.
 - **A frame past 1024 bytes is bracketed.** The synchronised-output bracket
   was kept only for a frame larger than 8 KiB, on the reasoning that a
   smaller one reaches the terminal in one read. It does not: macOS's

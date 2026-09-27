@@ -237,6 +237,14 @@ columns and a rocket in the next two. `graphemeWidth` counts it that way and
 `Screen.write` puts such a cluster in those cells, so the grid never claims a
 cluster in two columns that the terminal spreads over four.
 
+**Measured by cluster, cells drawn apart stay apart.** A terminal in mode
+2027 joins a codepoint to the cell on the left of the cursor wherever the
+break rules find no break, whatever was drawn when: a regional indicator
+beside another is a flag, a skin tone beside a thumb is that thumb's tone,
+and a spacing mark joins anything. A cell that would join its neighbour goes
+out with the mode off around it, so the terminal measures it by codepoint and
+gives it a cell of its own, and such a codepoint is never repeated with `REP`.
+
 **A row the terminal might measure differently is never diffed.** Whether the
 two width models disagree about a cluster is worked out once, when the cell is
 written, and a row holding one is repainted whole from an absolute position
