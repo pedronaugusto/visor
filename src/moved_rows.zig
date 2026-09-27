@@ -197,10 +197,17 @@ fn longestBand(now: []const u64, was: []const u64, offset: i32) ?struct { first:
 /// before they are compared cell by cell.
 fn hashRow(cells: []const Cell, caps: Caps) u64 {
     if (render.shownAsHeld(caps)) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
+    // What the terminal shows, a stretch of cells at a time: fed to the hash
+    // one cell at a time, the streaming state costs more than the hashing.
+    // The value is the same however the input is cut.
     var h: std.hash.Wyhash = .init(0);
-    for (cells) |c| {
-        const seen = render.visible(c, caps);
-        h.update(std.mem.asBytes(&seen));
+    var seen: [64]Cell = undefined;
+    var i: usize = 0;
+    while (i < cells.len) {
+        const n = @min(seen.len, cells.len - i);
+        for (seen[0..n], cells[i..][0..n]) |*to, c| to.* = render.visible(c, caps);
+        h.update(std.mem.sliceAsBytes(seen[0..n]));
+        i += n;
     }
     return h.final();
 }

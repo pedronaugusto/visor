@@ -184,6 +184,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sides, which always breaks. The answer is the one the rules give, checked
   for every printable pair after every kind of cluster before it. A frame of
   a scrolled 200x50 grid takes 23% less time.
+- **The scroll detector hashes a row in stretches of cells.** On a terminal
+  without OSC 8 or scaled text, what it shows was fed to the hash one cell
+  at a time, and the hash's streaming state cost more than the hashing. The
+  hashes are the same; a scrolled 200x50 frame with detection on takes 19%
+  less time.
 - `Tty` builds on conduit's terminal primitives (`conduit.tty`) for raw
   mode, the way back, the size and the device's name, instead of its own
   copies of the same calls, and the suite's pseudo-terminal is conduit's.
