@@ -210,7 +210,24 @@ pub const Parts = struct {
 /// an emoji it can modify is that emoji's skin tone, and a spacing mark joins
 /// whatever is to its left. Ghostty, whose grid the conformance build reads,
 /// does exactly this, with the rules in uucode that this package measures by.
-pub fn joinsCell(held: []const u8, next: []const u8) bool {
+pub inline fn joinsCell(held: []const u8, next: []const u8) bool {
+    // Printable ASCII is Grapheme_Cluster_Break Other, and no rule joins
+    // Other to Other whatever came before it (GB999), so a cell of it beside
+    // a cell ending in it breaks without a table lookup. A byte below 0x80
+    // is a codepoint of its own even after an ill-formed sequence, so the
+    // last byte of `held` is its last codepoint. Most of every screen takes
+    // this path, and the renderer asks once for every cell it writes.
+    if (held.len != 0 and next.len != 0 and printable(held[held.len - 1]) and printable(next[0]))
+        return false;
+    return joinsCellByRules(held, next);
+}
+
+fn printable(byte: u8) bool {
+    return byte >= 0x20 and byte < 0x7f;
+}
+
+/// `joinsCell` without the shortcut: the break rules, codepoint by codepoint.
+fn joinsCellByRules(held: []const u8, next: []const u8) bool {
     var state: uucode.grapheme.BreakState = .default;
     var it: Utf8 = .init(held);
     var previous = it.next() orelse return false;
@@ -647,4 +664,30 @@ test "a clustering terminal joins a cell to the one before it by the break rules
     try testing.expect(!joinsCell("a", "b"));
     try testing.expect(!joinsCell("\u{4e2d}", "\u{4e2d}"));
     try testing.expect(!joinsCell("", "\u{903}"));
+}
+
+test "a cell of printable ASCII beside one ending in it is answered as the break rules answer it" {
+    // The shortcut, against the rules it stands for: every printable pair,
+    // after every kind of cluster the state could carry into the boundary
+    // -- a prepend, a flag half, a joiner, an Indic linker, a Hangul
+    // syllable, an ill-formed tail.
+    const heads = [_][]const u8{
+        "",         "\u{600}",  "\u{1f1e6}", "\u{1f44d}\u{200d}",  "\u{915}\u{94d}",
+        "\u{1100}", "\xe4\xb8", "\u{301}",   "\u{1f1e6}\u{1f1e7}", "\u{200d}",
+    };
+    var held: [16]u8 = undefined;
+    for (heads) |head| {
+        for (0x20..0x7f) |a| {
+            @memcpy(held[0..head.len], head);
+            held[head.len] = @intCast(a);
+            const h = held[0 .. head.len + 1];
+            for (0x20..0x7f) |b| {
+                const next = [_]u8{@intCast(b)};
+                try testing.expectEqual(joinsCellByRules(h, &next), joinsCell(h, &next));
+                // And the same before a cluster that starts with it.
+                const more = [_]u8{ @intCast(b), 0xcc, 0x81 };
+                try testing.expectEqual(joinsCellByRules(h, &more), joinsCell(h, &more));
+            }
+        }
+    }
 }
