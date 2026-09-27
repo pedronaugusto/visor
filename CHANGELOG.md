@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`Table` has List's marker style and window.** `Table.marker_style`
+  draws the marker, and the blank beside every other row, in a style of its
+  own; `Table.visible(rows, &state)` says which rows a window that tall
+  shows under its header, and how many it does not, with the offset moved
+  as `draw` moves it. A table drawn by hand at worked-out columns and the
+  same table drawn by `Table` are held to the same cells.
 - **Pictures through shared memory.** `Layers.shared_memory`, set by a
   program whose terminal may be on the same machine, puts each picture in a
   POSIX shared memory object (`shm_open`, or `/dev/shm` on Linux without

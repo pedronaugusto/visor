@@ -49,6 +49,10 @@ pub const Table = struct {
     selected_style: Style = .{ .reverse = true },
     /// Drawn before the selected row.
     marker: []const u8 = "",
+    /// The style the marker draws in, and the blank before every other row,
+    /// or null for the row's own: the selected style beside the selected
+    /// row and the table's style beside the rest.
+    marker_style: ?Style = null,
     /// Cells left empty between two columns.
     column_spacing: u16 = 1,
     /// Where the text sits in each column.
@@ -80,6 +84,26 @@ pub const Table = struct {
         }
     };
 
+    /// Which rows a window so many rows tall shows under the header.
+    pub const Visible = struct {
+        /// The first row shown.
+        first: usize,
+        /// How many are shown.
+        count: usize,
+        /// How many are not: what a head saying "N more" counts.
+        hidden: usize,
+    };
+
+    /// The rows a window `height` rows tall shows under its header, the
+    /// offset moved as `draw` moves it to keep the selection on screen. A
+    /// program asks before it draws, to say how many more there are.
+    pub fn visible(t: Table, height: u16, state: *State) Visible {
+        const room = height -| @intFromBool(t.header != null);
+        t.scrollIntoView(room, state);
+        const count = @min(t.rows.len -| state.offset, room);
+        return .{ .first = state.offset, .count = count, .hidden = t.rows.len - count };
+    }
+
     /// Draws the header and as many rows as are left, moving the offset
     /// when the selection would otherwise be off screen.
     pub fn draw(t: Table, win: Window, state: *State) std.mem.Allocator.Error!void {
@@ -103,28 +127,27 @@ pub const Table = struct {
             row = 1;
         }
 
-        const body_rows = win.rows() -| row;
-        t.scrollIntoView(body_rows, state);
-
-        var i: usize = 0;
-        while (row < win.rows() and state.offset + i < t.rows.len) : ({
-            row += 1;
-            i += 1;
-        }) {
-            const which = state.offset + i;
+        const shown = t.visible(win.rows(), state);
+        for (shown.first..shown.first + shown.count) |which| {
             const chosen = state.selected == which;
             const style = if (chosen) t.selected_style else t.rows[which].style;
             win.fill(
                 .{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 },
                 .blank(if (chosen) style else t.style),
             );
-            if (chosen and marker_width != 0) {
-                _ = try win.printSegment(
-                    .{ .text = t.marker, .style = style },
-                    .{ .col = 0, .row = row, .wrap = .none },
-                );
+            if (marker_width != 0) {
+                const mark_style = t.marker_style orelse if (chosen) style else t.style;
+                if (chosen) {
+                    _ = try win.printSegment(
+                        .{ .text = t.marker, .style = mark_style },
+                        .{ .col = 0, .row = row, .wrap = .none },
+                    );
+                } else if (t.marker_style) |blank| {
+                    win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(blank));
+                }
             }
             try t.drawRow(body, cells, row, t.rows[which], style);
+            row += 1;
         }
     }
 
@@ -295,3 +318,113 @@ test "a column's text is measured the way the screen measures" {
 }
 
 const sign = "\u{26a0}\u{fe0f}";
+
+test "what is shown under the header and how many are not, for a head that says so" {
+    var many: [12]Table.Row = undefined;
+    for (&many) |*r| r.* = .{ .cells = &.{"x"} };
+    const t: Table = .{ .rows = &many, .widths = &.{.{ .fill = 1 }}, .header = .{ .cells = &.{"n"} } };
+    // Six rows of window: the header and five rows, the selection at the
+    // bottom once it passes them.
+    var state: Table.State = .{ .selected = 9 };
+    try testing.expectEqual(Table.Visible{ .first = 5, .count = 5, .hidden = 7 }, t.visible(6, &state));
+    var fresh: Table.State = .{ .selected = 2 };
+    try testing.expectEqual(Table.Visible{ .first = 0, .count = 5, .hidden = 7 }, t.visible(6, &fresh));
+    // Without a header every row of the window is a row of the table.
+    const bare: Table = .{ .rows = &many, .widths = &.{.{ .fill = 1 }} };
+    var top: Table.State = .{};
+    try testing.expectEqual(Table.Visible{ .first = 0, .count = 6, .hidden = 6 }, bare.visible(6, &top));
+    // A window with room for the header alone shows no rows.
+    var none: Table.State = .{};
+    try testing.expectEqual(Table.Visible{ .first = 0, .count = 0, .hidden = 12 }, t.visible(1, &none));
+    var empty: Table.State = .{};
+    try testing.expectEqual(Table.Visible{ .first = 0, .count = 0, .hidden = 0 }, (Table{ .rows = &.{}, .widths = &.{.{ .fill = 1 }} }).visible(5, &empty));
+}
+
+test "what visible says is what draw draws" {
+    var many: [9]Table.Row = undefined;
+    const names = [_][]const u8{ "0", "1", "2", "3", "4", "5", "6", "7", "8" };
+    var cells: [names.len][1][]const u8 = undefined;
+    for (&many, &cells, names) |*r, *c, name| {
+        c.* = .{name};
+        r.* = .{ .cells = c };
+    }
+    const t: Table = .{ .rows = &many, .widths = &.{.{ .fill = 1 }}, .header = .{ .cells = &.{"n"} } };
+    var window_rows: u16 = 1;
+    while (window_rows <= many.len + 2) : (window_rows += 1) {
+        for (0..many.len) |chosen| {
+            var asked: Table.State = .{ .selected = chosen };
+            const shown = t.visible(window_rows, &asked);
+            var h: Harness = try .init(testing.allocator, 3, window_rows);
+            defer h.deinit();
+            var drawn: Table.State = .{ .selected = chosen };
+            try t.draw(h.window(), &drawn);
+            _ = try h.frame();
+            try testing.expectEqual(asked, drawn);
+            for (0..shown.count) |k| {
+                try testing.expectEqualStrings(names[shown.first + k], h.term.screen().textAt(0, @intCast(k + 1)));
+            }
+            // And nothing under the last of them.
+            if (shown.count + 1 < window_rows) {
+                try testing.expectEqualStrings(" ", h.term.screen().textAt(0, @intCast(shown.count + 1)));
+            }
+        }
+    }
+}
+
+test "a table drawn by hand at worked-out columns and the same table drawn by Table are the same cells" {
+    // The shape a program hand-rolls: a bold header, a marker in its own
+    // style and a blank in that style beside the other rows, the chosen row
+    // reversed, and a size in a column after the names.
+    const hot: Style = .{ .fg = .ansi(.yellow), .bold = true };
+    const head: Style = .{ .bold = true };
+    const chosen_style: Style = .{ .reverse = true };
+    const cols: u16 = 14;
+    const names = [_][]const u8{ "alpha", "beta", "gamma" };
+    const sizes = [_][]const u8{ "12k", "3.4M", "7" };
+    const sel: usize = 1;
+    // The marker takes two columns; the name fills what the size's five
+    // and one of spacing leave.
+    const name_cols: u16 = cols - 2 - 1 - 5;
+
+    var by_hand: Harness = try .init(testing.allocator, cols, names.len + 1);
+    defer by_hand.deinit();
+    const w = by_hand.window();
+    w.fill(.{ .row = 0, .cols = cols, .rows = 1 }, .blank(head));
+    _ = try w.printSegment(.{ .text = "name", .style = head }, .{ .col = 2, .wrap = .none });
+    _ = try w.printSegment(.{ .text = "size", .style = head }, .{ .col = 2 + name_cols + 1, .wrap = .none });
+    for (names, sizes, 0..) |name, size, i| {
+        const row: u16 = @intCast(i + 1);
+        const on = i == sel;
+        const style: Style = if (on) chosen_style else .{};
+        w.fill(.{ .row = row, .cols = cols, .rows = 1 }, .blank(style));
+        if (on) {
+            _ = try w.printSegment(.{ .text = "\u{25b8} ", .style = hot }, .{ .row = row, .wrap = .none });
+        } else {
+            w.fill(.{ .row = row, .cols = 2, .rows = 1 }, .blank(hot));
+        }
+        _ = try w.printSegment(.{ .text = name, .style = style }, .{ .col = 2, .row = row, .wrap = .none });
+        _ = try w.printSegment(.{ .text = size, .style = style }, .{ .col = 2 + name_cols + 1, .row = row, .wrap = .none });
+    }
+
+    var by_table: Harness = try .init(testing.allocator, cols, names.len + 1);
+    defer by_table.deinit();
+    var rows_buf: [names.len]Table.Row = undefined;
+    var cells: [names.len][2][]const u8 = undefined;
+    for (names, sizes, 0..) |name, size, i| {
+        cells[i] = .{ name, size };
+        rows_buf[i] = .{ .cells = &cells[i] };
+    }
+    var state: Table.State = .{ .selected = sel };
+    try (Table{
+        .rows = &rows_buf,
+        .widths = &.{ .{ .fixed = name_cols }, .{ .fixed = 5 } },
+        .header = .{ .cells = &.{ "name", "size" } },
+        .header_style = head,
+        .selected_style = chosen_style,
+        .marker = "\u{25b8} ",
+        .marker_style = hot,
+    }).draw(by_table.window(), &state);
+    _ = try by_hand.frame();
+    _ = try by_table.frame();
+    try visor.expectScreensEqual(&by_hand.screen, &by_table.screen);
+}
