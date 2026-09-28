@@ -2,11 +2,34 @@
 
 [![CI](https://github.com/pedronaugusto/visor/actions/workflows/ci.yml/badge.svg)](https://github.com/pedronaugusto/visor/actions/workflows/ci.yml)
 
-visor is a cell grid and a diff renderer for programs that draw their own
-screen. You draw into a grid; it writes the shortest run of bytes that moves
-the terminal from the frame it is showing to the one it should be showing. A
-second module, `visor.widgets`, holds a layout solver and seventeen widgets
-drawn on that grid, and the base never imports it.
+visor is for building terminal user interfaces in Zig. You draw a frame with
+its widgets and layout, or cell by cell, and it sends the terminal only what
+changed since the last one.
+
+- **Widgets and layout.** Seventeen widgets — lists, tables, tabs, text
+  input, gauges, sparklines, bar charts, charts, a canvas, a calendar and more
+  — placed by a layout of fixed sizes, percentages and shares. A widget is a
+  value drawn into a window; what outlives the frame, like a selection or a
+  scroll, stays in your program.
+- **Only the difference goes out.** The renderer prices every way of getting
+  from the frame on screen to the next one and writes the cheapest, as one
+  write. A frame with nothing new writes nothing.
+- **Text the terminal will agree with.** Wide characters, emoji, flags and
+  combining marks sit in the cells the terminal will put them in, whether it
+  measures by codepoint or by cluster.
+- **Pictures.** Images through the kitty graphics protocol, ordered with the
+  text, and through shared memory when the terminal is on the same machine.
+- **Full screen or inline.** The alternate screen, or a few rows at the prompt
+  that leave their last frame in the scrollback.
+- **Tested against a terminal.** Every frame the tests draw is fed to a
+  terminal emulator and compared cell by cell with what was drawn, and again
+  against a shipping emulator. The same comparison is there for your own
+  screens.
+
+Input — keys, mouse, paste, resizes and the terminal's replies — comes from
+[`morse`](https://github.com/pedronaugusto/morse), which visor re-exports
+whole. The base (`visor`) and the widgets (`visor.widgets`) are separate
+modules, and the base never imports the widgets.
 
 ## Usage
 
@@ -316,15 +339,6 @@ period runs out, and a terminal that never answers is not waited for twice.
 
 **A picture on the same machine goes through shared memory.** With
 `Layers.shared_memory` set, the pixels are put in a shared memory object and
-only its name goes through the terminal's input: no deflate and no base64 on
-the program's thread. The first one asks for an answer; an error, or no answer
-within the grace period, turns the medium off for good, and that picture is
-refused so the program sends it again in the escape code, which is what a
-terminal on another machine, over ssh, gets from then on. An object the
-terminal did not read is unlinked, never left behind.
-
-**A picture on the same machine goes through shared memory.** With
-`Layers.shared_memory` set, the pixels are put in a shared memory object and
 only its name goes through the terminal's input: no deflate, no base64, and a
 picture that cost a frame costs a copy (a full-screen picture on a 4K display,
 from about 15 ms to under 3). The first one asks for an answer; an error, or no
@@ -533,6 +547,13 @@ on an Apple M3 Max, best of five passes of a thousand frames each:
 | The same, with `Caps.scroll_detection` | 154 µs | 878 |
 | A page of widgets drawn into a blank grid | 257 µs | 2,445 |
 | Nothing changed | 0 | 0 |
+
+## Built with visor
+
+**tycho** — every coding agent in one folder: you talk to one, and it directs
+the rest, on a station drawn in the terminal. In development.
+
+<!-- screenshot: tycho, taken after the bay lands -->
 
 ## Requirements
 
