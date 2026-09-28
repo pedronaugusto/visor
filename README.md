@@ -137,13 +137,20 @@ try visor.morse.mouse(&w, .{ .motion = .press });
 ```
 <!-- END GENERATED -->
 
-Three more examples are built and run by the same command.
+Four more examples are built and run by the same command.
 [`examples/viewer.zig`](examples/viewer.zig) is a file viewer on the widgets —
 a sidebar, a scrollbar, a status line and a resize —
 [`examples/gallery.zig`](examples/gallery.zig) draws every widget once, and
 [`examples/progress.zig`](examples/progress.zig) is a screen of two rows at
 the prompt, in inline mode, that grows to three and leaves its last frame in
 the history.
+[`examples/scope.zig`](examples/scope.zig) is a live audio scope — a
+waveform, one channel against the other, and a spectrum — drawn on the
+canvas from sound piped in:
+
+```sh
+ffmpeg -loglevel quiet -i song.flac -f s16le -ac 2 -ar 48000 - | zig build scope
+```
 
 ## Install
 

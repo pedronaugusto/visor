@@ -162,7 +162,16 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
-        examples_step.dependOn(&b.addRunArtifact(example).step);
+        const run = b.addRunArtifact(example);
+        // The scope reads sound from standard input and draws on the
+        // terminal; here it draws a generated chirp and reads it back.
+        if (std.mem.eql(u8, source, "examples/scope.zig")) {
+            run.addArg("--check");
+            const live = b.addRunArtifact(example);
+            live.stdio = .inherit;
+            b.step("scope", "Draw raw 16-bit stereo sound from standard input, live").dependOn(&live.step);
+        }
+        examples_step.dependOn(&run.step);
         check_step.dependOn(&example.step);
     }
     test_step.dependOn(examples_step);
@@ -227,6 +236,7 @@ const example_sources = [_][]const u8{
     "examples/viewer.zig",
     "examples/gallery.zig",
     "examples/progress.zig",
+    "examples/scope.zig",
 };
 
 /// The `uucode` fields this package builds into its tables.
