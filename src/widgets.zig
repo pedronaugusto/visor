@@ -55,6 +55,8 @@ pub const offset = layout_mod.offset;
 pub const Block = @import("widgets/block.zig").Block;
 /// Lines of text, wrapped, aligned and scrolled.
 pub const Paragraph = @import("widgets/paragraph.zig").Paragraph;
+/// Styled items at the left and right edges of one row.
+pub const Row = @import("widgets/row.zig").Row;
 /// Items in a column, with a selection that scrolls itself into view.
 pub const List = @import("widgets/list.zig").List;
 /// Rows in columns, with a header and a selection.
@@ -109,6 +111,7 @@ test {
     _ = layout_mod;
     _ = @import("widgets/block.zig");
     _ = @import("widgets/paragraph.zig");
+    _ = @import("widgets/row.zig");
     _ = @import("widgets/list.zig");
     _ = @import("widgets/table.zig");
     _ = @import("widgets/tabs.zig");

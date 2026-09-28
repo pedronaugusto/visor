@@ -29,6 +29,9 @@ pub const Line = struct {
 
 /// Lines of text, wrapped, aligned and scrolled.
 pub const Paragraph = struct {
+    /// Iterate the same wrapped ranges that drawing and rowCount use.
+    /// A caller laying out a transcript can retain its own per-row metadata.
+    pub const Rows = RowIterator;
     /// The lines, in order.
     lines: []const Line,
     /// How a line that does not fit is broken.
@@ -99,7 +102,7 @@ pub const Paragraph = struct {
 /// this refills from the start of the last row it was given and hands back
 /// absolute ranges. A paragraph of ten thousand rows therefore costs the
 /// same thirty-two rows of stack as a paragraph of two.
-const Rows = struct {
+const RowIterator = struct {
     text: []const u8,
     cols: u16,
     mode: visor.Wrap,
@@ -111,11 +114,13 @@ const Rows = struct {
     /// Whether the last refill saw the end of the text.
     last: bool = false,
 
-    fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) Rows {
+    /// Break `text` into rows `cols` wide, the way `Paragraph.draw` does.
+    pub fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) RowIterator {
         return .{ .text = text, .cols = cols, .mode = mode, .method = method };
     }
 
-    fn next(it: *Rows) ?visor.Row {
+    /// The next row, as a range of the whole text, or null after the last.
+    pub fn next(it: *RowIterator) ?visor.Row {
         if (it.at == it.have) {
             if (it.last) return null;
             it.have = visor.wrap(it.text[it.base..], it.cols, it.mode, it.method, &it.buf);
@@ -248,7 +253,7 @@ test "the rows of a long line come out in order whatever the buffer holds" {
     // Longer than the thirty-two rows the iterator refills from, so the
     // refill path is the one under test.
     const text = "a " ** 200;
-    var it: Rows = .init(text, 4, .word, .unicode);
+    var it: Paragraph.Rows = .init(text, 4, .word, .unicode);
     var count: usize = 0;
     var last_end: usize = 0;
     while (it.next()) |r| {
