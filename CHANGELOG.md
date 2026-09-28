@@ -379,6 +379,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and 1003 goes off after another went on. `Modes.mouse` is now morse's
   `Mouse`, one motion and one encoding, and nothing written after an `h` can
   reset its setting.
+- **A disagreement the conformance build reports fails it.** The build
+  printed a disagreement with `std.debug.print` and returned an error, so a
+  test that expected the error -- the link test provoking one on purpose --
+  printed "link disagrees" and passed, and a report could sit beside a pass.
+  Reports now go through `std.log.err`, which fails the test that logged
+  them whatever it returns; a test that provokes a disagreement asks where
+  it is without reporting it.
 - `wrap` left an empty row before a cluster wider than the whole row; the
   cluster now takes a row of its own.
 - `Tty.open` did not compile on macOS: Zig's libc bindings there have no

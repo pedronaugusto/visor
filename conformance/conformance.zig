@@ -41,6 +41,7 @@ const widgets = @import("visor.widgets");
 const Allocator = std.mem.Allocator;
 const Smith = std.testing.Smith;
 const testing = std.testing;
+const log = std.log.scoped(.conformance);
 
 /// The graphemes the generator draws from: ASCII, a combining pair, a wide
 /// one, a cluster too long to live in a cell, and the ones the two width
@@ -261,9 +262,20 @@ fn styleAgrees(want: visor.Style, got: vt.Style) bool {
         @intFromEnum(f.underline) == @intFromEnum(want.underline);
 }
 
-/// Every column of the grid the terminal rebuilt, against the grid that was
-/// drawn.
-fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
+/// Where the grid the terminal rebuilt first differs from the grid that was
+/// drawn, and in what.
+const Disagreement = struct {
+    col: u16,
+    row: u16,
+    what: What,
+
+    const What = enum { width, text, style, link };
+};
+
+/// The first column, reading row by row, where the grid the terminal rebuilt
+/// is not the grid that was drawn, or null when every column agrees. Says
+/// nothing: `expectAgrees` is what reports one.
+fn firstDisagreement(screen: *const visor.Screen, o: *const Oracle) !?Disagreement {
     var buf: [64]u8 = undefined;
     var row: u16 = 0;
     while (row < screen.size.rows) : (row += 1) {
@@ -271,44 +283,60 @@ fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
         while (col < screen.size.cols) : (col += 1) {
             const mine = screen.readCell(col, row).?;
             const theirs = try o.read(col, row, &buf);
-
-            if (wideOf(mine.shape.kind) != theirs.wide) {
-                std.debug.print(
-                    "column {d},{d}: this package says {s}, the terminal says {s}\n",
-                    .{ col, row, @tagName(mine.shape.kind), @tagName(theirs.wide) },
-                );
-                return error.WidthDisagrees;
-            }
-
+            if (wideOf(mine.shape.kind) != theirs.wide) return .{ .col = col, .row = row, .what = .width };
             // The covered column of a wide cluster draws nothing on either
             // side, and the two do not agree on what is written under it.
             if (mine.shape.kind == .spacer_tail) continue;
-
-            const want = screen.textAt(col, row);
-            if (!std.mem.eql(u8, want, theirs.text)) {
-                std.debug.print(
-                    "column {d},{d}: this package wrote '{f}', the terminal shows '{f}'\n",
-                    .{ col, row, std.ascii.hexEscape(want, .lower), std.ascii.hexEscape(theirs.text, .lower) },
-                );
-                return error.TextDisagrees;
-            }
-
-            if (!styleAgrees(mine.style, theirs.style)) {
-                std.debug.print(
-                    "column {d},{d}: style disagrees\n  drawn: {any}\n  shown: {any}\n",
-                    .{ col, row, mine.style, theirs.style },
-                );
-                return error.StyleDisagrees;
-            }
-
-            if (!linkAgrees(screen.target(mine.link), theirs.link)) {
-                std.debug.print(
-                    "column {d},{d}: link disagrees\n  drawn: {?any}\n  shown: {?any}\n",
-                    .{ col, row, screen.target(mine.link), theirs.link },
-                );
-                return error.LinkDisagrees;
-            }
+            if (!std.mem.eql(u8, screen.textAt(col, row), theirs.text)) return .{ .col = col, .row = row, .what = .text };
+            if (!styleAgrees(mine.style, theirs.style)) return .{ .col = col, .row = row, .what = .style };
+            if (!linkAgrees(screen.target(mine.link), theirs.link)) return .{ .col = col, .row = row, .what = .link };
         }
+    }
+    return null;
+}
+
+/// Every column of the grid the terminal rebuilt, against the grid that was
+/// drawn.
+///
+/// A disagreement is reported through `std.log.err`, which the test runner
+/// counts as a failure of the test that logged it whatever the test returns.
+/// So a report can never sit beside a pass: a caller that catches the error,
+/// or a test that expects it, still fails. A test that wants to provoke a
+/// disagreement asks `firstDisagreement`, which reports nothing.
+fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
+    const d = (try firstDisagreement(screen, o)) orelse return;
+    const mine = screen.readCell(d.col, d.row).?;
+    var buf: [64]u8 = undefined;
+    const theirs = try o.read(d.col, d.row, &buf);
+    switch (d.what) {
+        .width => {
+            log.err(
+                "column {d},{d}: this package says {s}, the terminal says {s}",
+                .{ d.col, d.row, @tagName(mine.shape.kind), @tagName(theirs.wide) },
+            );
+            return error.WidthDisagrees;
+        },
+        .text => {
+            log.err(
+                "column {d},{d}: this package wrote '{f}', the terminal shows '{f}'",
+                .{ d.col, d.row, std.ascii.hexEscape(screen.textAt(d.col, d.row), .lower), std.ascii.hexEscape(theirs.text, .lower) },
+            );
+            return error.TextDisagrees;
+        },
+        .style => {
+            log.err(
+                "column {d},{d}: style disagrees\n  drawn: {any}\n  shown: {any}",
+                .{ d.col, d.row, mine.style, theirs.style },
+            );
+            return error.StyleDisagrees;
+        },
+        .link => {
+            log.err(
+                "column {d},{d}: link disagrees\n  drawn: {?any}\n  shown: {?any}",
+                .{ d.col, d.row, screen.target(mine.link), theirs.link },
+            );
+            return error.LinkDisagrees;
+        },
     }
 }
 
@@ -854,11 +882,11 @@ fn placementCount(o: *const Oracle) usize {
 fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
     for (h.layers.shown.items) |layer| {
         const at = placementOf(o, layer.image, layer.placement) orelse {
-            std.debug.print("image {d}/{d}: drawn at {any}, the terminal has none\n", .{ layer.image, layer.placement, layer.rect });
+            log.err("image {d}/{d}: drawn at {any}, the terminal has none", .{ layer.image, layer.placement, layer.rect });
             return error.PlacementMissing;
         };
         if (!std.meta.eql(at, layer.rect)) {
-            std.debug.print("image {d}/{d}: drawn at {any}, the terminal has it at {any}\n", .{ layer.image, layer.placement, layer.rect, at });
+            log.err("image {d}/{d}: drawn at {any}, the terminal has it at {any}", .{ layer.image, layer.placement, layer.rect, at });
             return error.PlacementMoved;
         }
     }
@@ -1022,9 +1050,14 @@ test "two links that differ only by their id are two links to the second emulato
     try testing.expectEqual(@as(?[]const u8, null), (try o.read(2, 0, &buf)).link.?.id);
     try testing.expectEqual(@as(?Oracle.Hyperlink, null), (try o.read(3, 0, &buf)).link);
 
-    // And a drawn link the terminal did not get is a failure, not a pass.
+    // And a drawn link the terminal did not get is a disagreement, found
+    // where it is. Asked quietly: `expectAgrees` would report it, and a
+    // report fails the test that made it.
     try h.screen.write(3, 0, "d", .{}, one);
-    try testing.expectError(error.LinkDisagrees, expectAgrees(&h.screen, o));
+    try testing.expectEqual(
+        @as(?Disagreement, .{ .col = 3, .row = 0, .what = .link }),
+        try firstDisagreement(&h.screen, o),
+    );
 }
 
 test "every cluster written to the last row reaches the second emulator" {
