@@ -193,18 +193,16 @@ pub const Input = struct {
             const lim = in.limit(until);
             const left = lim.timeout.toDurationFromNow(in.tty.io) orelse return in.readBlocking(file);
             const ms: u32 = @intCast(std.math.clamp(left.raw.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
-            switch (console.WaitForSingleObject(file.handle, ms)) {
-                console.WAIT_OBJECT_0 => {},
-                console.WAIT_TIMEOUT => return if (lim.expires) .expired else .quiet,
-                else => return in.readBlocking(file),
+            switch (console.waitInput(file.handle, ms) catch return in.readBlocking(file)) {
+                .ready => {},
+                .timed_out => return if (lim.expires) .expired else .quiet,
             }
-            var records: [16]console.INPUT_RECORD = undefined;
-            var n: u32 = 0;
-            if (console.PeekConsoleInputW(file.handle, &records, records.len, &n) == .FALSE) return in.readBlocking(file);
+            var records: [16]console.InputRecord = undefined;
+            const n = console.peekInput(file.handle, &records) catch return in.readBlocking(file);
             if (keyWaiting(records[0..n])) return in.readBlocking(file);
             // Nothing a read would return: take those records off and wait
-            // again.
-            _ = console.ReadConsoleInputW(file.handle, &records, n, &n);
+            // again. A queue that cannot be drained is left to the read.
+            _ = console.readInput(file.handle, records[0..n]) catch return in.readBlocking(file);
         }
     }
 
@@ -279,47 +277,13 @@ pub const Input = struct {
 
 /// Whether a console's queued input holds a key going down, which is what a
 /// read in terminal input mode returns bytes for.
-fn keyWaiting(records: []const console.INPUT_RECORD) bool {
-    for (records) |r| {
-        if (r.EventType == console.KEY_EVENT and r.Event.KeyEvent.bKeyDown != 0) return true;
-    }
+fn keyWaiting(records: []const console.InputRecord) bool {
+    for (records) |r| if (r.keyDown()) return true;
     return false;
 }
 
-/// The console calls the lone `ESC`'s wait makes on Windows. Declared here,
-/// in the style of `std.os.windows.kernel32`; nothing below is reached
-/// elsewhere but the record shapes, which a test reads.
-const console = struct {
-    const windows = std.os.windows;
-    const KEY_EVENT: u16 = 0x0001;
-    const WAIT_OBJECT_0: u32 = 0x00000000;
-    const WAIT_TIMEOUT: u32 = 0x00000102;
-
-    const KEY_EVENT_RECORD = extern struct {
-        bKeyDown: i32,
-        wRepeatCount: u16,
-        wVirtualKeyCode: u16,
-        wVirtualScanCode: u16,
-        uChar: u16,
-        dwControlKeyState: u32,
-    };
-
-    const INPUT_RECORD = extern struct {
-        EventType: u16,
-        Event: extern union {
-            KeyEvent: KEY_EVENT_RECORD,
-            raw: [16]u8,
-        },
-    };
-
-    comptime {
-        std.debug.assert(@sizeOf(INPUT_RECORD) == 20);
-    }
-
-    extern "kernel32" fn WaitForSingleObject(hHandle: windows.HANDLE, dwMilliseconds: u32) callconv(.winapi) u32;
-    extern "kernel32" fn PeekConsoleInputW(hConsoleInput: windows.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) windows.BOOL;
-    extern "kernel32" fn ReadConsoleInputW(hConsoleInput: windows.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) windows.BOOL;
-};
+/// The console's input records and waits are conduit's.
+const console = @import("conduit.tty").console;
 
 const testing = std.testing;
 const conduit = @import("conduit");
@@ -719,18 +683,18 @@ test "the pump's corpus draws every fragment, raw bytes, every read size and lon
 }
 
 test "a console queue with a key going down is one a read returns for, and one with only other records is not" {
-    var focus: console.INPUT_RECORD = .{ .EventType = 0x0010, .Event = .{ .raw = @splat(0) } };
-    var up: console.INPUT_RECORD = .{ .EventType = console.KEY_EVENT, .Event = .{ .KeyEvent = .{
-        .bKeyDown = 0,
-        .wRepeatCount = 1,
-        .wVirtualKeyCode = 0x41,
-        .wVirtualScanCode = 0,
-        .uChar = 'a',
-        .dwControlKeyState = 0,
+    var focus: console.InputRecord = .{ .event_type = 0x0010, .event = .{ .raw = @splat(0) } };
+    var up: console.InputRecord = .{ .event_type = console.key_event, .event = .{ .key = .{
+        .down = 0,
+        .repeat_count = 1,
+        .virtual_key = 0x41,
+        .scan_code = 0,
+        .character = 'a',
+        .control_keys = 0,
     } } };
     try testing.expect(!keyWaiting(&.{ focus, up }));
     var down = up;
-    down.Event.KeyEvent.bKeyDown = 1;
+    down.event.key.down = 1;
     try testing.expect(keyWaiting(&.{ focus, down }));
     try testing.expect(!keyWaiting(&.{}));
     _ = &focus;
