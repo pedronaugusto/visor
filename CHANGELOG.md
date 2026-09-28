@@ -189,6 +189,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at a time, and the hash's streaming state cost more than the hashing. The
   hashes are the same; a scrolled 200x50 frame with detection on takes 19%
   less time.
+- **A row the diff would write as one run is painted without being
+  priced.** Where a changed row keeps a few cells, the renderer priced the
+  diff and the paint in full before writing either. When the first cell
+  changed and the run planner bridges every unchanged gap after it, the
+  diff is the paint byte for byte, so it is painted at once; the bytes are
+  the same as before on every frame. A frame of a scrolled 200x50 grid
+  takes 20% less time.
 - `Tty` builds on conduit's terminal primitives (`conduit.tty`) for raw
   mode, the way back, the size and the device's name, instead of its own
   copies of the same calls, and the suite's pseudo-terminal is conduit's.

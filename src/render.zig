@@ -782,7 +782,10 @@ pub const Renderer = struct {
     ) Error!bool {
         const cols = r.size.cols;
         if (@as(u32, last - first) + 1 <= cols / 2) return false;
-        if (first == 0 and last == cols - 1 and r.allChanged(s, caps, row)) return true;
+        if (first == 0 and last == cols - 1) {
+            if (r.allChanged(s, caps, row)) return true;
+            if (r.diffIsOneRun(s, caps, row)) return true;
+        }
         const floor = r.paintTextFloor(s, caps, row);
         if (r.isolatedDiffCost(s, caps, row, first, last, floor)) |diff| {
             if (diff < floor) return false;
@@ -800,6 +803,25 @@ pub const Renderer = struct {
             if (visible(now, caps).eql(was)) return false;
         }
         return true;
+    }
+
+    /// Whether the diff would write the row as one run from the first
+    /// column to the last: the first cell changed, and the planner bridges
+    /// every unchanged gap after it.
+    ///
+    /// That run is the paint, byte for byte. Both move to the first column,
+    /// write up to the row's trailing blanks and erase from there, so
+    /// `diffRowCost` and `paintRowCost` add the same terms -- except on a
+    /// row that is blank from the first column, where the paint also writes
+    /// nothing over a row the terminal already shows blank and the diff
+    /// cannot. The paint is never dearer, the tie goes to it, and neither
+    /// needs pricing. The planning is `runEnd`'s, which writes nothing and
+    /// prices only the cells either side of a gap.
+    fn diffIsOneRun(r: *Renderer, s: *Screen, caps: Caps, row: u16) bool {
+        const cols = r.size.cols;
+        if (visible(s.rowAt(row)[0], caps).eql(r.prevRow(row)[0])) return false;
+        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        return r.runEndCost(state, s, caps, row, 0, cols - 1) == cols - 1;
     }
 
     /// A valid, deliberately unbridged diff. The real planner can only make
@@ -2648,6 +2670,91 @@ test "arithmetic row prices match emitted rows" {
     f.renderer.style = .{ .bold = true, .fg = .ansi(.cyan) };
     try Check.row(&f, false);
     try Check.row(&f, true);
+}
+
+test "a row the diff writes as one run from the first column is the paint, byte for byte" {
+    // `paintIsCheaper` answers such a row without pricing it: the claim is
+    // that diffing and painting it write the same bytes, or the paint fewer
+    // on a row blank from the first column. Held here over rows drawn from
+    // a small alphabet of glyphs, blanks, styles and links, so gaps, erases
+    // and repeats all happen, from every terminal state the renderer can be
+    // in when it reaches the row.
+    const glyphs = [_][]const u8{ "x", "y", " ", " ", "\u{e9}" };
+    const styles = [_]Style{ .{}, .{}, .{ .bold = true }, .{ .fg = .rgb(1, 22, 203) } };
+    var prng: std.Random.DefaultPrng = .init(0x5eed_0f_0e_2a);
+    const random = prng.random();
+    var hits: usize = 0;
+    var blank_hits: usize = 0;
+    for (0..3000) |_| {
+        const cols: u16 = random.intRangeAtMost(u16, 2, 16);
+        var f: Fixture = try .init(testing.allocator, cols, 2);
+        defer f.deinit();
+        f.caps.rep = random.boolean();
+        const link = try f.screen.link(testing.allocator, "https://ziglang.org", "id=run");
+        // A cell is a glyph, a style and a link, or a blank; a row is blank
+        // from some column on a quarter of the time.
+        const Pick = struct { glyph: usize, style: usize, linked: bool, blank: bool };
+        var picks: [16]Pick = undefined;
+        for (0..2) |pass| {
+            const blank_from = if (random.uintLessThan(u8, 4) == 0) random.uintAtMost(u16, cols) else cols;
+            // The second frame keeps some of the first frame's cells.
+            const keep = random.uintAtMost(u8, 3);
+            for (0..cols) |c| {
+                if (pass == 1 and random.uintLessThan(u8, 8) < keep) {} else picks[c] = .{
+                    .glyph = random.uintLessThan(usize, glyphs.len),
+                    .style = random.uintLessThan(usize, styles.len),
+                    .linked = random.uintLessThan(u8, 5) == 0,
+                    .blank = c >= blank_from,
+                };
+                const col: u16 = @intCast(c);
+                const p = picks[c];
+                if (p.blank) {
+                    f.screen.fill(.{ .col = col, .row = 0, .cols = 1, .rows = 1 }, .blank(.{}));
+                } else {
+                    try f.screen.write(col, 0, glyphs[p.glyph], styles[p.style], if (p.linked) link else .none);
+                }
+            }
+            if (pass == 0) _ = try f.draw();
+        }
+
+        const r = &f.renderer;
+        r.style = styles[random.uintLessThan(usize, styles.len)];
+        r.link = if (random.boolean()) link else .none;
+        r.cursor = switch (random.uintLessThan(u8, 3)) {
+            0 => null,
+            1 => .{ .col = 0, .row = 0 },
+            else => .{ .col = random.uintLessThan(u16, cols), .row = random.uintLessThan(u16, 2) },
+        };
+        if (!r.diffIsOneRun(&f.screen, f.caps, 0)) continue;
+        hits += 1;
+
+        const saved = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        var bytes: [2][]u8 = undefined;
+        for ([_]bool{ false, true }, 0..) |whole, i| {
+            var emitted: std.Io.Writer.Allocating = .init(testing.allocator);
+            defer emitted.deinit();
+            var ignored: Renderer.Stats = .{};
+            try r.emitRow(&emitted.writer, &f.screen, f.caps, 0, 0, cols - 1, whole, &ignored);
+            bytes[i] = try testing.allocator.dupe(u8, emitted.written());
+            r.style = saved.style;
+            r.link = saved.link;
+            r.cursor = saved.cursor;
+        }
+        defer for (bytes) |b| testing.allocator.free(b);
+        const diff = try r.price(&f.screen, f.caps, 0, 0, cols - 1, false);
+        const paint = try r.price(&f.screen, f.caps, 0, 0, cols - 1, true);
+        try testing.expect(paint <= diff);
+        try testing.expect(try r.paintIsCheaper(&f.screen, f.caps, 0, 0, cols - 1));
+        if (trailingBlank(f.screen.rowAt(0), f.caps) == 0) {
+            blank_hits += 1;
+            try testing.expect(bytes[1].len <= bytes[0].len);
+        } else {
+            try testing.expectEqualStrings(bytes[0], bytes[1]);
+        }
+    }
+    // The alphabet reaches the case, and the blank one, often.
+    try testing.expect(hits > 500);
+    try testing.expect(blank_hits > 10);
 }
 
 test "a row with one cell changed is not written whole" {
