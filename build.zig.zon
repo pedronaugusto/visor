@@ -1,14 +1,14 @@
 .{
     .name = .visor,
-    .version = "0.2.1",
+    .version = "0.3.0",
     .dependencies = .{
         .uucode = .{
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#a1735214697e4c92a9ccf0d25914362a9213bad7",
-            .hash = "morse-0.5.0-OKnGoQGQDgDfF2OBwvwSSNkHiH-xAx-2mIoayDFcW0ay",
+            .url = "git+https://github.com/pedronaugusto/morse#ebe7020141cb2b0be92fe692521cc477d7d13ca3",
+            .hash = "morse-0.6.0-OKnGoaKQDgDu5zsfUp6QWNgOzyAFo3PXO-piEQirI4Rm",
         },
         .conduit = .{
             .url = "git+https://github.com/pedronaugusto/conduit#8adf8af91329333c2deb7db5e2b14fdbae9520d8",
