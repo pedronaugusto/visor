@@ -60,7 +60,9 @@ pub const Term = struct {
     graphics: std.ArrayList([]const u8) = .empty,
     /// The saved cursor, DECSC.
     saved: ?struct { col: u16, row: u16, style: Style } = null,
-    /// The last codepoint printed, which is what `REP` repeats.
+    /// What `REP` repeats: the codepoint that began the cell printed last,
+    /// the base of a cluster and not its last mark, as the pinned emulator
+    /// repeats it (`e` + U+0301 then `CSI 2 b` is two more `e`).
     previous: ?u21 = null,
     /// Mode 2027 turned off with `CSI ? 2027 l`. Measuring clusters, the
     /// terminal joins what it prints to the cell on the left of the cursor
@@ -255,7 +257,7 @@ pub const Term = struct {
         } else {
             try t.scr.write(t.col, t.row, grapheme, t.style, t.link);
         }
-        t.previous = lastCodepoint(grapheme);
+        t.previous = firstCodepoint(grapheme);
         t.col += w;
         if (t.col >= cols) {
             t.col = cols - 1;
@@ -312,7 +314,7 @@ pub const Term = struct {
             .link = left.link,
             .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(joined) },
         }));
-        t.previous = lastCodepoint(grapheme);
+        t.previous = firstCodepoint(joined);
         t.wrap_pending = false;
         t.col = head + w;
         if (t.col >= cols) {
@@ -322,14 +324,16 @@ pub const Term = struct {
         return true;
     }
 
-    /// `CSI n b`, REP: the last codepoint printed, printed again `n` times,
-    /// wrapping and scrolling exactly as printing it would.
+    /// `CSI n b`, REP: the codepoint that began the last cell printed
+    /// (`previous`), printed again `n` times, wrapping, scrolling and joining
+    /// exactly as printing it would.
     fn repeat(t: *Term, n: u32) Allocator.Error!void {
         const cp = t.previous orelse return;
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(cp, &buf) catch return;
         var i: u32 = 0;
-        while (i < n) : (i += 1) try t.place(buf[0..len], null);
+        // each copy printed as the codepoint would be, joining what it joins
+        while (i < n) : (i += 1) try t.put(buf[0..len]);
     }
 
     /// Down one row, scrolling the region when there is nowhere to go.
@@ -807,7 +811,7 @@ pub const Term = struct {
                 .scale = scale,
             },
         }));
-        t.previous = lastCodepoint(grapheme);
+        t.previous = firstCodepoint(grapheme);
         t.col = @intCast(t.col + span);
         if (t.col >= cols) {
             t.col = cols - 1;
@@ -1091,11 +1095,9 @@ fn incompleteTail(run: []const u8) usize {
 }
 
 /// The last codepoint of a grapheme, or null when the bytes are not UTF-8.
-fn lastCodepoint(grapheme: []const u8) ?u21 {
-    var last: ?u21 = null;
+fn firstCodepoint(grapheme: []const u8) ?u21 {
     var it: std.unicode.Utf8Iterator = .{ .bytes = grapheme, .i = 0 };
-    while (it.nextCodepoint()) |cp| last = cp;
-    return last;
+    return it.nextCodepoint();
 }
 
 /// Where a run of printable bytes ends.
@@ -1555,12 +1557,23 @@ test "measuring clusters, a codepoint the break rules join goes into the cell on
     try testing.expectEqualStrings("\u{903}", textAt(&first, 0, 1));
 }
 
-test "a repeat after a cluster repeats its last codepoint, as a terminal does" {
+test "a repeat after a cluster repeats the codepoint that began its cell, as the pinned emulator does" {
     var t = try made(6, 1);
     defer t.deinit();
     try t.feed("e\u{301}\x1b[2b");
     try testing.expectEqualStrings("e\u{301}", textAt(&t, 0, 0));
-    try testing.expectEqual(@as(?u21, 0x301), t.previous);
+    try testing.expectEqualStrings("e", textAt(&t, 1, 0));
+    try testing.expectEqualStrings("e", textAt(&t, 2, 0));
+    try testing.expectEqual(@as(?u21, 'e'), t.previous);
+    // a pair of indicators joined in one cell: the first repeats, and the
+    // two repeats pair with each other (conformance's "a repeat after a
+    // cluster")
+    var pair = try made(8, 1);
+    defer pair.deinit();
+    pair.setMethod(.unicode);
+    try pair.feed("\u{1f1e6}\u{1f1e7}\x1b[2b");
+    try testing.expectEqualStrings("\u{1f1e6}\u{1f1e7}", textAt(&pair, 0, 0));
+    try testing.expectEqualStrings("\u{1f1e6}\u{1f1e6}", textAt(&pair, 2, 0));
 }
 
 test "a repeat with nothing printed yet prints nothing" {

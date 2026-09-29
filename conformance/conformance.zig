@@ -1115,3 +1115,25 @@ test "a list of rows a person picks from reaches the second emulator as drawn" {
         try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
     }
 }
+
+test "a repeat after a cluster repeats the codepoint that began its cell" {
+    // What visor's own emulator (src/term.zig) models REP after: the base
+    // of the cell printed last, not its last mark. The renderer repeats no
+    // cluster, so this is the model held to the pinned emulator.
+    const gpa = testing.allocator;
+    const cases = [_]struct { bytes: []const u8, cells: []const []const u8 }{
+        .{ .bytes = "e\u{301}\x1b[2b", .cells = &.{ "e\u{301}", "e", "e", " " } },
+        .{ .bytes = "\u{1f1e6}\u{1f1e7}\x1b[2b", .cells = &.{ "\u{1f1e6}\u{1f1e7}", " ", "\u{1f1e6}\u{1f1e6}", " " } },
+        .{ .bytes = "a\x1b[2b", .cells = &.{ "a", "a", "a", " " } },
+    };
+    for (cases) |case| {
+        const o = try Oracle.init(gpa, .{ .cols = 10, .rows = 1 }, .unicode);
+        defer o.deinit();
+        o.feed("\x1b[?2027h");
+        o.feed(case.bytes);
+        var buf: [64]u8 = undefined;
+        for (case.cells, 0..) |want, col| {
+            try testing.expectEqualStrings(want, (try o.read(@intCast(col), 0, &buf)).text);
+        }
+    }
+}

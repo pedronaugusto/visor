@@ -280,6 +280,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The test emulator repeats what the pinned emulator repeats.** `REP`
+  after a cluster printed the cluster's last codepoint again, a mark
+  alone; libghostty-vt repeats the codepoint that began the cell (`e` +
+  U+0301 then `CSI 2 b` is two more `e`), and joins the copies as it would
+  any codepoint printed. The renderer repeats no cluster, so no output
+  moves; `Term` is what the tests read a frame through.
+
 - **A cluster that would join the cell on its left reaches a clustering
   terminal in a cell of its own, where mode 2027 off cannot keep it there.**
   A flag beside a lone regional indicator went out as it was, and a
