@@ -3,7 +3,7 @@
 const std = @import("std");
 const visor = @import("visor");
 
-pub const Row = struct {
+pub const Edges = struct {
     /// Drawn from the left edge, in order, and clipped where the right
     /// side and the gap begin.
     left: []const visor.Window.Segment = &.{},
@@ -23,7 +23,7 @@ pub const Row = struct {
 
     /// Draw the row on the window's first line. Cells the items do not
     /// cover are left as they were.
-    pub fn draw(r: Row, win: visor.Window) std.mem.Allocator.Error!void {
+    pub fn draw(r: Edges, win: visor.Window) std.mem.Allocator.Error!void {
         if (win.rect.isEmpty()) return;
         const right_w = @min(width(r.right, win.screen.method), win.cols());
         const right_col = win.cols() - right_w;
@@ -44,21 +44,21 @@ pub const Row = struct {
 
 const Harness = @import("harness.zig").Harness;
 
-test "a row keeps both edges and clips the left before the right" {
+test "edges keep both sides and clips the left before the right" {
     var h: Harness = try .init(std.testing.allocator, 12, 1);
     defer h.deinit();
-    try (Row{ .left = &.{.{ .text = "long left text" }}, .right = &.{.{ .text = "end", .style = .{ .bold = true } }} }).draw(h.window());
+    try (Edges{ .left = &.{.{ .text = "long left text" }}, .right = &.{.{ .text = "end", .style = .{ .bold = true } }} }).draw(h.window());
     try h.expectFrame("long lef end\n");
     try std.testing.expect(h.styleAt(11, 0).bold);
 }
 
-test "a row measures wide text and an empty right consumes no gap" {
+test "edges measure wide text and an empty right consumes no gap" {
     var h: Harness = try .init(std.testing.allocator, 6, 1);
     defer h.deinit();
-    try (Row{ .left = &.{.{ .text = "abcdef" }} }).draw(h.window());
+    try (Edges{ .left = &.{.{ .text = "abcdef" }} }).draw(h.window());
     try h.expectFrame("abcdef\n");
     h.window().clear();
-    try (Row{ .left = &.{.{ .text = "abc" }}, .right = &.{.{ .text = "界" }} }).draw(h.window());
-    try std.testing.expectEqual(@as(u16, 2), Row.width(&.{.{ .text = "界" }}, .unicode));
+    try (Edges{ .left = &.{.{ .text = "abc" }}, .right = &.{.{ .text = "界" }} }).draw(h.window());
+    try std.testing.expectEqual(@as(u16, 2), Edges.width(&.{.{ .text = "界" }}, .unicode));
     try h.expectFrame("abc 界\n");
 }

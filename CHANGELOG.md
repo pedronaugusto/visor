@@ -8,8 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`Row`: items at both edges of one line.** The right items keep their
-  width; the left are clipped a `gap` before them. `Row.width` measures a
+- **`Edges`: items at both edges of one line.** The right items keep their
+  width; the left are clipped a `gap` before them. `Edges.width` measures a
   run of items the way the row does.
 - **`Paragraph.Rows`**, the iterator `Paragraph` draws and counts with, so a
   caller that lays out wrapped text can keep its own data per row without
