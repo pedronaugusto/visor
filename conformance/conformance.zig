@@ -605,14 +605,18 @@ test "cells the program drew apart stay apart on the second emulator, where it w
     // The emulator joins a codepoint to the cell on the left of the cursor
     // wherever the break rules find no break: regional indicators pair, a
     // skin tone joins a thumb, a spacing mark joins anything. Each row puts
-    // such cells side by side, three regional indicators and a row of marks
-    // among them, drawn and then drawn again.
+    // such cells side by side, three regional indicators, a row of marks and
+    // flags beside lone indicators among them, drawn and then drawn again.
     const gpa = testing.allocator;
     const rows = [_][]const []const u8{
         &.{ "\u{1f1e6}", "\u{1f1e7}", "\u{1f1e6}", "z" },
         &.{ "\u{1f44d}", "\u{1f3fb}", "a", "\u{1f3fb}" },
         &.{ "\u{915}", "\u{903}", "\u{903}", "\u{903}", "\u{903}", "\u{903}", "a", "\u{903}" },
         &.{ "\u{4e2d}", "\u{903}", " ", "\u{903}", "\u{1f1e6}", "a" },
+        // a flag beside a lone indicator: more than marks, so mode 2027 off
+        // cannot keep it apart, and it is written before the cell it would
+        // join
+        &.{ "\u{1f1e6}", "\u{1f1e7}\u{1f1e8}", "z", "\u{1f1fa}", "\u{1f1f8}\u{1f1e6}" },
     };
     var h: Harness = try .init(gpa, .{ .cols = 16, .rows = rows.len }, .unicode);
     defer h.deinit();

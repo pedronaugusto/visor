@@ -243,6 +243,10 @@ pub const Renderer = struct {
         told: u32 = 0,
         /// Graphemes drawn at more than one cell's size.
         scaled: u32 = 0,
+        /// Clusters a terminal measuring clusters would have joined to the
+        /// cell on their left, written before that cell and the cell again
+        /// after them (`writeApart`).
+        rejoined: u32 = 0,
         /// Style changes written.
         styles: u32 = 0,
         /// Link changes written.
@@ -1016,6 +1020,10 @@ pub const Renderer = struct {
             } else if (r.marksApart(c, text, caps) or joinsApart(s, row, col, c, text, caps)) {
                 // Mode 2027 off and on again around it.
                 cost += 16 + text.len;
+            } else if (joinsAcross(s, row, col, c, text, caps)) |left| {
+                // The left cell blank, the cluster, two moves and the left
+                // cell again in its own style (`writeApart`).
+                cost += (col - left) + text.len + s.textOf(&cells[left]).len + 48;
             } else {
                 cost += text.len;
             }
@@ -1276,6 +1284,8 @@ pub const Renderer = struct {
                 try morse.unicodeCore.set(out, false);
                 try out.writeAll(text);
                 try morse.unicodeCore.set(out, true);
+            } else if (joinsAcross(s, row, col, c, text, caps)) |left| {
+                try r.writeApart(out, s, caps, row, left, col, c, text, stats);
             } else {
                 try out.writeAll(text);
             }
@@ -1292,6 +1302,39 @@ pub const Renderer = struct {
             }
             r.advance(col, row);
         }
+    }
+
+    /// A cluster a terminal measuring clusters would join to the cell on
+    /// its left (`joinsAcross`), with the cursor at it: the left cell's
+    /// columns written blank, so nothing is left there to join; the cluster;
+    /// then the left cell again, written to the left of the cluster, which
+    /// joins nothing to it; and the cursor put past the cluster. The left
+    /// cell goes out as it went the first time, mode 2027 off around it when
+    /// that kept it from its own left neighbour.
+    fn writeApart(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8, stats: *Stats) Error!void {
+        const cells = s.rowAt(row);
+        const lc = visible(cells[left], caps);
+        const held = s.textOf(&cells[left]);
+        try r.moveTo(out, left, row, stats);
+        try r.setStyle(out, lc.style, stats);
+        try r.setLink(out, s, .none, caps, stats);
+        try out.splatByteAll(' ', col - left);
+        r.advance(col, row);
+        try r.setStyle(out, c.style, stats);
+        try r.setLink(out, s, c.link, caps, stats);
+        try out.writeAll(text);
+        r.advance(col + c.width(), row);
+        try r.moveTo(out, left, row, stats);
+        try r.setStyle(out, lc.style, stats);
+        try r.setLink(out, s, lc.link, caps, stats);
+        if (joinsApart(s, row, left, lc, held, caps)) {
+            try morse.unicodeCore.set(out, false);
+            try out.writeAll(held);
+            try morse.unicodeCore.set(out, true);
+        } else try out.writeAll(held);
+        r.advance(col, row);
+        if (col + c.width() < r.size.cols) try r.moveTo(out, col + c.width(), row, stats) else r.cursor = null;
+        stats.rejoined += 1;
     }
 
     /// Whether a cluster goes out with mode 2027 off around it: a base and
@@ -1875,15 +1918,46 @@ fn repeatable(c: Cell, text: []const u8, caps: Caps) bool {
 /// way. The left cell is what the terminal holds there: this row is written
 /// from left to right, so it is the cell as this frame has it.
 fn joinsApart(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Caps) bool {
-    if (caps.width_method != .unicode or col == 0) return false;
-    if (c.isScaled() or c.width() == 0) return false;
+    _ = joinedTo(s, row, col, c, text, caps) orelse return false;
+    return apartFits(c, text);
+}
+
+/// Whether a cluster keeps its cell measured by codepoint: nothing after
+/// its first codepoint takes a column, so mode 2027 off leaves it where it
+/// is (`joinsApart`).
+fn apartFits(c: Cell, text: []const u8) bool {
+    return textmod.combinesOnly(text) and textmod.graphemeWidth(text, .wcwidth) == c.width();
+}
+
+/// Where the cell begins that a terminal measuring clusters would join the
+/// cluster at `col` to, when it would.
+fn joinedTo(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Caps) ?u16 {
+    if (caps.width_method != .unicode or col == 0) return null;
+    if (c.isScaled() or c.width() == 0) return null;
     const cells = s.rowAt(row);
     var left = col - 1;
     // The covered column of a wide cluster: the cluster is in its head.
     if (visible(cells[left], caps).isTail() and left > 0) left -= 1;
     const held: []const u8 = if (cells[left].isTail()) " " else s.textOf(&cells[left]);
-    if (!textmod.joinsCell(held, text)) return false;
-    return textmod.combinesOnly(text) and textmod.graphemeWidth(text, .wcwidth) == c.width();
+    if (!textmod.joinsCell(held, text)) return null;
+    return left;
+}
+
+/// Where the cell begins that a terminal measuring clusters would join the
+/// cluster at `col` to, when it would and mode 2027 off cannot keep them
+/// apart: a flag beside a lone indicator. Measured by codepoint, such a
+/// cluster takes more columns than its cell, so it is written where
+/// nothing is left of it to join, and the left cell after it
+/// (`Renderer.writeApart`). A left cell written with a scale joins nothing.
+fn joinsAcross(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Caps) ?u16 {
+    const left = joinedTo(s, row, col, c, text, caps) orelse return null;
+    if (apartFits(c, text)) return null;
+    // One that would join a blank as well: no order of writing keeps it
+    // apart.
+    if (textmod.joinsCell(" ", text)) return null;
+    const lc = visible(s.rowAt(row)[left], caps);
+    if (lc.isTail() or lc.isScaled()) return null;
+    return left;
 }
 
 /// How many cells from `col` show exactly `same`, stopping at `to`.
@@ -3356,4 +3430,33 @@ test "a base and its marks in the only column go out with cluster measuring off 
     try narrow.screen.write(0, 0, "e\u{301}", .{}, .none);
     _ = try narrow.draw();
     try testing.expect(std.mem.indexOf(u8, narrow.written(), "2027") == null);
+}
+
+test "a cluster that would join the cell on its left, and is more than marks, reaches a clustering terminal in a cell of its own" {
+    // A lone regional indicator, and beside it a flag: a terminal measuring
+    // clusters joins the flag's first indicator to the lone one, and with
+    // cluster measuring off the flag measures four columns. Neither is the
+    // screen; the cells are written so that nothing is left of the cluster
+    // to join, and the left cell after it.
+    const pairs = [_][2][]const u8{
+        .{ "\u{1f1e6}", "\u{1f1e7}\u{1f1e8}" },
+        .{ "\u{1f1fa}", "\u{1f1f8}\u{1f1e6}" },
+    };
+    for (pairs) |pair| {
+        var f: Fixture = try .init(testing.allocator, 8, 1);
+        defer f.deinit();
+        var t: Term = try .init(testing.allocator, f.screen.size);
+        defer t.deinit();
+        t.setMethod(.unicode);
+        try f.screen.write(0, 0, pair[0], .{ .bold = true, .fg = .ansi(.red) }, .none);
+        try f.screen.write(textmod.graphemeWidth(pair[0], .unicode), 0, pair[1], .{}, .none);
+        try f.screen.write(6, 0, "z", .{}, .none);
+        const stats = try f.draw();
+        try testing.expectEqual(f.written().len, stats.bytes);
+        try t.feed(f.written());
+        try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+        try testing.expectEqual(@as(u32, 1), stats.rejoined);
+        // and drawn again unchanged, nothing
+        try f.expectBytes("");
+    }
 }

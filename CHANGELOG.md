@@ -280,6 +280,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A cluster that would join the cell on its left reaches a clustering
+  terminal in a cell of its own, where mode 2027 off cannot keep it there.**
+  A flag beside a lone regional indicator went out as it was, and a
+  terminal measuring clusters joined the flag's first indicator to the
+  lone one; measured by codepoint the flag takes four columns, so turning
+  the mode off would not do. The left cell's columns are written blank,
+  the cluster after them, then the left cell again, which joins nothing to
+  its right (`Renderer.Stats.rejoined` counts them). A cluster that would
+  join a blank as well is written as before.
+
 - **Cells a clustering terminal would join stay apart.** A terminal in mode
   2027 joins a codepoint to the cell on the left of the cursor wherever the
   break rules find no break, so two regional indicators, a thumb and a skin
