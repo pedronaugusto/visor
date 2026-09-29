@@ -878,7 +878,7 @@ const Dimmer = struct {
     }
 
     fn apply(ctx: *anyopaque, stroke: Window.Ink.Stroke) Style {
-        const d: *Dimmer = @ptrCast(@alignCast(ctx));
+        const d: *Dimmer = @ptrCast(@alignCast(ctx)); // safe: ink hands apply out with a Dimmer as its ctx
         d.strokes += 1;
         if (!std.mem.eql(u8, stroke.text, " ")) d.glyphs += 1;
         d.last = .{ .col = stroke.col, .row = stroke.row };

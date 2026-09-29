@@ -2132,7 +2132,7 @@ const Frame = struct {
     /// The frame overran the buffer, so it is large enough to be worth
     /// bracketing and the bracket has to open now.
     fn drain(w: *Writer, data: []const []const u8, splat: usize) Writer.Error!usize {
-        const f: *Frame = @alignCast(@fieldParentPtr("writer", w));
+        const f: *Frame = @alignCast(@fieldParentPtr("writer", w)); // safe: this vtable is installed only on a Frame's writer
         if (f.sync and !f.opened) {
             f.opened = true;
             try morse.syncOutput.set(f.out, true);

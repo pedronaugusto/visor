@@ -238,8 +238,8 @@ pub const Links = struct {
 /// reallocation. Empty slices need no preservation.
 fn aliasOffset(storage: []const u8, bytes: []const u8) ?usize {
     if (bytes.len == 0 or storage.len == 0) return null;
-    const base = @intFromPtr(storage.ptr);
-    const at = @intFromPtr(bytes.ptr);
+    const base = @intFromPtr(storage.ptr); // safe: compared as numbers, never dereferenced
+    const at = @intFromPtr(bytes.ptr); // safe: compared as numbers, never dereferenced
     if (at < base or at - base > storage.len) return null;
     const off = at - base;
     if (bytes.len > storage.len - off) return null;

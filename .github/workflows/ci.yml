@@ -37,6 +37,9 @@ jobs:
       - name: Formatting
         run: zig fmt --check build.zig build.zig.zon src examples
 
+      - name: Casts out of the type system carry their reason
+        run: python3 ci/casts.py
+
       # Four optimize modes. The suite asserts on byte counts, which are the
       # same in every mode, and on arithmetic that is checked in two of them
       # and not in the other two.
