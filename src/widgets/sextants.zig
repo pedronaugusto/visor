@@ -73,8 +73,9 @@ pub const Sextants = struct {
     /// (c, r). A cell with nothing lit in it is left as it is.
     pub fn draw(s: Sextants, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
-        const need = s.width * s.height * 4;
-        if (s.pixels.len < need) return;
+        if (s.width == 0 or s.height == 0) return;
+        // Prove that every pixel fits before multiplying dimensions or offsets.
+        if (s.width > s.pixels.len / 4 / s.height) return;
         var row: u16 = 0;
         while (row < win.rows()) : (row += 1) {
             var col: u16 = 0;
@@ -146,4 +147,13 @@ test "a picture smaller than the window leaves the rest alone" {
     try h.expectFrame(
         "\u{1FB00}bc\ndef\n",
     );
+}
+
+test "unavailable pixels do not overflow the declared picture dimensions" {
+    var h = try Harness.init(testing.allocator, 2, 1);
+    defer h.deinit();
+    for ([_][2]usize{ .{ std.math.maxInt(usize), 2 }, .{ 2, std.math.maxInt(usize) }, .{ 0, std.math.maxInt(usize) } }) |size| {
+        try (Sextants{ .pixels = &.{}, .width = size[0], .height = size[1] }).draw(h.window());
+    }
+    try testing.expect(!h.screen.damage.any());
 }

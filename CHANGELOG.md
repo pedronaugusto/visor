@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Sextant pictures check that their pixels exist before multiplying dimensions.
+
 - Key strips saturate their widths and spacing without overflowing intermediate sums.
 
 - Navigation and anchored scrolling clamp state without overflowing at the usize edge.
