@@ -66,7 +66,7 @@ pub const Block = struct {
     /// padding, and is empty when there is nothing left — so a caller draws
     /// into it without checking, and a block in a window two cells tall
     /// writes its frame and nothing else.
-    pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!Window {
+    pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {
         if (win.rect.isEmpty()) return win;
         if (b.style) |s| win.fill(.fromSize(win.size()), .blank(s)) catch unreachable;
 
@@ -97,7 +97,7 @@ pub const Block = struct {
     }
 
     /// One title, between the two vertical sides of the frame.
-    fn drawTitle(b: Block, win: Window, row: u16, t: Title) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    fn drawTitle(b: Block, win: Window, row: u16, t: Title) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const left: u16 = if (b.borders.left) 1 else 0;
         const right: u16 = if (b.borders.right) 1 else 0;
         const room = win.cols() -| left -| right;

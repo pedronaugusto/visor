@@ -278,20 +278,33 @@ pub const Window = struct {
     }
 
     /// One cell, in this window's coordinates, clipped by its whole extent.
-    /// Stale or foreign handles return `InvalidHandle`.
-    pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+    /// Stale or foreign handles return `InvalidHandle`; malformed cells return `InvalidCell`.
+    pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+        const checked = try w.screen.cell(c);
+        if (!w.fitsCell(col, row, checked)) return;
+        var drawn = checked;
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try w.screen.textOf(&checked), checked.style));
+        @import("screen.zig").internal.placeCell(w.screen, w.rect.col + col, w.rect.row + row, drawn);
+    }
+
+    /// A source-terminal cell, clipped by its full extent. See Screen's
+    /// writeOwnedCellUnchecked preconditions; handles are always checked.
+    pub fn writeOwnedCellUnchecked(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+        _ = try w.screen.textOf(&c);
+        if (c.link != .none and w.screen.target(c.link) == null) return error.InvalidHandle;
         if (!w.fitsCell(col, row, c)) return;
         var drawn = c;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try w.screen.textOf(&c)), c.style));
-        try w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, drawn);
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), try w.screen.textOf(&c), c.style));
+        try w.screen.writeOwnedCellUnchecked(w.rect.col + col, w.rect.row + row, drawn);
     }
 
     /// Copies a cell from another screen into this window.
     /// The cell must still belong to the source's current pool generations.
-    pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) (std.mem.Allocator.Error || error{InvalidHandle})!void {
-        if (!w.fitsCell(col, row, c)) return;
-        var drawn = c;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try source.textOf(&c)), c.style));
+    pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+        const checked = try source.cell(c);
+        if (!w.fitsCell(col, row, checked)) return;
+        var drawn = checked;
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try source.textOf(&checked), checked.style));
         try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, drawn);
     }
 
@@ -309,8 +322,11 @@ pub const Window = struct {
         grapheme: []const u8,
         style: Style,
         link: Link,
-    ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
-        const span = textmod.graphemeWidth(grapheme, w.screen.method);
+    ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+        if (link != .none and w.screen.target(link) == null) return error.InvalidHandle;
+        if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
+        const valid = try @import("screen.zig").internal.glyph(grapheme);
+        const span = textmod.graphemeWidth(valid, w.screen.method);
         if (!w.fits(col, row, span, 1)) return;
         const drawn = if (w.ink == null) style else w.styled(col, row, span, grapheme, style);
         try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, drawn, link);
@@ -336,9 +352,12 @@ pub const Window = struct {
         style: Style,
         link: Link,
         scale: u3,
-    ) (std.mem.Allocator.Error || error{InvalidHandle})!bool {
+    ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!bool {
+        if (link != .none and w.screen.target(link) == null) return error.InvalidHandle;
+        if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
+        const valid = try @import("screen.zig").internal.glyph(grapheme);
         const tall: u16 = @max(scale, 1);
-        const wide: u16 = textmod.graphemeWidth(grapheme, w.screen.method);
+        const wide: u16 = textmod.graphemeWidth(valid, w.screen.method);
         if (col >= w.rect.cols or row >= w.rect.rows) return false;
         if (@as(u32, col) + @as(u32, wide) * tall > w.rect.cols) return false;
         if (@as(u32, row) + tall > w.rect.rows) return false;
@@ -348,7 +367,8 @@ pub const Window = struct {
 
     /// A rectangle of one cell, in this window's coordinates.
     /// Stale or foreign handles return `InvalidHandle` before any cell changes.
-    pub fn fill(w: Window, rect: Rect, c: Cell) error{InvalidHandle}!void {
+    pub fn fill(w: Window, rect: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+        _ = try w.screen.cell(c);
         const inside = rect.intersect(.fromSize(w.size()));
         if (inside.isEmpty()) return;
         if (w.ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
@@ -388,7 +408,7 @@ pub const Window = struct {
     /// longer than six bytes, by the same rule as `Screen.write`. A newline
     /// always ends a row; a word break looks ahead within one segment, so a
     /// word split across two segments breaks at the join.
-    pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
+    pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
         var at: Print = .{ .col = opts.col, .row = opts.row };
         if (w.rect.isEmpty()) {
             at.overflow = segments.len != 0;
@@ -399,7 +419,7 @@ pub const Window = struct {
     }
 
     /// One run.
-    pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
+    pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
         return w.print(&.{segment}, opts);
     }
 
@@ -497,7 +517,7 @@ pub const Window = struct {
         segment: Segment,
         opts: PrintOptions,
         from: Print,
-    ) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
+    ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
         var at = from;
         if (at.row >= w.rect.rows) {
             at.overflow = at.overflow or segment.text.len != 0;

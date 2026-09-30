@@ -207,7 +207,7 @@ pub const TextInput = struct {
     /// Draws as many rows as the window has, moving `state.first` so the
     /// cursor's row is among them, and puts the terminal's cursor at the
     /// text cursor when `show_cursor` is on.
-    pub fn draw(t: TextInput, win: Window, state: *State) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    pub fn draw(t: TextInput, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect.isEmpty()) return;
         const method = win.screen.method;
         const cols = win.cols();

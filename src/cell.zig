@@ -228,7 +228,8 @@ fn CellType(comptime checked: bool) type {
             return .{ .text = .space, .style = canonical(in), .link = .none, .shape = .{} };
         }
 
-        /// A cell holding a grapheme.
+        /// A value holding a grapheme. This canonicalizes style; Screen.cell or
+        /// placement checks glyph, shape and handles before importing it.
         pub fn init(args: struct {
             text: Text = .space,
             style: Style = .{},

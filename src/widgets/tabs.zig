@@ -67,7 +67,7 @@ pub const Tabs = struct {
     }
 
     /// Draws the titles on the window's first row.
-    pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect.isEmpty()) return;
         var spans = t.spanIterator(win.screen.method);
         while (spans.next()) |span| {

@@ -56,6 +56,14 @@ pub const Cursor = struct {
 
 // Cooperation inside the package; this namespace is not exported by visor.
 pub const internal = struct {
+    pub fn glyph(bytes: []const u8) error{InvalidCell}![]const u8 {
+        const valid = Screen.valid(bytes);
+        try Screen.checkGlyph(valid);
+        return valid;
+    }
+    pub fn placeCell(s: *Screen, col: u16, row_n: u16, checked: Cell) void {
+        s.placeOwnedCell(col, row_n, cellmod.internal.store(checked));
+    }
     pub fn row(s: *const Screen, n: u16) []const StoredCell {
         if (n >= s.size.rows) return &.{};
         return s._cells[@as(usize, n) * s.size.cols ..][0..s.size.cols];
@@ -239,6 +247,7 @@ pub const Screen = struct {
 
     /// One cell checked against this screen, clipped and damage marked.
     /// Stale or foreign text and link handles return `InvalidHandle` before any change.
+    /// Malformed glyphs and shapes return `InvalidCell`.
     ///
     /// A cell two columns wide also writes its tail, and one drawn at a
     /// scale writes its whole block of tails; whatever any of them covered is
@@ -248,10 +257,60 @@ pub const Screen = struct {
     /// there would wrap it onto the next row; a block that does not fit
     /// becomes a blank too. A cell handed in as a tail is taken as a blank:
     /// tails are the grid's own bookkeeping.
-    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+        const checked = try s.cell(c);
+        s.placeOwnedCell(col, row, cellmod.internal.store(checked));
+    }
+
+    /// Checks an imported value and canonicalizes its style and drift flag.
+    /// InvalidCell means the bytes are not one printable cluster, the shape
+    /// does not describe it in this screen's width method, or reserved bytes
+    /// are set. InvalidHandle means a pool handle is stale, foreign or out of bounds.
+    pub fn cell(s: *const Screen, c: Cell) error{ InvalidHandle, InvalidCell }!Cell {
+        const bytes = try s.checkedText(&c);
+        return validateCell(c, bytes, s.method);
+    }
+
+    fn validateCell(c: Cell, bytes: []const u8, method: textmod.Method) error{InvalidCell}!Cell {
+        try checkGlyph(bytes);
+        if (c.shape._reserved != 0 or !std.mem.allEqual(u8, &c._reserved, 0)) return error.InvalidCell;
+        if (!c.text.isPooled()) {
+            if (c.text.generation() != 0 or !std.mem.allEqual(u8, c.text.buf[c.text.len..], 0)) return error.InvalidCell;
+        } else if (c.text.length() <= Cell.Text.max_inline) return error.InvalidCell;
+        if (c.shape.kind == .spacer_head) {
+            if (!Cell.Text.eql(c.text, .space) or c.link != .none or c.shape.scale != 0 or c.shape.drift) return error.InvalidCell;
+        } else if (c.isHead() and textmod.graphemeWidth(bytes, method) != c.glyphWidth()) return error.InvalidCell;
+        var checked = c;
+        checked.setStyle(c.style);
+        if (c.shape.kind != .spacer_head) checked.shape.drift = textmod.disagrees(bytes);
+        return checked;
+    }
+
+    fn checkedText(s: *const Screen, c: *const Cell) error{ InvalidHandle, InvalidCell }![]const u8 {
+        // Pool identity checks precede glyph checks even for malformed input.
+        if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
+        if (!c.text.isPooled() and c.text.len > Cell.Text.max_inline) return error.InvalidCell;
+        return s.textOf(c);
+    }
+
+    /// Imports a cell measured by another terminal. Pool handles are still
+    /// checked. The caller guarantees one printable UTF-8 cluster, a valid
+    /// shape and canonical text bytes; its width may differ from Screen.method.
+    /// Used by terminal bridges that must retain the source terminal's width.
+    pub fn writeOwnedCellUnchecked(s: *Screen, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
         _ = try s.textOf(&c);
         if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
         s.placeOwnedCell(col, row, cellmod.internal.store(c));
+    }
+
+    fn checkGlyph(bytes: []const u8) error{InvalidCell}!void {
+        if (bytes.len == 1 and bytes[0] >= 0x20 and bytes[0] < 0x7f) return;
+        if (bytes.len == 0 or !std.unicode.utf8ValidateSlice(bytes)) return error.InvalidCell;
+        var codepoints = (std.unicode.Utf8View.init(bytes) catch unreachable).iterator();
+        while (codepoints.nextCodepoint()) |cp| if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) return error.InvalidCell;
+        var clusters = textmod.Graphemes.init(bytes);
+        if ((clusters.next() orelse return error.InvalidCell).len != bytes.len or
+            textmod.graphemeWidth(bytes, .wcwidth) == 0) return error.InvalidCell;
     }
 
     // The grid's own cells have already passed the handle checks.
@@ -307,25 +366,24 @@ pub const Screen = struct {
 
     /// Copies a cell from another screen, re-interning every owned value.
     /// Stale handles or a cell belonging to a different source return `InvalidHandle`.
-    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) (Allocator.Error || error{InvalidHandle})!void {
-        _ = try source.textOf(&c);
-        if (c.link != .none and source.target(c.link) == null) return error.InvalidHandle;
-        var put = c;
+    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) (Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+        const checked = try source.cell(c);
+        var put = try validateCell(checked, try source.textOf(&c), s.method);
         if (c.text.isPooled()) put.text = try s.intern(try source.textOf(&c));
         if (source.target(c.link)) |link_target| {
             put.link = cellmod.internal.exportLink(try s.links.intern(s.gpa, link_target.uri, link_target.params), s.pool_generation);
         } else {
             put.link = .none;
         }
-        try s.writeOwnedCell(col, row, put);
+        s.placeOwnedCell(col, row, cellmod.internal.store(put));
     }
 
     /// A grapheme measured, placed, and its tail written if it is wide.
     ///
     /// Allocates only when the grapheme is longer than six bytes and the
-    /// screen has not seen it before. A grapheme that measures zero columns,
-    /// and one that is or begins with a control character, is not written:
-    /// neither is something a terminal would put in a cell. Bytes that are
+    /// screen has not seen it before. Empty input and initial C0 controls or
+    /// DEL are ignored. Other nonprinting or multi-cluster glyphs return
+    /// InvalidCell before the grid changes. Bytes that are
     /// not UTF-8 are written as the replacement character, which is what a
     /// terminal would have shown for them, so the grid never holds bytes the
     /// terminal would read differently from the way they were measured.
@@ -343,11 +401,10 @@ pub const Screen = struct {
         text: []const u8,
         style: Style,
         to: Link,
-    ) (Allocator.Error || error{InvalidHandle})!void {
+    ) (Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (to != .none and s.target(to) == null) return error.InvalidHandle;
-        const grapheme = valid(text);
-        if (grapheme.len == 0) return;
-        if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
+        if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return;
+        const grapheme = try internal.glyph(text);
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) {
             var parts: textmod.Parts = .init(grapheme);
@@ -398,15 +455,14 @@ pub const Screen = struct {
         style: Style,
         to: Link,
         scale: u3,
-    ) (Allocator.Error || error{InvalidHandle})!bool {
+    ) (Allocator.Error || error{ InvalidHandle, InvalidCell })!bool {
         if (to != .none and s.target(to) == null) return error.InvalidHandle;
         if (scale <= 1) {
             try s.write(col, row, text, style, to);
             return true;
         }
-        const grapheme = valid(text);
-        if (grapheme.len == 0) return false;
-        if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
+        if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return false;
+        const grapheme = try internal.glyph(text);
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         // A cluster a terminal measuring by codepoint splits across cells
         // is not one glyph to scale.
@@ -437,15 +493,14 @@ pub const Screen = struct {
     }
 
     /// A rectangle of one cell.
-    pub fn fill(s: *Screen, rect: Rect, c: Cell) error{InvalidHandle}!void {
-        _ = try s.textOf(&c);
-        if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
+    pub fn fill(s: *Screen, rect: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+        const checked = try s.cell(c);
         const r = rect.intersect(.fromSize(s.size));
         if (r.isEmpty()) return;
         var y = r.row;
         while (y < r.bottom()) : (y += 1) {
             var col = r.col;
-            while (col < r.right()) : (col += 1) s.placeOwnedCell(col, @intCast(y), cellmod.internal.store(c));
+            while (col < r.right()) : (col += 1) s.placeOwnedCell(col, @intCast(y), cellmod.internal.store(checked));
         }
     }
 
@@ -499,7 +554,8 @@ pub const Screen = struct {
         s.heal(r.row -| max_reach, @intCast(@min(r.bottom() - 1 + max_reach, s.size.rows - 1)));
     }
 
-    /// A grapheme into the pool, deduplicated; inline when it fits.
+    /// Bytes into the pool, deduplicated; inline when they fit.
+    /// A cell using them is validated by `cell` or checked placement.
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
     pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
         const t = try s.graphemes.intern(s.gpa, bytes);
@@ -1291,10 +1347,10 @@ test "copying a pooled cell between screens keeps its source text" {
     var b = try made(2, 1);
     defer b.deinit();
 
-    try a.write(0, 0, "source-long", .{}, .none);
-    try b.write(1, 0, "target-long", .{}, .none);
+    try a.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, .none);
+    try b.write(1, 0, "b\u{301}\u{302}\u{303}", .{}, .none);
     try b.copyCell(&a, 0, 0, a.readCell(0, 0).?);
-    try testing.expectEqualStrings("source-long", b.textAt(0, 0));
+    try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", b.textAt(0, 0));
 }
 
 test "a link is interned and reaches the cell" {
@@ -1330,11 +1386,11 @@ test "compacting the pool keeps what is on screen and drops what is not" {
 
     var buf: [24]u8 = undefined;
     for (0..64) |i| {
-        const long = try std.fmt.bufPrint(&buf, "\u{1f468}\u{200d}{d:0>4}", .{i});
+        const long = try std.fmt.bufPrint(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
         try s.write(0, 0, long, .{}, .none);
         _ = try s.link(long, "");
     }
-    const kept = "\u{1f468}\u{200d}0063";
+    const kept = "a\u{301}\u{302}\u{33f}";
     try testing.expectEqualStrings(kept, s.textAt(0, 0));
     try testing.expect(s.graphemes.len() > kept.len);
     try testing.expectEqual(@as(usize, 64), s.links.count());
@@ -1369,13 +1425,13 @@ test "a resize rebuilds the pool rather than growing it forever" {
 
     var buf: [24]u8 = undefined;
     for (0..32) |i| {
-        const long = try std.fmt.bufPrint(&buf, "\u{1f468}\u{200d}{d:0>4}", .{i});
+        const long = try std.fmt.bufPrint(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
         try s.write(0, 0, long, .{}, .none);
     }
     const before = s.graphemes.len();
     try s.resize(.{ .cols = 6, .rows = 2 });
     try testing.expect(s.graphemes.len() < before);
-    try testing.expectEqualStrings("\u{1f468}\u{200d}0031", s.textAt(0, 0));
+    try testing.expectEqualStrings("a\u{301}\u{302}\u{31f}", s.textAt(0, 0));
 }
 
 test "Screen.link refuses controls in either field before interning and preserves UTF-8" {
@@ -1508,14 +1564,14 @@ test "retained handles cannot name foreign or compacted content" {
     defer a.deinit();
     var b = try Screen.init(testing.allocator, a.size);
     defer b.deinit();
-    const old_text = try a.intern("retained-text");
+    const old_text = try a.intern("a\u{301}\u{302}\u{303}");
     const old_link = try a.link("https://old.invalid", "");
-    const foreign_text = try b.intern("different-one");
+    const foreign_text = try b.intern("b\u{301}\u{302}\u{303}");
     _ = try b.link("https://new.invalid", "");
     try testing.expect(b.target(old_link) == null);
     try testing.expect(!Cell.Text.eql(old_text, foreign_text));
     try a.compactPool();
-    const new_text = try a.intern("different-one");
+    const new_text = try a.intern("b\u{301}\u{302}\u{303}");
     _ = try a.link("https://new.invalid", "");
     try testing.expect(a.target(old_link) == null);
     try testing.expect(!Cell.Text.eql(old_text, new_text));
@@ -1526,9 +1582,9 @@ test "checked cell operations refuse stale and foreign handles before changing t
     defer a.deinit();
     var b = try Screen.init(testing.allocator, a.size);
     defer b.deinit();
-    const retained: Cell = .{ .text = try a.intern("retained-text"), .link = try a.link("https://old.invalid", "") };
+    const retained: Cell = .{ .text = try a.intern("a\u{301}\u{302}\u{303}"), .link = try a.link("https://old.invalid", "") };
     try a.writeOwnedCell(0, 0, retained);
-    _ = try b.intern("different-one");
+    _ = try b.intern("b\u{301}\u{302}\u{303}");
     _ = try b.link("https://new.invalid", "");
     const blank = b._cells[0];
     const link_only: Cell = .{ .link = retained.link };
@@ -1544,7 +1600,7 @@ test "checked cell operations refuse stale and foreign handles before changing t
     try testing.expectError(error.InvalidHandle, b.dupeTextOf(testing.allocator, &retained));
     try testing.expect(blank.eql(b._cells[0]));
     try b.copyCell(&a, 0, 0, retained);
-    try testing.expectEqualStrings("retained-text", b.textAt(0, 0));
+    try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", b.textAt(0, 0));
     try testing.expectEqualStrings("https://old.invalid", b.target(b.readCell(0, 0).?.link).?.uri);
 
     try a.compactPool();
@@ -1552,12 +1608,12 @@ test "checked cell operations refuse stale and foreign handles before changing t
     try testing.expectError(error.InvalidHandle, a.writeOwnedCell(1, 0, retained));
     try testing.expectError(error.InvalidHandle, b.copyCell(&a, 1, 0, retained));
     try testing.expect(a.target(retained.link) == null);
-    try testing.expectEqualStrings("retained-text", a.textAt(0, 0));
+    try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", a.textAt(0, 0));
     const after_compaction = a.readCell(0, 0).?;
     try a.resize(.{ .cols = 4, .rows = 1 });
     try testing.expectError(error.InvalidHandle, a.textOf(&after_compaction));
     try testing.expect(a.target(after_compaction.link) == null);
-    try testing.expectEqualStrings("retained-text", a.textAt(0, 0));
+    try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", a.textAt(0, 0));
     const portable: Cell = .{ .text = .inlined("x") };
     try a.writeOwnedCell(2, 0, portable);
     try b.writeOwnedCell(2, 0, portable);
@@ -1585,4 +1641,74 @@ test "the grid and renderer store compact cells while exported handles stay chec
     const current = s.readCell(0, 0).?;
     try testing.expectEqualStrings(glyph, try s.textOf(&current));
     try testing.expectEqualStrings("https://checked.invalid", s.target(current.link).?.uri);
+}
+
+test "cell imports reject malformed glyphs and shapes before changing the grid" {
+    var s = try made(4, 2);
+    defer s.deinit();
+    var source = try made(4, 2);
+    defer source.deinit();
+    s.damage.clear();
+    const bad = [_]Cell{
+        .{ .text = .inlined("") },
+        .{ .text = .inlined("ab") },
+        .{ .text = .inlined("\x1b") },
+        .{ .text = .inlined("\xff") },
+        .{ .text = .inlined("\u{301}") },
+        .{ .text = .inlined("x"), .shape = .{ .kind = .wide } },
+        .{ .text = .inlined("中") },
+        .{ .shape = .{ ._reserved = 1 } },
+        .{ .shape = .{ .kind = .spacer_head, .scale = 2 } },
+    };
+    for (bad) |cell| {
+        try testing.expectError(error.InvalidCell, s.cell(cell));
+        try testing.expectError(error.InvalidCell, s.writeOwnedCell(0, 0, cell));
+        try testing.expectError(error.InvalidCell, s.fill(.fromSize(s.size), cell));
+        try testing.expectError(error.InvalidCell, s.copyCell(&source, 0, 0, cell));
+        try testing.expect(!s.damage.any());
+        try testing.expectEqualStrings(" ", s.textAt(0, 0));
+    }
+    for ([_][]const u8{ "", "ab", "\x1b", "\u{301}", "a\u{85}" }) |bytes| {
+        try testing.expectError(error.InvalidCell, internal.glyph(bytes));
+        if (bytes.len > 1 and bytes[0] >= 0x20) {
+            try testing.expectError(error.InvalidCell, s.write(0, 0, bytes, .{}, .none));
+            try testing.expectError(error.InvalidCell, s.writeScaled(0, 0, bytes, .{}, .none, 2));
+        }
+    }
+    const multi = Cell{ .text = try s.intern("pooled-multiple-clusters") };
+    try testing.expectError(error.InvalidCell, s.writeOwnedCell(0, 0, multi));
+    var noncanonical: Cell = .{ .text = .inlined("x") };
+    noncanonical.text.buf[5] = 1;
+    try testing.expectError(error.InvalidCell, s.writeOwnedCell(0, 0, noncanonical));
+    try s.writeOwnedCell(0, 0, .{ .text = .inlined("a\u{301}") });
+    try s.writeOwnedCell(1, 0, .{ .text = .inlined("中"), .shape = .{ .kind = .wide } });
+    try testing.expect(s.readCell(2, 0).?.isTail());
+}
+
+test "a terminal bridge keeps stated widths and still checks pool identities" {
+    var s = try made(4, 1);
+    defer s.deinit();
+    const foreign = Cell{ .text = .inlined("x"), .shape = .{ .kind = .wide }, .link = try s.link("https://bridge.invalid", "") };
+    try testing.expectError(error.InvalidCell, s.cell(foreign));
+    try s.writeOwnedCellUnchecked(0, 0, foreign);
+    try testing.expectEqual(@as(u4, 2), s.readCell(0, 0).?.width());
+    try testing.expect(s.readCell(1, 0).?.isTail());
+    var other = try made(4, 1);
+    defer other.deinit();
+    try testing.expectError(error.InvalidHandle, other.writeOwnedCellUnchecked(0, 0, foreign));
+    try s.compactPool();
+    try testing.expectError(error.InvalidHandle, s.writeOwnedCellUnchecked(0, 0, foreign));
+}
+
+test "copying a cell checks destination shape before allocating its pools" {
+    var source = try made(4, 1);
+    defer source.deinit();
+    try source.write(0, 0, "👩‍🚀", .{}, try source.link("https://source.invalid", ""));
+    var dest = try Screen.init(testing.allocator, source.size);
+    defer dest.deinit();
+    dest.damage.clear();
+    try testing.expectError(error.InvalidCell, dest.copyCell(&source, 0, 0, source.readCell(0, 0).?));
+    try testing.expectEqual(@as(usize, 0), dest.graphemes.len());
+    try testing.expectEqual(@as(usize, 0), dest.links.count());
+    try testing.expect(!dest.damage.any());
 }

@@ -168,7 +168,7 @@ pub const List = struct {
 
     /// Draws as many items as the window has rows for, moving the offset
     /// when the selection would otherwise be off screen.
-    pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect.isEmpty()) return;
         const shown = l.visible(win.rows(), state);
         const marker_width = win.width(l.marker);
@@ -210,7 +210,7 @@ pub const List = struct {
     }
 
     /// An item's first row: its runs, and its aside against the right edge.
-    fn drawFirst(l: List, win: Window, runs: []const Segment, aside: []const Segment, over: ?Style) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    fn drawFirst(l: List, win: Window, runs: []const Segment, aside: []const Segment, over: ?Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const room = win.cols();
         if (aside.len == 0) return l.drawRuns(win, runs, over, room);
 
@@ -249,7 +249,7 @@ pub const List = struct {
     /// Runs laid along one row from its first column and cut at `limit`: a
     /// run is cut where the next one's column begins, and the one that
     /// crosses `limit` is cut there with the ellipsis.
-    fn drawRuns(l: List, win: Window, runs: []const Segment, over: ?Style, limit: u16) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    fn drawRuns(l: List, win: Window, runs: []const Segment, over: ?Style, limit: u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const end = @min(limit, win.cols());
         var at: u16 = 0;
         for (runs, 0..) |r, i| {

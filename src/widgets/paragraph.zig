@@ -62,7 +62,7 @@ pub const Paragraph = struct {
     }
 
     /// Draws as many rows as the window has, starting at `scroll`.
-    pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+    pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect.isEmpty()) return;
         var produced: usize = 0;
         var row: u16 = 0;

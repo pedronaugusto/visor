@@ -176,8 +176,8 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
-| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
+| The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `rowAt`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
+| The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `rowAt`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
@@ -338,6 +338,19 @@ stale or foreign handle; `target` returns null. Inline text and `Link.none`
 are portable. Use `copyCell` with the source screen to transfer a live cell,
 or the owned-copy helpers to keep content through compaction. Raw pool
 constructors and raw text resolution are no longer public APIs.
+
+Raw `Cell` and `Cell.Text` values are untrusted input. `Screen.cell(value)`
+checks one printable UTF-8 cluster, its shape and pool handles and returns a
+canonical cell or `InvalidCell` / `InvalidHandle`. Checked placement, fills
+and copies apply the same precondition before changing the grid. `write`
+and `writeScaled` ignore empty input and initial controls, and reject
+nonprinting or multi-cluster glyphs; invalid UTF-8 is still replaced with the replacement character. `intern` stores
+bytes; validation happens when those bytes become a cell.
+
+`Screen.writeOwnedCellUnchecked` and its Window counterpart are the bridge
+for another terminal's measured cells: handles stay checked, while the
+caller guarantees the glyph, shape and canonical text bytes. The source
+terminal's width is kept even when the parent would measure it differently.
 
 `Window` checks the whole glyph or scaled cell extent before direct writes
 and copies. Multi-cell fills use the fill rectangle as their boundary.
