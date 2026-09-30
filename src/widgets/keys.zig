@@ -40,12 +40,12 @@ pub const Keys = struct {
 
     /// How many columns the strip takes, gaps included, margin not.
     pub fn width(k: Keys, method: visor.Method) u16 {
-        var total: u32 = 0;
+        var total: u16 = 0;
         for (k.keys, 0..) |key, i| {
-            total += visor.width(key.key, method) + k.space + visor.width(key.label, method);
-            if (i + 1 < k.keys.len) total += k.gap;
+            total +|= visor.width(key.key, method) +| k.space +| visor.width(key.label, method);
+            if (i + 1 < k.keys.len) total +|= k.gap;
         }
-        return @intCast(@min(total, std.math.maxInt(u16)));
+        return total;
     }
 
     /// Draws the strip on the window's first row. The columns between the
@@ -62,7 +62,7 @@ pub const Keys = struct {
         };
         for (k.keys, 0..) |key, i| {
             _ = try win.printSegment(.{ .text = key.key, .style = k.key_style }, .{ .col = col, .wrap = .none });
-            col +|= visor.width(key.key, method) + k.space;
+            col +|= visor.width(key.key, method) +| k.space;
             _ = try win.printSegment(.{ .text = key.label, .style = k.label_style }, .{ .col = col, .wrap = .none });
             col +|= visor.width(key.label, method);
             if (i + 1 < k.keys.len) col +|= k.gap;
@@ -119,4 +119,13 @@ test "the strip can sit on the left or in the middle" {
         \\    x go
         \\
     );
+}
+
+test "key spacing can reach the u16 edge" {
+    const keys: Keys = .{ .keys = &.{.{ .key = "x", .label = "go" }}, .space = std.math.maxInt(u16), .where = .left, .margin = 0 };
+    try testing.expectEqual(std.math.maxInt(u16), keys.width(.unicode));
+    var h = try Harness.init(testing.allocator, 2, 1);
+    defer h.deinit();
+    try keys.draw(h.window());
+    try h.expectFrame("x\n");
 }

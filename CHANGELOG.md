@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Key strips saturate their widths and spacing without overflowing intermediate sums.
+
 - Navigation and anchored scrolling clamp state without overflowing at the usize edge.
 
 - Paragraph scrolling skips whole wide clusters at the u16 column edge.
