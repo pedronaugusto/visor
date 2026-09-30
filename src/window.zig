@@ -1010,7 +1010,7 @@ test "printing measures without allocating and commits only unseen pooled text w
     fail.fail_index = fail.alloc_index;
     const measured = try s.window().printSegment(.{ .text = long }, .{ .commit = false });
     try testing.expectEqual(@as(u16, 1), measured.col);
-    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s._graphemes.len());
     _ = try s.window().printSegment(.{ .text = "inline" }, .{});
     try testing.expectError(error.OutOfMemory, s.window().printSegment(.{ .text = long }, .{}));
     fail.fail_index = std.math.maxInt(usize);

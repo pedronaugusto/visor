@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Raw Screen pools and Renderer baseline/link fields are internal `_` storage; exported cells and handles use the checked boundary.
+
 - ASCII batching checks its first cell against the Unicode neighbour so a prepend cannot join across grid cells.
 
 - Codepoint measurement gives Unicode prepend characters their standalone column rather than dropping them as combining marks.

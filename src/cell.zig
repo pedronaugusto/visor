@@ -1,8 +1,8 @@
 //! What a grid holds: one cell, its grapheme, its style, its link.
 //!
 //! A checked cell is forty-eight bytes; its stored form is thirty-two. Both
-//! have no padding and no indeterminate byte in
-//! it, and is therefore compared -- a cell, or a whole row -- with one
+//! have no padding or indeterminate bytes, and are compared -- a cell,
+//! or a whole row -- with one
 //! `memcmp`. That is what `morse.Style` being an `extern` struct with a
 //! defined layout buys.
 //!

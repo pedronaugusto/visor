@@ -181,9 +181,9 @@ fn checkGrid(s: *const Screen) !void {
             const c = s._cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
             if (c.text.isPooled()) {
-                try testing.expect(c.text.offset().? + c.text.length() <= s.graphemes.len());
+                try testing.expect(c.text.offset().? + c.text.length() <= s._graphemes.len());
             }
-            if (c.link.index()) |li| try testing.expect(li < s.links.count());
+            if (c.link.index()) |li| try testing.expect(li < s._links.count());
             if (c.isTail()) {
                 // A tail is its head's, content and all: the renderer never
                 // writes one, and the terminal makes its own from the head.
@@ -392,8 +392,8 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
 fn corrupt(r: *Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
     const count = dice.valueRangeAtMost(u8, 1, 8);
-    while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
+    while (i < count and r._prev.len != 0) : (i += 1) {
+        r._prev[dice.index(r._prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
     r.style = styles[dice.index(styles.len)];
     r.cursor = null;

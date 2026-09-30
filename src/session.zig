@@ -290,7 +290,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
             const size = s.screen.size;
             const generation = s.screen.pool_generation;
             const cells = s.screen._cells;
-            const prev = s.renderer.prev;
+            const prev = s.renderer._prev;
             const borrowed = s.screen.textAt(0, 0);
             const pending = s.pending;
             _ = s.resize(&sink.writer) catch |err| {
@@ -299,7 +299,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
                 try testing.expectEqual(size, s.ws.cells);
                 try testing.expectEqual(generation, s.screen.pool_generation);
                 try testing.expect(s.screen._cells.ptr == cells.ptr);
-                try testing.expect(s.renderer.prev.ptr == prev.ptr);
+                try testing.expect(s.renderer._prev.ptr == prev.ptr);
                 try testing.expect(s.screen.textAt(0, 0).ptr == borrowed.ptr);
                 try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", borrowed);
                 try testing.expectEqual(pending, s.pending);

@@ -177,7 +177,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `rowAt`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
-| The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `rowAt`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
+| The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
@@ -336,8 +336,9 @@ and resize invalidate retained handles; another screen cannot use them.
 `textOf`, cell writes, fills and copies return `InvalidHandle` before using a
 stale or foreign handle; `target` returns null. Inline text and `Link.none`
 are portable. Use `copyCell` with the source screen to transfer a live cell,
-or the owned-copy helpers to keep content through compaction. Raw pool
-constructors and raw text resolution are no longer public APIs.
+or the owned-copy helpers to keep content through compaction. Raw pools and
+renderer baselines are internal storage, with `_` field names. Raw pool
+constructors and raw text resolution are not public APIs.
 
 Raw `Cell` and `Cell.Text` values are untrusted input. `Screen.cell(value)`
 checks one printable UTF-8 cluster, its shape and pool handles and returns a

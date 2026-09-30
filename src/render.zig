@@ -156,7 +156,7 @@ pub const Renderer = struct {
     /// The size both the previous frame and the screen must be.
     size: Size,
     /// What the terminal was last shown.
-    prev: []Cell,
+    _prev: []Cell,
     /// The pool generation whose identities the previous frame records.
     pool_generation: ?u64 = null,
     /// Rows the renderer has its own reason to write whole.
@@ -184,7 +184,7 @@ pub const Renderer = struct {
     /// The style the terminal is in.
     style: Style = .{},
     /// The link the terminal has open.
-    link: Link = .none,
+    _link: Link = .none,
     /// Where the terminal's cursor is, or null when the renderer does not
     /// know — after a scroll, after a repaint, after a row whose width the
     /// terminal may have disagreed about, and after a write into the last
@@ -274,7 +274,7 @@ pub const Renderer = struct {
         var r: Renderer = .{
             .gpa = gpa,
             .size = size,
-            .prev = &.{},
+            ._prev = &.{},
             .force = &.{},
             .drifted = &.{},
             .untrusted = &.{},
@@ -309,7 +309,7 @@ pub const Renderer = struct {
     // address stay with their owner; the prepared value frees the old storage.
     fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
         std.debug.assert(r.gpa.ptr == prepared.gpa.ptr and r.gpa.vtable == prepared.gpa.vtable);
-        inline for (.{ "size", "prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
+        inline for (.{ "size", "_prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
             std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
         }
         r.repaint();
@@ -321,7 +321,7 @@ pub const Renderer = struct {
     pub fn repaint(r: *Renderer) void {
         r.repaint_all = true;
         r.cursor = null;
-        @memset(r.prev, unknown);
+        @memset(r._prev, unknown);
     }
 
     /// Forgets the cursor's position after a one-off sequence moved it.
@@ -338,7 +338,7 @@ pub const Renderer = struct {
     pub fn repaintRow(r: *Renderer, row: u16) void {
         if (row >= r.force.len) return;
         r.force[row] = true;
-        @memset(r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols], unknown);
+        @memset(r._prev[@as(usize, row) * r.size.cols ..][0..r.size.cols], unknown);
     }
 
     /// Writes the difference between the last frame and this one: the grid,
@@ -473,12 +473,12 @@ pub const Renderer = struct {
         }
         try morse.cursorVisible.set(w, false);
 
-        @memset(r.prev, .blank(.{}));
+        @memset(r._prev, .blank(.{}));
         @memset(r.force, false);
         @memset(r.drifted, false);
         @memset(r.untrusted, false);
         r.style = .{};
-        r.link = .none;
+        r._link = .none;
         r.cursor = .{ .col = 0, .row = 0 };
         r.shown = false;
         r.shape = null;
@@ -534,9 +534,9 @@ pub const Renderer = struct {
     pub fn leave(r: *Renderer, w: *Writer) Error!void {
         try morse.syncOutput.set(w, false);
         const was = r.entered orelse return;
-        if (r.link != .none) {
+        if (r._link != .none) {
             try morse.hyperlinkEnd(w);
-            r.link = .none;
+            r._link = .none;
         }
         try morse.resetStyle(w);
         r.style = .{};
@@ -602,7 +602,7 @@ pub const Renderer = struct {
 
     /// One row of the previous frame.
     fn prevRow(r: *const Renderer, row: u16) []const Cell {
-        return r.prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
+        return r._prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
     }
 
     /// Moves the previous frame's rows the way the terminal just moved the
@@ -610,7 +610,7 @@ pub const Renderer = struct {
     fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
         const cols = r.size.cols;
         const blank: Cell = .blank(.{});
-        const region = r.prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
+        const region = r._prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
         const untrusted = r.untrusted[top .. @as(usize, bottom) + 1];
         const moved = @as(usize, distance) * cols;
         if (up) {
@@ -635,9 +635,9 @@ pub const Renderer = struct {
     /// Takes the memory the renderer needs, all of it at once.
     fn allocate(r: *Renderer, size: Size) Allocator.Error!void {
         const gpa = r.gpa;
-        r.prev = try gpa.alloc(Cell, size.area());
-        errdefer gpa.free(r.prev);
-        @memset(r.prev, .blank(.{}));
+        r._prev = try gpa.alloc(Cell, size.area());
+        errdefer gpa.free(r._prev);
+        @memset(r._prev, .blank(.{}));
         r.force = try gpa.alloc(bool, size.rows);
         errdefer gpa.free(r.force);
         @memset(r.force, false);
@@ -655,7 +655,7 @@ pub const Renderer = struct {
     /// Gives all of it back.
     fn release(r: *Renderer) void {
         const gpa = r.gpa;
-        gpa.free(r.prev);
+        gpa.free(r._prev);
         gpa.free(r.force);
         gpa.free(r.drifted);
         gpa.free(r.untrusted);
@@ -719,7 +719,7 @@ pub const Renderer = struct {
     fn beginRepaint(r: *Renderer, out: *Writer, caps: Caps) Error!void {
         try r.hideForWrite(out);
         if (caps.osc8) try morse.hyperlinkEnd(out);
-        r.link = .none;
+        r._link = .none;
         try morse.resetStyle(out);
         r.style = .{};
         r.cursor = null;
@@ -735,7 +735,7 @@ pub const Renderer = struct {
             } else {
                 try morse.clearScreen(out, .to_end);
             }
-            @memset(r.prev, .blank(.{}));
+            @memset(r._prev, .blank(.{}));
             @memset(r.untrusted, false);
         }
     }
@@ -870,7 +870,7 @@ pub const Renderer = struct {
     fn diffIsOneRun(r: *Renderer, s: *Screen, caps: Caps, row: u16) bool {
         const cols = r.size.cols;
         if (visible(stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return false;
-        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        const state: CostState = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
         return r.runEndCost(state, s, caps, row, 0, cols - 1) == cols - 1;
     }
 
@@ -888,7 +888,7 @@ pub const Renderer = struct {
     ) ?usize {
         const cells = stored.row(s, row);
         const old = r.prevRow(row);
-        var state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        var state: CostState = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
         var cost: usize = 0;
         var col = first;
         while (col <= last) {
@@ -948,7 +948,7 @@ pub const Renderer = struct {
     ) Error!u64 {
         var state: CostState = .{
             .style = r.style,
-            .link = r.link,
+            .link = r._link,
             .cursor = r.cursor,
         };
         return if (whole)
@@ -1441,7 +1441,7 @@ pub const Renderer = struct {
         col: u16,
         last: u16,
     ) u16 {
-        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        const state: CostState = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
         return r.runEndCost(state, s, caps, row, col, last);
     }
 
@@ -1449,7 +1449,7 @@ pub const Renderer = struct {
     fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) void {
         const cells = stored.row(s, row)[first .. @as(usize, last) + 1];
         const row_start = @as(usize, row) * r.size.cols;
-        const old = r.prev[row_start + first .. row_start + @as(usize, last) + 1];
+        const old = r._prev[row_start + first .. row_start + @as(usize, last) + 1];
         if (shownAsHeld(caps)) {
             @memcpy(old, cells);
             return;
@@ -1501,19 +1501,19 @@ pub const Renderer = struct {
         caps: Caps,
         stats: *Stats,
     ) Error!void {
-        if (!caps.osc8 or r.link == to) return;
+        if (!caps.osc8 or r._link == to) return;
         if (to == .none) {
             try morse.hyperlinkEnd(out);
         } else {
             const t = stored.target(s, to) orelse {
                 try morse.hyperlinkEnd(out);
-                r.link = .none;
+                r._link = .none;
                 stats.links += 1;
                 return;
             };
             try morse.hyperlinkStart(out, t.uri, if (t.params.len == 0) null else t.params);
         }
-        r.link = to;
+        r._link = to;
         stats.links += 1;
     }
 
@@ -2787,12 +2787,12 @@ test "arithmetic row prices match emitted rows" {
     const Check = struct {
         fn row(fixture: *Fixture, whole: bool) !void {
             const r = &fixture.renderer;
-            const saved = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+            const saved = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
             var emitted: Writer.Discarding = .init(&.{});
             var ignored: Renderer.Stats = .{};
             try r.emitRow(&emitted.writer, &fixture.screen, fixture.caps, 0, 0, 39, whole, &ignored);
             r.style = saved.style;
-            r.link = saved.link;
+            r._link = saved.link;
             r.cursor = saved.cursor;
 
             const priced = try r.price(&fixture.screen, fixture.caps, 0, 0, 39, whole);
@@ -2803,7 +2803,7 @@ test "arithmetic row prices match emitted rows" {
                 try testing.expect(r.isolatedDiffCost(&fixture.screen, fixture.caps, 0, 0, 39, std.math.maxInt(usize)).? >= priced);
             }
             try testing.expectEqual(saved.style, r.style);
-            try testing.expectEqual(saved.link, r.link);
+            try testing.expectEqual(saved.link, r._link);
             try testing.expectEqual(saved.cursor, r.cursor);
         }
     };
@@ -2864,7 +2864,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
 
         const r = &f.renderer;
         r.style = styles[random.uintLessThan(usize, styles.len)];
-        r.link = if (random.boolean()) @enumFromInt(@as(u16, @truncate(@intFromEnum(link)))) else .none;
+        r._link = if (random.boolean()) @enumFromInt(@as(u16, @truncate(@intFromEnum(link)))) else .none;
         r.cursor = switch (random.uintLessThan(u8, 3)) {
             0 => null,
             1 => .{ .col = 0, .row = 0 },
@@ -2873,7 +2873,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
         if (!r.diffIsOneRun(&f.screen, f.caps, 0)) continue;
         hits += 1;
 
-        const saved = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
+        const saved = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
         var bytes: [2][]u8 = undefined;
         for ([_]bool{ false, true }, 0..) |whole, i| {
             var emitted: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -2882,7 +2882,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
             try r.emitRow(&emitted.writer, &f.screen, f.caps, 0, 0, cols - 1, whole, &ignored);
             bytes[i] = try testing.allocator.dupe(u8, emitted.written());
             r.style = saved.style;
-            r.link = saved.link;
+            r._link = saved.link;
             r.cursor = saved.cursor;
         }
         defer for (bytes) |b| testing.allocator.free(b);
@@ -3629,8 +3629,8 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         const new_link = try next.link("https://new.invalid", "");
         const new = "b\u{301}\u{302}\u{303}";
         try next.write(0, 0, new, .{}, new_link);
-        try testing.expectEqual(f.renderer.prev[0].text.offset(), next._cells[0].text.offset());
-        try testing.expectEqual(f.renderer.prev[0].link.index(), next._cells[0].link.index());
+        try testing.expectEqual(f.renderer._prev[0].text.offset(), next._cells[0].text.offset());
+        try testing.expectEqual(f.renderer._prev[0].link.index(), next._cells[0].link.index());
         try testing.expect(!f.screen.readCell(0, 0).?.eql(next.readCell(0, 0).?));
         // Damage belongs to the grid's writes; it says nothing about which
         // grid the terminal was previously shown.

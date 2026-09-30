@@ -550,8 +550,8 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
 fn corrupt(r: *visor.Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
     const count = dice.valueRangeAtMost(u8, 1, 8);
-    while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
+    while (i < count and r._prev.len != 0) : (i += 1) {
+        r._prev[dice.index(r._prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
     r.style = styles[dice.index(styles.len)];
     r.cursor = null;
@@ -885,7 +885,7 @@ fn placementCount(o: *const Oracle) usize {
 /// Every layer the screen shows is where the second emulator has it, and
 /// it has nothing else.
 fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
-    for (h.layers.shown.items) |layer| {
+    for (h.layers.placements()) |layer| {
         const at = placementOf(o, layer.image, layer.placement) orelse {
             log.err("image {d}/{d}: drawn at {any}, the terminal has none", .{ layer.image, layer.placement, layer.rect });
             return error.PlacementMissing;
@@ -895,7 +895,7 @@ fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
             return error.PlacementMoved;
         }
     }
-    try testing.expectEqual(h.layers.shown.items.len, placementCount(o));
+    try testing.expectEqual(h.layers.placements().len, placementCount(o));
 }
 
 /// A picture of `id`, four by four pixels, sent the way a program sends one.

@@ -74,10 +74,10 @@ pub const internal = struct {
     }
     pub fn textOf(s: *const Screen, c: *const StoredCell) []const u8 {
         if (!c.text.isPooled()) return c.text.inlineSlice().?;
-        return s.graphemes.bytes.items[c.text.offset().?..][0..c.text.length()];
+        return s._graphemes.bytes.items[c.text.offset().?..][0..c.text.length()];
     }
     pub fn target(s: *const Screen, link: @TypeOf(@as(StoredCell, .{}).link)) ?pool.Target {
-        return s.links.get(link);
+        return s._links.get(link);
     }
 
     pub fn resizeKeepingLink(s: *Screen, size: Size, link: *Link) Allocator.Error!void {
@@ -94,9 +94,9 @@ pub const Screen = struct {
     /// Every cell, row by row.
     _cells: []StoredCell,
     /// The graphemes too long to live in a cell.
-    graphemes: pool.Graphemes,
+    _graphemes: pool.Graphemes,
     /// Every OSC 8 target the cells point at.
-    links: pool.Links,
+    _links: pool.Links,
     /// The identity of this pair of pools, changed whenever they are replaced.
     pool_generation: u64 = 0,
     /// Which cells have changed since the last frame was written.
@@ -121,8 +121,8 @@ pub const Screen = struct {
             .gpa = gpa,
             .size = size,
             ._cells = cells,
-            .graphemes = .{},
-            .links = .{},
+            ._graphemes = .{},
+            ._links = .{},
             .pool_generation = pool.nextGeneration(),
             .damage = dmg,
         };
@@ -132,8 +132,8 @@ pub const Screen = struct {
     pub fn deinit(s: *Screen) void {
         const gpa = s.gpa;
         gpa.free(s._cells);
-        s.graphemes.deinit(gpa);
-        s.links.deinit(gpa);
+        s._graphemes.deinit(gpa);
+        s._links.deinit(gpa);
         s.damage.deinit(gpa);
         s.* = undefined;
     }
@@ -173,8 +173,8 @@ pub const Screen = struct {
             .gpa = gpa,
             .size = size,
             ._cells = cells,
-            .graphemes = .{},
-            .links = .{},
+            ._graphemes = .{},
+            ._links = .{},
             .damage = damage,
         };
         if (size.rows > 0) resized.heal(0, size.rows - 1);
@@ -257,10 +257,10 @@ pub const Screen = struct {
                 c.link = links.intern(gpa, t.uri, t.params) catch unreachable;
             }
         }
-        s.graphemes.deinit(gpa);
-        s.links.deinit(gpa);
-        s.graphemes = graphemes;
-        s.links = links;
+        s._graphemes.deinit(gpa);
+        s._links.deinit(gpa);
+        s._graphemes = graphemes;
+        s._links = links;
         s.pool_generation = pool.nextGeneration();
         if (retained) |slot| slot.* = cellmod.internal.exportLink(prepared.kept, s.pool_generation);
     }
@@ -397,7 +397,7 @@ pub const Screen = struct {
         var put = try validateCell(checked, try source.textOf(&c), s.method);
         if (c.text.isPooled()) put.text = try s.intern(try source.textOf(&c));
         if (source.target(c.link)) |link_target| {
-            put.link = cellmod.internal.exportLink(try s.links.intern(s.gpa, link_target.uri, link_target.params), s.pool_generation);
+            put.link = cellmod.internal.exportLink(try s._links.intern(s.gpa, link_target.uri, link_target.params), s.pool_generation);
         } else {
             put.link = .none;
         }
@@ -584,7 +584,7 @@ pub const Screen = struct {
     /// A cell using them is validated by `cell` or checked placement.
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
     pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
-        const t = try s.graphemes.intern(s.gpa, bytes);
+        const t = try s._graphemes.intern(s.gpa, bytes);
         return cellmod.internal.exportCell(.{ .text = t }, s.pool_generation).text;
     }
 
@@ -599,7 +599,7 @@ pub const Screen = struct {
     pub fn link(s: *Screen, uri: []const u8, params: []const u8) (Allocator.Error || error{ControlInText})!Link {
         try morse.checkText(uri);
         try morse.checkText(params);
-        return cellmod.internal.exportLink(try s.links.intern(s.gpa, uri, params), s.pool_generation);
+        return cellmod.internal.exportLink(try s._links.intern(s.gpa, uri, params), s.pool_generation);
     }
 
     /// The bytes of a cell's grapheme, or `InvalidHandle` for stale or foreign text.
@@ -616,7 +616,7 @@ pub const Screen = struct {
         if (!c.text.isPooled()) return c.text.inlineSlice() orelse error.InvalidHandle;
         if (c.text.generation() != s.pool_generation) return error.InvalidHandle;
         const t: StoredCell.Text = .{ .buf = c.text.buf, .len = c.text.len };
-        return s.graphemes.slice(&t);
+        return s._graphemes.slice(&t);
     }
 
     /// The bytes of the grapheme at a place, borrowed from the grid itself,
@@ -635,7 +635,7 @@ pub const Screen = struct {
     /// `dupeTarget` to retain the target across drawing.
     pub fn target(s: *const Screen, l: Link) ?pool.Target {
         if (l == .none or l.generation() != s.pool_generation) return null;
-        return s.links.get(@enumFromInt(@as(u16, @truncate(@intFromEnum(l)))));
+        return s._links.get(@enumFromInt(@as(u16, @truncate(@intFromEnum(l)))));
     }
 
     /// Copies a cell's text for retention. The caller owns the result and
@@ -922,9 +922,9 @@ fn checkInvariants(s: *const Screen) !void {
             // table.
             if (c.text.isPooled()) {
                 const off = c.text.offset().?;
-                try testing.expect(off + c.text.length() <= s.graphemes.len());
+                try testing.expect(off + c.text.length() <= s._graphemes.len());
             }
-            if (c.link.index()) |li| try testing.expect(li < s.links.count());
+            if (c.link.index()) |li| try testing.expect(li < s._links.count());
 
             if (c.isTail()) {
                 // A tail never stands alone: something covers it.
@@ -1418,13 +1418,13 @@ test "compacting the pool keeps what is on screen and drops what is not" {
     }
     const kept = "a\u{301}\u{302}\u{33f}";
     try testing.expectEqualStrings(kept, s.textAt(0, 0));
-    try testing.expect(s.graphemes.len() > kept.len);
-    try testing.expectEqual(@as(usize, 64), s.links.count());
+    try testing.expect(s._graphemes.len() > kept.len);
+    try testing.expectEqual(@as(usize, 64), s._links.count());
 
     try s.compactPool();
     try testing.expectEqualStrings(kept, s.textAt(0, 0));
-    try testing.expectEqual(@as(usize, kept.len), s.graphemes.len());
-    try testing.expectEqual(@as(usize, 0), s.links.count());
+    try testing.expectEqual(@as(usize, kept.len), s._graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s._links.count());
     try checkInvariants(&s);
 }
 
@@ -1436,10 +1436,10 @@ test "compacting keeps the links cells still point at" {
     _ = stale;
     const live = try s.link("https://ziglang.org", "id=1");
     try s.write(0, 0, "z", .{}, live);
-    try testing.expectEqual(@as(usize, 2), s.links.count());
+    try testing.expectEqual(@as(usize, 2), s._links.count());
 
     try s.compactPool();
-    try testing.expectEqual(@as(usize, 1), s.links.count());
+    try testing.expectEqual(@as(usize, 1), s._links.count());
     const now = s.readCell(0, 0).?.link;
     try testing.expectEqualStrings("https://ziglang.org", s.target(now).?.uri);
     try testing.expectEqualStrings("id=1", s.target(now).?.params);
@@ -1454,9 +1454,9 @@ test "a resize rebuilds the pool rather than growing it forever" {
         const long = try std.fmt.bufPrint(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
         try s.write(0, 0, long, .{}, .none);
     }
-    const before = s.graphemes.len();
+    const before = s._graphemes.len();
     try s.resize(.{ .cols = 6, .rows = 2 });
-    try testing.expect(s.graphemes.len() < before);
+    try testing.expect(s._graphemes.len() < before);
     try testing.expectEqualStrings("a\u{301}\u{302}\u{31f}", s.textAt(0, 0));
 }
 
@@ -1554,16 +1554,16 @@ test "a failed resize leaves cells, pool identities, borrows and damage untouche
             s.damage.clear();
             const before = s._cells[0];
             const cells = s._cells;
-            const graphemes = s.graphemes.bytes.items;
-            const links = s.links.bytes.items;
+            const graphemes = s._graphemes.bytes.items;
+            const links = s._links.bytes.items;
             const generation = s.pool_generation;
             s.resize(.{ .cols = 8, .rows = 2 }) catch |err| {
                 try testing.expectEqual(generation, s.pool_generation);
                 try testing.expectEqual(Size{ .cols = 4, .rows = 1 }, s.size);
                 try testing.expect(s._cells.ptr == cells.ptr);
                 try testing.expect(before.eql(s._cells[0]));
-                try testing.expect(s.graphemes.bytes.items.ptr == graphemes.ptr);
-                try testing.expect(s.links.bytes.items.ptr == links.ptr);
+                try testing.expect(s._graphemes.bytes.items.ptr == graphemes.ptr);
+                try testing.expect(s._links.bytes.items.ptr == links.ptr);
                 try testing.expect(!s.damage.any());
                 return err;
             };
@@ -1651,7 +1651,7 @@ test "the grid and renderer store compact cells while exported handles stay chec
     try testing.expect(@sizeOf(@TypeOf(s._cells[0])) <= 32);
     var renderer = try @import("render.zig").Renderer.init(testing.allocator, s.size);
     defer renderer.deinit();
-    try testing.expect(@sizeOf(@TypeOf(renderer.prev[0])) <= 32);
+    try testing.expect(@sizeOf(@TypeOf(renderer._prev[0])) <= 32);
     const glyph = "👩‍🚀";
     try s.write(0, 0, glyph, .{}, try s.link("https://checked.invalid", ""));
     const exported = s.readCell(0, 0).?;
@@ -1734,8 +1734,8 @@ test "copying a cell checks destination shape before allocating its pools" {
     defer dest.deinit();
     dest.damage.clear();
     try testing.expectError(error.InvalidCell, dest.copyCell(&source, 0, 0, source.readCell(0, 0).?));
-    try testing.expectEqual(@as(usize, 0), dest.graphemes.len());
-    try testing.expectEqual(@as(usize, 0), dest.links.count());
+    try testing.expectEqual(@as(usize, 0), dest._graphemes.len());
+    try testing.expectEqual(@as(usize, 0), dest._links.count());
     try testing.expect(!dest.damage.any());
 }
 
@@ -1746,15 +1746,31 @@ test "shrinking a screen sweeps text and links that no cell keeps" {
     const glyph = "a\u{301}\u{302}\u{303}";
     try s.write(1, 0, glyph, .{}, link);
     try s.resize(.{ .cols = 1, .rows = 1 });
-    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
-    try testing.expectEqual(@as(usize, 0), s.links.count());
+    try testing.expectEqual(@as(usize, 0), s._graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s._links.count());
 
     // A head can survive the rectangle but lose the room its block needs.
     try s.resize(.{ .cols = 2, .rows = 1 });
     const wide_link = try s.link("https://clipped.example", "");
     try s.write(0, 0, "界\u{301}\u{302}", .{}, wide_link);
     try s.resize(.{ .cols = 1, .rows = 1 });
-    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
-    try testing.expectEqual(@as(usize, 0), s.links.count());
+    try testing.expectEqual(@as(usize, 0), s._graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s._links.count());
     try testing.expectEqualStrings(" ", s.textAt(0, 0));
+}
+
+test "raw pools and renderer storage stay behind the checked boundary" {
+    const Renderer = @import("render.zig").Renderer;
+    try testing.expect(!@hasField(Screen, "graphemes"));
+    try testing.expect(!@hasField(Screen, "links"));
+    try testing.expect(!@hasField(Renderer, "prev"));
+    try testing.expect(!@hasField(Renderer, "link"));
+    var s = try made(1, 1);
+    defer s.deinit();
+    const text = try s.intern("a\u{301}\u{302}\u{303}");
+    const link = try s.link("https://checked.invalid", "");
+    try s.writeOwnedCell(0, 0, .{ .text = text, .link = link });
+    const exported = s.readCell(0, 0).?;
+    try testing.expectEqual(s.pool_generation, exported.text.generation());
+    try testing.expectEqual(s.pool_generation, exported.link.generation());
 }
