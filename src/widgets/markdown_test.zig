@@ -61,7 +61,7 @@ test "markdown edges handle empty widths literal delimiters and unsafe targets" 
     try md.draw(h.window());
     _ = try h.frame();
     try t.expectEqualStrings("│", h.screen.textAt(0, 0));
-    for (0..h.screen.size.rows) |row| {
+    for (0..h.screen.dimensions().rows) |row| {
         const cells = h.screen.rowAt(@intCast(row));
         for (0..cells.len()) |col| try t.expectEqual(visor.Link.none, cells.get(col).?.link);
     }

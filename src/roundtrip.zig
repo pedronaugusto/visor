@@ -175,9 +175,9 @@ const Harness = struct {
 
 /// Every invariant the grid promises, checked over the whole of it.
 fn checkGrid(s: *const Screen) !void {
-    for (0..s.size.rows) |r| {
+    for (0..s.dimensions().rows) |r| {
         var col: u16 = 0;
-        while (col < s.size.cols) {
+        while (col < s.dimensions().cols) {
             const c = s._cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
             if (c.text.isPooled()) {
@@ -197,8 +197,8 @@ fn checkGrid(s: *const Screen) !void {
             // A head's block is inside the grid and made of its own tails,
             // so the columns of a row add up to the row.
             const span = c.width();
-            try testing.expect(col + span <= s.size.cols);
-            try testing.expect(r + c.rows() <= s.size.rows);
+            try testing.expect(col + span <= s.dimensions().cols);
+            try testing.expect(r + c.rows() <= s.dimensions().rows);
             for (0..c.rows()) |dr| {
                 for (0..span) |dc| {
                     if (dr == 0 and dc == 0) continue;
@@ -215,10 +215,10 @@ fn checkGrid(s: *const Screen) !void {
 /// That the conservative damage map names every cell that changed, checked
 /// against a copy taken before the operations.
 fn checkDamage(s: *const Screen, before: []const @import("cell.zig").internal.StoredCell) !void {
-    for (0..s.size.rows) |r| {
-        const span = s.damage.row(@intCast(r));
+    for (0..s.dimensions().rows) |r| {
+        const span = s._damage.row(@intCast(r));
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.dimensions().cols) : (col += 1) {
             const i = s.index(col, @intCast(r));
             const changed = !s._cells[i].eql(before[i]);
             const named = if (span) |sp| col >= sp.first and col <= sp.last else false;
@@ -252,8 +252,8 @@ const Tally = struct {
 /// One random operation on the grid.
 fn operate(h: *Harness, dice: *corpus.Dice) !void {
     const s = &h.screen;
-    const cols = s.size.cols;
-    const rows = s.size.rows;
+    const cols = s.dimensions().cols;
+    const rows = s.dimensions().rows;
     const graphemes = &alphabet;
     const op = dice.valueRangeAtMost(u8, 0, 7);
     if (h.tally) |tl| tl.ops.add(op);
@@ -343,7 +343,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     var frames: usize = 0;
     while (frames < 6 and !dice.eos()) : (frames += 1) {
         @memcpy(before, h.screen._cells);
-        h.screen.damage.clear();
+        h.screen._damage.clear();
 
         var ops: usize = 0;
         const count = dice.valueRangeAtMost(u8, 1, 12);
@@ -552,11 +552,11 @@ test "the round trip holds across resizes against a terminal told every width" {
 fn expectRegionEqual(want: *const Screen, t: *const Term) !void {
     const got = t.screen();
     const origin = (t.saved orelse return error.NoOrigin).row;
-    try testing.expect(origin + want.size.rows <= got.size.rows);
+    try testing.expect(origin + want.dimensions().rows <= got.dimensions().rows);
     var row: u16 = 0;
-    while (row < want.size.rows) : (row += 1) {
+    while (row < want.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < want.size.cols) : (col += 1) {
+        while (col < want.dimensions().cols) : (col += 1) {
             const a = want.readCell(col, row).?;
             const b = got.readCell(col, origin + row).?;
             const same = std.mem.eql(u8, want.textAt(col, row), got.textAt(col, origin + row)) and

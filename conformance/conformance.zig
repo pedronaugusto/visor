@@ -278,9 +278,9 @@ const Disagreement = struct {
 fn firstDisagreement(screen: *const visor.Screen, o: *const Oracle) !?Disagreement {
     var buf: [64]u8 = undefined;
     var row: u16 = 0;
-    while (row < screen.size.rows) : (row += 1) {
+    while (row < screen.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < screen.size.cols) : (col += 1) {
+        while (col < screen.dimensions().cols) : (col += 1) {
             const mine = screen.readCell(col, row).?;
             const theirs = try o.read(col, row, &buf);
             if (wideOf(mine.shape.kind) != theirs.wide) return .{ .col = col, .row = row, .what = .width };
@@ -443,8 +443,8 @@ const Harness = struct {
 /// package draws from, written against the public API.
 fn operate(h: *Harness, dice: *corpus.Dice) !void {
     const s = &h.screen;
-    const cols = s.size.cols;
-    const rows = s.size.rows;
+    const cols = s.dimensions().cols;
+    const rows = s.dimensions().rows;
     const op = dice.valueRangeAtMost(u8, 0, 6);
     if (h.tally) |t| t.ops.add(op);
     switch (op) {
@@ -594,7 +594,7 @@ test "a mark on a terminal one column wide stays with its base" {
     const gpa = testing.allocator;
     var h: Harness = try .init(gpa, .{ .cols = 1, .rows = 2 }, .unicode);
     defer h.deinit();
-    const o = try Oracle.init(gpa, h.screen.size, .unicode);
+    const o = try Oracle.init(gpa, h.screen.dimensions(), .unicode);
     defer o.deinit();
     try h.screen.write(0, 0, "e\u{301}", .{}, .none);
     try h.screen.write(0, 1, "a\u{301}\u{302}", .{ .bold = true }, .none);
@@ -621,7 +621,7 @@ test "cells the program drew apart stay apart on the second emulator, where it w
     };
     var h: Harness = try .init(gpa, .{ .cols = 16, .rows = rows.len }, .unicode);
     defer h.deinit();
-    const o = try Oracle.init(gpa, h.screen.size, .unicode);
+    const o = try Oracle.init(gpa, h.screen.dimensions(), .unicode);
     defer o.deinit();
     try h.enter(o);
     for (rows, 0..) |cells, row| {
@@ -648,7 +648,7 @@ test "measured by codepoint, a cluster of wide codepoints is in the cells the te
     const gpa = testing.allocator;
     var h: Harness = try .init(gpa, .{ .cols = 10, .rows = 2 }, .wcwidth);
     defer h.deinit();
-    const o = try Oracle.init(gpa, h.screen.size, .wcwidth);
+    const o = try Oracle.init(gpa, h.screen.dimensions(), .wcwidth);
     defer o.deinit();
     try h.screen.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none);
     try h.screen.write(4, 0, "x", .{}, .none);
@@ -1093,7 +1093,7 @@ test "a list of rows a person picks from reaches the second emulator as drawn" {
     for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
         var h: Harness = try .init(gpa, .{ .cols = 22, .rows = 5 }, method);
         defer h.deinit();
-        const o = try Oracle.init(gpa, h.screen.size, method);
+        const o = try Oracle.init(gpa, h.screen.dimensions(), method);
         defer o.deinit();
         const Run = widgets.List.Segment;
         const items = [_]widgets.Item{
@@ -1143,7 +1143,7 @@ test "an ASCII batch stays apart from a prepend on the second emulator" {
     for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
         var h = try Harness.init(testing.allocator, .{ .cols = 5, .rows = 1 }, method);
         defer h.deinit();
-        const o = try Oracle.init(testing.allocator, h.screen.size, method);
+        const o = try Oracle.init(testing.allocator, h.screen.dimensions(), method);
         defer o.deinit();
         h.caps.rep = false;
         try h.enter(o);

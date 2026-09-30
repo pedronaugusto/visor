@@ -151,35 +151,41 @@ pub const sync_gate = 1024;
 /// The last frame, and the style, link and cursor the terminal is currently
 /// in.
 pub const Renderer = struct {
+    // Fields prefixed _ belong to the owner; change geometry through resize.
+    /// The current grid dimensions, copied rather than borrowed storage.
+    pub fn dimensions(owner: *const Renderer) Size {
+        return owner._size;
+    }
+
     /// The allocator `init` was given.
-    gpa: Allocator,
+    _gpa: Allocator,
     /// The size both the previous frame and the screen must be.
-    size: Size,
+    _size: Size,
     /// What the terminal was last shown.
     _prev: []Cell,
     /// The pool generation whose identities the previous frame records.
-    pool_generation: ?u64 = null,
+    _pool_generation: ?u64 = null,
     /// Rows the renderer has its own reason to write whole.
-    force: []bool,
+    _force: []bool,
     /// Rows that have ever held a grapheme the two width models disagree
     /// about. A change of width method repaints all of them, touched or not:
     /// a terminal that clips a row it measures wider than the model does is
     /// not something the model can see happen.
-    drifted: []bool,
+    _drifted: []bool,
     /// Rows of `prev` a cell diff cannot safely cross. Unlike `drifted`,
     /// this follows scrolling content and is cleared when the row becomes
     /// safe again.
-    untrusted: []bool,
+    _untrusted: []bool,
     /// A hash of each row of `prev` and of the screen, for finding a frame
     /// whose rows moved.
-    hashes: []u64,
+    _hashes: []u64,
     /// The renderer's own write buffer. A frame that fits in it is written
     /// to the caller in one go, which is what lets the synchronised-output
     /// bracket be decided after the frame's size is known.
-    buf: []u8,
+    _buf: []u8,
     /// SGR spellings already constructed for style pairs this renderer has
     /// seen. A collision only rebuilds one spelling.
-    style_sequences: StyleSequenceCache = .{},
+    _style_sequences: StyleSequenceCache = .{},
 
     /// The style the terminal is in.
     style: Style = .{},
@@ -206,7 +212,7 @@ pub const Renderer = struct {
     /// In inline mode, how many rows of the terminal are the screen's,
     /// counted from the saved origin; null in the alternate screen. The next
     /// repaint takes or gives back rows when this and `size.rows` differ.
-    region: ?u16 = null,
+    _region: ?u16 = null,
 
     /// The modes `enter` switched, remembered so `leave` is its mirror.
     pub const Entered = struct {
@@ -272,14 +278,14 @@ pub const Renderer = struct {
     /// Allocates the previous frame.
     pub fn init(gpa: Allocator, size: Size) Allocator.Error!Renderer {
         var r: Renderer = .{
-            .gpa = gpa,
-            .size = size,
+            ._gpa = gpa,
+            ._size = size,
             ._prev = &.{},
-            .force = &.{},
-            .drifted = &.{},
-            .untrusted = &.{},
-            .hashes = &.{},
-            .buf = &.{},
+            ._force = &.{},
+            ._drifted = &.{},
+            ._untrusted = &.{},
+            ._hashes = &.{},
+            ._buf = &.{},
         };
         try r.allocate(size);
         return r;
@@ -300,7 +306,7 @@ pub const Renderer = struct {
     /// at the old size after it had changed -- is its own business, and
     /// nothing about what it now shows is known.
     pub fn resize(r: *Renderer, size: Size) Allocator.Error!void {
-        var prepared = try Renderer.init(r.gpa, size);
+        var prepared = try Renderer.init(r._gpa, size);
         defer prepared.deinit();
         r.resizePrepared(&prepared);
     }
@@ -308,8 +314,8 @@ pub const Renderer = struct {
     // Moves only storage. Terminal mode intent and the renderer's stable
     // address stay with their owner; the prepared value frees the old storage.
     fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
-        std.debug.assert(r.gpa.ptr == prepared.gpa.ptr and r.gpa.vtable == prepared.gpa.vtable);
-        inline for (.{ "size", "_prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
+        std.debug.assert(r._gpa.ptr == prepared._gpa.ptr and r._gpa.vtable == prepared._gpa.vtable);
+        inline for (.{ "_size", "_prev", "_force", "_drifted", "_untrusted", "_hashes", "_buf" }) |field| {
             std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
         }
         r.repaint();
@@ -336,9 +342,9 @@ pub const Renderer = struct {
     /// could be showing anything on it. What a caller that suspects one row
     /// gives it.
     pub fn repaintRow(r: *Renderer, row: u16) void {
-        if (row >= r.force.len) return;
-        r.force[row] = true;
-        @memset(r._prev[@as(usize, row) * r.size.cols ..][0..r.size.cols], unknown);
+        if (row >= r._force.len) return;
+        r._force[row] = true;
+        @memset(r._prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols], unknown);
     }
 
     /// Writes the difference between the last frame and this one: the grid,
@@ -350,7 +356,7 @@ pub const Renderer = struct {
     /// that orders them, the text pass whole before the first graphics
     /// command. A program that shows no pictures passes null.
     pub fn draw(r: *Renderer, w: *Writer, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {
-        if (!std.meta.eql(r.size, s.size)) return error.SizeMismatch;
+        if (!std.meta.eql(r.dimensions(), s.dimensions())) return error.SizeMismatch;
         // The emit path updates its model while it constructs the frame. If
         // any write fails, none of those updates describe what the terminal
         // received, so the next attempt must establish the whole frame from
@@ -361,10 +367,10 @@ pub const Renderer = struct {
 
         // Damage cannot distinguish a reused pool identity from the old
         // bytes it named. Forget the whole baseline before comparing it.
-        if (r.pool_generation) |generation| {
-            if (generation != s.pool_generation) r.repaint();
+        if (r._pool_generation) |generation| {
+            if (generation != s._pool_generation) r.repaint();
         }
-        r.pool_generation = s.pool_generation;
+        r._pool_generation = s._pool_generation;
 
         // A terminal told to measure clusters differently has redrawn
         // everything the two models disagreed about, and the model cannot
@@ -375,14 +381,14 @@ pub const Renderer = struct {
         r.method = caps.width_method;
 
         const pictures = if (layers) |l| l.hasFrameWork() else false;
-        const body = r.repaint_all or s.damage.any() or r.anyForced() or pictures;
+        const body = r.repaint_all or s._damage.any() or r.anyForced() or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
-            s.damage.clear();
+            s._damage.clear();
             return stats;
         }
 
-        var frame: Frame = .init(w, r.buf, caps.sync and !caps.sync_unwanted);
+        var frame: Frame = .init(w, r._buf, caps.sync and !caps.sync_unwanted);
         const out = &frame.writer;
 
         if (r.repaint_all) {
@@ -391,7 +397,7 @@ pub const Renderer = struct {
             if (layers) |l| l.repaint();
         }
         if (body) {
-            if (caps.scroll_detection and r.region == null) {
+            if (caps.scroll_detection and r._region == null) {
                 if (try moved_rows.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
             }
             try r.drawRows(out, s, caps, &stats);
@@ -412,8 +418,8 @@ pub const Renderer = struct {
 
         try frame.finish();
         if (body) {
-            s.damage.clear();
-            @memset(r.force, false);
+            s._damage.clear();
+            @memset(r._force, false);
             r.repaint_all = false;
         }
         // Retirement goes directly to the accepted writer, after the frame.
@@ -448,7 +454,7 @@ pub const Renderer = struct {
             .unicode_core = caps.width_method == .unicode,
             .modes = modes,
         };
-        r.region = if (mode == .@"inline") r.size.rows else null;
+        r._region = if (mode == .@"inline") r.dimensions().rows else null;
         if (mode == .alt) try morse.altScreen.set(w, true);
         // After the switch: the alternate screen has a keyboard stack of its
         // own, and this push belongs on it.
@@ -468,15 +474,15 @@ pub const Renderer = struct {
             .@"inline" => {
                 // From the start of the row the prompt left the cursor on.
                 try w.writeByte('\r');
-                try r.reserve(w, r.size.rows);
+                try r.reserve(w, r.dimensions().rows);
             },
         }
         try morse.cursorVisible.set(w, false);
 
         @memset(r._prev, .blank(.{}));
-        @memset(r.force, false);
-        @memset(r.drifted, false);
-        @memset(r.untrusted, false);
+        @memset(r._force, false);
+        @memset(r._drifted, false);
+        @memset(r._untrusted, false);
         r.style = .{};
         r._link = .none;
         r.cursor = .{ .col = 0, .row = 0 };
@@ -562,13 +568,13 @@ pub const Renderer = struct {
                 // the screen's rows, and one line feed further, which is the
                 // row below when there is one and a scroll when there is not.
                 try morse.cursorRestore(w);
-                const rows = r.region orelse r.size.rows;
+                const rows = r._region orelse r.dimensions().rows;
                 if (rows > 1) try morse.cursorDown(w, rows - 1);
                 try w.writeByte('\n');
                 try w.writeByte('\r');
             },
         }
-        r.region = null;
+        r._region = null;
         r.entered = null;
     }
 
@@ -584,7 +590,7 @@ pub const Renderer = struct {
         }
         try morse.cursorSave(w);
         if (rows > 0) try morse.clearScreen(w, .to_end);
-        r.region = rows;
+        r._region = rows;
         r.cursor = .{ .col = 0, .row = 0 };
     }
 
@@ -602,29 +608,29 @@ pub const Renderer = struct {
 
     /// One row of the previous frame.
     fn prevRow(r: *const Renderer, row: u16) []const Cell {
-        return r._prev[@as(usize, row) * r.size.cols ..][0..r.size.cols];
+        return r._prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols];
     }
 
     /// Moves the previous frame's rows the way the terminal just moved the
     /// real ones, and marks the rows it vacated to be written whole.
     fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         const blank: Cell = .blank(.{});
         const region = r._prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
-        const untrusted = r.untrusted[top .. @as(usize, bottom) + 1];
+        const untrusted = r._untrusted[top .. @as(usize, bottom) + 1];
         const moved = @as(usize, distance) * cols;
         if (up) {
             std.mem.copyForwards(Cell, region[0 .. region.len - moved], region[moved..]);
             @memset(region[region.len - moved ..], blank);
             std.mem.copyForwards(bool, untrusted[0 .. untrusted.len - distance], untrusted[distance..]);
             @memset(untrusted[untrusted.len - distance ..], false);
-            for (bottom + 1 - distance..bottom + 1) |row| r.force[row] = true;
+            for (bottom + 1 - distance..bottom + 1) |row| r._force[row] = true;
         } else {
             std.mem.copyBackwards(Cell, region[moved..], region[0 .. region.len - moved]);
             @memset(region[0..moved], blank);
             std.mem.copyBackwards(bool, untrusted[distance..], untrusted[0 .. untrusted.len - distance]);
             @memset(untrusted[0..distance], false);
-            for (top..top + distance) |row| r.force[row] = true;
+            for (top..top + distance) |row| r._force[row] = true;
         }
     }
 
@@ -634,44 +640,44 @@ pub const Renderer = struct {
 
     /// Takes the memory the renderer needs, all of it at once.
     fn allocate(r: *Renderer, size: Size) Allocator.Error!void {
-        const gpa = r.gpa;
+        const gpa = r._gpa;
         r._prev = try gpa.alloc(Cell, size.area());
         errdefer gpa.free(r._prev);
         @memset(r._prev, .blank(.{}));
-        r.force = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r.force);
-        @memset(r.force, false);
-        r.drifted = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r.drifted);
-        @memset(r.drifted, false);
-        r.untrusted = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r.untrusted);
-        @memset(r.untrusted, false);
-        r.hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
-        errdefer gpa.free(r.hashes);
-        r.buf = try gpa.alloc(u8, sync_gate);
+        r._force = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r._force);
+        @memset(r._force, false);
+        r._drifted = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r._drifted);
+        @memset(r._drifted, false);
+        r._untrusted = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r._untrusted);
+        @memset(r._untrusted, false);
+        r._hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
+        errdefer gpa.free(r._hashes);
+        r._buf = try gpa.alloc(u8, sync_gate);
     }
 
     /// Gives all of it back.
     fn release(r: *Renderer) void {
-        const gpa = r.gpa;
+        const gpa = r._gpa;
         gpa.free(r._prev);
-        gpa.free(r.force);
-        gpa.free(r.drifted);
-        gpa.free(r.untrusted);
-        gpa.free(r.hashes);
-        gpa.free(r.buf);
+        gpa.free(r._force);
+        gpa.free(r._drifted);
+        gpa.free(r._untrusted);
+        gpa.free(r._hashes);
+        gpa.free(r._buf);
     }
 
     /// Whether any row carries the renderer's own reason to be written.
     fn anyForced(r: *const Renderer) bool {
-        for (r.force) |f| if (f) return true;
+        for (r._force) |f| if (f) return true;
         return false;
     }
 
     /// Marks every row that has ever drifted to be written whole.
     fn forceDrifted(r: *Renderer) void {
-        for (r.drifted, r.force) |d, *f| {
+        for (r._drifted, r._force) |d, *f| {
             if (d) f.* = true;
         }
     }
@@ -723,31 +729,31 @@ pub const Renderer = struct {
         try morse.resetStyle(out);
         r.style = .{};
         r.cursor = null;
-        @memset(r.force, true);
+        @memset(r._force, true);
         // Inline, a repaint starts from the origin with the screen's rows
         // taken or given back if the size changed, and everything from the
         // origin down erased: the previous frame is then exactly blank,
         // which is the one state a repaint can be sure of.
-        if (r.region) |had| {
+        if (r._region) |had| {
             try r.home(out);
-            if (had != r.size.rows) {
-                try r.reserve(out, r.size.rows);
+            if (had != r.dimensions().rows) {
+                try r.reserve(out, r.dimensions().rows);
             } else {
                 try morse.clearScreen(out, .to_end);
             }
             @memset(r._prev, .blank(.{}));
-            @memset(r.untrusted, false);
+            @memset(r._untrusted, false);
         }
     }
 
     /// Every row that changed, in order.
     fn drawRows(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, stats: *Stats) Error!void {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         if (cols == 0) return;
         var row: u16 = 0;
-        while (row < r.size.rows) : (row += 1) {
-            const span = s.damage.row(row);
-            const forced = r.force[row];
+        while (row < r.dimensions().rows) : (row += 1) {
+            const span = s._damage.row(row);
+            const forced = r._force[row];
             if (span == null and !forced) continue;
             const first = if (forced) 0 else span.?.first;
             const last = if (forced) cols - 1 else span.?.last;
@@ -758,11 +764,11 @@ pub const Renderer = struct {
                 stats.skipped += cols;
                 continue;
             }
-            const scan_first = if (r.untrusted[row]) 0 else first;
-            const scan_last = if (r.untrusted[row]) cols - 1 else last;
+            const scan_first = if (r._untrusted[row]) 0 else first;
+            const scan_last = if (r._untrusted[row]) cols - 1 else last;
             const current_untrusted = rowDrifts(s, caps, row, scan_first, scan_last);
-            const drift = r.untrusted[row] or current_untrusted;
-            if (drift) r.drifted[row] = true;
+            const drift = r._untrusted[row] or current_untrusted;
+            if (drift) r._drifted[row] = true;
             stats.rows += 1;
 
             const whole = forced or drift or try r.paintIsCheaper(s, caps, row, first, last);
@@ -774,7 +780,7 @@ pub const Renderer = struct {
             // column off. Nothing but an absolute move is safe.
             if (drift and !widthsAgree(caps)) r.cursor = null;
             r.commitRow(s, caps, row, first, last);
-            r.untrusted[row] = current_untrusted;
+            r._untrusted[row] = current_untrusted;
         }
     }
 
@@ -830,7 +836,7 @@ pub const Renderer = struct {
         first: u16,
         last: u16,
     ) Error!bool {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         if (@as(u32, last - first) + 1 <= cols / 2) return false;
         if (first == 0 and last == cols - 1) {
             if (r.allChanged(s, caps, row)) return true;
@@ -868,7 +874,7 @@ pub const Renderer = struct {
     /// needs pricing. The planning is `runEnd`'s, which writes nothing and
     /// prices only the cells either side of a gap.
     fn diffIsOneRun(r: *Renderer, s: *Screen, caps: Caps, row: u16) bool {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         if (visible(stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return false;
         const state: CostState = .{ .style = r.style, .link = r._link, .cursor = r.cursor };
         return r.runEndCost(state, s, caps, row, 0, cols - 1) == cols - 1;
@@ -959,7 +965,7 @@ pub const Renderer = struct {
 
     /// The arithmetic counterpart of `paintRow`.
     fn paintRowCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16) usize {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         const cells = stored.row(s, row);
         const erase_from = trailingBlank(cells, caps);
 
@@ -986,7 +992,7 @@ pub const Renderer = struct {
         first: u16,
         last: u16,
     ) usize {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         const cells = stored.row(s, row);
         const old = r.prevRow(row);
 
@@ -1193,7 +1199,7 @@ pub const Renderer = struct {
 
     /// A whole row, written from an absolute position.
     fn paintRow(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, stats: *Stats) Error!void {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         const cells = stored.row(s, row);
         const erase_from = trailingBlank(cells, caps);
 
@@ -1224,7 +1230,7 @@ pub const Renderer = struct {
         last: u16,
         stats: *Stats,
     ) Error!void {
-        const cols = r.size.cols;
+        const cols = r.dimensions().cols;
         const cells = stored.row(s, row);
         const old = r.prevRow(row);
 
@@ -1400,7 +1406,7 @@ pub const Renderer = struct {
             try morse.unicodeCore.set(out, true);
         } else try out.writeAll(held);
         r.advance(col, row);
-        if (col + c.width() < r.size.cols) try r.moveTo(out, col + c.width(), row, stats) else r.cursor = null;
+        if (col + c.width() < r.dimensions().cols) try r.moveTo(out, col + c.width(), row, stats) else r.cursor = null;
         stats.rejoined += 1;
     }
 
@@ -1420,7 +1426,7 @@ pub const Renderer = struct {
     /// measure qualify: anything else would take a cell of its own measured
     /// by codepoint, and wrap.
     fn marksApart(r: *const Renderer, c: Cell, text: []const u8, caps: Caps) bool {
-        if (r.size.cols != 1 or caps.width_method != .unicode) return false;
+        if (r.dimensions().cols != 1 or caps.width_method != .unicode) return false;
         if (c.isScaled() or c.width() != 1 or text.len < 2) return false;
         const codepoints = std.unicode.utf8CountCodepoints(text) catch return false;
         if (codepoints < 2) return false;
@@ -1448,7 +1454,7 @@ pub const Renderer = struct {
     /// Copies a row's conservative damage span into the previous frame.
     fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) void {
         const cells = stored.row(s, row)[first .. @as(usize, last) + 1];
-        const row_start = @as(usize, row) * r.size.cols;
+        const row_start = @as(usize, row) * r.dimensions().cols;
         const old = r._prev[row_start + first .. row_start + @as(usize, last) + 1];
         if (shownAsHeld(caps)) {
             @memcpy(old, cells);
@@ -1473,7 +1479,7 @@ pub const Renderer = struct {
     fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
         if (std.mem.eql(u8, std.mem.asBytes(&r.style), std.mem.asBytes(&to))) return;
         const from = r.style;
-        if (r.style_sequences.get(from, to)) |sequence| {
+        if (r._style_sequences.get(from, to)) |sequence| {
             try out.writeAll(sequence);
         } else {
             var bytes: [StyleSequenceCache.max_len]u8 = undefined;
@@ -1485,7 +1491,7 @@ pub const Renderer = struct {
                 return;
             };
             const sequence = fixed.buffered();
-            r.style_sequences.put(from, to, sequence);
+            r._style_sequences.put(from, to, sequence);
             try out.writeAll(sequence);
         }
         r.style = to;
@@ -1521,7 +1527,7 @@ pub const Renderer = struct {
     /// write that filled the last column leaves the terminal holding a wrap,
     /// which is a state no arithmetic should be done from.
     fn advance(r: *Renderer, col: u16, row: u16) void {
-        if (col >= r.size.cols) {
+        if (col >= r.dimensions().cols) {
             r.cursor = null;
         } else {
             r.cursor = .{ .col = col, .row = row };
@@ -1530,7 +1536,7 @@ pub const Renderer = struct {
 
     /// The arithmetic counterpart of `advance`.
     fn advanceCost(r: *Renderer, state: *CostState, col: u16, row: u16) void {
-        if (col >= r.size.cols) {
+        if (col >= r.dimensions().cols) {
             state.cursor = null;
         } else {
             state.cursor = .{ .col = col, .row = row };
@@ -1545,7 +1551,7 @@ pub const Renderer = struct {
             if (at.col == col and at.row == row) return 0;
         }
 
-        const cost: usize = if (r.region != null) region: {
+        const cost: usize = if (r._region != null) region: {
             const origin: Point = .{ .col = 0, .row = 0 };
             const from_origin = plan(origin, there, .region);
             const via_origin: usize = if (col == 0 and row == 0) 2 else 2 + from_origin.cost;
@@ -1569,7 +1575,7 @@ pub const Renderer = struct {
         if (r.cursor) |at| {
             if (at.col == col and at.row == row) return;
         }
-        if (r.region != null) {
+        if (r._region != null) {
             try r.moveWithin(out, there);
         } else if (r.cursor) |at| {
             try writeMove(out, at, there);
@@ -1616,8 +1622,8 @@ pub const Renderer = struct {
         }
         try r.moveTo(
             out,
-            @min(s.cursor.col, r.size.cols -| 1),
-            @min(s.cursor.row, r.size.rows -| 1),
+            @min(s.cursor.col, r.dimensions().cols -| 1),
+            @min(s.cursor.row, r.dimensions().rows -| 1),
             &ignored,
         );
         if (r.shown != true) {
@@ -1845,9 +1851,9 @@ fn styleCost(from: Style, to: Style) usize {
 fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
     if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
     const from = state.style;
-    const n = r.style_sequences.getCost(from, to) orelse cost: {
+    const n = r._style_sequences.getCost(from, to) orelse cost: {
         const computed = styleCost(from, to);
-        r.style_sequences.putCost(from, to, computed);
+        r._style_sequences.putCost(from, to, computed);
         break :cost computed;
     };
     state.style = to;
@@ -2810,7 +2816,7 @@ test "arithmetic row prices match emitted rows" {
 
     try Check.row(&f, false);
     try Check.row(&f, true);
-    f.renderer.region = 2;
+    f.renderer._region = 2;
     f.renderer.cursor = .{ .col = 17, .row = 1 };
     f.renderer.style = .{ .bold = true, .fg = .ansi(.cyan) };
     try Check.row(&f, false);
@@ -2920,11 +2926,11 @@ test "restoring a cell leaves conservative damage but writes nothing" {
 
     try f.screen.write(3, 0, "x", .{}, .none);
     try f.screen.write(3, 0, " ", .{}, .none);
-    try testing.expect(f.screen.damage.any());
+    try testing.expect(f.screen._damage.any());
 
     const stats = try f.draw();
     try testing.expectEqual(@as(usize, 0), stats.bytes);
-    try testing.expect(!f.screen.damage.any());
+    try testing.expect(!f.screen._damage.any());
 }
 
 test "a cluster the two width models disagree about makes its row drift" {
@@ -2939,8 +2945,8 @@ test "a cluster the two width models disagree about makes its row drift" {
     try f.screen.write(0, 0, "\u{26a0}\u{fe0f}", .{}, .none);
     _ = try f.draw();
     try testing.expectEqual(@as(?Point, null), f.renderer.cursor);
-    try testing.expect(f.renderer.drifted[0]);
-    try testing.expect(!f.renderer.drifted[1]);
+    try testing.expect(f.renderer._drifted[0]);
+    try testing.expect(!f.renderer._drifted[1]);
 }
 
 test "a cluster the models disagree about is written with its width when the terminal takes one" {
@@ -2958,7 +2964,7 @@ test "a cluster the models disagree about is written with its width when the ter
     // The row was diffed, not repainted, and the cursor is still trusted.
     try testing.expectEqual(@as(u32, 0), stats.repainted);
     try testing.expectEqual(Point{ .col = 2, .row = 0 }, f.renderer.cursor.?);
-    try testing.expect(!f.renderer.drifted[0]);
+    try testing.expect(!f.renderer._drifted[0]);
 }
 
 test "told every width, the terminal is told everything but ASCII" {
@@ -3035,7 +3041,7 @@ test "a scaled grapheme reaches the emulator as the block it is" {
     var f: Fixture = try .init(testing.allocator, 8, 3);
     defer f.deinit();
     f.caps.scaled_text = true;
-    var t: Term = try .init(testing.allocator, f.screen.size);
+    var t: Term = try .init(testing.allocator, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
 
@@ -3072,16 +3078,16 @@ test "cached row safety follows scrolled previous rows" {
     var f: Fixture = try .init(testing.allocator, 4, 4);
     defer f.deinit();
 
-    f.renderer.untrusted[2] = true;
+    f.renderer._untrusted[2] = true;
     f.renderer.shiftPrev(0, 3, 1, true);
-    try testing.expect(f.renderer.untrusted[1]);
-    try testing.expect(!f.renderer.untrusted[2]);
-    try testing.expect(!f.renderer.untrusted[3]);
+    try testing.expect(f.renderer._untrusted[1]);
+    try testing.expect(!f.renderer._untrusted[2]);
+    try testing.expect(!f.renderer._untrusted[3]);
 
     f.renderer.shiftPrev(0, 3, 2, false);
-    try testing.expect(f.renderer.untrusted[3]);
-    try testing.expect(!f.renderer.untrusted[0]);
-    try testing.expect(!f.renderer.untrusted[1]);
+    try testing.expect(f.renderer._untrusted[3]);
+    try testing.expect(!f.renderer._untrusted[0]);
+    try testing.expect(!f.renderer._untrusted[1]);
 }
 
 test "a screen of the wrong size is refused rather than drawn" {
@@ -3111,7 +3117,7 @@ fn expectRowText(t: *const Term, row: u16, want: []const u8) !void {
     var buf: [256]u8 = undefined;
     var n: usize = 0;
     var col: u16 = 0;
-    while (col < t.screen().size.cols) : (col += 1) {
+    while (col < t.screen().dimensions().cols) : (col += 1) {
         const g = t.screen().textAt(col, row);
         @memcpy(buf[n..][0..g.len], g);
         n += g.len;
@@ -3330,7 +3336,7 @@ test "inline mode never writes a scrolling region" {
         for (text, 0..) |c, i| try f.screen.write(@intCast(i), @intCast(row), &.{c}, .{}, .none);
     }
     _ = try f.draw();
-    f.screen.scroll(.fromSize(f.screen.size), 1);
+    f.screen.scroll(.fromSize(f.screen.dimensions()), 1);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
     try testing.expect(std.mem.indexOf(u8, f.written(), "r") == null);
@@ -3516,7 +3522,7 @@ test "a cluster that would join the cell on its left, and is more than marks, re
     for (pairs) |pair| {
         var f: Fixture = try .init(testing.allocator, 8, 1);
         defer f.deinit();
-        var t: Term = try .init(testing.allocator, f.screen.size);
+        var t: Term = try .init(testing.allocator, f.screen.dimensions());
         defer t.deinit();
         t.setMethod(.unicode);
         try f.screen.write(0, 0, pair[0], .{ .bold = true, .fg = .ansi(.red) }, .none);
@@ -3602,7 +3608,7 @@ test "pool compaction repaints reused text and link identities, including throug
             // A resize can compact even when the renderer next sees its
             // original size again.
             try f.screen.resize(.{ .cols = 9, .rows = 1 });
-            try f.screen.resize(f.renderer.size);
+            try f.screen.resize(f.renderer.dimensions());
         } else try f.screen.compactPool();
         try testing.expectEqual(previous.text.offset(), f.screen._cells[0].text.offset());
         try testing.expectEqual(previous.link.index(), f.screen._cells[0].link.index());
@@ -3622,7 +3628,7 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         const old_link = try f.screen.link("https://old.invalid", "");
         try f.screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, old_link);
         _ = try f.draw();
-        var next = try Screen.init(testing.allocator, f.screen.size);
+        var next = try Screen.init(testing.allocator, f.screen.dimensions());
         var next_owned = true;
         defer if (next_owned) next.deinit();
         next.method = .unicode;
@@ -3634,7 +3640,7 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         try testing.expect(!f.screen.readCell(0, 0).?.eql(next.readCell(0, 0).?));
         // Damage belongs to the grid's writes; it says nothing about which
         // grid the terminal was previously shown.
-        next.damage.clear();
+        next._damage.clear();
         f.out.clearRetainingCapacity();
         const screen = if (reuse_address) screen: {
             f.screen.deinit();
@@ -3658,7 +3664,7 @@ test "an ASCII batch keeps its first cell apart from a Unicode prepend" {
     for ([_][]const u8{"\u{d4e}"}) |prepend| {
         var f = try Fixture.init(testing.allocator, 5, 1);
         defer f.deinit();
-        var term = try Term.init(testing.allocator, f.screen.size);
+        var term = try Term.init(testing.allocator, f.screen.dimensions());
         defer term.deinit();
         term.setMethod(.unicode);
         f.caps.width_method = .unicode;

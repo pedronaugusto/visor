@@ -275,12 +275,12 @@ test "a lying bar chart refuses a label gutter wider than the window" {
     var h = try Harness.init(testing.allocator, 2, 1);
     defer h.deinit();
     try (BarChart{ .direction = .horizontal, .bars = &.{.{ .label = "x" ** std.math.maxInt(u16), .value = 1 }} }).draw(h.window());
-    try testing.expect(!h.screen.damage.any());
+    try testing.expect(!h.screen._damage.any());
 }
 
 test "a bar label centred beyond the coordinate edge draws nothing" {
     var screen = try visor.Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
     defer screen.deinit();
     try (BarChart{ .bars = &.{} }).drawLabel(screen.window(), "x", std.math.maxInt(u16) - 1, 0, std.math.maxInt(u16));
-    try testing.expect(!screen.damage.any());
+    try testing.expect(!screen._damage.any());
 }

@@ -92,6 +92,6 @@ fn check(gpa: std.mem.Allocator) !void {
     _ = try session.resize(&out.writer);
     try paint(&session, 3);
     _ = try session.draw(&out.writer);
-    if (session.screen.size.cols != 50 or out.written().len == 0) return error.ExampleFailed;
+    if (session.screen.dimensions().cols != 50 or out.written().len == 0) return error.ExampleFailed;
     if (!quit(.{ .key = .{ .key = .{ .char = 'c' }, .mods = .{ .ctrl = true } } })) return error.ExampleFailed;
 }

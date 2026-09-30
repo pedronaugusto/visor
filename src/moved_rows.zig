@@ -38,7 +38,7 @@ const min_dirty_rows = 3;
 /// or null when the frame is not a scroll.
 pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u32 {
     const found = detect(r, s, caps) orelse return null;
-    const rows = r.size.rows;
+    const rows = r.dimensions().rows;
 
     // The vacated rows are filled with the terminal's current background, so
     // the style has to be the one a blank cell is in.
@@ -77,13 +77,13 @@ const Found = struct {
 /// Looks for the offset that explains the most rows, then for the longest
 /// band of rows it explains, then checks that band cell by cell.
 fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
-    const rows = r.size.rows;
+    const rows = r.dimensions().rows;
     if (rows < 3 or r.repaint_all) return null;
-    if (s.damage.count() < min_dirty_rows) return null;
-    for (r.force) |f| if (f) return null;
+    if (s._damage.count() < min_dirty_rows) return null;
+    for (r._force) |f| if (f) return null;
 
-    const now = r.hashes[0..rows];
-    const was = r.hashes[rows..][0..rows];
+    const now = r._hashes[0..rows];
+    const was = r._hashes[rows..][0..rows];
     for (0..rows) |i| {
         now[i] = hashRow(@import("screen.zig").internal.row(s, @intCast(i)), caps);
         was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), caps);
@@ -263,7 +263,7 @@ const Fixture = struct {
     /// Numbers down the left of the screen, so a moved row is obvious.
     fn number(f: *Fixture) !void {
         var row: u16 = 0;
-        while (row < f.screen.size.rows) : (row += 1) {
+        while (row < f.screen.dimensions().rows) : (row += 1) {
             var buf: [8]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
             for (text, 0..) |c, i| try f.screen.write(@intCast(i), row, &.{c}, .{}, .none);
@@ -279,7 +279,7 @@ test "a whole screen scrolled up is one sequence and not a repaint" {
     try f.number();
     _ = try f.draw();
 
-    f.screen.scroll(.fromSize(f.screen.size), 1);
+    f.screen.scroll(.fromSize(f.screen.dimensions()), 1);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 12), stats.scrolled);
     try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[1S") != null);
@@ -294,7 +294,7 @@ test "a whole screen scrolled down is the mirror" {
     try f.number();
     _ = try f.draw();
 
-    f.screen.scroll(.fromSize(f.screen.size), -2);
+    f.screen.scroll(.fromSize(f.screen.dimensions()), -2);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 12), stats.scrolled);
     try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[2T") != null);
@@ -337,7 +337,7 @@ test "the detector is off unless the caller asks for it" {
     try f.number();
     _ = try f.draw();
 
-    f.screen.scroll(.fromSize(f.screen.size), 1);
+    f.screen.scroll(.fromSize(f.screen.dimensions()), 1);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
 }
@@ -364,7 +364,7 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     var f: Fixture = try .init(gpa, 10, 9);
     defer f.deinit();
     f.caps.scaled_text = true;
-    var t: @import("term.zig").Term = try .init(gpa, f.screen.size);
+    var t: @import("term.zig").Term = try .init(gpa, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
     f.renderer.shown = null;

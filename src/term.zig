@@ -216,15 +216,15 @@ pub const Term = struct {
     /// The same, with the width the cluster was told to take rather than
     /// the one this terminal would measure.
     fn putAs(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
-        if (t.scr.size.cols == 0 or t.scr.size.rows == 0) return;
+        if (t.scr.dimensions().cols == 0 or t.scr.dimensions().rows == 0) return;
         if (told == null and try t.join(grapheme)) return;
         return t.place(grapheme, told);
     }
 
     /// A grapheme into a cell of its own, joined to nothing.
     fn place(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
-        const cols = t.scr.size.cols;
-        if (cols == 0 or t.scr.size.rows == 0) return;
+        const cols = t.scr.dimensions().cols;
+        if (cols == 0 or t.scr.dimensions().rows == 0) return;
         const w: u16 = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
         if (w == 0 or w > 2) return;
 
@@ -281,7 +281,7 @@ pub const Term = struct {
     /// both alike.
     fn join(t: *Term, grapheme: []const u8) Allocator.Error!bool {
         if (t.scr.method != .unicode or t.clusters_off or t.col == 0) return false;
-        const cols = t.scr.size.cols;
+        const cols = t.scr.dimensions().cols;
         var at: u16 = if (t.wrap_pending) t.col else t.col - 1;
         if (t.scr.readCell(at, t.row)) |c| {
             if (c.isTail() and at > 0) at -= 1;
@@ -343,7 +343,7 @@ pub const Term = struct {
     fn lineFeed(t: *Term) void {
         if (t.row == t.scroll_bottom) {
             t.scrollRegion(1);
-        } else if (t.row + 1 < t.scr.size.rows) {
+        } else if (t.row + 1 < t.scr.dimensions().rows) {
             t.row += 1;
         }
         t.wrap_pending = false;
@@ -355,7 +355,7 @@ pub const Term = struct {
         const rect: geom.Rect = .{
             .col = 0,
             .row = t.scroll_top,
-            .cols = t.scr.size.cols,
+            .cols = t.scr.dimensions().cols,
             .rows = t.scroll_bottom - t.scroll_top + 1,
         };
         const keep = t.scr.cursor;
@@ -492,7 +492,7 @@ pub const Term = struct {
 
     /// `CSI top ; bottom r`, DECSTBM, which also homes the cursor.
     fn setScrollRegion(t: *Term, params: []const u8) void {
-        const rows = t.scr.size.rows;
+        const rows = t.scr.dimensions().rows;
         if (rows == 0) return;
         const top = @min(nonzeroParam(params, 0, 1), rows) - 1;
         const bottom = @min(nonzeroParam(params, 1, rows), rows) - 1;
@@ -504,9 +504,9 @@ pub const Term = struct {
 
     /// The cursor, clamped to the grid.
     fn moveTo(t: *Term, col: u16, row: u16) void {
-        if (t.scr.size.cols == 0 or t.scr.size.rows == 0) return;
-        t.col = @min(col, t.scr.size.cols - 1);
-        t.row = @min(row, t.scr.size.rows - 1);
+        if (t.scr.dimensions().cols == 0 or t.scr.dimensions().rows == 0) return;
+        t.col = @min(col, t.scr.dimensions().cols - 1);
+        t.row = @min(row, t.scr.dimensions().rows - 1);
         t.wrap_pending = false;
     }
 
@@ -522,7 +522,7 @@ pub const Term = struct {
 
     /// `CSI n J`.
     fn eraseScreen(t: *Term, what: u32) void {
-        const size = t.scr.size;
+        const size = t.scr.dimensions();
         switch (what) {
             0 => {
                 t.eraseRun(t.col, t.row, size.cols - t.col);
@@ -544,7 +544,7 @@ pub const Term = struct {
 
     /// `CSI n K`.
     fn eraseLine(t: *Term, what: u32) void {
-        const cols = t.scr.size.cols;
+        const cols = t.scr.dimensions().cols;
         switch (what) {
             0 => t.eraseRun(t.col, t.row, cols - t.col),
             1 => t.eraseRun(0, t.row, t.col + 1),
@@ -555,7 +555,7 @@ pub const Term = struct {
 
     /// `CSI n X`, which erases without moving anything.
     fn eraseChars(t: *Term, n: u32) void {
-        const cols = t.scr.size.cols;
+        const cols = t.scr.dimensions().cols;
         t.eraseRun(t.col, t.row, @intCast(@min(n, cols - t.col)));
     }
 
@@ -563,7 +563,7 @@ pub const Term = struct {
     fn eraseRun(t: *Term, col: u16, row: u16, count: u16) void {
         const blank = t.erased();
         var i: u16 = 0;
-        while (i < count and col + i < t.scr.size.cols) : (i += 1) {
+        while (i < count and col + i < t.scr.dimensions().cols) : (i += 1) {
             t.scr.writeOwnedCellUnchecked(col + i, row, blank) catch unreachable;
         }
     }
@@ -574,7 +574,7 @@ pub const Term = struct {
         const rect: geom.Rect = .{
             .col = 0,
             .row = t.row,
-            .cols = t.scr.size.cols,
+            .cols = t.scr.dimensions().cols,
             .rows = t.scroll_bottom - t.row + 1,
         };
         const count: i32 = @intCast(@min(n, rect.rows));
@@ -588,7 +588,7 @@ pub const Term = struct {
         const rect: geom.Rect = .{
             .col = 0,
             .row = t.row,
-            .cols = t.scr.size.cols,
+            .cols = t.scr.dimensions().cols,
             .rows = t.scroll_bottom - t.row + 1,
         };
         const count: i32 = @intCast(@min(n, rect.rows));
@@ -599,7 +599,7 @@ pub const Term = struct {
     /// `CSI n @`: blanks opened at the cursor, the rest of the row pushed
     /// right.
     fn insertChars(t: *Term, n: u32) void {
-        const cols = t.scr.size.cols;
+        const cols = t.scr.dimensions().cols;
         const count: u16 = @intCast(@min(n, cols - t.col));
         var col = cols;
         while (col > t.col + count) {
@@ -612,7 +612,7 @@ pub const Term = struct {
     /// `CSI n P`: cells removed at the cursor, the rest of the row pulled
     /// left.
     fn deleteChars(t: *Term, n: u32) void {
-        const cols = t.scr.size.cols;
+        const cols = t.scr.dimensions().cols;
         const count: u16 = @intCast(@min(n, cols - t.col));
         var col = t.col;
         while (col + count < cols) : (col += 1) {
@@ -794,8 +794,8 @@ pub const Term = struct {
     /// moves past it along the top row. A block that does not fit draws
     /// nothing, which is as far as this emulator follows the protocol.
     fn putScaled(t: *Term, grapheme: []const u8, told: ?u2, scale: u3) Allocator.Error!void {
-        const cols = t.scr.size.cols;
-        const rows = t.scr.size.rows;
+        const cols = t.scr.dimensions().cols;
+        const rows = t.scr.dimensions().rows;
         if (cols == 0 or rows == 0) return;
         const w: u16 = told orelse textmod.graphemeWidth(grapheme, t.scr.method);
         if (w == 0 or w > 2) return;
@@ -875,9 +875,9 @@ pub const DumpOptions = struct {
 /// written as `opts.tail`.
 pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Error!void {
     var row: u16 = 0;
-    while (row < s.size.rows) : (row += 1) {
+    while (row < s.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.dimensions().cols) : (col += 1) {
             const c = &s._cells[s.index(col, row)];
             try w.writeAll(if (c.isTail()) opts.tail else @import("screen.zig").internal.textOf(s, c));
         }
@@ -914,7 +914,7 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
 /// number of styles apart; nothing survives the call.
 pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.Allocator.Error)!void {
     const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
+    var arena_state: std.heap.ArenaAllocator = .init(s._gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
@@ -924,8 +924,8 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
     const ids = try arena.alloc(u32, s._cells.len);
     var key: std.Io.Writer.Allocating = .init(arena);
     for (s._cells, 0..) |cell, i| {
-        const col: u16 = @intCast(i % s.size.cols);
-        const row: u16 = @intCast(i / s.size.cols);
+        const col: u16 = @intCast(i % s.dimensions().cols);
+        const row: u16 = @intCast(i / s.dimensions().cols);
         // A covered column speaks for the grapheme that covers it.
         const source = if (s.headOf(col, row)) |head| s._cells[s.index(head.col, head.row)] else cell;
         key.clearRetainingCapacity();
@@ -963,9 +963,9 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
         try w.writeByte('\n');
     }
     var row: u16 = 0;
-    while (row < s.size.rows) : (row += 1) {
+    while (row < s.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.dimensions().cols) : (col += 1) {
             try Id.write(w, ids[s.index(col, row)], digits);
         }
         try w.writeByte('\n');
@@ -1016,10 +1016,10 @@ fn stylesEqual(a: Style, b: Style) bool {
 /// Two screens compared cell by cell, naming the first that differs and
 /// printing both grids.
 pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
-    if (!std.meta.eql(want.size, got.size)) {
+    if (!std.meta.eql(want.dimensions(), got.dimensions())) {
         std.debug.print(
             "screen size: want {d}x{d}, have {d}x{d}\n",
-            .{ want.size.cols, want.size.rows, got.size.cols, got.size.rows },
+            .{ want.dimensions().cols, want.dimensions().rows, got.dimensions().cols, got.dimensions().rows },
         );
         return error.TestExpectedEqual;
     }
@@ -1034,11 +1034,11 @@ pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
 /// by a wrap and a space someone asked for are the same cell to it, and only
 /// this package knows the difference.
 pub fn firstDifference(want: *const Screen, got: *const Screen) ?geom.Point {
-    if (!std.meta.eql(want.size, got.size)) return .{ .col = 0, .row = 0 };
+    if (!std.meta.eql(want.dimensions(), got.dimensions())) return .{ .col = 0, .row = 0 };
     var row: u16 = 0;
-    while (row < want.size.rows) : (row += 1) {
+    while (row < want.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < want.size.cols) : (col += 1) {
+        while (col < want.dimensions().cols) : (col += 1) {
             const a = want._cells[want.index(col, row)];
             const b = got._cells[got.index(col, row)];
             if (std.mem.eql(u8, want.textAt(col, row), got.textAt(col, row)) and
@@ -1072,10 +1072,10 @@ fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) !void
 /// The grid on stderr, one row a line, for a failing test to be read from.
 fn printGrid(s: *const Screen) void {
     var row: u16 = 0;
-    while (row < s.size.rows) : (row += 1) {
+    while (row < s.dimensions().rows) : (row += 1) {
         std.debug.print("|", .{});
         var col: u16 = 0;
-        while (col < s.size.cols) : (col += 1) {
+        while (col < s.dimensions().cols) : (col += 1) {
             if (s._cells[s.index(col, row)].isTail()) continue;
             std.debug.print("{s}", .{s.textAt(col, row)});
         }
@@ -1237,7 +1237,7 @@ fn textAt(t: *const Term, col: u16, row: u16) []const u8 {
 fn rowText(t: *const Term, row: u16, buf: []u8) []const u8 {
     var n: usize = 0;
     var col: u16 = 0;
-    while (col < t.scr.size.cols) : (col += 1) {
+    while (col < t.scr.dimensions().cols) : (col += 1) {
         const g = t.screen().textAt(col, row);
         @memcpy(buf[n..][0..g.len], g);
         n += g.len;
@@ -1489,10 +1489,10 @@ test "a hyperlink allocation failure is reported and can be retried" {
     var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
     const failed_gpa = failing.allocator();
     t.gpa = failed_gpa;
-    t.scr.gpa = failed_gpa;
+    t.scr._gpa = failed_gpa;
     try testing.expectError(error.OutOfMemory, t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\"));
     t.gpa = testing.allocator;
-    t.scr.gpa = testing.allocator;
+    t.scr._gpa = testing.allocator;
     try testing.expectEqual(Link.none, t.link);
 
     try t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\x");
@@ -1608,7 +1608,7 @@ test "a repeat with nothing printed yet prints nothing" {
     var t = try made(4, 1);
     defer t.deinit();
     try t.feed("\x1b[3b");
-    try testing.expect(!t.scr.damage.any());
+    try testing.expect(!t.scr._damage.any());
 }
 
 test "a cluster told its width takes that width whatever this terminal measures" {
@@ -1871,10 +1871,10 @@ test "a failed terminal resize keeps its open link and both pool generations" {
             defer t.deinit();
             try t.feed("\x1b]8;id=open;https://open.invalid\x1b\\");
             const before = t.link;
-            const generation = t.scr.pool_generation;
+            const generation = t.scr._pool_generation;
             t.resize(.{ .cols = 5, .rows = 2 }) catch |err| {
                 try testing.expectEqual(before, t.link);
-                try testing.expectEqual(generation, t.scr.pool_generation);
+                try testing.expectEqual(generation, t.scr._pool_generation);
                 try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.link).?.uri);
                 return err;
             };

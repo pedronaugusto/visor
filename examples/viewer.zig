@@ -213,7 +213,7 @@ pub fn main() !void {
     } };
 
     // The terminal this program would have been given. A real one comes
-    // from `Tty.size`, and a resize arrives as an event.
+    // from `Tty.dimensions()`, and a resize arrives as an event.
     var size: visor.Size = .{ .cols = 76, .rows = 16 };
 
     var screen: visor.Screen = try .init(gpa, size);

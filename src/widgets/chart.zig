@@ -321,7 +321,7 @@ test "chart labels reserve their margins before narrowing the width" {
     defer h.deinit();
     const long = "x" ** std.math.maxInt(u16);
     try (Chart{ .datasets = &.{}, .y = .{ .labels = &.{long} } }).draw(h.window());
-    try testing.expect(!h.screen.damage.any());
+    try testing.expect(!h.screen._damage.any());
     try (Chart{ .datasets = &.{.{ .name = long, .points = &.{} }} }).draw(h.window());
     _ = try h.frame();
     const datasets = try testing.allocator.alloc(Dataset, @as(usize, std.math.maxInt(u16)) + 1);

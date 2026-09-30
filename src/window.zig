@@ -649,7 +649,7 @@ fn mouseAt(x: u32, y: u32) morse.MouseEvent {
 fn rowText(s: *const Screen, row: u16, buf: []u8) []const u8 {
     var n: usize = 0;
     var col: u16 = 0;
-    while (col < s.size.cols) : (col += 1) {
+    while (col < s.dimensions().cols) : (col += 1) {
         const g = s.textAt(col, row);
         @memcpy(buf[n..][0..g.len], g);
         n += g.len;
@@ -677,7 +677,7 @@ test "a child asked for outside its parent comes back empty" {
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
     try testing.expect(c.rect.isEmpty());
     try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
-    try testing.expect(!s.damage.any());
+    try testing.expect(!s._damage.any());
 }
 
 test "a child with no size given is the rest of the parent" {
@@ -694,7 +694,7 @@ test "a write past the window's edge writes nothing at all" {
     const c = s.window().child(.{ .col = 1, .row = 0, .cols = 2, .rows = 1 });
     try c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
     try c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
-    try testing.expect(!s.damage.any());
+    try testing.expect(!s._damage.any());
     try testing.expectEqual(@as(?Cell, null), c.readCell(2, 0));
 }
 
@@ -771,7 +771,7 @@ test "print measuring only writes nothing" {
     defer s.deinit();
     const at = try s.window().printSegment(.{ .text = "abcd" }, .{ .commit = false });
     try testing.expectEqual(@as(u16, 4), at.col);
-    try testing.expect(!s.damage.any());
+    try testing.expect(!s._damage.any());
 }
 
 test "a newline in a segment ends the row whatever the wrap is" {
@@ -973,7 +973,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
         .{ .text = "one two ", .style = .{ .italic = true } },
         .{ .text = "\u{4e2d} three four", .style = .{ .fg = .ansi(.cyan) } },
     }, .{ .wrap = .word });
-    for (0..plain.size.rows) |r| {
+    for (0..plain.dimensions().rows) |r| {
         if (r % 2 == 0) continue;
         for (@import("screen.zig").internal.rowMut(&plain, @intCast(r))) |*c| {
             if (!c.eql(.blank(.{}))) c.style.dim = true;

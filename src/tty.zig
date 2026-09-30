@@ -290,11 +290,11 @@ pub const Tty = struct {
         // bytes, including the flush. On failure `restore` retries through
         // the saved descriptor using the still-entered renderer.
         const entered = r.entered;
-        const region = r.region;
+        const region = r._region;
         const shape = r.shape;
         errdefer {
             r.entered = entered;
-            r.region = region;
+            r._region = region;
             r.shape = shape;
         }
         var buffer: [256]u8 = undefined;

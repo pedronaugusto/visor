@@ -1560,7 +1560,7 @@ test "a retired first picture is freed even when the frame has no text or placem
     try testing.expect(p.takeDirty());
     try testing.expectEqual(@as(usize, 0), f.layers.count());
     try testing.expectEqual(@as(usize, 0), f.layers._declared.items.len);
-    try testing.expect(!f.screen.damage.any());
+    try testing.expect(!f.screen._damage.any());
     const drawn = try f.draw();
     try testing.expect(f.layers.image(sent.id) == null);
     try testing.expectEqual(@as(u32, 1), drawn.placements);

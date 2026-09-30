@@ -166,12 +166,12 @@ pub const Session = struct {
             // Reserve the renderer first, then let Screen's atomic resize
             // commit. The remaining storage swap cannot fail, so allocation
             // failure cannot split the two grids or invalidate old borrows.
-            var prepared: ?Renderer = if (!std.meta.eql(s.renderer.size, next.cells))
-                try Renderer.init(s.renderer.gpa, next.cells)
+            var prepared: ?Renderer = if (!std.meta.eql(s.renderer.dimensions(), next.cells))
+                try Renderer.init(s.renderer._gpa, next.cells)
             else
                 null;
             defer if (prepared) |*r| r.deinit();
-            if (!std.meta.eql(s.screen.size, next.cells)) try s.screen.resize(next.cells);
+            if (!std.meta.eql(s.screen.dimensions(), next.cells)) try s.screen.resize(next.cells);
             if (prepared) |*r| render.internal.resizePrepared(&s.renderer, r);
         }
         if (changed or confirmed) {
@@ -200,11 +200,11 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
     defer out.deinit();
     try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 10, .rows = 4 } }, 0));
     try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 12, .rows = 5 } }, 1));
-    try testing.expectEqual(@as(u16, 8), s.screen.size.cols);
+    try testing.expectEqual(@as(u16, 8), s.screen.dimensions().cols);
     try testing.expectEqual(@as(usize, 0), out.written().len);
     try testing.expect(try s.resize(&out.writer));
-    try testing.expectEqual(s.ws.cells, s.screen.size);
-    try testing.expectEqual(s.ws.cells, s.renderer.size);
+    try testing.expectEqual(s.ws.cells, s.screen.dimensions());
+    try testing.expectEqual(s.ws.cells, s.renderer.dimensions());
     try testing.expectEqual(@as(u16, 12), s.ws.cells.cols);
     try testing.expect(!s.ws.cell.known());
     try testing.expectEqualStrings("\x1b[16t", out.written());
@@ -212,8 +212,8 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
     out.clearRetainingCapacity();
     try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[8;6;14t").? }, 2));
     _ = try s.resize(&out.writer);
-    try testing.expectEqual(@as(u16, 14), s.screen.size.cols);
-    try testing.expectEqual(s.screen.size, s.renderer.size);
+    try testing.expectEqual(@as(u16, 14), s.screen.dimensions().cols);
+    try testing.expectEqual(s.screen.dimensions(), s.renderer.dimensions());
 }
 
 test "a session repaints an unchanged in-band size, including pictures" {
@@ -287,17 +287,17 @@ test "a failed session resize keeps both grids and their borrowed content togeth
             var sink: Writer.Discarding = .init(&.{});
             _ = try s.draw(&sink.writer);
             _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, 0);
-            const size = s.screen.size;
-            const generation = s.screen.pool_generation;
+            const size = s.screen.dimensions();
+            const generation = s.screen._pool_generation;
             const cells = s.screen._cells;
             const prev = s.renderer._prev;
             const borrowed = s.screen.textAt(0, 0);
             const pending = s.pending;
             _ = s.resize(&sink.writer) catch |err| {
-                try testing.expectEqual(size, s.screen.size);
-                try testing.expectEqual(size, s.renderer.size);
+                try testing.expectEqual(size, s.screen.dimensions());
+                try testing.expectEqual(size, s.renderer.dimensions());
                 try testing.expectEqual(size, s.ws.cells);
-                try testing.expectEqual(generation, s.screen.pool_generation);
+                try testing.expectEqual(generation, s.screen._pool_generation);
                 try testing.expect(s.screen._cells.ptr == cells.ptr);
                 try testing.expect(s.renderer._prev.ptr == prev.ptr);
                 try testing.expect(s.screen.textAt(0, 0).ptr == borrowed.ptr);
@@ -305,8 +305,8 @@ test "a failed session resize keeps both grids and their borrowed content togeth
                 try testing.expectEqual(pending, s.pending);
                 return err;
             };
-            try testing.expectEqual(s.screen.size, s.renderer.size);
-            try testing.expectEqual(s.ws.cells, s.screen.size);
+            try testing.expectEqual(s.screen.dimensions(), s.renderer.dimensions());
+            try testing.expectEqual(s.ws.cells, s.screen.dimensions());
             try testing.expectEqualStrings("https://kept.invalid", s.screen.target(s.screen.readCell(0, 0).?.link).?.uri);
             _ = try s.draw(&sink.writer);
         }

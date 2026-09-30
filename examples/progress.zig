@@ -105,9 +105,9 @@ fn frame(
     std.debug.assert((try renderer.draw(&out.writer, screen, null, caps)).bytes == 0);
     const origin = term.saved.?.row;
     var row: u16 = 0;
-    while (row < screen.size.rows) : (row += 1) {
+    while (row < screen.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
-        while (col < screen.size.cols) : (col += 1) {
+        while (col < screen.dimensions().cols) : (col += 1) {
             std.debug.assert(std.mem.eql(u8, screen.textAt(col, row), term.screen().textAt(col, origin + row)));
         }
     }
@@ -130,7 +130,7 @@ fn show(gpa: std.mem.Allocator, term: *const visor.Term, what: []const u8, stats
     var lines = std.mem.splitScalar(u8, text.written(), '\n');
     var row: u16 = 0;
     while (lines.next()) |line| : (row += 1) {
-        if (row >= term.screen().size.rows) break;
+        if (row >= term.screen().dimensions().rows) break;
         std.debug.print("{c}|{s}|\n", .{ @as(u8, if (row == term.row) '>' else ' '), line });
     }
 }

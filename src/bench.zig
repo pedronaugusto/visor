@@ -77,11 +77,11 @@ const Bench = struct {
         };
         const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789 .,:;!?-+/";
         var row: u16 = 0;
-        while (row < b.screen.size.rows) : (row += 1) {
+        while (row < b.screen.dimensions().rows) : (row += 1) {
             var col: u16 = 0;
-            while (col < b.screen.size.cols) : (col += 1) {
-                const i = @as(usize, row) * b.screen.size.cols + col + salt;
-                const style = palette[(col / (b.screen.size.cols / 8 + 1)) % palette.len];
+            while (col < b.screen.dimensions().cols) : (col += 1) {
+                const i = @as(usize, row) * b.screen.dimensions().cols + col + salt;
+                const style = palette[(col / (b.screen.dimensions().cols / 8 + 1)) % palette.len];
                 try b.screen.write(col, row, alphabet[i % alphabet.len ..][0..1], style, .none);
             }
         }
@@ -91,8 +91,8 @@ const Bench = struct {
     /// a dashboard looks like and where runs of one glyph come from.
     fn paintPanels(b: *Bench) !void {
         const root = b.screen.window();
-        const cols = b.screen.size.cols / 2;
-        const rows = b.screen.size.rows / 2;
+        const cols = b.screen.dimensions().cols / 2;
+        const rows = b.screen.dimensions().rows / 2;
         for (0..2) |y| {
             for (0..2) |x| {
                 const n: u16 = @intCast(y * 2 + x);
@@ -190,7 +190,7 @@ test "a frame in which one row scrolled is a scroll, not a repaint" {
     try b.paint(0);
     _ = try b.draw();
 
-    b.screen.scroll(.fromSize(b.screen.size), 1);
+    b.screen.scroll(.fromSize(b.screen.dimensions()), 1);
     // The row the scroll brought in is blank, so the frame is the scroll
     // sequence and nothing else.
     const stats = try b.draw();
@@ -269,7 +269,7 @@ test "the draw path allocates nothing at all" {
     _ = gpa;
     try b.screen.writeOwnedCell(4, 4, .blank(.{ .bold = true }));
     try b.screen.fill(.{ .col = 0, .row = 0, .cols = 10, .rows = 2 }, .blank(.{}));
-    b.screen.scroll(.fromSize(b.screen.size), 1);
+    b.screen.scroll(.fromSize(b.screen.dimensions()), 1);
     b.screen.clear();
     _ = try b.draw();
     try testing.expectEqual(@as(usize, 0), failing.allocations);
