@@ -45,7 +45,7 @@ pub const Markdown = struct {
         var y: u16 = 0;
         while (y < win.rows()) : (y += 1) {
             const row = rows.next() orelse return;
-            const block = m.document.blocks.items[row.block];
+            const block = m.document.blocks()[row.block];
             var bar: u32 = 0;
             while (bar < block.depth and bar * 2 < win.cols()) : (bar += 1) try win.write(@intCast(bar * 2), y, "│", m.theme.quote, .none);
             const prefix: u16 = @intCast(@min(@as(u32, block.depth) * 2 + block.indent, win.cols()));
@@ -62,9 +62,9 @@ pub const Markdown = struct {
             }
             if (row.first and block.marker.len > 0) _ = try win.printSegment(.{ .text = block.marker, .style = m.theme.list }, .{ .col = prefix, .row = y, .wrap = .none });
             var x: u32 = @min(@as(u32, prefix) + block.marker.len, win.cols());
-            const text = m.document.text.items[row.start..row.end];
+            const text = m.document.text()[row.start..row.end];
             var it: visor.Graphemes = .init(text);
-            const spans = m.document.spans.items[block.first_span..block.end_span];
+            const spans = m.document.spans()[block.first_span..block.end_span];
             var low: usize = 0;
             var high = spans.len;
             while (low < high) {
@@ -123,8 +123,8 @@ const Rows = struct {
     }
     fn next(it: *Rows) ?Row {
         if (it.cols == 0) return null;
-        while (it.block < it.document.blocks.items.len) {
-            const b = it.document.blocks.items[it.block];
+        while (it.block < it.document.blocks().len) {
+            const b = it.document.blocks()[it.block];
             const prefix = @as(u64, b.depth) * 2 + b.indent + b.marker.len;
             if (b.kind != .prose and b.kind != .heading or prefix >= it.cols) {
                 const r: Row = .{ .block = it.block, .start = b.start, .end = b.end, .first = true };
@@ -132,7 +132,7 @@ const Rows = struct {
                 return r;
             }
             if (it.prose == null) {
-                it.prose = .init(it.document.text.items[b.start..b.end], @intCast(it.cols - prefix), .word, it.method);
+                it.prose = .init(it.document.text()[b.start..b.end], @intCast(it.cols - prefix), .word, it.method);
                 it.first = true;
             }
             if (it.prose.?.next()) |r| {

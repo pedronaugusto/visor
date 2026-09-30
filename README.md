@@ -245,7 +245,9 @@ and rasterizes pixels with these primitives.
 
 ### Markdown
 
-`Markdown.Document` reads text once and owns its source and runs. A widget
+`Markdown.Document` reads text once and owns its source and runs. Its
+`source()`, `text()`, `spans()` and `blocks()` return const slices borrowed
+until `deinit`; span and block ranges index `text()`. A widget
 borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
 method)` uses the same rows as `draw`, without allocation. Keep the document
 until its widgets are finished, then call `deinit`. Drawing can allocate for

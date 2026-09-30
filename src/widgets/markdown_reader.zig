@@ -18,36 +18,53 @@ pub const Block = struct {
 /// Parsed Markdown, independent of width, theme and screen. Owns all bytes.
 /// Do not copy an initialized Document; deinit it once after its widgets.
 pub const Document = struct {
-    allocator: std.mem.Allocator,
-    source: []u8,
-    text: std.ArrayList(u8) = .empty,
-    spans: std.ArrayList(Span) = .empty,
-    blocks: std.ArrayList(Block) = .empty,
+    _allocator: std.mem.Allocator,
+    _source: []u8,
+    _text: std.ArrayList(u8) = .empty,
+    _spans: std.ArrayList(Span) = .empty,
+    _blocks: std.ArrayList(Block) = .empty,
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!Document {
-        var d: Document = .{ .allocator = allocator, .source = try allocator.dupe(u8, source) };
+    /// Source bytes, borrowed until deinit.
+    pub fn source(d: *const Document) []const u8 {
+        return d._source;
+    }
+    /// Rendered bytes; block and span ranges index this slice. Borrowed until deinit.
+    pub fn text(d: *const Document) []const u8 {
+        return d._text.items;
+    }
+    /// Inline roles and targets, borrowed until deinit.
+    pub fn spans(d: *const Document) []const Span {
+        return d._spans.items;
+    }
+    /// Structural blocks, borrowed until deinit.
+    pub fn blocks(d: *const Document) []const Block {
+        return d._blocks.items;
+    }
+
+    pub fn init(allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
+        var d: Document = .{ ._allocator = allocator, ._source = try allocator.dupe(u8, input) };
         errdefer d.deinit();
         try d.read();
         return d;
     }
     pub fn deinit(d: *Document) void {
-        d.allocator.free(d.source);
-        d.text.deinit(d.allocator);
-        d.spans.deinit(d.allocator);
-        d.blocks.deinit(d.allocator);
+        d._allocator.free(d._source);
+        d._text.deinit(d._allocator);
+        d._spans.deinit(d._allocator);
+        d._blocks.deinit(d._allocator);
         d.* = undefined;
     }
 
     fn append(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
         if (bytes.len == 0) return;
-        const start = d.text.items.len;
-        try d.text.appendSlice(d.allocator, bytes);
-        try d.spans.append(d.allocator, .{ .start = start, .end = d.text.items.len, .flags = flags, .uri = uri });
+        const start = d._text.items.len;
+        try d._text.appendSlice(d._allocator, bytes);
+        try d._spans.append(d._allocator, .{ .start = start, .end = d._text.items.len, .flags = flags, .uri = uri });
     }
 
     fn read(d: *Document) !void {
-        if (d.source.len == 0) return;
-        var lines = std.mem.splitScalar(u8, d.source, '\n');
+        if (d._source.len == 0) return;
+        var lines = std.mem.splitScalar(u8, d._source, '\n');
         var fenced: ?struct { char: u8, count: usize, depth: u16, indent: u16 } = null;
         var may_join = false;
         while (lines.next()) |raw| {
@@ -71,7 +88,7 @@ pub const Document = struct {
             while (indent < body.len and body[indent] == ' ') indent += 1;
             if (indent >= 4 or std.mem.startsWith(u8, body, "\t")) {
                 // A hanging list continuation takes precedence over indented code.
-                const last = if (d.blocks.items.len == 0) null else &d.blocks.items[d.blocks.items.len - 1];
+                const last = if (d._blocks.items.len == 0) null else &d._blocks.items[d._blocks.items.len - 1];
                 if (!(may_join and last != null and last.?.marker.len > 0 and q.depth == last.?.depth and indent >= @as(usize, last.?.indent) + last.?.marker.len)) {
                     body = body[if (indent >= 4) 4 else 1..];
                     try d.block(.{ .kind = .code, .depth = q.depth }, body, true);
@@ -111,12 +128,12 @@ pub const Document = struct {
                 continue;
             }
             if (may_join) {
-                const last = &d.blocks.items[d.blocks.items.len - 1];
+                const last = &d._blocks.items[d._blocks.items.len - 1];
                 if (last.depth == q.depth and (last.marker.len == 0 or indent >= @as(usize, last.indent) + last.marker.len)) {
                     try d.append(" ", .{}, "");
                     try d.inlineRead(body, .{}, "", 0);
-                    last.end = d.text.items.len;
-                    last.end_span = d.spans.items.len;
+                    last.end = d._text.items.len;
+                    last.end_span = d._spans.items.len;
                     continue;
                 }
             }
@@ -127,12 +144,12 @@ pub const Document = struct {
 
     fn block(d: *Document, value: Block, body: []const u8, literal: bool) !void {
         var b = value;
-        b.start = d.text.items.len;
-        b.first_span = d.spans.items.len;
+        b.start = d._text.items.len;
+        b.first_span = d._spans.items.len;
         if (literal) try d.append(body, .{}, "") else try d.inlineRead(body, .{}, "", 0);
-        b.end = d.text.items.len;
-        b.end_span = d.spans.items.len;
-        try d.blocks.append(d.allocator, b);
+        b.end = d._text.items.len;
+        b.end_span = d._spans.items.len;
+        try d._blocks.append(d._allocator, b);
     }
 
     fn inlineRead(d: *Document, body: []const u8, flags: Flags, uri: []const u8, depth: u8) std.mem.Allocator.Error!void {

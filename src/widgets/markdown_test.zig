@@ -81,7 +81,7 @@ test "markdown owns its input and releases every failed parse allocation" {
             @memset(source, 'x');
             const md: widgets.Markdown = .{ .document = &doc, .theme = .{} };
             try t.expect(md.rowCount(20, .unicode) > 0);
-            try t.expect(std.mem.startsWith(u8, doc.source, "# heading"));
+            try t.expect(std.mem.startsWith(u8, doc.source(), "# heading"));
         }
     };
     try t.checkAllAllocationFailures(t.allocator, Check.parse, .{});
@@ -110,4 +110,21 @@ test "markdown code scrolling tabs and clipped windows agree with row counts" {
     try md.draw(h.window().child(.{ .col = 1, .cols = 6 }));
     try h.expectFrame(" x\n\n │ │ │\n 1. 中\n    中\n");
     try t.expectEqual(@as(usize, 7), md.rowCount(6, .unicode));
+}
+
+test "markdown document exposes only borrowed const parsing ranges" {
+    const Document = widgets.Markdown.Document;
+    try t.expect(!@hasField(Document, "allocator"));
+    try t.expect(!@hasField(Document, "source"));
+    try t.expect(!@hasField(Document, "text"));
+    try t.expect(!@hasField(Document, "spans"));
+    try t.expect(!@hasField(Document, "blocks"));
+    var doc = try Document.init(t.allocator, "**label** [link](https://x)");
+    defer doc.deinit();
+    const source: []const u8 = doc.source();
+    const text: []const u8 = doc.text();
+    try t.expectEqualStrings("**label** [link](https://x)", source);
+    try t.expectEqualStrings("label link", text);
+    try t.expectEqual(@as(usize, 1), doc.blocks().len);
+    for (doc.spans()) |span| try t.expect(span.end <= text.len);
 }
