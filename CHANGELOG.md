@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Screen and Renderer store thirty-two-byte cells, export checked values through readCell and rowAt().get(), and replace direct grid mutation with placement operations.
+
 - Window checks complete text and cell extents before placement, copying or multi-cell fills can cross a child boundary.
 
 - Sextants weights RGBA brightness and cell colour by alpha so transparent pixels leave cells alone.

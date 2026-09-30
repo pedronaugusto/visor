@@ -878,8 +878,8 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
     while (row < s.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
-            const c = &s.cells[s.index(col, row)];
-            try w.writeAll(if (c.isTail()) opts.tail else (s.textOf(c) catch @panic("invalid cell in screen")));
+            const c = &s._cells[s.index(col, row)];
+            try w.writeAll(if (c.isTail()) opts.tail else @import("screen.zig").internal.textOf(s, c));
         }
         try w.writeByte('\n');
     }
@@ -920,16 +920,16 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
     // Each cell's legend line, keyed by the line itself: two cells whose
     // lines read the same are the same style to anyone reading the dump.
     var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
-    const ids = try arena.alloc(u32, s.cells.len);
+    const ids = try arena.alloc(u32, s._cells.len);
     var key: std.Io.Writer.Allocating = .init(arena);
-    for (s.cells, 0..) |cell, i| {
+    for (s._cells, 0..) |cell, i| {
         const col: u16 = @intCast(i % s.size.cols);
         const row: u16 = @intCast(i / s.size.cols);
         // A covered column speaks for the grapheme that covers it.
-        const source = if (s.headOf(col, row)) |head| s.cells[s.index(head.col, head.row)] else cell;
+        const source = if (s.headOf(col, row)) |head| s._cells[s.index(head.col, head.row)] else cell;
         key.clearRetainingCapacity();
         writeStyleName(&key.writer, source.style) catch return error.OutOfMemory;
-        if (s.target(source.link)) |target| {
+        if (@import("screen.zig").internal.target(s, source.link)) |target| {
             key.writer.print(" link={s}", .{target.uri}) catch return error.OutOfMemory;
         }
         const found = try seen.getOrPut(arena, key.written());
@@ -1028,8 +1028,8 @@ pub fn firstDifference(want: *const Screen, got: *const Screen) ?geom.Point {
     while (row < want.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < want.size.cols) : (col += 1) {
-            const a = want.cells[want.index(col, row)];
-            const b = got.cells[got.index(col, row)];
+            const a = want._cells[want.index(col, row)];
+            const b = got._cells[got.index(col, row)];
             if (std.mem.eql(u8, want.textAt(col, row), got.textAt(col, row)) and
                 linksEqual(want, got, a.link, b.link) and
                 stylesEqual(a.style, b.style) and
@@ -1043,14 +1043,14 @@ pub fn firstDifference(want: *const Screen, got: *const Screen) ?geom.Point {
 
 /// Says what differs at one cell, then prints both grids whole.
 fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) !void {
-    const a = want.cells[want.index(col, row)];
-    const b = got.cells[got.index(col, row)];
+    const a = want._cells[want.index(col, row)];
+    const b = got._cells[got.index(col, row)];
     std.debug.print("cell {d},{d} differs\n", .{ col, row });
     std.debug.print("  want: \"{s}\" {any} link={any} shape={any}\n", .{
-        want.textAt(col, row), a.style, want.target(a.link), a.shape,
+        want.textAt(col, row), a.style, @import("screen.zig").internal.target(want, a.link), a.shape,
     });
     std.debug.print("  have: \"{s}\" {any} link={any} shape={any}\n", .{
-        got.textAt(col, row), b.style, got.target(b.link), b.shape,
+        got.textAt(col, row), b.style, @import("screen.zig").internal.target(got, b.link), b.shape,
     });
     std.debug.print("--- want ---\n", .{});
     printGrid(want);
@@ -1065,7 +1065,7 @@ fn printGrid(s: *const Screen) void {
         std.debug.print("|", .{});
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
-            if (s.cells[s.index(col, row)].isTail()) continue;
+            if (s._cells[s.index(col, row)].isTail()) continue;
             std.debug.print("{s}", .{s.textAt(col, row)});
         }
         std.debug.print("|\n", .{});
@@ -1074,9 +1074,9 @@ fn printGrid(s: *const Screen) void {
 
 /// Whether two cells' links name the same target, which is not the same as
 /// holding the same index: the two screens interned in different orders.
-fn linksEqual(want: *const Screen, got: *const Screen, a: Link, b: Link) bool {
-    const ta = want.target(a);
-    const tb = got.target(b);
+fn linksEqual(want: *const Screen, got: *const Screen, a: @TypeOf(@as(@import("cell.zig").internal.StoredCell, .{}).link), b: @TypeOf(@as(@import("cell.zig").internal.StoredCell, .{}).link)) bool {
+    const ta = @import("screen.zig").internal.target(want, a);
+    const tb = @import("screen.zig").internal.target(got, b);
     if (ta == null or tb == null) return (ta == null) == (tb == null);
     return std.mem.eql(u8, ta.?.uri, tb.?.uri) and std.mem.eql(u8, ta.?.params, tb.?.params);
 }
@@ -1841,8 +1841,8 @@ test "a resize keeps the terminal's open link even before any cell uses it" {
     try testing.expectEqualStrings("https://open.invalid", active.uri);
     try testing.expectEqualStrings("id=open", active.params);
     try t.feed("b");
-    try testing.expectEqualStrings("https://shown.invalid", t.scr.target(t.scr.cells[0].link).?.uri);
-    try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.cells[1].link).?.uri);
+    try testing.expectEqualStrings("https://shown.invalid", t.scr.target(t.scr.readCell(0, 0).?.link).?.uri);
+    try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.readCell(1, 0).?.link).?.uri);
     try testing.expectEqualStrings("a", t.scr.textAt(0, 0));
     try testing.expectEqualStrings("b", t.scr.textAt(1, 0));
 }
@@ -1862,7 +1862,7 @@ test "a failed terminal resize keeps its open link and both pool generations" {
                 return err;
             };
             try t.feed("x");
-            try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.cells[0].link).?.uri);
+            try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.readCell(0, 0).?.link).?.uri);
         }
     }.run, .{});
 }

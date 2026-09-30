@@ -40,10 +40,11 @@ const Layers = @import("layer.zig").Layers;
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
+const stored = @import("screen.zig").internal;
 
 const Allocator = std.mem.Allocator;
-const Cell = cellmod.Cell;
-const Link = cellmod.Link;
+const Cell = cellmod.internal.StoredCell;
+const Link = @TypeOf(@as(Cell, .{}).link);
 const Point = geom.Point;
 const Size = geom.Size;
 pub const Style = cellmod.Style;
@@ -786,9 +787,10 @@ pub const Renderer = struct {
     /// previous frame does not record one, so the comparison has to strip it
     /// rather than find a difference nothing could write.
     fn rowUnchanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) bool {
-        const now = s.rowAt(row)[first .. @as(usize, last) + 1];
+        const now = stored.row(s, row)[first .. @as(usize, last) + 1];
         const was = r.prevRow(row)[first .. @as(usize, last) + 1];
-        if (shownAsHeld(caps)) return cellmod.rowsEqual(now, was);
+        if (storedRowsEqual(now, was)) return true;
+        if (shownAsHeld(caps)) return false;
         for (now, was) |current, previous| {
             if (!visible(current, caps).eql(previous)) return false;
         }
@@ -807,7 +809,7 @@ pub const Renderer = struct {
     /// width of every cluster it could disagree about, only wide cells matter.
     fn rowDrifts(s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) bool {
         const agree = widthsAgree(caps);
-        for (s.rowAt(row)[first .. @as(usize, last) + 1]) |raw| {
+        for (stored.row(s, row)[first .. @as(usize, last) + 1]) |raw| {
             const c = visible(raw, caps);
             if (c.width() != 1) return true;
             if (!agree and c.shape.drift) return true;
@@ -847,7 +849,7 @@ pub const Renderer = struct {
     /// In that case diffing and painting emit the same row, so the tie goes
     /// to painting without pricing either one.
     fn allChanged(r: *const Renderer, s: *const Screen, caps: Caps, row: u16) bool {
-        for (s.rowAt(row), r.prevRow(row)) |now, was| {
+        for (stored.row(s, row), r.prevRow(row)) |now, was| {
             if (visible(now, caps).eql(was)) return false;
         }
         return true;
@@ -867,7 +869,7 @@ pub const Renderer = struct {
     /// prices only the cells either side of a gap.
     fn diffIsOneRun(r: *Renderer, s: *Screen, caps: Caps, row: u16) bool {
         const cols = r.size.cols;
-        if (visible(s.rowAt(row)[0], caps).eql(r.prevRow(row)[0])) return false;
+        if (visible(stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return false;
         const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
         return r.runEndCost(state, s, caps, row, 0, cols - 1) == cols - 1;
     }
@@ -884,7 +886,7 @@ pub const Renderer = struct {
         last: u16,
         limit: usize,
     ) ?usize {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const old = r.prevRow(row);
         var state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.cursor };
         var cost: usize = 0;
@@ -908,7 +910,7 @@ pub const Renderer = struct {
     /// sequences are omitted; text sizing and REP are retained because they
     /// change how many text bytes the paint actually needs.
     fn paintTextFloor(_: *Renderer, s: *Screen, caps: Caps, row: u16) usize {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const end = trailingBlank(cells, caps);
         var cost: usize = 0;
         var col: u16 = 0;
@@ -918,7 +920,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
+            const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
             if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
             cost += text.len;
             col += c.width();
@@ -958,7 +960,7 @@ pub const Renderer = struct {
     /// The arithmetic counterpart of `paintRow`.
     fn paintRowCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16) usize {
         const cols = r.size.cols;
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const erase_from = trailingBlank(cells, caps);
 
         if (erase_from == 0) {
@@ -985,7 +987,7 @@ pub const Renderer = struct {
         last: u16,
     ) usize {
         const cols = r.size.cols;
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const old = r.prevRow(row);
 
         var cost: usize = 0;
@@ -1028,7 +1030,7 @@ pub const Renderer = struct {
         to: u16,
         erase_tail: bool,
     ) usize {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const erase_from = if (erase_tail)
             @max(from, trailingBlank(cells[0 .. @as(usize, to) + 1], caps))
         else
@@ -1052,7 +1054,7 @@ pub const Renderer = struct {
             }
             cost += setStyleCost(r, state, c.style);
             cost += setLinkCost(state, s, c.link, caps);
-            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
+            const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
             if (c.isScaled()) {
                 // OSC 66, two one-digit keys, their separator, the metadata
                 // terminator and ST.
@@ -1067,7 +1069,7 @@ pub const Renderer = struct {
             } else if (joinsAcross(s, row, col, c, text, caps)) |left| {
                 // The left cell blank, the cluster, two moves and the left
                 // cell again in its own style (`writeApart`).
-                cost += (col - left) + text.len + (s.textOf(&cells[left]) catch @panic("invalid cell in screen")).len + 48;
+                cost += (col - left) + text.len + stored.textOf(s, &cells[left]).len + 48;
             } else {
                 cost += text.len;
             }
@@ -1089,14 +1091,14 @@ pub const Renderer = struct {
     /// determines the pen and the cursor without pricing the stretch whose
     /// bytes the caller does not use.
     fn writeCellsState(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16, from: u16, to: u16) void {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const c = visible(cells[to], caps);
         state.style = c.style;
         if (caps.osc8) {
             for (cells[from .. @as(usize, to) + 1]) |raw| {
                 const link = visible(raw, caps).link;
                 if (state.link != link) {
-                    state.link = if (link == .none or s.target(link) != null) link else .none;
+                    state.link = if (link == .none or stored.target(s, link) != null) link else .none;
                 }
             }
         }
@@ -1108,7 +1110,7 @@ pub const Renderer = struct {
     /// gap before pricing any of them. REP is handled by the caller because
     /// it can make repeated text shorter than its byte lengths.
     fn textCostExceeds(s: *Screen, caps: Caps, row: u16, from: u16, to: u16, limit: usize) bool {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         var cost: usize = 0;
         var col = from;
         while (col <= to) {
@@ -1117,7 +1119,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
+            const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
             cost += text.len;
             if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
             if (cost > limit) return true;
@@ -1137,7 +1139,7 @@ pub const Renderer = struct {
         col: u16,
         last: u16,
     ) u16 {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const old = r.prevRow(row);
         var state = initial;
 
@@ -1192,7 +1194,7 @@ pub const Renderer = struct {
     /// A whole row, written from an absolute position.
     fn paintRow(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, stats: *Stats) Error!void {
         const cols = r.size.cols;
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const erase_from = trailingBlank(cells, caps);
 
         if (erase_from == 0) {
@@ -1223,7 +1225,7 @@ pub const Renderer = struct {
         stats: *Stats,
     ) Error!void {
         const cols = r.size.cols;
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const old = r.prevRow(row);
 
         var col = first;
@@ -1287,7 +1289,7 @@ pub const Renderer = struct {
         stats: *Stats,
         erase_tail: bool,
     ) Error!void {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const erase_from = if (erase_tail)
             @max(from, trailingBlank(cells[0 .. @as(usize, to) + 1], caps))
         else
@@ -1315,9 +1317,29 @@ pub const Renderer = struct {
             }
             try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
+            // Printable ASCII cannot join its left neighbour or need a width
+            // protocol. Send a style run together, rather than visiting the
+            // terminal state once for every byte. REP keeps its own run path.
+            if (!caps.rep and c.shape.kind == .narrow and !c.isScaled() and c.text.isAscii()) {
+                var bytes: [256]u8 = undefined;
+                var n: usize = 0;
+                while (col <= to and n < bytes.len) {
+                    if (erase_tail and col == erase_from and to - col + 1 > erase_cost) break;
+                    const next = visible(cells[col], caps);
+                    if (next.shape.kind != .narrow or next.isScaled() or !next.text.isAscii() or
+                        next.link != c.link or !std.mem.eql(u8, std.mem.asBytes(&next.style), std.mem.asBytes(&c.style))) break;
+                    bytes[n] = next.text.buf[0];
+                    n += 1;
+                    col += 1;
+                }
+                try out.writeAll(bytes[0..n]);
+                stats.cells += @intCast(n);
+                r.advance(col, row);
+                continue;
+            }
             // A covered cell shown as a blank is a space, whatever the head
             // it carried the text of.
-            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
+            const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
             if (c.isScaled()) {
                 try morse.textSize(out, .{ .scale = c.shape.scale, .width = c.glyphWidth() }, text);
                 stats.scaled += 1;
@@ -1356,9 +1378,9 @@ pub const Renderer = struct {
     /// cell goes out as it went the first time, mode 2027 off around it when
     /// that kept it from its own left neighbour.
     fn writeApart(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8, stats: *Stats) Error!void {
-        const cells = s.rowAt(row);
+        const cells = stored.row(s, row);
         const lc = visible(cells[left], caps);
-        const held = (s.textOf(&cells[left]) catch @panic("invalid cell in screen"));
+        const held = stored.textOf(s, &cells[left]);
         try r.moveTo(out, left, row, stats);
         try r.setStyle(out, lc.style, stats);
         try r.setLink(out, s, .none, caps, stats);
@@ -1424,7 +1446,7 @@ pub const Renderer = struct {
 
     /// Copies a row's conservative damage span into the previous frame.
     fn commitRow(r: *Renderer, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) void {
-        const cells = s.rowAt(row)[first .. @as(usize, last) + 1];
+        const cells = stored.row(s, row)[first .. @as(usize, last) + 1];
         const row_start = @as(usize, row) * r.size.cols;
         const old = r.prev[row_start + first .. row_start + @as(usize, last) + 1];
         if (shownAsHeld(caps)) {
@@ -1482,7 +1504,7 @@ pub const Renderer = struct {
         if (to == .none) {
             try morse.hyperlinkEnd(out);
         } else {
-            const t = s.target(to) orelse {
+            const t = stored.target(s, to) orelse {
                 try morse.hyperlinkEnd(out);
                 r.link = .none;
                 stats.links += 1;
@@ -1838,7 +1860,7 @@ fn setLinkCost(state: *CostState, s: *const Screen, to: Link, caps: Caps) usize 
         state.link = .none;
         return hyperlink_end_cost;
     }
-    const target = s.target(to) orelse {
+    const target = stored.target(s, to) orelse {
         state.link = .none;
         return hyperlink_end_cost;
     };
@@ -1982,11 +2004,11 @@ fn apartFits(c: Cell, text: []const u8) bool {
 fn joinedTo(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Caps) ?u16 {
     if (caps.width_method != .unicode or col == 0) return null;
     if (c.isScaled() or c.width() == 0) return null;
-    const cells = s.rowAt(row);
+    const cells = stored.row(s, row);
     var left = col - 1;
     // The covered column of a wide cluster: the cluster is in its head.
     if (visible(cells[left], caps).isTail() and left > 0) left -= 1;
-    const held: []const u8 = if (cells[left].isTail()) " " else (s.textOf(&cells[left]) catch @panic("invalid cell in screen"));
+    const held: []const u8 = if (cells[left].isTail()) " " else stored.textOf(s, &cells[left]);
     if (!textmod.joinsCell(held, text)) return null;
     return left;
 }
@@ -2003,7 +2025,7 @@ fn joinsAcross(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: 
     // One that would join a blank as well: no order of writing keeps it
     // apart.
     if (textmod.joinsCell(" ", text)) return null;
-    const lc = visible(s.rowAt(row)[left], caps);
+    const lc = visible(stored.row(s, row)[left], caps);
     if (lc.isTail() or lc.isScaled()) return null;
     return left;
 }
@@ -2841,7 +2863,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
 
         const r = &f.renderer;
         r.style = styles[random.uintLessThan(usize, styles.len)];
-        r.link = if (random.boolean()) link else .none;
+        r.link = if (random.boolean()) @enumFromInt(@as(u16, @truncate(@intFromEnum(link)))) else .none;
         r.cursor = switch (random.uintLessThan(u8, 3)) {
             0 => null,
             1 => .{ .col = 0, .row = 0 },
@@ -2867,7 +2889,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
         const paint = try r.price(&f.screen, f.caps, 0, 0, cols - 1, true);
         try testing.expect(paint <= diff);
         try testing.expect(try r.paintIsCheaper(&f.screen, f.caps, 0, 0, cols - 1));
-        if (trailingBlank(f.screen.rowAt(0), f.caps) == 0) {
+        if (trailingBlank(stored.row(&f.screen, 0), f.caps) == 0) {
             blank_hits += 1;
             try testing.expect(bytes[1].len <= bytes[0].len);
         } else {
@@ -3571,7 +3593,7 @@ test "pool compaction repaints reused text and link identities, including throug
         const old_link = try f.screen.link("https://old.invalid", "");
         try f.screen.write(0, 0, old, .{}, old_link);
         _ = try f.draw();
-        const previous = f.renderer.prev[0];
+        const previous = f.screen.readCell(0, 0).?;
 
         const new_link = try f.screen.link("https://new.invalid", "");
         try f.screen.write(0, 0, new, .{}, new_link);
@@ -3581,9 +3603,9 @@ test "pool compaction repaints reused text and link identities, including throug
             try f.screen.resize(.{ .cols = 9, .rows = 1 });
             try f.screen.resize(f.renderer.size);
         } else try f.screen.compactPool();
-        try testing.expectEqual(previous.text.offset(), f.screen.cells[0].text.offset());
-        try testing.expectEqual(previous.link.index(), f.screen.cells[0].link.index());
-        try testing.expect(!previous.eql(f.screen.cells[0]));
+        try testing.expectEqual(previous.text.offset(), f.screen._cells[0].text.offset());
+        try testing.expectEqual(previous.link.index(), f.screen._cells[0].link.index());
+        try testing.expect(!previous.eql(f.screen.readCell(0, 0).?));
         const stats = try f.draw();
         try testing.expectEqual(@as(u32, 1), stats.repainted);
         try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
@@ -3606,9 +3628,9 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         const new_link = try next.link("https://new.invalid", "");
         const new = "b\u{301}\u{302}\u{303}";
         try next.write(0, 0, new, .{}, new_link);
-        try testing.expectEqual(f.renderer.prev[0].text.offset(), next.cells[0].text.offset());
-        try testing.expectEqual(f.renderer.prev[0].link.index(), next.cells[0].link.index());
-        try testing.expect(!f.renderer.prev[0].eql(next.cells[0]));
+        try testing.expectEqual(f.renderer.prev[0].text.offset(), next._cells[0].text.offset());
+        try testing.expectEqual(f.renderer.prev[0].link.index(), next._cells[0].link.index());
+        try testing.expect(!f.screen.readCell(0, 0).?.eql(next.readCell(0, 0).?));
         // Damage belongs to the grid's writes; it says nothing about which
         // grid the terminal was previously shown.
         next.damage.clear();
@@ -3624,4 +3646,9 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
         try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
     }
+}
+
+fn storedRowsEqual(a: []const Cell, b: []const Cell) bool {
+    if (a.len != b.len) return false;
+    return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
 }

@@ -19,8 +19,8 @@ const std = @import("std");
 const cellmod = @import("cell.zig");
 
 const Allocator = std.mem.Allocator;
-const Text = cellmod.Cell.Text;
-const Link = cellmod.Link;
+const Text = cellmod.internal.StoredCell.Text;
+const Link = @TypeOf(@as(cellmod.internal.StoredCell, .{}).link);
 
 // Identities never wrap: exhaustion refuses creation instead of reusing a
 // handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
@@ -34,21 +34,19 @@ pub fn nextGeneration() u64 {
     }
 }
 
-fn pooledText(generation: u64, offset: u32, len: u16) Text {
+fn pooledText(offset: u32, len: u16) Text {
     var t: Text = .{ .buf = @splat(0), .len = Text.pooled };
     std.mem.writeInt(u32, t.buf[0..4], offset, .little);
     std.mem.writeInt(u16, t.buf[4..6], len, .little);
-    std.mem.writeInt(u48, &t.pool_generation, @intCast(generation), .little);
     return t;
 }
 
-fn pooledLink(generation: u64, index: u16) Link {
-    return @enumFromInt((generation << 16) | (@as(u64, index) + 1));
+fn pooledLink(index: u16) Link {
+    return @enumFromInt(index + 1);
 }
 
 /// The pool of graphemes longer than a cell holds inline.
 pub const Graphemes = struct {
-    generation: u64 = 0,
     /// Every long grapheme, back to back, in the order they were first seen.
     bytes: std.ArrayList(u8) = .empty,
     /// Where each one is, keyed by what it says.
@@ -100,11 +98,10 @@ pub const Graphemes = struct {
     /// else.
     pub fn intern(p: *Graphemes, gpa: Allocator, grapheme: []const u8) Allocator.Error!Text {
         if (grapheme.len <= Text.max_inline) return .inlined(grapheme);
-        if (p.generation == 0) p.generation = nextGeneration();
         const byte_len = std.math.cast(u16, grapheme.len) orelse return error.OutOfMemory;
 
         const found = p.index.getEntryAdapted(grapheme, Adapted{ .bytes = p.bytes.items });
-        if (found) |e| return pooledText(p.generation, e.key_ptr.offset, e.key_ptr.len);
+        if (found) |e| return pooledText(e.key_ptr.offset, e.key_ptr.len);
 
         const offset = std.math.cast(u32, p.bytes.items.len) orelse return error.OutOfMemory;
         const borrowed = aliasOffset(p.bytes.items, grapheme);
@@ -114,11 +111,11 @@ pub const Graphemes = struct {
         p.bytes.appendSliceAssumeCapacity(source);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
-        return pooledText(p.generation, offset, byte_len);
+        return pooledText(offset, byte_len);
     }
 
     /// The bytes of a grapheme, whichever tier it is in.
-    /// Stale or foreign pooled handles return `InvalidHandle`.
+    /// Internal offsets are bounded here; Screen checks public pool identities.
     ///
     /// The `Text` is taken by pointer because a short grapheme lives in it:
     /// the bytes come back borrowed from whatever holds the cell, and a
@@ -128,7 +125,6 @@ pub const Graphemes = struct {
     /// invalidate pooled slices.
     pub fn slice(p: *const Graphemes, t: *const Text) error{InvalidHandle}![]const u8 {
         if (!t.isPooled()) return t.inlineSlice() orelse error.InvalidHandle;
-        if (t.generation() == 0 or t.generation() != p.generation) return error.InvalidHandle;
         const off: usize = t.offset().?;
         const n = t.length();
         if (off > p.bytes.items.len or n > p.bytes.items.len - off) return error.InvalidHandle;
@@ -136,10 +132,9 @@ pub const Graphemes = struct {
     }
 
     /// Empties the pool, keeping the memory. Pooled `Cell.Text` handles
-    /// handed out before this become invalid; inline text remains portable.
+    /// held before this become invalid; Screen owns their checked exports.
     /// The caller clears the grid and repaints.
     pub fn reset(p: *Graphemes) void {
-        p.generation = 0;
         p.bytes.clearRetainingCapacity();
         p.index.clearRetainingCapacity();
     }
@@ -179,7 +174,6 @@ pub const OwnedTarget = struct {
 
 /// Every link a screen's cells point at.
 pub const Links = struct {
-    generation: u64 = 0,
     /// The URIs and parameter lists, back to back.
     bytes: std.ArrayList(u8) = .empty,
     /// One entry a link, in the order they were first seen.
@@ -196,10 +190,10 @@ pub const Links = struct {
         links: *const Links,
 
         pub fn hash(ctx: Context, i: u16) u64 {
-            return hashTarget(ctx.links.get(pooledLink(ctx.links.generation, i)).?);
+            return hashTarget(ctx.links.get(pooledLink(i)).?);
         }
         pub fn eql(ctx: Context, a: u16, b: u16) bool {
-            return eqlTarget(ctx.links.get(pooledLink(ctx.links.generation, a)).?, ctx.links.get(pooledLink(ctx.links.generation, b)).?);
+            return eqlTarget(ctx.links.get(pooledLink(a)).?, ctx.links.get(pooledLink(b)).?);
         }
     };
 
@@ -210,7 +204,7 @@ pub const Links = struct {
             return hashTarget(key);
         }
         pub fn eql(ctx: Adapted, key: Target, i: u16) bool {
-            return eqlTarget(key, ctx.links.get(pooledLink(ctx.links.generation, i)).?);
+            return eqlTarget(key, ctx.links.get(pooledLink(i)).?);
         }
     };
 
@@ -238,9 +232,8 @@ pub const Links = struct {
     /// give the same `Link`.
     pub fn intern(l: *Links, gpa: Allocator, uri: []const u8, params: []const u8) Allocator.Error!Link {
         if (uri.len == 0) return .none;
-        if (l.generation == 0) l.generation = nextGeneration();
         const target: Target = .{ .uri = uri, .params = params };
-        if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return pooledLink(l.generation, i);
+        if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return pooledLink(i);
 
         const uri_len = std.math.cast(u16, uri.len) orelse return error.OutOfMemory;
         const params_len = std.math.cast(u16, params.len) orelse return error.OutOfMemory;
@@ -266,15 +259,14 @@ pub const Links = struct {
             .params_len = params_len,
         });
         l.index.putAssumeCapacityContext(i, {}, .{ .links = l });
-        return pooledLink(l.generation, i);
+        return pooledLink(i);
     }
 
-    /// The target a link names, or null for `.none`, a stale or foreign
-    /// handle, or an index outside this table. The returned slices borrow from the growable
+    /// The target a stored link names, or null for `.none` or an index outside this table. The returned slices borrow from the growable
     /// link pool: further interning, compaction, resize or deinitialization
     /// can invalidate them even when the original cell is unchanged.
     pub fn get(l: *const Links, link: Link) ?Target {
-        if (link == .none or link.generation() == 0 or link.generation() != l.generation) return null;
+        if (link == .none) return null;
         const i = link.index() orelse return null;
         if (i >= l.entries.items.len) return null;
         const e = l.entries.items[i];
@@ -422,7 +414,7 @@ test "a link index from another screen reads as nothing" {
     var l: Links = .{};
     defer l.deinit(testing.allocator);
     _ = try l.intern(testing.allocator, "a://b", "");
-    try testing.expectEqual(@as(?Target, null), l.get(pooledLink(l.generation, 9)));
+    try testing.expectEqual(@as(?Target, null), l.get(pooledLink(9)));
 }
 
 test "the pool gives its memory back under a failing allocator" {

@@ -311,7 +311,7 @@ own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Design
 
-**A cell is forty-eight bytes and is compared as memory.** The grapheme lives
+**A stored cell is thirty-two bytes and is compared as memory.** The grapheme lives
 in the cell when it is six bytes or fewer, which covers every
 single-codepoint cluster and a base with a combining mark, and in a pool the
 screen owns when it is longer. The style is `morse.Style`, which has a
@@ -320,7 +320,10 @@ field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
 
-Pooled text and link handles carry their issuing pool generation. Compaction
+Cells read from the screen carry checked text and link handles. The grid and
+renderer store compact cells; Screen owns their pool identity. `rowAt` gives
+a borrowed row with `len()` and checked `get(col)` values; writes go through
+Screen rather than mutable row slices. Pooled handles carry their issuing generation. Compaction
 and resize invalidate retained handles; another screen cannot use them.
 `textOf`, cell writes, fills and copies return `InvalidHandle` before using a
 stale or foreign handle; `target` returns null. Inline text and `Link.none`

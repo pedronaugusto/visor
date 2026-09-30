@@ -177,7 +177,7 @@ fn checkGrid(s: *const Screen) !void {
     for (0..s.size.rows) |r| {
         var col: u16 = 0;
         while (col < s.size.cols) {
-            const c = s.cells[s.index(col, @intCast(r))];
+            const c = s._cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape._reserved == 0);
             if (c.text.isPooled()) {
                 try testing.expect(c.text.offset().? + c.text.length() <= s.graphemes.len());
@@ -187,7 +187,7 @@ fn checkGrid(s: *const Screen) !void {
                 // A tail is its head's, content and all: the renderer never
                 // writes one, and the terminal makes its own from the head.
                 const head = s.headOf(col, @intCast(r)) orelse return error.OrphanTail;
-                var own = s.cells[s.index(head.col, head.row)];
+                var own = s._cells[s.index(head.col, head.row)];
                 own.shape.kind = .spacer_tail;
                 try testing.expect(c.eql(own));
                 col += 1;
@@ -201,7 +201,7 @@ fn checkGrid(s: *const Screen) !void {
             for (0..c.rows()) |dr| {
                 for (0..span) |dc| {
                     if (dr == 0 and dc == 0) continue;
-                    const t = s.cells[s.index(@intCast(col + dc), @intCast(r + dr))];
+                    const t = s._cells[s.index(@intCast(col + dc), @intCast(r + dr))];
                     try testing.expect(t.isTail());
                     try testing.expectEqual(c.shape.scale, t.shape.scale);
                 }
@@ -213,13 +213,13 @@ fn checkGrid(s: *const Screen) !void {
 
 /// That the conservative damage map names every cell that changed, checked
 /// against a copy taken before the operations.
-fn checkDamage(s: *const Screen, before: []const Cell) !void {
+fn checkDamage(s: *const Screen, before: []const @import("cell.zig").internal.StoredCell) !void {
     for (0..s.size.rows) |r| {
         const span = s.damage.row(@intCast(r));
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
             const i = s.index(col, @intCast(r));
-            const changed = !s.cells[i].eql(before[i]);
+            const changed = !s._cells[i].eql(before[i]);
             const named = if (span) |sp| col >= sp.first and col <= sp.last else false;
             if (changed and !named) return error.DamageUnderReported;
         }
@@ -336,12 +336,12 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer t.deinit();
     t.setMethod(terminalMethod(method));
 
-    const before = try gpa.alloc(Cell, h.screen.cells.len);
+    const before = try gpa.alloc(@import("cell.zig").internal.StoredCell, h.screen._cells.len);
     defer gpa.free(before);
 
     var frames: usize = 0;
     while (frames < 6 and !dice.eos()) : (frames += 1) {
-        @memcpy(before, h.screen.cells);
+        @memcpy(before, h.screen._cells);
         h.screen.damage.clear();
 
         var ops: usize = 0;
@@ -556,8 +556,8 @@ fn expectRegionEqual(want: *const Screen, t: *const Term) !void {
     while (row < want.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < want.size.cols) : (col += 1) {
-            const a = want.cells[want.index(col, row)];
-            const b = got.cells[got.index(col, origin + row)];
+            const a = want.readCell(col, row).?;
+            const b = got.readCell(col, origin + row).?;
             const same = std.mem.eql(u8, want.textAt(col, row), got.textAt(col, origin + row)) and
                 std.mem.eql(u8, std.mem.asBytes(&a.style), std.mem.asBytes(&b.style)) and
                 a.width() == b.width() and a.isTail() == b.isTail() and

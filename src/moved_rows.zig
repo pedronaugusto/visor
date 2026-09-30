@@ -23,7 +23,7 @@ const render = @import("render.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
 
-const Cell = cellmod.Cell;
+const Cell = cellmod.internal.StoredCell;
 const Renderer = render.Renderer;
 const Writer = std.Io.Writer;
 
@@ -85,7 +85,7 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     const now = r.hashes[0..rows];
     const was = r.hashes[rows..][0..rows];
     for (0..rows) |i| {
-        now[i] = hashRow(s.rowAt(@intCast(i)), caps);
+        now[i] = hashRow(@import("screen.zig").internal.row(s, @intCast(i)), caps);
         was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), caps);
     }
 
@@ -104,7 +104,7 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     var i = band.first;
     while (i <= band.last) : (i += 1) {
         const source: u16 = if (up) i + distance else i - distance;
-        if (!rowsEqual(s.rowAt(i), render.internal.prevRow(r, source), caps)) return null;
+        if (!rowsEqual(@import("screen.zig").internal.row(s, i), render.internal.prevRow(r, source), caps)) return null;
     }
 
     // A region whose edge runs through text drawn more than one row tall
@@ -112,8 +112,8 @@ fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     // and a terminal clears a block it no longer holds whole. Either frame
     // is enough to refuse, because the terminal holds the one and is about
     // to be given the other.
-    if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(s.rowAt(top - 1), s.rowAt(top)))) return null;
-    if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(s.rowAt(bottom), s.rowAt(bottom + 1)))) return null;
+    if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import("screen.zig").internal.row(s, top - 1), @import("screen.zig").internal.row(s, top)))) return null;
+    if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import("screen.zig").internal.row(s, bottom), @import("screen.zig").internal.row(s, bottom + 1)))) return null;
     return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
 }
 
@@ -216,7 +216,7 @@ fn hashRow(cells: []const Cell, caps: Caps) u64 {
 /// checked against.
 fn rowsEqual(a: []const Cell, b: []const Cell, caps: Caps) bool {
     if (a.len != b.len) return false;
-    if (render.shownAsHeld(caps)) return cellmod.rowsEqual(a, b);
+    if (render.shownAsHeld(caps)) return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
     for (a, b) |x, y| if (!render.visible(x, caps).eql(y)) return false;
     return true;
 }

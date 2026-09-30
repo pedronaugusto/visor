@@ -288,7 +288,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
             _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, 0);
             const size = s.screen.size;
             const generation = s.screen.pool_generation;
-            const cells = s.screen.cells;
+            const cells = s.screen._cells;
             const prev = s.renderer.prev;
             const borrowed = s.screen.textAt(0, 0);
             const pending = s.pending;
@@ -297,7 +297,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
                 try testing.expectEqual(size, s.renderer.size);
                 try testing.expectEqual(size, s.ws.cells);
                 try testing.expectEqual(generation, s.screen.pool_generation);
-                try testing.expect(s.screen.cells.ptr == cells.ptr);
+                try testing.expect(s.screen._cells.ptr == cells.ptr);
                 try testing.expect(s.renderer.prev.ptr == prev.ptr);
                 try testing.expect(s.screen.textAt(0, 0).ptr == borrowed.ptr);
                 try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", borrowed);
@@ -306,7 +306,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
             };
             try testing.expectEqual(s.screen.size, s.renderer.size);
             try testing.expectEqual(s.ws.cells, s.screen.size);
-            try testing.expectEqualStrings("https://kept.invalid", s.screen.target(s.screen.cells[0].link).?.uri);
+            try testing.expectEqualStrings("https://kept.invalid", s.screen.target(s.screen.readCell(0, 0).?.link).?.uri);
             _ = try s.draw(&sink.writer);
         }
     }.run, .{});

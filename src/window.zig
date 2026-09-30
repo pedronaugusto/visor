@@ -955,7 +955,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
     }, .{ .wrap = .word });
     for (0..plain.size.rows) |r| {
         if (r % 2 == 0) continue;
-        for (plain.rowAtMut(@intCast(r))) |*c| {
+        for (@import("screen.zig").internal.rowMut(&plain, @intCast(r))) |*c| {
             if (!c.eql(.blank(.{}))) c.style.dim = true;
         }
     }
@@ -969,7 +969,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
         .{ .text = "\u{4e2d} three four", .style = .{ .fg = .ansi(.cyan) } },
     }, .{ .wrap = .word });
 
-    for (plain.cells, inked.cells) |a, b| try testing.expect(a.eql(b));
+    for (plain._cells, inked._cells) |a, b| try testing.expect(a.eql(b));
 }
 
 test "a rectangle of the window's own cells is the child over it, clipped" {
