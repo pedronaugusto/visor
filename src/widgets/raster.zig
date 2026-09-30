@@ -60,6 +60,10 @@ pub const Surface = struct {
         if (!valid(a) or !valid(b) or !std.math.isFinite(paint.width) or paint.width <= 0) return;
         const r = paint.width / 2;
         const area = s.box(.{ @min(a[0], b[0]) - r - 0.5, @min(a[1], b[1]) - r - 0.5 }, .{ @max(a[0], b[0]) + r + 0.5, @max(a[1], b[1]) + r + 0.5 });
+        if (needsWide(a) or needsWide(b) or paint.width > 1e50) {
+            s.lineWide(a, b, paint, area);
+            return;
+        }
         const dx = b[0] - a[0];
         const dy = b[1] - a[1];
         const length = dx * dx + dy * dy;
@@ -82,18 +86,65 @@ pub const Surface = struct {
         if (!valid(center) or !valid(radii) or radii[0] <= 0 or radii[1] <= 0 or !std.math.isFinite(paint.width) or paint.width <= 0) return;
         const half = if (filled) 0 else paint.width / 2;
         const area = s.box(.{ center[0] - radii[0] - half - 0.5, center[1] - radii[1] - half - 0.5 }, .{ center[0] + radii[0] + half + 0.5, center[1] + radii[1] + half + 0.5 });
+        if (needsWide(center) or needsWide(radii) or @min(radii[0], radii[1]) < 1e-50 or paint.width > 1e50) {
+            s.ellipseWith(f128, center, radii, filled, paint, area);
+        } else {
+            s.ellipseWith(f64, center, radii, filled, paint, area);
+        }
+    }
+
+    // Normal form avoids subtracting enormous endpoint-relative projections
+    // to recover a small pixel distance. f128 holds every product of f64 inputs.
+    fn lineWide(s: *Surface, a: [2]f64, b: [2]f64, paint: Paint, area: [4]u32) void {
+        const ax: f128 = a[0];
+        const ay: f128 = a[1];
+        const bx: f128 = b[0];
+        const by: f128 = b[1];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const length = @sqrt(dx * dx + dy * dy);
+        const ux = if (length == 0) 0 else dx / length;
+        const uy = if (length == 0) 0 else dy / length;
+        const first = ax * ux + ay * uy;
+        const last = bx * ux + by * uy;
+        const offset = if (length == 0) 0 else (ax * by - ay * bx) / length;
+        const r = @as(f128, paint.width) / 2;
         var y = area[1];
         while (y < area[3]) : (y += 1) {
             var x = area[0];
             while (x < area[2]) : (x += 1) {
-                const nx = (@as(f64, @floatFromInt(x)) - center[0]) / radii[0];
-                const ny = (@as(f64, @floatFromInt(y)) - center[1]) / radii[1];
+                const px: f128 = @floatFromInt(x);
+                const py: f128 = @floatFromInt(y);
+                const projection = px * ux + py * uy;
+                const ex = px - (if (projection <= first) ax else bx);
+                const ey = py - (if (projection <= first) ay else by);
+                const distance = if (length == 0 or projection <= first or projection >= last)
+                    @sqrt(ex * ex + ey * ey)
+                else
+                    @abs(px * uy - py * ux - offset);
+                s.blend(x, y, paint, @floatCast(std.math.clamp(r + 0.5 - distance, 0, 1)));
+            }
+        }
+    }
+
+    fn ellipseWith(s: *Surface, comptime Float: type, center: [2]f64, radii: [2]f64, filled: bool, paint: Paint, area: [4]u32) void {
+        const rx: Float = radii[0];
+        const ry: Float = radii[1];
+        const half = if (filled) 0 else @as(Float, paint.width) / 2;
+        var y = area[1];
+        while (y < area[3]) : (y += 1) {
+            var x = area[0];
+            while (x < area[2]) : (x += 1) {
+                const nx = (@as(Float, @floatFromInt(x)) - @as(Float, center[0])) / rx;
+                const ny = (@as(Float, @floatFromInt(y)) - @as(Float, center[1])) / ry;
                 const norm = @sqrt(nx * nx + ny * ny);
                 // The gradient converts the implicit ellipse to pixel distance.
-                const gradient = if (norm == 0) 1 / @min(radii[0], radii[1]) else @sqrt((nx / radii[0]) * (nx / radii[0]) + (ny / radii[1]) * (ny / radii[1])) / norm;
+                const gx = nx / rx;
+                const gy = ny / ry;
+                const gradient = if (norm == 0) 1 / @min(rx, ry) else @sqrt(gx * gx + gy * gy) / norm;
                 const distance = (norm - 1) / gradient;
                 const coverage = if (filled) 0.5 - distance else half + 0.5 - @abs(distance);
-                s.blend(x, y, paint, std.math.clamp(coverage, 0, 1));
+                s.blend(x, y, paint, @floatCast(std.math.clamp(coverage, 0, 1)));
             }
         }
     }
@@ -111,4 +162,9 @@ fn edge(v: f64, limit: u32) u32 {
 }
 fn valid(p: [2]f64) bool {
     return std.math.isFinite(p[0]) and std.math.isFinite(p[1]);
+}
+
+// Squared distances and ellipse gradients stay within f64 in this range.
+fn needsWide(p: [2]f64) bool {
+    return @abs(p[0]) > 1e50 or @abs(p[1]) > 1e50;
 }

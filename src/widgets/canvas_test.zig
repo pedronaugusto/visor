@@ -84,3 +84,21 @@ test "canvas shapes use sextant and braille fallback or the picture owner" {
     try cells.map(&.{&.{ .{ -100, 2 }, .{ 100, 2 } }}, .{});
     _ = try h.frame();
 }
+
+test "raster lines keep finite extreme coordinates through their arithmetic" {
+    var surface = try Canvas.Surface.init(t.allocator, 3, 3);
+    defer surface.deinit();
+    const extreme = std.math.floatMax(f64);
+    surface.line(.{ -extreme, -extreme }, .{ extreme, extreme }, .{});
+    const alpha = [_]u8{ 255, 75, 0, 75, 255, 75, 0, 75, 255 };
+    for (alpha, 0..) |expected, i| try t.expectEqual(expected, surface.pixels[i * 4 + 3]);
+}
+
+test "raster ellipses keep tiny finite radii through their arithmetic" {
+    var surface = try Canvas.Surface.init(t.allocator, 3, 3);
+    defer surface.deinit();
+    surface.ellipse(.{ 0, 0 }, .{ std.math.floatMin(f64), 1 }, false, .{ .width = 2 });
+    try t.expectEqual(@as(u8, 255), surface.pixels[3]);
+    try t.expectEqual(@as(u8, 128), surface.pixels[7]);
+    try t.expectEqual(@as(u8, 0), surface.pixels[11]);
+}

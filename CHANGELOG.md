@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Raster strokes and ellipses keep finite extreme coordinates and tiny radii through their distance calculations.
+
 - Breaking: Cell construction/import checks glyphs and shapes with InvalidCell; terminal bridges use explicitly unchecked placement while pool handles remain checked.
 
 - Breaking: Date uses checked init(year, month, day) construction and component accessors instead of mutable calendar literals.
