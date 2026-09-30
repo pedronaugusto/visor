@@ -116,15 +116,15 @@ pub const Screen = struct {
             s.damageAll();
             return;
         }
-        // Before anything is committed, so that a resize either happens or
-        // leaves the screen exactly as it was. The cells that survive carry
-        // the new offsets with them.
-        try s.compactPool();
-
+        // Prepare the grid and damage map before compaction commits new
+        // identities. Nothing fallible follows a successful compaction, so
+        // any allocation failure preserves cells, pools, borrows and damage.
         const cells = try gpa.alloc(Cell, size.area());
         errdefer gpa.free(cells);
         @memset(cells, .blank(.{}));
-        try s.damage.resize(gpa, size.rows);
+        var damage = try Damage.init(gpa, size.rows);
+        errdefer damage.deinit(gpa);
+        try s.compactPool();
 
         const rows = @min(s.size.rows, size.rows);
         const cols = @min(s.size.cols, size.cols);
@@ -134,6 +134,8 @@ pub const Screen = struct {
         }
         gpa.free(s.cells);
         s.cells = cells;
+        s.damage.deinit(gpa);
+        s.damage = damage;
         s.size = size;
 
         // A wide grapheme or a block that used to have room may not any
@@ -1382,6 +1384,38 @@ test "managed screens and renderers use their captured allocator through every o
             try r.resize(s.size);
             var out: std.Io.Writer.Discarding = .init(&.{});
             _ = try r.draw(&out.writer, &s, null, .{});
+        }
+    }.run, .{});
+}
+
+test "a failed resize leaves cells, pool identities, borrows and damage untouched" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator) !void {
+            var s = try Screen.init(gpa, .{ .cols = 4, .rows = 1 });
+            defer s.deinit();
+            s.method = .unicode;
+            _ = try s.intern("a\u{301}\u{302}\u{303}");
+            _ = try s.link("https://stale.invalid", "");
+            const live = try s.link("https://live.invalid", "id=live");
+            try s.write(0, 0, "b\u{301}\u{302}\u{303}", .{}, live);
+            s.damage.clear();
+            const before = s.cells[0];
+            const cells = s.cells;
+            const graphemes = s.graphemes.bytes.items;
+            const links = s.links.bytes.items;
+            const generation = s.pool_generation;
+            s.resize(.{ .cols = 8, .rows = 2 }) catch |err| {
+                try testing.expectEqual(generation, s.pool_generation);
+                try testing.expectEqual(Size{ .cols = 4, .rows = 1 }, s.size);
+                try testing.expect(s.cells.ptr == cells.ptr);
+                try testing.expect(before.eql(s.cells[0]));
+                try testing.expect(s.graphemes.bytes.items.ptr == graphemes.ptr);
+                try testing.expect(s.links.bytes.items.ptr == links.ptr);
+                try testing.expect(!s.damage.any());
+                return err;
+            };
+            try testing.expectEqualStrings("b\u{301}\u{302}\u{303}", s.textAt(0, 0));
+            try testing.expectEqualStrings("https://live.invalid", s.target(s.cells[0].link).?.uri);
         }
     }.run, .{});
 }
