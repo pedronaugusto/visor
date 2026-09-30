@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- The allocation-free drawing test observes the allocators captured by both owners and refuses new allocations and resizes after warmup.
+
 - Screen fills and Window placement share whole-cell clipping so a wide or scaled fill stays inside its requested rectangle.
 
 - List and Table bound visible ranges even when the viewport has no body rows.

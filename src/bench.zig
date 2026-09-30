@@ -252,25 +252,29 @@ test "a frame of panels stays inside its budget and REP is what keeps it there" 
 }
 
 test "the draw path allocates nothing at all" {
-    // An allocator that fails on its first request, handed to nothing: the
-    // screen and the renderer take theirs at init, and the frame path takes
-    // none.
-    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
-    var b: Bench = try .init(testing.allocator, 120, 40);
+    // Both owners and the output writer use this allocator. Warm their
+    // storage, then refuse every allocation and resize on the frame path.
+    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{});
+    var b: Bench = try .init(failing.allocator(), 120, 40);
     defer b.deinit();
     try b.paint(0);
     _ = try b.draw();
+    try testing.expect(failing.allocations > 0);
+    const allocations = failing.allocations;
+    const resizes = failing.resize_index;
+    failing.fail_index = failing.alloc_index;
+    failing.resize_fail_index = resizes;
 
-    // Every mutation the frame path offers, with the failing allocator
-    // standing by to prove nothing reaches for one.
-    const gpa = failing.allocator();
-    _ = gpa;
     try b.screen.writeOwnedCell(4, 4, .blank(.{ .bold = true }));
     try b.screen.fill(.{ .col = 0, .row = 0, .cols = 10, .rows = 2 }, .blank(.{}));
     b.screen.scroll(.fromSize(b.screen.dimensions()), 1);
-    b.screen.clear();
     _ = try b.draw();
-    try testing.expectEqual(@as(usize, 0), failing.allocations);
+    b.screen.clear();
+    b.renderer.repaint();
+    _ = try b.draw();
+    try testing.expectEqual(allocations, failing.allocations);
+    try testing.expectEqual(resizes, failing.resize_index);
+    try testing.expect(!failing.has_induced_failure);
 }
 
 /// Says what a frame cost when it costs too much, so the number in the test
