@@ -71,6 +71,8 @@ pub const Underline = cell_mod.Underline;
 pub const Link = cell_mod.Link;
 /// The target a `Link` names: a URI and the parameters beside it.
 pub const Target = pool_mod.Target;
+/// An independent link target, released with its `deinit`.
+pub const OwnedTarget = pool_mod.OwnedTarget;
 /// A colour as eight bits a channel.
 pub const Rgb = palette_mod.Rgb;
 /// What the terminal's colours look like, as it reported them.

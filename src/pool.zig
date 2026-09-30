@@ -96,7 +96,10 @@ pub const Graphemes = struct {
     ///
     /// The `Text` is taken by pointer because a short grapheme lives in it:
     /// the bytes come back borrowed from whatever holds the cell, and a
-    /// temporary would be gone by the time they were read.
+    /// temporary would be gone by the time they were read. Pooled bytes
+    /// borrow from the growable pool: interning unrelated graphemes can
+    /// invalidate them. Reset, compaction, resize and deinitialization also
+    /// invalidate pooled slices.
     pub fn slice(p: *const Graphemes, t: *const Text) []const u8 {
         return t.slice(p.bytes.items);
     }
@@ -116,7 +119,9 @@ pub const Graphemes = struct {
 };
 
 /// One OSC 8 target: where the terminal is told to go, and the parameters it
-/// is told alongside.
+/// is told alongside. Both slices borrow from the link pool; interning
+/// unrelated links can invalidate them, as can compaction, resize and
+/// deinitialization. Use `Screen.dupeTarget` to retain one.
 pub const Target = struct {
     /// The URI, which the terminal opens on a click.
     uri: []const u8,
@@ -124,6 +129,20 @@ pub const Target = struct {
     /// the one terminals act on, and two targets that differ only there are
     /// two targets.
     params: []const u8,
+};
+
+/// An independent copy of a link target. `deinit` releases both slices
+/// through the allocator the copy was made with.
+pub const OwnedTarget = struct {
+    gpa: Allocator,
+    uri: []const u8,
+    params: []const u8,
+
+    pub fn deinit(t: *OwnedTarget) void {
+        t.gpa.free(t.uri);
+        t.gpa.free(t.params);
+        t.* = undefined;
+    }
 };
 
 /// Every link a screen's cells point at.
@@ -217,7 +236,9 @@ pub const Links = struct {
     }
 
     /// The target a link names, or null for `.none` and for an index that
-    /// belongs to another screen.
+    /// is outside this table. The returned slices borrow from the growable
+    /// link pool: further interning, compaction, resize or deinitialization
+    /// can invalidate them even when the original cell is unchanged.
     pub fn get(l: *const Links, link: Link) ?Target {
         const i = link.index() orelse return null;
         if (i >= l.entries.items.len) return null;

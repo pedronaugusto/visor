@@ -409,7 +409,9 @@ pub const Window = struct {
 
     /// The OSC 8 target under a cell of the window, or null: what a click
     /// there opens. A cell carries its link, so nothing has to remember
-    /// where the links were drawn.
+    /// where the links were drawn. The target borrows from the screen's
+    /// growable link pool: interning links, compaction, resize or destruction
+    /// can invalidate its slices. `Screen.dupeTarget` makes a retained copy.
     pub fn linkAt(w: Window, col: u16, row: u16) ?Target {
         if (col >= w.rect.cols or row >= w.rect.rows) return null;
         const at_col = w.rect.col + col;

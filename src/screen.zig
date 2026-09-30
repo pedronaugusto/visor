@@ -466,20 +466,52 @@ pub const Screen = struct {
     /// The cell is taken by pointer because a grapheme of six bytes or
     /// fewer lives inside it: what comes back borrows from the cell, and a
     /// cell read out by value would be gone before the bytes were used.
+    /// Inline bytes live until that cell changes or goes away. Pooled bytes
+    /// borrow from a growable pool: interning unrelated text can invalidate
+    /// them even when this cell is unchanged. Compaction, resize and
+    /// deinitialization can also invalidate them. Use `dupeTextOf` to retain
+    /// the bytes across drawing.
     pub fn textOf(s: *const Screen, c: *const Cell) []const u8 {
         return s.graphemes.slice(&c.text);
     }
 
     /// The bytes of the grapheme at a place, borrowed from the grid itself,
-    /// or an empty slice outside it.
+    /// or an empty slice outside it. Inline bytes are invalidated by a cell
+    /// change, resize or deinitialization; pooled bytes also by pool growth
+    /// or compaction. Use `dupeTextAt` to retain them.
     pub fn textAt(s: *const Screen, col: u16, row_n: u16) []const u8 {
         if (col >= s.size.cols or row_n >= s.size.rows) return &.{};
         return s.textOf(&s.cells[s.index(col, row_n)]);
     }
 
-    /// The target a cell's link names, or null when it has none.
+    /// The target a cell's link names, or null when it has none. Both slices
+    /// borrow from the growable link pool: interning unrelated links,
+    /// compaction, resize or deinitialization can invalidate them. Use
+    /// `dupeTarget` to retain the target across drawing.
     pub fn target(s: *const Screen, l: Link) ?pool.Target {
         return s.links.get(l);
+    }
+
+    /// Copies a cell's text for retention. The caller owns the result and
+    /// frees it with `gpa`, which belongs to the copy, not to this screen.
+    pub fn dupeTextOf(s: *const Screen, gpa: Allocator, c: *const Cell) Allocator.Error![]u8 {
+        return gpa.dupe(u8, s.textOf(c));
+    }
+
+    /// Copies text at a place for retention, empty outside the grid. The
+    /// caller owns the result and frees it with the copy's allocator `gpa`.
+    pub fn dupeTextAt(s: *const Screen, gpa: Allocator, col: u16, row_n: u16) Allocator.Error![]u8 {
+        return gpa.dupe(u8, s.textAt(col, row_n));
+    }
+
+    /// Copies a target for retention, or null for no link. The returned
+    /// owner keeps the copy's allocator `gpa`; call its `deinit` to free it.
+    pub fn dupeTarget(s: *const Screen, gpa: Allocator, l: Link) Allocator.Error!?pool.OwnedTarget {
+        const t = s.target(l) orelse return null;
+        const uri = try gpa.dupe(u8, t.uri);
+        errdefer gpa.free(uri);
+        const params = try gpa.dupe(u8, t.params);
+        return .{ .gpa = gpa, .uri = uri, .params = params };
     }
 
     /// The head whose grapheme covers a tail: the wide grapheme to its left,
@@ -1296,4 +1328,49 @@ test "Screen.link refuses controls in either field before interning and preserve
     try testing.expectEqualStrings("id=🐈", target.params);
     const second = try s.link(testing.allocator, "uri", "");
     try testing.expectEqual(@intFromEnum(first) + 1, @intFromEnum(second));
+}
+
+test "owned text and targets survive drawing, compaction, resize and destruction" {
+    var s = try made(4, 1);
+    var live = true;
+    defer if (live) s.deinit(testing.allocator);
+    const long = "a\u{301}\u{302}\u{303}";
+    const link_id = try s.link(testing.allocator, "https://kept.invalid", "id=kept");
+    try s.write(0, 0, long, .{}, link_id);
+    try s.write(1, 0, "x", .{}, .none);
+    const text = try s.dupeTextAt(testing.allocator, 0, 0);
+    defer testing.allocator.free(text);
+    const inline_text = try s.dupeTextOf(testing.allocator, &s.cells[1]);
+    defer testing.allocator.free(inline_text);
+    var target_copy = (try s.dupeTarget(testing.allocator, link_id)).?;
+    defer target_copy.deinit();
+    try testing.expect((try s.dupeTarget(testing.allocator, .none)) == null);
+    var buf: [64]u8 = undefined;
+    for (0..128) |i| {
+        const unrelated = try std.fmt.bufPrint(&buf, "unrelated-{d}", .{i});
+        _ = try s.intern(testing.allocator, unrelated);
+        _ = try s.link(testing.allocator, unrelated, "");
+    }
+    s.clear();
+    try s.compactPool(testing.allocator);
+    try s.resize(testing.allocator, .{ .cols = 8, .rows = 2 });
+    s.deinit(testing.allocator);
+    live = false;
+    try testing.expectEqualStrings(long, text);
+    try testing.expectEqualStrings("x", inline_text);
+    try testing.expectEqualStrings("https://kept.invalid", target_copy.uri);
+    try testing.expectEqualStrings("id=kept", target_copy.params);
+}
+
+test "an owned target releases its first copy when the second allocation fails" {
+    var s = try made(4, 1);
+    defer s.deinit(testing.allocator);
+    const id = try s.link(testing.allocator, "https://kept.invalid", "id=kept");
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator, screen: *const Screen, link_id: Link) !void {
+            var copy = (try screen.dupeTarget(gpa, link_id)).?;
+            defer copy.deinit();
+            try testing.expectEqualStrings("id=kept", copy.params);
+        }
+    }.run, .{ &s, id });
 }
