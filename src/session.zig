@@ -162,8 +162,16 @@ pub const Session = struct {
         const changed = !std.meta.eql(s.ws.cells, next.cells) or !std.meta.eql(s.ws.area, next.area);
         const confirmed = s.resize_report and s.caps.in_band_resize;
         if (changed) {
+            // Reserve the renderer first, then let Screen's atomic resize
+            // commit. The remaining storage swap cannot fail, so allocation
+            // failure cannot split the two grids or invalidate old borrows.
+            var prepared: ?Renderer = if (!std.meta.eql(s.renderer.size, next.cells))
+                try Renderer.init(s.renderer.gpa, next.cells)
+            else
+                null;
+            defer if (prepared) |*r| r.deinit();
             if (!std.meta.eql(s.screen.size, next.cells)) try s.screen.resize(next.cells);
-            if (!std.meta.eql(s.renderer.size, next.cells)) try s.renderer.resize(next.cells);
+            if (prepared) |*r| render.internal.resizePrepared(&s.renderer, r);
         }
         if (changed or confirmed) {
             s.renderer.repaint();
@@ -265,4 +273,41 @@ test "the probe wait keeps DA1 quiet time and the overall deadline on caller tim
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1500));
     probe.answered = .initFull();
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1000));
+}
+
+test "a failed session resize keeps both grids and their borrowed content together" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator) !void {
+            var s = try Session.init(gpa, .{ .cells = .{ .cols = 4, .rows = 1 } }, .{ .graphics_id = 1 });
+            defer s.deinit();
+            s.screen.method = .unicode;
+            const link = try s.screen.link("https://kept.invalid", "id=kept");
+            try s.screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, link);
+            var sink: Writer.Discarding = .init(&.{});
+            _ = try s.draw(&sink.writer);
+            _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, 0);
+            const size = s.screen.size;
+            const generation = s.screen.pool_generation;
+            const cells = s.screen.cells;
+            const prev = s.renderer.prev;
+            const borrowed = s.screen.textAt(0, 0);
+            const pending = s.pending;
+            _ = s.resize(&sink.writer) catch |err| {
+                try testing.expectEqual(size, s.screen.size);
+                try testing.expectEqual(size, s.renderer.size);
+                try testing.expectEqual(size, s.ws.cells);
+                try testing.expectEqual(generation, s.screen.pool_generation);
+                try testing.expect(s.screen.cells.ptr == cells.ptr);
+                try testing.expect(s.renderer.prev.ptr == prev.ptr);
+                try testing.expect(s.screen.textAt(0, 0).ptr == borrowed.ptr);
+                try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", borrowed);
+                try testing.expectEqual(pending, s.pending);
+                return err;
+            };
+            try testing.expectEqual(s.screen.size, s.renderer.size);
+            try testing.expectEqual(s.ws.cells, s.screen.size);
+            try testing.expectEqualStrings("https://kept.invalid", s.screen.target(s.screen.cells[0].link).?.uri);
+            _ = try s.draw(&sink.writer);
+        }
+    }.run, .{});
 }

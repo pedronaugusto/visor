@@ -299,26 +299,18 @@ pub const Renderer = struct {
     /// at the old size after it had changed -- is its own business, and
     /// nothing about what it now shows is known.
     pub fn resize(r: *Renderer, size: Size) Allocator.Error!void {
-        const gpa = r.gpa;
-        var next: Renderer = .{
-            .gpa = gpa,
-            .size = size,
-            .prev = &.{},
-            .force = &.{},
-            .drifted = &.{},
-            .untrusted = &.{},
-            .hashes = &.{},
-            .buf = &.{},
-        };
-        try next.allocate(size);
-        r.release();
-        r.size = size;
-        r.prev = next.prev;
-        r.force = next.force;
-        r.drifted = next.drifted;
-        r.untrusted = next.untrusted;
-        r.hashes = next.hashes;
-        r.buf = next.buf;
+        var prepared = try Renderer.init(r.gpa, size);
+        defer prepared.deinit();
+        r.resizePrepared(&prepared);
+    }
+
+    // Moves only storage. Terminal mode intent and the renderer's stable
+    // address stay with their owner; the prepared value frees the old storage.
+    fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
+        std.debug.assert(r.gpa.ptr == prepared.gpa.ptr and r.gpa.vtable == prepared.gpa.vtable);
+        inline for (.{ "size", "prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
+            std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
+        }
         r.repaint();
     }
 
@@ -1866,6 +1858,10 @@ const hyperlink_end_cost = 7;
 /// nothing a program reaches: `Renderer` is re-exported, this file's own
 /// declarations are not, so these are the package's and not its API.
 pub const internal = struct {
+    pub fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
+        r.resizePrepared(prepared);
+    }
+
     pub fn prevRow(r: *const Renderer, row: u16) []const Cell {
         return r.prevRow(row);
     }

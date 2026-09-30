@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- A failed session resize preserves both grids, pool handles and borrowed content until their new storage is ready.
+
 - Silence to a direct image transmission never makes an unread shared-memory picture ready.
 
 - Resizing the terminal emulator retains its open OSC 8 target, including before a cell uses it.
