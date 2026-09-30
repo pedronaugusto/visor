@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Markdown.Rows exposes the same borrowed visual ranges as drawing, with inline spans, block structure and opening fence metadata.
+
 - Breaking: Markdown.Document owns internal parsing storage and exposes source, text, spans and blocks as borrowed const slices.
 
 - Breaking: Raw Screen pools and Renderer baseline/link fields are internal `_` storage; exported cells and handles use the checked boundary.

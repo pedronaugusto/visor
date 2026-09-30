@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
@@ -244,6 +244,14 @@ and foreground RGB by alpha when showing an RGBA picture in cells. `examples/gal
 and rasterizes pixels with these primitives.
 
 ### Markdown
+
+`Markdown.Rows.init(&document, cols, method)` iterates the exact rows used
+by drawing and `rowCount`. Each row carries `start`/`end` ranges into
+`document.text()`, borrowed `text` and overlapping `spans`, `block_index`,
+`first`, and a `block` value describing its kind, quote `depth`, list
+`marker`, `indent`, heading level and optional opening `fence` (character,
+count and info string). Borrows live until the Document is deinitialized;
+iteration allocates nothing. Code rows remain verbatim and unwrapped.
 
 `Markdown.Document` reads text once and owns its source and runs. Its
 `source()`, `text()`, `spans()` and `blocks()` return const slices borrowed

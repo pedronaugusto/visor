@@ -128,3 +128,58 @@ test "markdown document exposes only borrowed const parsing ranges" {
     try t.expectEqual(@as(usize, 1), doc.blocks().len);
     for (doc.spans()) |span| try t.expect(span.end <= text.len);
 }
+
+test "markdown borrowed rows match drawing and preserve block structure" {
+    var doc = try widgets.Markdown.Document.init(t.allocator, "# title\n\n> - one two three four\n> ~~~zig\n> a\tb\n> ~~~\n    code\n---\n中 中 中");
+    defer doc.deinit();
+    for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
+        for ([_]u16{ 0, 1, 4, 9, 20 }) |cols| {
+            const md: widgets.Markdown = .{ .document = &doc, .theme = .{} };
+            var rows = widgets.Markdown.Rows.init(&doc, cols, method);
+            var whole = try Harness.init(t.allocator, cols, @intCast(md.rowCount(cols, method)));
+            defer whole.deinit();
+            whole.screen.method = method;
+            try md.draw(whole.window());
+            var count: usize = 0;
+            while (rows.next()) |row| : (count += 1) {
+                try t.expectEqualStrings(doc.text()[row.start..row.end], row.text);
+                try t.expectEqual(@intFromPtr(doc.text().ptr) + row.start, @intFromPtr(row.text.ptr));
+                try t.expectEqualDeep(doc.blocks()[row.block_index], row.block);
+                if (row.block.fence) |f| {
+                    try t.expectEqual(@as(u8, '~'), f.char);
+                    try t.expectEqual(@as(usize, 3), f.count);
+                    try t.expectEqualStrings("zig", f.info);
+                }
+                var one = try Harness.init(t.allocator, cols, 1);
+                defer one.deinit();
+                one.screen.method = method;
+                // An application renders the borrowed row with its own annotations.
+                const b = row.block;
+                const prefix: u16 = @intCast(@min(@as(u32, b.depth) * 2 + b.indent, cols));
+                var bar: u32 = 0;
+                while (bar < b.depth and bar * 2 < cols) : (bar += 1) try one.window().write(@intCast(bar * 2), 0, "│", .{}, .none);
+                if (b.kind == .rule) {
+                    for (prefix..cols) |x| try one.window().write(@intCast(x), 0, "─", .{}, .none);
+                } else {
+                    if (row.first) _ = try one.window().printSegment(.{ .text = b.marker }, .{ .col = prefix });
+                    var x: u32 = @intCast(@min(@as(usize, prefix) + b.marker.len, cols));
+                    var column: u32 = 0;
+                    var glyphs = visor.Graphemes.init(row.text);
+                    while (glyphs.next()) |g| {
+                        const tab = b.kind == .code and std.mem.eql(u8, g, "\t");
+                        const width: u32 = if (tab) 4 - column % 4 else visor.graphemeWidth(g, method);
+                        column += width;
+                        if (x + width > cols) break;
+                        if (tab) {
+                            for (0..width) |offset| try one.window().write(@intCast(x + offset), 0, " ", .{}, .none);
+                        } else try one.window().write(@intCast(x), 0, g, .{}, .none);
+                        x += width;
+                    }
+                }
+                for (0..cols) |x| try t.expectEqualDeep(whole.screen.readCell(@intCast(x), @intCast(count)), one.screen.readCell(@intCast(x), 0));
+            }
+            try t.expectEqual(md.rowCount(cols, method), count);
+            try t.expectEqual(null, rows.next());
+        }
+    }
+}

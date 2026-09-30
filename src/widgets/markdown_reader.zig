@@ -3,7 +3,10 @@ const std = @import("std");
 
 pub const Flags = packed struct(u3) { strong: bool = false, emphasis: bool = false, code: bool = false };
 pub const Span = struct { start: usize, end: usize, flags: Flags, uri: []const u8 = "" };
+pub const Fence = struct { char: u8, count: usize, info: []const u8 };
 pub const Block = struct {
+    /// Opening fence, or null for prose and indented code.
+    fence: ?Fence = null,
     kind: enum { prose, code, heading, rule, blank },
     depth: u16 = 0,
     indent: u16 = 0,
@@ -18,11 +21,14 @@ pub const Block = struct {
 /// Parsed Markdown, independent of width, theme and screen. Owns all bytes.
 /// Do not copy an initialized Document; deinit it once after its widgets.
 pub const Document = struct {
+    pub const Block = @import("markdown_reader.zig").Block;
+    pub const Span = @import("markdown_reader.zig").Span;
+    pub const Fence = @import("markdown_reader.zig").Fence;
     _allocator: std.mem.Allocator,
     _source: []u8,
     _text: std.ArrayList(u8) = .empty,
-    _spans: std.ArrayList(Span) = .empty,
-    _blocks: std.ArrayList(Block) = .empty,
+    _spans: std.ArrayList(Document.Span) = .empty,
+    _blocks: std.ArrayList(Document.Block) = .empty,
 
     /// Source bytes, borrowed until deinit.
     pub fn source(d: *const Document) []const u8 {
@@ -33,11 +39,11 @@ pub const Document = struct {
         return d._text.items;
     }
     /// Inline roles and targets, borrowed until deinit.
-    pub fn spans(d: *const Document) []const Span {
+    pub fn spans(d: *const Document) []const Document.Span {
         return d._spans.items;
     }
     /// Structural blocks, borrowed until deinit.
-    pub fn blocks(d: *const Document) []const Block {
+    pub fn blocks(d: *const Document) []const Document.Block {
         return d._blocks.items;
     }
 
@@ -65,7 +71,7 @@ pub const Document = struct {
     fn read(d: *Document) !void {
         if (d._source.len == 0) return;
         var lines = std.mem.splitScalar(u8, d._source, '\n');
-        var fenced: ?struct { char: u8, count: usize, depth: u16, indent: u16 } = null;
+        var fenced: ?struct { char: u8, count: usize, depth: u16, indent: u16, info: []const u8 } = null;
         var may_join = false;
         while (lines.next()) |raw| {
             if (raw.len == 0 and lines.peek() == null) break;
@@ -78,7 +84,7 @@ pub const Document = struct {
                 if (q.depth == f.depth and closing != null and closing.?.char == f.char and closing.?.count >= f.count and std.mem.trim(u8, trimmed[closing.?.count..], " \t").len == 0) {
                     fenced = null;
                 } else {
-                    try d.block(.{ .kind = .code, .depth = f.depth, .indent = f.indent }, body, true);
+                    try d.block(.{ .kind = .code, .depth = f.depth, .indent = f.indent, .fence = .{ .char = f.char, .count = f.count, .info = f.info } }, body, true);
                 }
                 may_join = false;
                 continue;
@@ -104,7 +110,7 @@ pub const Document = struct {
             }
             if (fence(body)) |f| {
                 if (indent <= 3) {
-                    fenced = .{ .char = f.char, .count = f.count, .depth = q.depth, .indent = 0 };
+                    fenced = .{ .char = f.char, .count = f.count, .depth = q.depth, .indent = 0, .info = std.mem.trim(u8, body[f.count..], " \t") };
                     may_join = false;
                     continue;
                 }
@@ -142,7 +148,7 @@ pub const Document = struct {
         }
     }
 
-    fn block(d: *Document, value: Block, body: []const u8, literal: bool) !void {
+    fn block(d: *Document, value: Document.Block, body: []const u8, literal: bool) !void {
         var b = value;
         b.start = d._text.items.len;
         b.first_span = d._spans.items.len;
