@@ -5,6 +5,7 @@
 //! date, `fill` for a name, `max` for a number that is usually short.
 
 const std = @import("std");
+const selection = @import("selection.zig");
 const visor = @import("visor");
 
 const layout = @import("layout.zig");
@@ -73,14 +74,12 @@ pub const Table = struct {
 
         /// The row after this one, stopping at the last.
         pub fn next(s: *State, count: usize) void {
-            if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| @min(i +| 1, count - 1) else 0;
+            s.select(selection.move(s.selected, count, .next));
         }
 
         /// The row before this one, stopping at the first.
         pub fn previous(s: *State, count: usize) void {
-            if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| i -| 1 else count - 1;
+            s.select(selection.move(s.selected, count, .previous));
         }
     };
 
@@ -436,4 +435,16 @@ test "navigation and scrolling clamp state at the usize edge" {
     try testing.expectEqual(@as(usize, 0), state.offset);
     state.next(3);
     try testing.expectEqual(@as(?usize, 2), state.selected);
+}
+
+test "previous navigation clamps a table selection after its rows shrink" {
+    for ([_]?usize{ null, 0, 1, 2, 3, std.math.maxInt(usize) }) |selected| {
+        var state: Table.State = .{ .selected = selected, .offset = 7 };
+        state.previous(3);
+        const expected: usize = if (selected) |i| @min(i -| 1, 2) else 2;
+        try testing.expectEqual(@as(?usize, expected), state.selected);
+        state.previous(0);
+        try testing.expectEqual(@as(?usize, null), state.selected);
+        try testing.expectEqual(@as(usize, 0), state.offset);
+    }
 }

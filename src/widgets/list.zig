@@ -12,6 +12,7 @@
 //! it stops fitting, with the ellipsis the list is given.
 
 const std = @import("std");
+const selection = @import("selection.zig");
 const visor = @import("visor");
 
 const Style = visor.Style;
@@ -112,14 +113,12 @@ pub const List = struct {
 
         /// The item after this one, stopping at the last.
         pub fn next(s: *State, count: usize) void {
-            if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| @min(i +| 1, count - 1) else 0;
+            s.select(selection.move(s.selected, count, .next));
         }
 
         /// The item before this one, stopping at the first.
         pub fn previous(s: *State, count: usize) void {
-            if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| i -| 1 else count - 1;
+            s.select(selection.move(s.selected, count, .previous));
         }
 
         /// The first item.
@@ -767,4 +766,16 @@ test "navigation clamps a selection at the usize edge" {
     var state: List.State = .{ .selected = std.math.maxInt(usize) };
     state.next(3);
     try testing.expectEqual(@as(?usize, 2), state.selected);
+}
+
+test "previous navigation clamps a list selection after its items shrink" {
+    for ([_]?usize{ null, 0, 1, 2, 3, std.math.maxInt(usize) }) |selected| {
+        var state: List.State = .{ .selected = selected, .offset = 7 };
+        state.previous(3);
+        const expected: usize = if (selected) |i| @min(i -| 1, 2) else 2;
+        try testing.expectEqual(@as(?usize, expected), state.selected);
+        state.previous(0);
+        try testing.expectEqual(@as(?usize, null), state.selected);
+        try testing.expectEqual(@as(usize, 0), state.offset);
+    }
 }

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- List and Table share bounded navigation so moving backward also clamps selections after items disappear.
+
 - Resize rebuilds pools from the clipped and repaired grid so discarded cells retain no text or links.
 
 - Raster strokes and ellipses keep finite extreme coordinates and tiny radii through their distance calculations.
