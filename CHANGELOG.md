@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: image transmission can return `PayloadTooLarge`; shared memory reserves its owner and checks the protocol size before creating an object.
+
 - Breaking: `Tty.leave()` releases its own renderer; raw terminals register separately for panic restoration and must stay at a stable address until restored, with their renderer alive.
 
 - Pool compaction repaints text and pictures, including when resize compacts the pools.

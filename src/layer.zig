@@ -203,7 +203,7 @@ pub const Replacement = struct {
     pending: ?u32 = null,
     dirty: bool = false,
 
-    pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId };
+    pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId, PayloadTooLarge };
 
     /// Whether another picture can be sent. Call `declare` to settle a
     /// ready or refused pending picture before sending the next one.
@@ -290,6 +290,11 @@ pub const Replacement = struct {
     }
 };
 
+/// The protocol's S field must fit before any OS object is created.
+fn sharedSize(len: usize) error{PayloadTooLarge}!u32 {
+    return std.math.cast(u32, len) orelse error.PayloadTooLarge;
+}
+
 /// The z the terminal is given for a layer under the text.
 ///
 /// Below zero is under the text; the sorted position is added, so the
@@ -370,6 +375,8 @@ pub const Layers = struct {
     /// `ready` says so: the old placement is deleted after the new one is
     /// made.
     ///
+    /// A shared-memory payload beyond the protocol's u32 size returns
+    /// `PayloadTooLarge` before allocating or creating an object.
     /// Written to `w` directly and not through a frame, so the caller sends
     /// before it draws.
     pub fn transmit(
@@ -379,7 +386,7 @@ pub const Layers = struct {
         id: u32,
         pixels: []const u8,
         how: Transmit,
-    ) (Writer.Error || Allocator.Error)!usize {
+    ) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!usize {
         if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(gpa, w, sm, id, pixels, how)) |n| return n;
         };
@@ -440,7 +447,11 @@ pub const Layers = struct {
     /// could not be put there (the medium is then off, and the caller's
     /// picture goes in the escape code). While the medium is on trial the
     /// terminal is asked to answer, whatever the caller asked.
-    fn transmitShared(l: *Layers, gpa: Allocator, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) (Writer.Error || Allocator.Error)!?usize {
+    fn transmitShared(l: *Layers, gpa: Allocator, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!?usize {
+        const size = try sharedSize(pixels.len);
+        // Reserve before the OS object exists. Once it does, the image
+        // record can take its name without any further allocation.
+        if (l.find(id) == null) try l.images.ensureUnusedCapacity(gpa, 1);
         const name = shm.nameOf(sm.seq);
         sm.seq +%= 1;
         shm.put(sm.io, name, pixels) catch {
@@ -462,7 +473,7 @@ pub const Layers = struct {
             .medium = .shared_memory,
             .width = how.width,
             .height = how.height,
-            .size = @intCast(pixels.len),
+            .size = size,
             .quiet = if (how.answer or trying) .answers else .silent,
         }, name.slice());
         return name.len;
@@ -1441,4 +1452,40 @@ test "a retired first picture is freed even when the frame has no text or placem
     try testing.expectEqualStrings("\x1b_Ga=d,q=2,d=I,i=2\x1b\\", f.written());
     try testing.expectEqual(f.written().len, drawn.bytes);
     try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+}
+
+test "shared memory reserves ownership before creating a name" {
+    var fail = std.testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    var l: Layers = .{ .shared_memory = .{ .io = testing.io, .seq = 0xffffffe0 } };
+    defer l.deinit(testing.allocator);
+    const name = shm.nameOf(l.shared_memory.?.seq);
+    defer shm.unlink(testing.io, name);
+    var buf: [256]u8 = undefined;
+    var out: Writer = .fixed(&buf);
+    try testing.expectError(error.OutOfMemory, l.transmit(fail.allocator(), &out, 1, &.{ 1, 2, 3, 4 }, .{ .compress = false }));
+    try testing.expectEqual(@as(u32, 0xffffffe0), l.shared_memory.?.seq);
+    try testing.expectEqual(@as(usize, 0), l.images.items.len);
+    try testing.expectEqual(@as(usize, 0), out.buffered().len);
+}
+
+test "shared memory validates the protocol size before any ownership or output" {
+    try testing.expectEqual(std.math.maxInt(u32), try sharedSize(std.math.maxInt(u32)));
+    if (@bitSizeOf(usize) <= 32) return error.SkipZigTest;
+    const oversized: usize = @as(usize, std.math.maxInt(u32)) + 1;
+    try testing.expectError(error.PayloadTooLarge, sharedSize(oversized));
+    var l: Layers = .{ .shared_memory = .{ .io = testing.io, .seq = 0xffffffd0 } };
+    defer l.deinit(testing.allocator);
+    const name = shm.nameOf(l.shared_memory.?.seq);
+    // A collision refuses creation without reading the synthetic pixels
+    // even on the unfixed path. Its fallback cannot allocate a record.
+    if (shm.supported) try shm.put(testing.io, name, &.{ 1, 2, 3, 4 });
+    defer shm.unlink(testing.io, name);
+    var fail = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    var out: Writer = .fixed(&.{});
+    // Only the length may be inspected: there are no pixels behind this
+    // pointer, and validation must precede any attempt to read or copy it.
+    const pixels = @as([*]const u8, @ptrFromInt(1))[0..oversized];
+    try testing.expectError(error.PayloadTooLarge, l.transmit(fail.allocator(), &out, 1, pixels, .{ .compress = false }));
+    try testing.expectEqual(@as(u32, 0xffffffd0), l.shared_memory.?.seq);
+    try testing.expectEqual(@as(usize, 0), l.images.capacity);
 }
