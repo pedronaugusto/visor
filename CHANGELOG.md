@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Cell placement and printing compare wide extents before narrowing at the u16 coordinate edge.
+
 - A failed terminal leave or flush keeps the mode intent for restoration through the saved descriptor.
 
 - Rendering a different screen repaints even when its pooled cell IDs coincide, including when a screen address is reused.

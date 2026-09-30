@@ -230,7 +230,7 @@ pub const Screen = struct {
             put = .blank(put.style);
             put.shape.kind = .spacer_head;
         }
-        if (col + put.width() > s.size.cols or row + put.rows() > s.size.rows) {
+        if (@as(u32, col) + put.width() > s.size.cols or @as(u32, row) + put.rows() > s.size.rows) {
             put = .blank(put.style);
         }
 
@@ -308,11 +308,11 @@ pub const Screen = struct {
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) {
             var parts: textmod.Parts = .init(grapheme);
-            var at = col;
+            var at: u32 = col;
             while (parts.next()) |part| {
                 if (part.cols == 0) continue;
                 if (at >= s.size.cols) break;
-                try s.writeOne(at, row, part.bytes, part.cols, style, to);
+                try s.writeOne(@intCast(at), row, part.bytes, part.cols, style, to);
                 at += part.cols;
             }
             return;
@@ -552,7 +552,7 @@ pub const Screen = struct {
                 c -= 1;
                 const h = s.cells[s.index(c, r)];
                 if (h.isTail() or !h.isScaled()) continue;
-                if (c + h.width() > col and r + h.rows() > row_n) return .{ .col = c, .row = r };
+                if (@as(u32, c) + h.width() > col and @as(u32, r) + h.rows() > row_n) return .{ .col = c, .row = r };
             }
         }
         return null;
@@ -699,7 +699,7 @@ pub const Screen = struct {
     fn blockWhole(s: *const Screen, col: u16, row_n: u16, head: Cell) bool {
         const span = head.width();
         const tall = head.rows();
-        if (col + span > s.size.cols or row_n + tall > s.size.rows) return false;
+        if (@as(u32, col) + span > s.size.cols or @as(u32, row_n) + tall > s.size.rows) return false;
         var dr: u16 = 0;
         while (dr < tall) : (dr += 1) {
             var dc: u16 = 0;
@@ -724,7 +724,7 @@ pub const Screen = struct {
                 if (r > head.row or (r == head.row and c >= head.col)) break;
                 const h = s.cells[s.index(c, r)];
                 if (h.isTail()) continue;
-                if (c + h.width() > col and r + h.rows() > row_n) return true;
+                if (@as(u32, c) + h.width() > col and @as(u32, r) + h.rows() > row_n) return true;
             }
         }
         return false;
@@ -1429,4 +1429,16 @@ test "a failed resize leaves cells, pool identities, borrows and damage untouche
             try testing.expectEqualStrings("https://live.invalid", s.target(s.cells[0].link).?.uri);
         }
     }.run, .{});
+}
+
+test "cell extents clip safely at the u16 coordinate edge" {
+    var s = try Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
+    defer s.deinit();
+    const last = s.size.cols - 1;
+    s.writeOwnedCell(last, 0, .{ .text = .inlined("x"), .shape = .{ .scale = 7 } });
+    try testing.expect(s.cells[last].eql(.blank(.{})));
+    // Measured by codepoint, a two-column part at the last column becomes
+    // a spacer; stepping past it must not narrow an out-of-grid endpoint.
+    try s.write(last, 0, "\u{1f680}", .{}, .none);
+    try testing.expectEqual(Cell.Kind.spacer_head, s.cells[last].shape.kind);
 }

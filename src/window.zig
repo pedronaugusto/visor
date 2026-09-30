@@ -484,6 +484,10 @@ pub const Window = struct {
         from: Print,
     ) std.mem.Allocator.Error!Print {
         var at = from;
+        if (at.row >= w.rect.rows) {
+            at.overflow = at.overflow or segment.text.len != 0;
+            return at;
+        }
         var it: textmod.Graphemes = .init(segment.text);
         while (it.nextAt()) |found| {
             const g = found.bytes;
@@ -499,7 +503,7 @@ pub const Window = struct {
             if (opts.wrap == .word and g.len == 1 and g[0] == ' ' and at.col == 0) continue;
             if (opts.wrap == .word and atWordStart(segment.text, found.start)) {
                 const word = wordWidth(w, segment.text, found.start);
-                if (at.col + word > w.rect.cols and word <= w.rect.cols) {
+                if (@as(u32, at.col) + word > w.rect.cols and word <= w.rect.cols) {
                     at.col = 0;
                     at.row += 1;
                     if (at.row >= w.rect.rows) {
@@ -510,7 +514,7 @@ pub const Window = struct {
             }
             const cluster = textmod.graphemeWidth(g, w.screen.method);
             if (cluster == 0) continue;
-            if (at.col + cluster > w.rect.cols) {
+            if (@as(u32, at.col) + cluster > w.rect.cols) {
                 switch (opts.wrap) {
                     .none => {
                         at.overflow = true;
@@ -982,4 +986,17 @@ test "printing measures without allocating and commits only unseen pooled text w
     _ = try s.window().printSegment(.{ .text = long }, .{});
     try testing.expectEqual(grown, fail.alloc_index);
     try testing.expectEqualStrings(long, s.textAt(0, 0));
+}
+
+test "printing clips word widths and starting rows at the u16 coordinate edge" {
+    var s = try Screen.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer s.deinit();
+    const word = try testing.allocator.alloc(u8, std.math.maxInt(u16));
+    defer testing.allocator.free(word);
+    @memset(word, 'x');
+    const result = try s.window().printSegment(.{ .text = word }, .{ .col = 1, .wrap = .word, .commit = false });
+    try testing.expect(result.overflow);
+    const outside = try s.window().printSegment(.{ .text = "\n" }, .{ .row = std.math.maxInt(u16), .commit = false });
+    try testing.expect(outside.overflow);
+    try testing.expectEqual(std.math.maxInt(u16), outside.row);
 }
