@@ -791,7 +791,7 @@ pub const Layers = struct {
 
     /// One placement, drawn from the cell it is put at.
     fn writePlace(w: *Writer, layer: Layer, z: i32) Writer.Error!void {
-        try morse.cursorTo(w, layer.rect.row + 1, layer.rect.col + 1);
+        try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
         try morse.placeImage(w, .{
             .image = .{ .id = layer.image },
             .quiet = .silent,
@@ -1654,4 +1654,15 @@ test "direct transmission silence cannot make an unread shared picture ready" {
     try testing.expectEqual(Image.State.failed, l.image(2).?.state);
     try testing.expect(l.image(2).?.shm == null);
     try shm.put(testing.io, name, "gone");
+}
+
+test "a picture placement spells the one-based u16 coordinate edge without overflow" {
+    var l: Layers = .{};
+    defer l.deinit(testing.allocator);
+    const edge = std.math.maxInt(u16);
+    try l.declare(testing.allocator, .{ .image = 7, .rect = .{ .col = edge, .row = edge, .cols = 1, .rows = 1 } });
+    var out: Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try testing.expectEqual(@as(usize, 1), try l.emit(&out.writer, .{ .kitty_graphics = true }));
+    try testing.expect(std.mem.startsWith(u8, out.written(), "\x1b[65536;65536H"));
 }
