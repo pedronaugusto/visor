@@ -99,7 +99,7 @@ pub const LineGauge = struct {
                 .{ .text = text, .style = g.label_style },
                 .{ .wrap = .none },
             );
-            col = @min(at.col + 1, win.cols());
+            col = @min(at.col +| 1, win.cols());
         }
         const room = win.cols() -| col;
         const clamped = @min(@max(g.ratio, 0), 1);
@@ -181,3 +181,10 @@ test "the label is centred the way the screen measures it" {
 }
 
 const sign = "\u{26a0}\u{fe0f}";
+
+test "a full-width line gauge label leaves no room for its gap" {
+    var screen = try visor.Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
+    defer screen.deinit();
+    try (LineGauge{ .ratio = 0.5, .label = "x" ** std.math.maxInt(u16) }).draw(screen.window());
+    try testing.expectEqualStrings("x", screen.textAt(std.math.maxInt(u16) - 1, 0));
+}

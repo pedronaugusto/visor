@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- A line gauge whose label fills the row leaves no room for its gap.
+
 - Sextant pictures check that their pixels exist before multiplying dimensions.
 
 - Key strips saturate their widths and spacing without overflowing intermediate sums.
