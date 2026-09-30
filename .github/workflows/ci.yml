@@ -55,6 +55,17 @@ jobs:
       - name: Test — ReleaseSmall
         run: zig build test -Doptimize=ReleaseSmall
 
+      # The suite under ThreadSanitizer: input is read by a task beside the
+      # caller's and handed over through a queue, and a race at that crossing
+      # is a claim a detector can check and a reader cannot. Debug, the mode
+      # the detector instruments most completely. Linux only: Windows has no
+      # runtime for it, and the hosted macOS runner's instrumented binaries
+      # are killed before their first test, while the suite passes under it
+      # on a Mac, where it is run before a release.
+      - name: Test — ThreadSanitizer
+        if: runner.os == 'Linux'
+        run: zig build test -Dthread-sanitizer -Doptimize=Debug --test-timeout 120s
+
       # Built AND run, against the module a consumer gets.
       - name: Examples
         run: zig build examples

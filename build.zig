@@ -88,14 +88,26 @@ pub fn build(b: *std.Build) void {
 
     const fuzzable = false;
 
+    // Input is read by a task beside the caller's, handed over through a
+    // queue, and stopped by a cancel; a race at that crossing is a claim a
+    // detector can check and a reader cannot: `zig build test
+    // -Dthread-sanitizer`. The detector is an LLVM pass.
+    const thread_sanitizer = b.option(
+        bool,
+        "thread-sanitizer",
+        "Build the tests with ThreadSanitizer",
+    ) orelse false;
+    const sanitize: ?bool = if (thread_sanitizer) true else null;
+
     const tests = b.addTest(.{
         .name = "visor-tests",
-        .use_llvm = needsLlvm(target, optimize),
+        .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/visor.zig"),
             .target = target,
             .optimize = optimize,
             .error_tracing = fuzzable,
+            .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
                 .{ .name = "conduit", .module = conduit.module("conduit") },
@@ -122,12 +134,13 @@ pub fn build(b: *std.Build) void {
     // user ever runs.
     const widget_tests = b.addTest(.{
         .name = "visor-widget-tests",
-        .use_llvm = needsLlvm(target, optimize),
+        .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/widgets.zig"),
             .target = target,
             .optimize = optimize,
             .error_tracing = fuzzable,
+            .sanitize_thread = sanitize,
             .imports = &.{
                 .{ .name = "visor", .module = module },
                 .{ .name = "corpus", .module = corpus },
