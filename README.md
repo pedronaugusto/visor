@@ -169,11 +169,11 @@ with a `try`. Resizing allocates.
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
 | The grid | `Screen` — `init`, `deinit`, `resize`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `headOf`, and the fields `cursor`, `pointer`, `damage`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
-| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`. |
-| The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setModes`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
+| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
+| The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count` — `Transmit`, `SharedMemory`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `update`, `resized` — `Pixels`, `CellSize`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `SharedMemory`, `Replacement`, `ImageIds`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -196,6 +196,9 @@ defined layout and no padding, so a whole row is one `memcmp` rather than a
 field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
+
+`Screen.link` refuses C0 controls and DEL in a URI or params with
+`error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
 
 **Damage is conservative.** A write marks a cell only when it changes it. If
 another write restores the displayed value before drawing, the mark remains:
@@ -270,6 +273,10 @@ one sequence and never touches the block; and on a terminal without the
 protocol the grapheme is drawn at its own size with the rest of the block
 blank.
 
+`fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
+boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
+yourself only when the returned slice is shorter than the input.
+
 **Inline mode addresses nothing by row number.** A screen entered inline
 takes its rows from the row the cursor is on, the terminal scrolling for the
 ones that do not fit, and saves an origin there with `DECSC`. Every move after
@@ -314,14 +321,15 @@ terminal's word unless asked to: an image sent quietly is shown at once, and
 one sent asking for an answer is shown on the answer or when the caller's grace
 period runs out, and a terminal that never answers is not waited for twice.
 
-**A picture on the same machine goes through shared memory.** With
-`Layers.shared_memory` set, the pixels are put in a shared memory object and
-only its name goes through the terminal's input: no deflate and no base64 on
-the program's thread. The first one asks for an answer; an error, or no answer
-within the grace period, turns the medium off for good, and that picture is
-refused so the program sends it again in the escape code, which is what a
-terminal on another machine, over ssh, gets from then on. An object the
-terminal did not read is unlinked, never left behind.
+`Replacement` keeps a current picture while a new one is in flight. Share an
+`ImageIds` range between replacements, with the probe's graphics id excluded.
+`send` takes pixels and transmit options; `declare` takes the placement and
+caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
+`declare` again. Its result says another frame is needed while waiting;
+`takeDirty` asks for new pixels after a refusal. A swap places the new picture,
+drops the old placement, then frees its pixels inside `commitFrame(w, caps)`.
+The renderer calls that itself; callers of `emit` call it after their frame
+reaches the writer. Failed writes retain retirement for the next attempt.
 
 **A picture on the same machine goes through shared memory.** With
 `Layers.shared_memory` set, the pixels are put in a shared memory object and
@@ -348,12 +356,20 @@ changes, and a frame drawn in that gap stays wrong until the next repaint, so
 `enter` turns 2048 on wherever `Caps.in_band_resize` says the terminal has
 it.
 
+`Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
+place, writing only the mode differences and repainting on the next draw.
+Leaving and entering a renderer that has drawn also repaints text and pictures.
+
 **A cell's pixel size is the terminal's word, not a division.** The
 operating system and a resize report give the text area, which a terminal may
 pad, so the area divided by the grid is a little too large and the error grows
 toward the right edge. `Winsize` keeps the area and the cell apart, takes the
 cell only from the terminal's answer to `CSI 16 t`, and when it has to divide
 it says so.
+
+`Winsize.locate(mouse)` returns its zero-based column and row and fractions
+`x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
+cell reports point to the middle. Unknown pixel size returns null.
 
 **Input is morse's events, read.** `Input.next` reads the terminal, frames
 the bytes with `morse.KeyParser` and hands back the parser's events as they
@@ -380,9 +396,32 @@ answers set or reset is one it has: nothing has turned synchronised output or
 in-band resize reports on when the probe asks, so a terminal that has them
 answers reset.
 
+`Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
+`Caps.Probe` and `Layers` together. Its fields remain yours to use directly.
+Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
+keys and application policy are still yours. Drain the batch, call `resize(w)`
+once, paint `screen`, then `draw(w)` and flush your writer. Both grids follow
+the last resize; an unchanged in-band report repaints too, and each resize
+asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
+mouse parsing in step with the requested encoding. `setCaps` lets the caller
+apply its own overrides after a probe answer.
+
+`ProbeWait.init(now_ms, timeout_ms, quiet_ms).remaining(probe, now_ms)` gives
+the next read's budget, or null when done. It owns no clock or read: an early
+key can be handled by the application while forwarded probe replies arrive.
+`examples/live.zig` shows the loop; run it with `zig build live`. The examples
+step runs its `--check` path without a terminal.
+
 **A frame is one write.** `draw` writes to a `*std.Io.Writer` and never
 flushes it, so batching is yours. `Stats.bytes` says how large the buffer
 wants to be.
+
+The writer is the caller's, and `draw` never flushes. Between frames, one-off
+sequences must not paint, move the cursor, change SGR or a link, or change
+tracked modes. Queries, clipboard writes and notifications fit that contract.
+After moving the cursor, call `Renderer.untrustCursor()` so the next move is
+absolute. Painting or changing SGR or a link also needs `repaint`; change
+tracked modes through `setModes` or `setCaps` so `leave` can undo them.
 
 **A widget is a value, and the caller keeps what survives the frame.** It is
 built where it is drawn, handed a window, and gone by the end of the call.
@@ -541,51 +580,3 @@ Zig 0.16.0.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
-`Screen.link` refuses C0 controls and DEL in a URI or params with
-`error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
-
-`Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
-place, writing only the mode differences and repainting on the next draw.
-Leaving and entering a renderer that has drawn also repaints text and pictures.
-
-`Replacement` keeps a current picture while a new one is in flight. Share an
-`ImageIds` range between replacements, with the probe's graphics id excluded.
-`send` takes pixels and transmit options; `declare` takes the placement and
-caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
-`declare` again. Its result says another frame is needed while waiting;
-`takeDirty` asks for new pixels after a refusal. A swap places the new picture,
-drops the old placement, then frees its pixels inside `commitFrame(w, caps)`.
-The renderer calls that itself; callers of `emit` call it after their frame
-reaches the writer. Failed writes retain retirement for the next attempt.
-
-`Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
-`Caps.Probe` and `Layers` together. Its fields remain yours to use directly.
-Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
-keys and application policy are still yours. Drain the batch, call `resize(w)`
-once, paint `screen`, then `draw(w)` and flush your writer. Both grids follow
-the last resize; an unchanged in-band report repaints too, and each resize
-asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
-mouse parsing in step with the requested encoding. `setCaps` lets the caller
-apply its own overrides after a probe answer.
-
-`ProbeWait.init(now_ms, timeout_ms, quiet_ms).remaining(probe, now_ms)` gives
-the next read's budget, or null when done. It owns no clock or read: an early
-key can be handled by the application while forwarded probe replies arrive.
-`examples/live.zig` shows the loop; run it with `zig build live`. The examples
-step runs its `--check` path without a terminal.
-
-`Winsize.locate(mouse)` returns its zero-based column and row and fractions
-`x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
-cell reports point to the middle. Unknown pixel size returns null.
-
-`fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
-boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
-yourself only when the returned slice is shorter than the input.
-
-The writer is the caller's, and `draw` never flushes. Between frames, one-off
-sequences must not paint, move the cursor, change SGR or a link, or change
-tracked modes. Queries, clipboard writes and notifications fit that contract.
-After moving the cursor, call `Renderer.untrustCursor()` so the next move is
-absolute. Painting or changing SGR or a link also needs `repaint`; change
-tracked modes through `setModes` or `setCaps` so `leave` can undo them.

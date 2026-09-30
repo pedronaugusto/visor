@@ -264,9 +264,9 @@ fn drawMeters(win: visor.Window) !void {
     var state: widgets.List.State = .{ .selected = 2 };
     try (widgets.List{
         .items = &.{
-            .{ .text = "bridge" },
-            .{ .text = "holomap" },
-            .{ .text = "watch" },
+            .{ .text = "files" },
+            .{ .text = "search" },
+            .{ .text = "help" },
         },
         .marker = "\u{25b8} ",
         .selected_style = .{ .reverse = true },
