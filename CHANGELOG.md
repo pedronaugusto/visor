@@ -8,21 +8,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.0] - 2026-09-30
 
-- Gallery list names are neutral, and the README describes shared-memory pictures once.
+### Changed
 
-- `Renderer.untrustCursor` forgets a cursor moved between frames; renderer and README document the caller-owned writer contract.
+- On morse 0.7.0.
+- `Screen.link` refuses C0 controls and DEL in the URI and its params
+  before interning them.
+- Re-entering a renderer that was used repaints its text and pictures.
 
-- `fitEnd` keeps a text suffix on a grapheme boundary beside a leading ellipsis.
+### Added
 
-- `Winsize.locate` maps a mouse report to its cell and fraction using the fractional cell size.
-
-- `Session` holds the screen, renderer, size, caps, probe and layers, coalesces resizes and keeps mouse parsing in step; `ProbeWait` uses caller-supplied time, with a live-loop example on POSIX and Windows.
-
-- `Replacement` keeps one picture in flight and swaps on acknowledgement or grace; `ImageIds` skips the probe and retirement frees inside `commitFrame(w, caps)`, including frames with no visible text or picture.
-
-- Behaviour change: `Screen.link` refuses C0 controls and DEL in the URI and params before interning.
-
-- Behaviour change: re-entering a used renderer repaints text and pictures; `setCaps` changes capabilities without leaving the screen, on morse 0.7.0.
+- `Session` holds the screen, renderer, size, caps, probe and layers,
+  coalesces resizes and keeps mouse parsing in step; `ProbeWait` runs on
+  caller-supplied time. A live-loop example runs on POSIX and Windows.
+- `Renderer.setCaps` changes capabilities without leaving the screen.
+- `Replacement` keeps one picture in flight and swaps it on
+  acknowledgement or after a grace, with ids from an `ImageIds` range;
+  `commitFrame(w, caps)` frees retired pictures, including in a frame with
+  nothing else to draw.
+- `Renderer.untrustCursor` forgets a cursor moved between frames; the
+  renderer and the README state what a caller's one-off writes may change.
+- `Winsize.locate` maps a mouse report to its cell and the fraction within
+  it, from the fractional cell size.
+- `fitEnd` keeps a text's end on a grapheme boundary beside a leading
+  ellipsis.
 
 ## [0.3.0] - 2026-09-29
 
