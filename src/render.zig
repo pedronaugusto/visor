@@ -374,7 +374,7 @@ pub const Renderer = struct {
         }
         r.method = caps.width_method;
 
-        const pictures = if (layers) |l| l.declared.items.len != 0 or l.count() != 0 or l.retired.items.len != 0 else false;
+        const pictures = if (layers) |l| l.hasFrameWork() else false;
         const body = r.repaint_all or s.damage.any() or r.anyForced() or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
@@ -3534,15 +3534,15 @@ test "a cluster that would join the cell on its left, and is more than marks, re
 test "changing caps keeps the screen, and re-entering repaints every row and picture" {
     var f: Fixture = try .init(testing.allocator, 8, 3);
     defer f.deinit();
-    var layers: Layers = .{};
-    defer layers.deinit(testing.allocator);
+    var layers: Layers = .init(testing.allocator);
+    defer layers.deinit();
     var c = f.caps;
     c.kitty_graphics = true;
     try f.renderer.enter(&f.out.writer, c, .alt, .{});
     for ("row one", 0..) |_, col| try f.screen.write(@intCast(col), 0, "row one"[col..][0..1], .{}, .none);
     for ("row two", 0..) |_, col| try f.screen.write(@intCast(col), 1, "row two"[col..][0..1], .{}, .none);
     const picture: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
-    try layers.declare(testing.allocator, picture);
+    try layers.declare(picture);
     _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
     f.out.clearRetainingCapacity();
     c.in_band_resize = true;
@@ -3550,7 +3550,7 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     try f.renderer.setCaps(&f.out.writer, c);
     try testing.expectEqualStrings("\x1b[?2048h\x1b[?2027l", f.out.written());
     f.out.clearRetainingCapacity();
-    try layers.declare(testing.allocator, picture);
+    try layers.declare(picture);
     const changed = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
     try testing.expectEqual(@as(u32, 3), changed.rows);
     try testing.expect(changed.cells >= 14);
@@ -3558,7 +3558,7 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     try f.renderer.leave(&f.out.writer);
     try f.renderer.enter(&f.out.writer, c, .alt, .{});
     f.out.clearRetainingCapacity();
-    try layers.declare(testing.allocator, picture);
+    try layers.declare(picture);
     const entered = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
     try testing.expectEqual(@as(u32, 3), entered.rows);
     try testing.expect(entered.cells >= 14);

@@ -44,7 +44,7 @@ pub const Session = struct {
     ws: Winsize,
     caps: Caps = .{},
     probe: Caps.Probe,
-    layers: Layers = .{},
+    layers: Layers,
     /// Last size of a drained batch, applied by `resize` before painting.
     pending: ?Winsize = null,
     /// An in-band report also confirms a size already seen by a signal.
@@ -59,6 +59,7 @@ pub const Session = struct {
         errdefer screen.deinit();
         return .{
             .gpa = gpa,
+            .layers = .init(gpa),
             .screen = screen,
             .renderer = try Renderer.init(gpa, ws.cells),
             .ws = ws,
@@ -69,7 +70,7 @@ pub const Session = struct {
     /// Gives memory back. Leave the terminal first when this value entered
     /// it; freeing memory writes nothing.
     pub fn deinit(s: *Session) void {
-        s.layers.deinit(s.gpa);
+        s.layers.deinit();
         s.renderer.deinit();
         s.screen.deinit();
         s.* = undefined;
@@ -225,13 +226,13 @@ test "a session repaints an unchanged in-band size, including pictures" {
     _ = try s.setCaps(&out.writer, s.probe.caps);
     try s.screen.write(0, 0, "x", .{}, .none);
     const layer: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
-    try s.layers.declare(testing.allocator, layer);
+    try s.layers.declare(layer);
     _ = try s.draw(&out.writer);
     out.clearRetainingCapacity();
     _ = try s.handle(&out.writer, .{ .resize = .{ .cols = 8, .rows = 3 } }, 1);
     try testing.expect(try s.resize(&out.writer));
     try testing.expectEqualStrings("\x1b[16t", out.written());
-    try s.layers.declare(testing.allocator, layer);
+    try s.layers.declare(layer);
     const drawn = try s.draw(&out.writer);
     try testing.expectEqual(@as(u32, 3), drawn.rows);
     try testing.expectEqual(@as(u32, 1), drawn.placements);

@@ -67,8 +67,8 @@ test "canvas shapes use sextant and braille fallback or the picture owner" {
     try h.expectFrame("⠒⠒\n");
     var surface = try Canvas.Surface.init(t.allocator, 8, 8);
     defer surface.deinit();
-    var layers: visor.Layers = .{};
-    defer layers.deinit(t.allocator);
+    var layers: visor.Layers = .init(t.allocator);
+    defer layers.deinit();
     var out: std.Io.Writer.Allocating = .init(t.allocator);
     defer out.deinit();
     h.screen.clear();

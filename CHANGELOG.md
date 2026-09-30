@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Layers captures its allocator at init, allocating picture and Replacement operations take no allocator, and metadata is read through borrowed accessors.
+
 - Breaking: Screen and Renderer store thirty-two-byte cells, export checked values through readCell and rowAt().get(), and replace direct grid mutation with placement operations.
 
 - Window checks complete text and cell extents before placement, copying or multi-cell fills can cross a child boundary.

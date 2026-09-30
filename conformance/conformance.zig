@@ -367,7 +367,7 @@ const Harness = struct {
     out: std.Io.Writer.Allocating,
     caps: visor.Caps,
     /// The pictures shown beside the screen.
-    layers: visor.Layers = .{},
+    layers: visor.Layers,
     /// Where the generator's draws are counted, for the test that proves the
     /// corpus explores; null everywhere else.
     tally: ?*Tally = null,
@@ -380,6 +380,7 @@ const Harness = struct {
         errdefer r.deinit();
         return .{
             .gpa = gpa,
+            .layers = .init(gpa),
             .screen = s,
             .renderer = r,
             .out = .init(gpa),
@@ -400,7 +401,7 @@ const Harness = struct {
 
     fn deinit(h: *Harness) void {
         h.screen.deinit();
-        h.layers.deinit(h.gpa);
+        h.layers.deinit();
         h.renderer.deinit();
         h.out.deinit();
     }
@@ -901,7 +902,7 @@ fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
 fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
     const pixels: [4 * 4 * 4]u8 = @splat(0x80);
     h.out.clearRetainingCapacity();
-    _ = try h.layers.transmit(h.gpa, &h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
+    _ = try h.layers.transmit(&h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
     o.feed(h.out.written());
 }
 
@@ -958,7 +959,7 @@ fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
 
 /// This frame's layers: picture `i + 1` at `rects[i]`.
 fn layOut(h: *Harness, rects: []const visor.Rect) !void {
-    for (rects, 1..) |r, i| try h.layers.declare(h.gpa, .{ .image = @intCast(i), .rect = r });
+    for (rects, 1..) |r, i| try h.layers.declare(.{ .image = @intCast(i), .rect = r });
 }
 
 test "pictures stay where the program put them across resizes" {

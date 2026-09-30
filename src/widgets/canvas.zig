@@ -107,8 +107,8 @@ pub const Canvas = struct {
                 pic.surface.clear();
                 const p = c.raster(pic.surface);
                 for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
-                _ = try pic.layers.transmit(pic.allocator, pic.writer, pic.image, pic.surface.pixels, .{ .width = pic.surface.width, .height = pic.surface.height });
-                try pic.layers.declare(pic.allocator, .{ .image = pic.image, .placement = pic.placement, .rect = win.rect, .order = pic.order });
+                _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels, .{ .width = pic.surface.width, .height = pic.surface.height });
+                try pic.layers.declare(.{ .image = pic.image, .placement = pic.placement, .rect = win.rect, .order = pic.order });
                 return;
             }
         }

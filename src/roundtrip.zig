@@ -124,7 +124,7 @@ const Harness = struct {
     out: std.Io.Writer.Allocating,
     caps: Caps,
     /// The pictures shown beside the screen.
-    layers: layer.Layers = .{},
+    layers: layer.Layers,
     /// Where the generator's draws are counted, for the test that proves the
     /// corpus explores; null everywhere else.
     tally: ?*Tally = null,
@@ -137,6 +137,7 @@ const Harness = struct {
         errdefer r.deinit();
         return .{
             .gpa = gpa,
+            .layers = .init(gpa),
             .screen = s,
             .renderer = r,
             .out = .init(gpa),
@@ -155,7 +156,7 @@ const Harness = struct {
 
     fn deinit(h: *Harness) void {
         h.screen.deinit();
-        h.layers.deinit(h.gpa);
+        h.layers.deinit();
         h.renderer.deinit();
         h.out.deinit();
     }
@@ -785,7 +786,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                     0 => {
                         const id = dice.valueRangeAtMost(u32, 1, 4);
                         const px = [_]u8{ 0, 0, 0, 255 } ** 4;
-                        _ = try h.layers.transmit(gpa, &side.writer, id, &px, .{
+                        _ = try h.layers.transmit(&side.writer, id, &px, .{
                             .width = 2,
                             .height = 2,
                             .answer = dice.value(bool),
@@ -824,7 +825,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
                 else => unreachable,
             }
         }
-        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
+        for (showing.items) |p| try h.layers.declare(p.asLayer());
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
@@ -865,10 +866,10 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=N"));
 
         // Declared again unchanged, the frame writes nothing at all.
-        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
+        for (showing.items) |p| try h.layers.declare(p.asLayer());
         h.out.clearRetainingCapacity();
         try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
-        for (showing.items) |p| try h.layers.declare(gpa, p.asLayer());
+        for (showing.items) |p| try h.layers.declare(p.asLayer());
         h.screen.damageAll();
         h.out.clearRetainingCapacity();
         try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
