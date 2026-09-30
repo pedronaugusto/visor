@@ -167,6 +167,129 @@ pub const Transmit = struct {
     now_ms: i64 = 0,
 };
 
+/// Rotating image ids in an inclusive range, shared by any number of
+/// replacements. Skips zero, the probe id and every image still held by
+/// `Layers`, including those awaiting retirement.
+pub const ImageIds = struct {
+    first: u32,
+    last: u32,
+    graphics_id: u32,
+    next: u32,
+
+    pub fn init(first: u32, last: u32, graphics_id: u32) error{InvalidIdRange}!ImageIds {
+        if (first == 0 or first > last or (first == last and first == graphics_id)) return error.InvalidIdRange;
+        return .{ .first = first, .last = last, .graphics_id = graphics_id, .next = first };
+    }
+
+    /// A free id, or `NoImageId` while the range is wholly occupied.
+    pub fn acquire(ids: *ImageIds, layers: *const Layers) error{NoImageId}!u32 {
+        const start = ids.next;
+        while (true) {
+            const id = ids.next;
+            ids.next = if (id == ids.last) ids.first else id + 1;
+            if (id != ids.graphics_id and layers.image(id) == null) return id;
+            if (ids.next == start) return error.NoImageId;
+        }
+    }
+};
+
+/// One replaceable picture, independent of its position, stack or content.
+/// Send to an unused id, keep the current picture while the new one lands,
+/// then declare the new one and retire the old through `commitFrame`.
+/// One transmit may be in flight. The caller owns the value, its id range,
+/// grace period and any decision about when to produce another picture.
+pub const Replacement = struct {
+    current: ?u32 = null,
+    pending: ?u32 = null,
+    dirty: bool = false,
+
+    pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId };
+
+    /// Whether another picture can be sent. Call `declare` to settle a
+    /// ready or refused pending picture before sending the next one.
+    pub fn canSend(p: *const Replacement) bool {
+        return p.pending == null;
+    }
+
+    /// Sends one new picture, returning its id and payload byte count.
+    /// On a partial write the recorded image is retired at the next commit
+    /// and `takeDirty` asks the owner to produce it again.
+    pub fn send(p: *Replacement, gpa: Allocator, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!struct { id: u32, bytes: usize } {
+        if (!p.canSend()) return error.Busy;
+        const id = try ids.acquire(layers);
+        // Reserve cleanup before any command can reach the terminal.
+        try layers.retired.ensureUnusedCapacity(gpa, 1);
+        const bytes = layers.transmit(gpa, w, id, pixels, how) catch |err| {
+            if (layers.image(id) != null) layers.retired.appendAssumeCapacity(id);
+            p.dirty = true;
+            return err;
+        };
+        p.pending = id;
+        return .{ .id = id, .bytes = bytes };
+    }
+
+    /// Declares the picture at `want`, overriding its image id. Returns
+    /// true while a pending picture needs an acknowledgement or grace time;
+    /// the caller can arrange another frame then. An absent declaration
+    /// hides the picture without swapping or freeing it.
+    /// Failed pending images keep the old picture and set `takeDirty`.
+    pub fn declare(p: *Replacement, gpa: Allocator, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
+        var at = want orelse return p.pending != null;
+        if (p.pending) |id| {
+            const ready = layers.ready(id, now_ms, grace_ms);
+            const failed = if (layers.image(id)) |img| img.state == .failed else true;
+            if (failed) {
+                try layers.retire(gpa, id);
+                p.pending = null;
+                p.dirty = true;
+            } else if (ready) {
+                // Reserve retirement and the declaration before changing state.
+                if (p.current != null) try layers.retired.ensureUnusedCapacity(gpa, 1);
+                at.image = id;
+                try layers.declare(gpa, at);
+                if (p.current) |old| try layers.retire(gpa, old);
+                p.current = id;
+                p.pending = null;
+                return false;
+            }
+        }
+        if (p.current) |id| {
+            if (layers.image(id)) |img| {
+                if (img.state != .failed) {
+                    at.image = id;
+                    try layers.declare(gpa, at);
+                    return p.pending != null;
+                }
+            }
+            try layers.retire(gpa, id);
+            p.current = null;
+            p.dirty = true;
+        }
+        return p.pending != null;
+    }
+
+    /// Whether a refusal or write failure asked for another picture since
+    /// last checked. Call `declare` after `Layers.ack` to fold refusals in.
+    pub fn takeDirty(p: *Replacement) bool {
+        defer p.dirty = false;
+        return p.dirty;
+    }
+
+    /// Retires everything this value owns at the next committed frame.
+    pub fn retire(p: *Replacement, gpa: Allocator, layers: *Layers) Allocator.Error!void {
+        try layers.retired.ensureUnusedCapacity(gpa, 2);
+        if (p.current) |id| {
+            try layers.retire(gpa, id);
+            layers.undeclareImage(id);
+        }
+        if (p.pending) |id| {
+            try layers.retire(gpa, id);
+            layers.undeclareImage(id);
+        }
+        p.* = .{};
+    }
+};
+
 /// The z the terminal is given for a layer under the text.
 ///
 /// Below zero is under the text; the sorted position is added, so the
@@ -184,6 +307,8 @@ pub const Layers = struct {
     declared: std.ArrayList(Layer) = .empty,
     /// What the terminal is showing, after the last `emit`.
     shown: std.ArrayList(Layer) = .empty,
+    /// Images freed only after a complete frame stopped declaring them.
+    retired: std.ArrayList(u32) = .empty,
     /// Whether this terminal answers a transmit: unknown until the first
     /// answer (true), or until a grace period runs out with no answer ever
     /// (false), after which nothing is waited for.
@@ -213,6 +338,7 @@ pub const Layers = struct {
         l.images.deinit(gpa);
         l.declared.deinit(gpa);
         l.shown.deinit(gpa);
+        l.retired.deinit(gpa);
         gpa.free(l.window);
         l.deflated.deinit(gpa);
         l.* = .{};
@@ -411,6 +537,7 @@ pub const Layers = struct {
     /// with, so the terminal's memory and this list stay as small as what
     /// is alive.
     pub fn free(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
+        try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
         var i: usize = 0;
         while (i < l.images.items.len) {
             if (l.images.items[i].id == id) {
@@ -420,7 +547,19 @@ pub const Layers = struct {
         }
         l.forgetShown(id);
         l.undeclareImage(id);
-        try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
+        var retired_i: usize = 0;
+        while (retired_i < l.retired.items.len) {
+            if (l.retired.items[retired_i] == id) {
+                _ = l.retired.swapRemove(retired_i);
+            } else retired_i += 1;
+        }
+    }
+
+    /// Frees `id` inside `commitFrame`, after placements and deletions.
+    /// A still-declared image is kept until a later frame stops using it.
+    pub fn retire(l: *Layers, gpa: Allocator, id: u32) Allocator.Error!void {
+        if (std.mem.indexOfScalar(u32, l.retired.items, id) != null) return;
+        try l.retired.append(gpa, id);
     }
 
     /// Frees every image. What a program writes on the way out.
@@ -525,19 +664,38 @@ pub const Layers = struct {
         return written;
     }
 
-    /// Commits the declarations after the caller accepted the complete
-    /// frame. Kept separate from `emit` so a failed output write can retry
-    /// both placements and deletions unchanged.
-    pub fn commitFrame(l: *Layers, caps: Caps) void {
-        l.replace_all = false;
+    /// Commits after `emit` and the complete frame reached the caller's
+    /// writer. Frees retired images after their old placements were dropped,
+    /// then keeps the declarations. Returns the number of free commands.
+    /// A failed free keeps its record and retirement for the next attempt.
+    /// No allocation and no flush. The renderer calls this for its frames.
+    pub fn commitFrame(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
         if (!caps.kitty_graphics) {
             l.declared.clearRetainingCapacity();
-            return;
+            return 0;
         }
+        var freed: usize = 0;
+        var i: usize = 0;
+        while (i < l.retired.items.len) {
+            const id = l.retired.items[i];
+            var declared = false;
+            for (l.declared.items) |layer| if (layer.image == id) {
+                declared = true;
+                break;
+            };
+            if (declared) {
+                i += 1;
+                continue;
+            }
+            try l.free(w, id);
+            freed += 1;
+        }
+        l.replace_all = false;
         const was_shown = l.shown;
         l.shown = l.declared;
         l.declared = was_shown;
         l.declared.clearRetainingCapacity();
+        return freed;
     }
 
     /// Takes every placement off the screen, keeping the images. What a
@@ -1172,4 +1330,94 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     try testing.expect(!q.ready(8, 2000, 1000));
     try testing.expect(q.shared_memory.?.state == .no);
     try testing.expect(q.image(8).?.shm == null);
+}
+
+test "a replacement lands over the old picture, placed before dropped before freed" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    var ids = try ImageIds.init(6, 9, 8);
+    var p: Replacement = .{};
+    var sink: Writer.Discarding = .init(&.{});
+    const pixels = [_]u8{0} ** 16;
+    const at: Layer = .{ .image = 0, .rect = .{ .col = 2, .row = 1, .cols = 8, .rows = 4 } };
+    const first = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{ .width = 2, .height = 2, .answer = true, .now_ms = 1000 });
+    try testing.expectEqual(@as(u32, 6), first.id);
+    try testing.expect(!p.canSend());
+    try testing.expectError(error.Busy, p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{}));
+    try testing.expect(try p.declare(testing.allocator, &f.layers, at, 1016, 250));
+    try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
+    f.layers.ack(.{ .id = first.id, .message = "OK" });
+    try testing.expect(!try p.declare(testing.allocator, &f.layers, at, 1033, 250));
+    try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+    const next = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{ .width = 2, .height = 2, .answer = true, .now_ms = 2000 });
+    try testing.expectEqual(@as(u32, 7), next.id);
+    try testing.expect(try p.declare(testing.allocator, &f.layers, at, 2016, 250));
+    try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+    f.layers.ack(.{ .id = next.id, .message = "OK" });
+    _ = try p.declare(testing.allocator, &f.layers, at, 2041, 250);
+    const swapped = try f.draw();
+    try testing.expectEqual(f.written().len, swapped.bytes);
+    const placed = std.mem.indexOf(u8, f.written(), "a=p,q=2,i=7,p=1").?;
+    const dropped = std.mem.indexOf(u8, f.written(), "a=d,q=2,d=i,i=6,p=1").?;
+    const freed = std.mem.indexOf(u8, f.written(), "a=d,q=2,d=I,i=6").?;
+    try testing.expect(placed < dropped and dropped < freed);
+    try testing.expect(f.layers.image(6) == null);
+    _ = try p.declare(testing.allocator, &f.layers, at, 2100, 250);
+    try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+    // Rotation skips the probe, even when it is not held by Layers.
+    try testing.expectEqual(@as(u32, 9), (try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{})).id);
+}
+
+test "replacement grace, refusals and failed output leave another picture due" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    var ids = try ImageIds.init(1, 5, 1);
+    var p: Replacement = .{};
+    var sink: Writer.Discarding = .init(&.{});
+    const at: Layer = .{ .image = 0, .rect = .{ .cols = 2, .rows = 2 } };
+    const pixels = [_]u8{0} ** 16;
+    _ = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 1000 });
+    try testing.expect(try p.declare(testing.allocator, &f.layers, at, 1249, 250));
+    try testing.expect(!try p.declare(testing.allocator, &f.layers, at, 1250, 250));
+    _ = try f.draw();
+    try testing.expectEqual(@as(u32, 1), f.layers.fallbacks);
+    const next = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 2000 });
+    f.layers.ack(.{ .id = next.id, .message = "EBADPNG:bad" });
+    _ = try p.declare(testing.allocator, &f.layers, at, 2001, 250);
+    try testing.expect(p.takeDirty());
+    try testing.expect(!p.takeDirty());
+    try testing.expectEqual(@as(?u32, 2), p.current);
+    _ = try f.draw();
+    try testing.expect(f.layers.image(next.id) == null);
+    const retry = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 3000 });
+    f.layers.ack(.{ .id = retry.id, .message = "OK" });
+    _ = try p.declare(testing.allocator, &f.layers, at, 3001, 250);
+    var no_room: [0]u8 = .{};
+    var blocked: Writer = .fixed(&no_room);
+    try testing.expectError(error.WriteFailed, f.renderer.draw(&blocked, &f.screen, &f.layers, f.caps));
+    try testing.expect(f.layers.image(2) != null);
+    _ = try f.draw();
+    try testing.expect(f.layers.image(2) == null);
+    try testing.expect(std.mem.indexOf(u8, f.written(), "a=p,q=2,i=4") != null);
+    // A free itself can fail too; retirement and the image survive.
+    try p.retire(testing.allocator, &f.layers);
+    _ = try f.layers.emit(&sink.writer, f.caps);
+    try testing.expectError(error.WriteFailed, f.layers.commitFrame(&blocked, f.caps));
+    try testing.expect(f.layers.image(4) != null);
+    _ = try f.layers.commitFrame(&sink.writer, f.caps);
+    try testing.expect(f.layers.image(4) == null);
+}
+
+test "image ids stay within their range and refuse exhaustion" {
+    var l: Layers = .{};
+    defer l.deinit(testing.allocator);
+    try testing.expectError(error.InvalidIdRange, ImageIds.init(0, 3, 1));
+    try testing.expectError(error.InvalidIdRange, ImageIds.init(3, 2, 1));
+    var ids = try ImageIds.init(std.math.maxInt(u32) - 1, std.math.maxInt(u32), 1);
+    const id = try ids.acquire(&l);
+    try l.record(testing.allocator, .{ .id = id });
+    const next = try ids.acquire(&l);
+    try l.record(testing.allocator, .{ .id = next });
+    try testing.expect(id != next);
+    try testing.expectError(error.NoImageId, ids.acquire(&l));
 }

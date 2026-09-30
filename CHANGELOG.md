@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Replacement` keeps one picture in flight and swaps on acknowledgement or grace; `ImageIds` skips the probe and retirement frees inside `commitFrame(w, caps)`.
+
 - Behaviour change: `Screen.link` refuses C0 controls and DEL in the URI and params before interning.
 
 - Behaviour change: re-entering a used renderer repaints text and pictures; `setCaps` changes capabilities without leaving the screen, on morse 0.7.0.

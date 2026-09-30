@@ -153,6 +153,10 @@ pub const Image = layer_mod.Image;
 pub const Layer = layer_mod.Layer;
 /// What this frame shows.
 pub const Layers = layer_mod.Layers;
+/// One picture replaced without a gap, on caller-supplied time.
+pub const Replacement = layer_mod.Replacement;
+/// A rotating range of image ids that skips the graphics probe.
+pub const ImageIds = layer_mod.ImageIds;
 /// Pictures through shared memory, where the program allows it.
 pub const SharedMemory = layer_mod.SharedMemory;
 

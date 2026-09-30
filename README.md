@@ -548,3 +548,13 @@ MIT. See [LICENSE](LICENSE).
 `Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
 place, writing only the mode differences and repainting on the next draw.
 Leaving and entering a renderer that has drawn also repaints text and pictures.
+
+`Replacement` keeps a current picture while a new one is in flight. Share an
+`ImageIds` range between replacements, with the probe's graphics id excluded.
+`send` takes pixels and transmit options; `declare` takes the placement and
+caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
+`declare` again. Its result says another frame is needed while waiting;
+`takeDirty` asks for new pixels after a refusal. A swap places the new picture,
+drops the old placement, then frees its pixels inside `commitFrame(w, caps)`.
+The renderer calls that itself; callers of `emit` call it after their frame
+reaches the writer. Failed writes retain retirement for the next attempt.

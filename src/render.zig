@@ -401,9 +401,12 @@ pub const Renderer = struct {
             @memset(r.force, false);
             r.repaint_all = false;
         }
-        if (layers) |l| l.commitFrame(caps);
+        // Retirement goes directly to the accepted writer, after the frame.
+        // An empty buffer counts the bytes without delaying a free command.
+        var retirement: Frame = .init(w, &.{}, false);
+        if (layers) |l| stats.placements += @intCast(try l.commitFrame(&retirement.writer, caps));
         r.drawn = true;
-        stats.bytes = frame.n;
+        stats.bytes = frame.n + retirement.n;
         return stats;
     }
 
