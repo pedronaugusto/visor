@@ -20,6 +20,12 @@
 //! literal of escape bytes in this file, and a reviewer can check that with
 //! `grep`.
 //!
+//! The writer belongs to the caller. Between frames, one-off sequences
+//! must not paint, move the cursor, change SGR or a link, or change tracked
+//! modes. `untrustCursor` makes a cursor move safe; painting or changing
+//! SGR or a link also needs `repaint`. Use `setModes` and `setCaps` for
+//! tracked modes so `leave` can undo them. `draw` never flushes.
+//!
 //! What this file will never hold: a widget, a layout, an event, a thread, a
 //! timeout, a flush of the caller's writer, or an allocation on the frame
 //! path.
@@ -322,6 +328,14 @@ pub const Renderer = struct {
         r.repaint_all = true;
         r.cursor = null;
         @memset(r.prev, unknown);
+    }
+
+    /// Forgets the cursor's position after a one-off sequence moved it.
+    /// The next needed move is absolute (or from the saved inline origin).
+    /// Does not forget cells or pen state; call `repaint` as well after
+    /// painting or changing SGR or an open link outside the renderer.
+    pub fn untrustCursor(r: *Renderer) void {
+        r.cursor = null;
     }
 
     /// One row written whole, absolutely positioned, as though the terminal
@@ -3525,4 +3539,19 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     try f.renderer.setCaps(&f.out.writer, c);
     try testing.expectEqual(@as(usize, 0), f.out.written().len);
     try testing.expect(!f.renderer.repaint_all);
+}
+
+test "untrustCursor settles a cursor moved between otherwise unchanged frames" {
+    var f: Fixture = try .init(testing.allocator, 10, 3);
+    defer f.deinit();
+    f.screen.cursor = .{ .col = 4, .row = 1, .visible = true };
+    _ = try f.draw();
+    try f.expectBytes("");
+    // This query changes no tracked state; the next frame remains empty.
+    try morse.requestCursorPosition(&f.out.writer);
+    try f.expectBytes("");
+    try morse.cursorTo(&f.out.writer, 3, 9);
+    f.renderer.untrustCursor();
+    try f.expectBytes("\x1b[2;5H");
+    try f.expectBytes("");
 }

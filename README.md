@@ -582,3 +582,10 @@ cell reports point to the middle. Unknown pixel size returns null.
 `fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
 boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
 yourself only when the returned slice is shorter than the input.
+
+The writer is the caller's, and `draw` never flushes. Between frames, one-off
+sequences must not paint, move the cursor, change SGR or a link, or change
+tracked modes. Queries, clipboard writes and notifications fit that contract.
+After moving the cursor, call `Renderer.untrustCursor()` so the next move is
+absolute. Painting or changing SGR or a link also needs `repaint`; change
+tracked modes through `setModes` or `setCaps` so `leave` can undo them.
