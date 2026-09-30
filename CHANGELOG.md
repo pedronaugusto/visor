@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Style dumps use as many padded base-62 digits per cell as their legend needs, including more than two beyond 3,844 styles.
+
 - Breaking: Layers captures its allocator at init, allocating picture and Replacement operations take no allocator, and metadata is read through borrowed accessors.
 
 - Breaking: Screen and Renderer store thirty-two-byte cells, export checked values through readCell and rowAt().get(), and replace direct grid mutation with placement operations.

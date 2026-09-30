@@ -903,8 +903,9 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
 /// - A colour is `default`, one of the sixteen names, `palette:<n>`, or
 ///   `#rrggbb` in lower case.
 /// - Ids are `0-9a-zA-Z`, one character a cell when the screen has 62 styles
-///   or fewer. With more, every id is two characters, most significant first,
-///   in the legend and in the grid, so a row of the grid is twice the width.
+///   or fewer. Every id has the fewest base-62 digits that can name the whole
+///   legend, padded with zeroes, most significant first, in legend and grid.
+///   A grid row is its column count times that shared digit count.
 /// - The grid is one line a row and one id a column. The column a wide
 ///   grapheme covers prints the id of the cell it continues.
 /// - Every line ends in a newline, with no blank line after the last.
@@ -937,16 +938,26 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
         ids[i] = @intCast(found.index);
     }
 
-    const two = seen.count() > alphabet.len;
+    var digits: usize = 1;
+    var capacity: u64 = alphabet.len;
+    while (seen.count() > capacity) : (digits += 1) capacity *= alphabet.len;
     const Id = struct {
-        fn write(out: *Writer, id: u32, wide: bool) Writer.Error!void {
-            if (wide) try out.writeByte(alphabet[id / alphabet.len]);
-            try out.writeByte(alphabet[id % alphabet.len]);
+        fn write(out: *Writer, id: u32, width: usize) Writer.Error!void {
+            // Six base-62 digits cover every u32 id a grid can hold.
+            var bytes: [6]u8 = undefined;
+            var value = id;
+            var at = width;
+            while (at > 0) {
+                at -= 1;
+                bytes[at] = alphabet[value % alphabet.len];
+                value /= alphabet.len;
+            }
+            try out.writeAll(bytes[0..width]);
         }
     };
     for (seen.keys(), 0..) |line, i| {
         try w.writeAll("# ");
-        try Id.write(w, @intCast(i), two);
+        try Id.write(w, @intCast(i), digits);
         try w.writeByte(' ');
         try w.writeAll(line);
         try w.writeByte('\n');
@@ -955,7 +966,7 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
     while (row < s.size.rows) : (row += 1) {
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
-            try Id.write(w, ids[s.index(col, row)], two);
+            try Id.write(w, ids[s.index(col, row)], digits);
         }
         try w.writeByte('\n');
     }
@@ -1898,4 +1909,34 @@ test "a saved terminal cursor stays inside the grid after a resize" {
     try t.resize(.{ .cols = 1, .rows = 1 });
     try t.feed("\x1b8x");
     try testing.expectEqualStrings("x", textAt(&t, 0, 0));
+}
+
+test "style dump IDs grow beyond the two digit legend" {
+    for ([_]u16{ 1, 62, 63, 3844, 3845 }) |count| {
+        var screen = try Screen.init(testing.allocator, .{ .cols = count, .rows = 1 });
+        defer screen.deinit();
+        for (0..count) |i| try screen.writeOwnedCell(@intCast(i), 0, .blank(.{ .fg = .rgb(@intCast(i / 256), @intCast(i % 256), 0) }));
+        var out: Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        try dumpScreenStyles(&screen, &out.writer);
+        const digits: usize = if (count <= 62) 1 else if (count <= 3844) 2 else 3;
+        var lines = std.mem.splitScalar(u8, out.written(), '\n');
+        for (0..count) |i| {
+            const legend = lines.next().?;
+            try testing.expect(std.mem.startsWith(u8, legend, "# "));
+            try testing.expectEqual(@as(u8, ' '), legend[2 + digits]);
+            var id: usize = 0;
+            for (legend[2..][0..digits]) |digit| id = id * 62 + std.mem.indexOfScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
+            try testing.expectEqual(i, id);
+        }
+        const grid = lines.next().?;
+        try testing.expectEqual(@as(usize, count) * digits, grid.len);
+        for (0..count) |i| {
+            var id: usize = 0;
+            for (grid[i * digits ..][0..digits]) |digit| id = id * 62 + std.mem.indexOfScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
+            try testing.expectEqual(i, id);
+        }
+        try testing.expectEqualStrings("", lines.next().?);
+        try testing.expect(lines.next() == null);
+    }
 }

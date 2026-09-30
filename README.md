@@ -311,6 +311,10 @@ own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Design
 
+`dumpScreenStyles` writes padded base-62 IDs, most significant digit first.
+Every ID in the legend and grid uses the fewest digits needed for the whole
+legend: one through 62 styles, two through 3,844, and more for larger legends.
+
 **A stored cell is thirty-two bytes and is compared as memory.** The grapheme lives
 in the cell when it is six bytes or fewer, which covers every
 single-codepoint cluster and a base with a combining mark, and in a pool the
