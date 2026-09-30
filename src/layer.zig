@@ -223,7 +223,7 @@ pub const Replacement = struct {
 
     pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId, PayloadTooLarge };
 
-    /// Whether another picture can be sent. Call `declare` to settle a
+    /// Whether another picture can be sent. Call `settle` or `declare` to settle a
     /// ready or refused pending picture before sending the next one.
     pub fn canSend(p: *const Replacement) bool {
         return p.pending == null;
@@ -247,14 +247,15 @@ pub const Replacement = struct {
         return .{ .id = id, .bytes = bytes };
     }
 
-    /// Declares the picture at `want`, overriding its image id. Returns
-    /// true while a pending picture needs an acknowledgement or grace time;
-    /// the caller can arrange another frame then. An absent declaration
-    /// hides the picture without swapping or freeing it.
-    /// Failed pending images keep the old picture and set `takeDirty`.
-    pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
-        const gpa = layers._gpa;
-        var at = want orelse return p.pending != null;
+    /// Fold acknowledgements and grace into ownership without declaring a
+    /// placement. Returns true while a pending image still needs a reply.
+    /// Refusals retain a usable current picture and set takeDirty.
+    /// On allocation failure, current and pending ownership stay unchanged.
+    pub fn settle(p: *Replacement, layers: *Layers, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
+        // Reserve every retirement before changing either ownership slot.
+        const current_failed = if (p.current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
+        const reserve: usize = if (p.pending != null) 1 + @as(usize, @intFromBool(p.current != null)) else @intFromBool(current_failed);
+        try layers._retired.ensureUnusedCapacity(layers._gpa, reserve);
         if (p.pending) |id| {
             const ready = layers.ready(id, now_ms, grace_ms);
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
@@ -263,33 +264,40 @@ pub const Replacement = struct {
                 p.pending = null;
                 p.dirty = true;
             } else if (ready) {
-                // Reserve retirement and the declaration before changing state.
-                if (p.current != null) try layers._retired.ensureUnusedCapacity(gpa, 1);
-                at.image = id;
-                try layers.declare(at);
                 if (p.current) |old| try layers.retire(old);
                 p.current = id;
                 p.pending = null;
-                return false;
             }
         }
         if (p.current) |id| {
-            if (layers.image(id)) |img| {
-                if (img.state != .failed) {
-                    at.image = id;
-                    try layers.declare(at);
-                    return p.pending != null;
-                }
+            const failed = if (layers.image(id)) |img| img.state == .failed else true;
+            if (failed) {
+                try layers.retire(id);
+                p.current = null;
+                p.dirty = true;
             }
-            try layers.retire(id);
-            p.current = null;
-            p.dirty = true;
         }
         return p.pending != null;
     }
 
+    /// Settle and declare at want, overriding its image id. Returns true
+    /// while a pending image needs another frame. A null want leaves
+    /// ownership unsettled and makes no declaration; use settle explicitly
+    /// to advance hidden pictures.
+    pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
+        var at = want orelse return p.pending != null;
+        // A declaration must be able to commit after ownership changes.
+        try layers._declared.ensureUnusedCapacity(layers._gpa, 1);
+        const waiting = try p.settle(layers, now_ms, grace_ms);
+        if (p.current) |id| {
+            at.image = id;
+            try layers.declare(at);
+        }
+        return waiting;
+    }
+
     /// Whether a refusal or write failure asked for another picture since
-    /// last checked. Call `declare` after `Layers.ack` to fold refusals in.
+    /// last checked. Call `settle` or `declare` after `Layers.ack` to fold refusals in.
     pub fn takeDirty(p: *Replacement) bool {
         defer p.dirty = false;
         return p.dirty;
@@ -1740,4 +1748,38 @@ test "managed layers keep one allocator through pictures placements and retireme
             try testing.expectEqual(@as(usize, 0), layers.images().len);
         }
     }.run, .{});
+}
+
+test "a replacement settles without declaring or hiding placements" {
+    const Check = struct {
+        fn run(gpa: Allocator) !void {
+            var layers = Layers.init(gpa);
+            defer layers.deinit();
+            var ids = try ImageIds.init(2, 8, 1);
+            var p: Replacement = .{};
+            var sink = Writer.Discarding.init(&.{});
+            const first = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true, .now_ms = 100 });
+            try testing.expect(try p.settle(&layers, 109, 10));
+            try testing.expect(!try p.settle(&layers, 110, 10));
+            try testing.expectEqual(first.id, p.current.?);
+            const at: Layer = .{ .image = first.id, .rect = .{ .cols = 1, .rows = 1 } };
+            try layers.declare(at);
+            const next = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
+            layers.ack(.{ .id = next.id, .message = "refused" });
+            try testing.expect(!try p.settle(&layers, 0, 10));
+            try testing.expect(p.takeDirty());
+            try testing.expectEqual(first.id, p.current.?);
+            try testing.expectEqualDeep(at, layers.declarations()[0]);
+            const last = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
+            layers.ack(.{ .id = last.id, .message = "OK" });
+            try testing.expect(!try p.settle(&layers, 0, 10));
+            try testing.expectEqual(last.id, p.current.?);
+            try testing.expectEqualDeep(at, layers.declarations()[0]);
+            layers.ack(.{ .id = last.id, .message = "refused" });
+            try testing.expect(!try p.settle(&layers, 0, 10));
+            try testing.expectEqual(null, p.current);
+            try testing.expect(p.takeDirty());
+        }
+    };
+    try testing.checkAllAllocationFailures(testing.allocator, Check.run, .{});
 }

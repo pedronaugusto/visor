@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Replacement.settle advances acknowledgements and grace without creating a placement.
+
 - Breaking: Canvas.Picture borrows Surface and Layers without a redundant allocator field.
 
 - visor.Transmit names the transmission options accepted by Layers and Replacement.
