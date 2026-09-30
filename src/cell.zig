@@ -313,6 +313,14 @@ pub const Cell = CellType(true);
 pub const internal = struct {
     pub const StoredCell = CellType(false);
 
+    // Clipping uses the full head extent; imported continuation cells
+    // become one blank cell when placed independently.
+    pub fn fits(c: Cell, col: u16, row: u16, size: @import("geom.zig").Size) bool {
+        const span: u16 = if (c.isTail() or c.shape.kind == .spacer_head) 1 else c.width();
+        const height: u16 = if (c.isTail() or c.shape.kind == .spacer_head) 1 else c.rows();
+        return col < size.cols and row < size.rows and @as(u32, col) + span <= size.cols and @as(u32, row) + height <= size.rows;
+    }
+
     pub fn store(c: Cell) StoredCell {
         return .{ .text = .{ .buf = c.text.buf, .len = c.text.len }, .link = @enumFromInt(@as(u16, @truncate(@intFromEnum(c.link)))), .style = canonical(c.style), .shape = c.shape };
     }

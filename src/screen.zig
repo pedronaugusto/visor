@@ -532,7 +532,10 @@ pub const Screen = struct {
         var y = r.row;
         while (y < r.bottom()) : (y += 1) {
             var col = r.col;
-            while (col < r.right()) : (col += 1) s.placeOwnedCell(col, @intCast(y), cellmod.internal.store(checked));
+            while (col < r.right()) : (col += 1) {
+                if (cellmod.internal.fits(checked, col - r.col, y - r.row, r.size()))
+                    s.placeOwnedCell(col, y, cellmod.internal.store(checked));
+            }
         }
     }
 
@@ -1795,4 +1798,29 @@ test "screen and renderer geometry and allocation metadata have one owner" {
     try screen.resize(.{ .cols = 7, .rows = 3 });
     try renderer.resize(screen.dimensions());
     try testing.expectEqual(screen.dimensions(), renderer.dimensions());
+}
+
+test "screen fills keep whole glyph extents inside their rectangle" {
+    for ([_]u3{ 1, 3 }) |scale| {
+        var s = try made(8, 5);
+        defer s.deinit();
+        var source = try made(8, 5);
+        defer source.deinit();
+        if (scale == 1) try source.write(0, 0, "中", .{}, .none) else _ = try source.writeScaled(0, 0, "x", .{}, .none, scale);
+        const glyph = source.readCell(0, 0).?;
+        try s.write(3, 1, "R", .{}, .none);
+        try s.write(1, 3, "B", .{}, .none);
+        const rect: Rect = .{ .col = 1, .row = 1, .cols = 2, .rows = 2 };
+        try s.fill(rect, glyph);
+        try testing.expectEqualStrings("R", s.textAt(3, 1));
+        try testing.expectEqualStrings("B", s.textAt(1, 3));
+        var via_window = try made(8, 5);
+        defer via_window.deinit();
+        try via_window.write(3, 1, "R", .{}, .none);
+        try via_window.write(1, 3, "B", .{}, .none);
+        try via_window.window().fill(rect, glyph);
+        for (0..5) |row| for (0..8) |col| {
+            try testing.expectEqualDeep(via_window.readCell(@intCast(col), @intCast(row)), s.readCell(@intCast(col), @intCast(row)));
+        };
+    }
 }

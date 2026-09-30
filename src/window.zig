@@ -337,8 +337,7 @@ pub const Window = struct {
         return col < w.cols() and row < w.rows() and @as(u32, col) + span <= w.cols() and @as(u32, row) + height <= w.rows();
     }
     fn fitsCell(w: Window, col: u16, row: u16, c: Cell) bool {
-        if (c.isTail() or c.shape.kind == .spacer_head) return w.fits(col, row, 1, 1);
-        return w.fits(col, row, c.width(), c.rows());
+        return cellmod.internal.fits(c, col, row, w.size());
     }
 
     /// A grapheme drawn `scale` cells tall and `scale` times its width

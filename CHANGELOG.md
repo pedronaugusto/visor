@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Screen fills and Window placement share whole-cell clipping so a wide or scaled fill stays inside its requested rectangle.
+
 - List and Table bound visible ranges even when the viewport has no body rows.
 
 - Wrapping and Window printing treat CRLF as one hard line break, including when clipping the rest of a line.
