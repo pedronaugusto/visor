@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Failed image transmissions remain refused and freeable instead of becoming ready through silence or grace.
+
 - Custom border drawing refuses malformed glyphs through checked placement instead of treating caller input as unreachable.
 
 - The allocation-free drawing test observes the allocators captured by both owners and refuses new allocations and resizes after warmup.

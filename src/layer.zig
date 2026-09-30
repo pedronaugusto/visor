@@ -457,7 +457,8 @@ pub const Layers = struct {
     /// A shared-memory payload beyond the protocol's u32 size returns
     /// `PayloadTooLarge` before allocating or creating an object.
     /// Written to `w` directly and not through a frame, so the caller sends
-    /// before it draws.
+    /// before it draws. A failed write retains a refused, freeable image;
+    /// it cannot become ready through grace. Send it again to retry.
     pub fn transmit(
         l: *Layers,
         w: *Writer,
@@ -501,6 +502,7 @@ pub const Layers = struct {
             .sent_ms = how.now_ms,
         });
 
+        errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
             .format = how.format,
@@ -553,6 +555,7 @@ pub const Layers = struct {
             .shm = object.name,
         });
         l._shared_objects.appendAssumeCapacity(object);
+        errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
             .format = how.format,
@@ -1679,6 +1682,8 @@ test "shared memory keeps ownership through every allocation and partial output 
             const name = l.image(7).?.shm.?;
             defer shm.unlink(testing.io, name);
             try testing.expectEqual(@as(usize, 1), l._shared_objects.items.len);
+            try testing.expect(l.image(7).?.state == .failed);
+            try testing.expect(!l.ready(7, 1000, 10));
             l.configureSharedMemory(null);
             l.deinit();
             owned = false;
@@ -1782,4 +1787,22 @@ test "a replacement settles without declaring or hiding placements" {
         }
     };
     try testing.checkAllAllocationFailures(testing.allocator, Check.run, .{});
+}
+
+test "failed direct transmission stays refused through grace and can be retried" {
+    for ([_]bool{ false, true }) |answer| {
+        for ([_]usize{ 0, 12 }) |prefix| {
+            var layers: Layers = .init(testing.allocator);
+            defer layers.deinit();
+            var bytes: [12]u8 = undefined;
+            var blocked: Writer = .fixed(bytes[0..prefix]);
+            try testing.expectError(error.WriteFailed, layers.transmit(&blocked, 42, "rgba", .{ .answer = answer, .compress = false }));
+            try testing.expect(layers.image(42) != null);
+            try testing.expect(!layers.ready(42, 1000, 10));
+            try testing.expect(layers.image(42).?.state == .failed);
+            var sink: Writer.Discarding = .init(&.{});
+            _ = try layers.transmit(&sink.writer, 42, "rgba", .{ .compress = false });
+            try testing.expect(layers.ready(42, 1000, 10));
+        }
+    }
 }
