@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Paragraph scrolling skips whole wide clusters at the u16 column edge.
+
 - Charts check label and legend margins before narrowing their dimensions.
 
 - Layout clips areas before padding, placement or repetition, and divides part counts without narrowing their totals.

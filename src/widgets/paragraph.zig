@@ -152,7 +152,7 @@ const RowIterator = struct {
 /// What is left of a row after `n` columns are skipped off its left.
 fn skipColumns(text: []const u8, n: u16, method: visor.Method) []const u8 {
     if (n == 0) return text;
-    var used: u16 = 0;
+    var used: u32 = 0;
     var it: visor.Graphemes = .init(text);
     while (it.nextAt()) |found| {
         if (used >= n) return text[found.start..];
@@ -313,4 +313,14 @@ test "a paragraph scrolled by n shows what the whole one shows n rows down" {
             }
         }
     }
+}
+
+test "horizontal scrolling skips a wide cluster crossing the u16 edge" {
+    const text = "a" ** (std.math.maxInt(u16) - 1) ++ "一x";
+    try testing.expectEqualStrings("x", skipColumns(text, std.math.maxInt(u16), .unicode));
+    var h = try Harness.init(testing.allocator, 2, 1);
+    defer h.deinit();
+    const paragraph: Paragraph = .{ .lines = &.{.{ .text = text }}, .scroll_columns = std.math.maxInt(u16) };
+    try paragraph.draw(h.window());
+    try h.expectFrame("x\n");
 }
