@@ -7,14 +7,13 @@
 //! parameters are part of its identity: two targets that differ only by an
 //! `id=` are two links, because they are two links to the terminal.
 //!
-//! Nothing here is ever compacted or reused. An offset handed out stays
-//! valid until the screen is freed, so the renderer's previous frame may hold
-//! cells whose graphemes were interned many frames ago. A screen that has
-//! churned through a great many distinct long graphemes can be reset with
-//! `Graphemes.reset`, which the caller must follow with a repaint.
-//!
-//! What this file will never be: a ring buffer that wraps. A grapheme a cell
-//! points at is valid for as long as the screen is.
+//! An offset stays valid within one pool generation. `Screen.compactPool`
+//! and resize replace these pools and rewrite live cells; the renderer
+//! detects the changed generation and forgets its previous identities.
+//! Growable storage can move while offsets stay valid, so borrowed slices
+//! have a shorter lifetime than those offsets. `Graphemes.reset` invalidates
+//! offsets too; its caller clears the grid and repaints.
+//! Nothing here wraps or reuses an offset behind a live cell.
 
 const std = @import("std");
 const cellmod = @import("cell.zig");

@@ -157,7 +157,7 @@ pub const Renderer = struct {
     /// What the terminal was last shown.
     prev: []Cell,
     /// The pool generation whose identities the previous frame records.
-    pool_generation: u64 = 0,
+    pool_generation: ?u64 = null,
     /// Rows the renderer has its own reason to write whole.
     force: []bool,
     /// Rows that have ever held a grapheme the two width models disagree
@@ -368,7 +368,9 @@ pub const Renderer = struct {
 
         // Damage cannot distinguish a reused pool identity from the old
         // bytes it named. Forget the whole baseline before comparing it.
-        if (r.pool_generation != s.pool_generation) r.repaint();
+        if (r.pool_generation) |generation| {
+            if (generation != s.pool_generation) r.repaint();
+        }
         r.pool_generation = s.pool_generation;
 
         // A terminal told to measure clusters differently has redrawn
@@ -3589,5 +3591,37 @@ test "pool compaction repaints reused text and link identities, including throug
         try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
         try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
         try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+    }
+}
+
+test "a renderer keeps pool identities apart across screens and a reused screen address" {
+    for ([_]bool{ false, true }) |reuse_address| {
+        var f: Fixture = try .init(testing.allocator, 8, 1);
+        defer f.deinit();
+        const old_link = try f.screen.link("https://old.invalid", "");
+        try f.screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, old_link);
+        _ = try f.draw();
+        var next = try Screen.init(testing.allocator, f.screen.size);
+        var next_owned = true;
+        defer if (next_owned) next.deinit();
+        next.method = .unicode;
+        const new_link = try next.link("https://new.invalid", "");
+        const new = "b\u{301}\u{302}\u{303}";
+        try next.write(0, 0, new, .{}, new_link);
+        try testing.expect(f.renderer.prev[0].eql(next.cells[0]));
+        // Damage belongs to the grid's writes; it says nothing about which
+        // grid the terminal was previously shown.
+        next.damage.clear();
+        f.out.clearRetainingCapacity();
+        const screen = if (reuse_address) screen: {
+            f.screen.deinit();
+            f.screen = next;
+            next_owned = false;
+            break :screen &f.screen;
+        } else &next;
+        const stats = try f.renderer.draw(&f.out.writer, screen, null, f.caps);
+        try testing.expectEqual(@as(u32, 1), stats.repainted);
+        try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
+        try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
     }
 }

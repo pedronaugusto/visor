@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Rendering a different screen repaints even when its pooled cell IDs coincide, including when a screen address is reused.
+
 - A failed resize preserves the screen, its pool identities, borrowed slices and damage.
 
 - Printing documents its allocation rule: measurement allocates nothing; committing can allocate for unseen graphemes longer than six bytes.

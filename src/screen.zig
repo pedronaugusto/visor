@@ -40,6 +40,16 @@ const Rect = geom.Rect;
 const Size = geom.Size;
 const Style = cellmod.Style;
 
+// Each pool pair has a process-wide identity, independent of a Screen's
+// address. Screens can move, or a new one can reuse a destroyed one's place;
+// neither makes offsets from different pools comparable. Atomic so screens
+// constructed on independent threads also get distinct identities.
+var pool_generations: std.atomic.Value(u64) = .init(1);
+
+fn nextPoolGeneration() u64 {
+    return pool_generations.fetchAdd(1, .monotonic);
+}
+
 /// Where the terminal's cursor should end the frame, whether it shows, and
 /// what shape it takes.
 pub const Cursor = struct {
@@ -65,7 +75,7 @@ pub const Screen = struct {
     graphemes: pool.Graphemes,
     /// Every OSC 8 target the cells point at.
     links: pool.Links,
-    /// Changes whenever compaction replaces the pools and their identities.
+    /// The identity of this pair of pools, changed whenever they are replaced.
     pool_generation: u64 = 0,
     /// Which cells have changed since the last frame was written.
     damage: Damage,
@@ -91,6 +101,7 @@ pub const Screen = struct {
             .cells = cells,
             .graphemes = .{},
             .links = .{},
+            .pool_generation = nextPoolGeneration(),
             .damage = dmg,
         };
     }
@@ -185,7 +196,7 @@ pub const Screen = struct {
         s.links.deinit(gpa);
         s.graphemes = graphemes;
         s.links = links;
-        s.pool_generation += 1;
+        s.pool_generation = nextPoolGeneration();
         s.damageAll();
     }
 
