@@ -22,6 +22,11 @@ pub fn main() !void {
     defer renderer.deinit();
 
     try draw(screen.window());
+    var surface = try widgets.Canvas.Surface.init(gpa, 160, 80);
+    defer surface.deinit();
+    const raster = (widgets.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(&surface);
+    raster.circle(50, 50, 30, .{ .rgba = .{ 255, 200, 0, 255 } });
+    raster.line(0, 0, 100, 100, .{ .blend = .additive });
 
     const caps: visor.Caps = .{ .width_method = .unicode, .truecolor = true, .osc8 = true };
     var out: std.Io.Writer.Allocating = .init(gpa);
@@ -199,12 +204,7 @@ fn drawCanvas(win: visor.Window) !void {
     try p.rect(4, 4, 92, 92, .{ .fg = .ansi(.blue) });
     try p.line(4, 4, 96, 96, .{ .fg = .ansi(.green) });
     try p.line(4, 96, 96, 4, .{ .fg = .ansi(.green) });
-    var circle: [64][2]f64 = undefined;
-    for (&circle, 0..) |*point, i| {
-        const t = @as(f64, @floatFromInt(i)) / 63 * std.math.tau;
-        point.* = .{ 50 + 30 * @cos(t), 50 + 30 * @sin(t) };
-    }
-    try p.polyline(&circle, .{ .fg = .ansi(.yellow) });
+    try p.circle(50, 50, 30, .{ .fg = .ansi(.yellow) });
 }
 
 fn drawCalendar(win: visor.Window) !void {

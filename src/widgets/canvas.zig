@@ -1,14 +1,6 @@
-//! A plane to draw shapes on, in the caller's own coordinates.
-//!
-//! A canvas is a window plus two ranges: the caller says what the left and
-//! right edges are worth and what the top and bottom are worth, and draws in
-//! those numbers. How many marks fit in a cell is the marker's business —
-//! eight for braille, one for a block — so the same drawing is sharper or
-//! blunter without the code that made it changing.
-//!
-//! Nothing is buffered. A mark is read out of the cell it lands in, combined
-//! with what is already there, and written back, so a canvas costs no memory
-//! at all and two shapes that cross share the cell they cross in.
+//! Shapes in plot coordinates, drawn into cells or a caller-owned RGBA surface.
+//! The cell painter writes immediately. The raster painter allocates nothing;
+//! Layers owns transmission and placement of its pixels.
 
 const std = @import("std");
 const visor = @import("visor");
@@ -67,6 +59,73 @@ const braille_base: u21 = 0x2800;
 
 /// A plane to draw shapes on, in the caller's own coordinates.
 pub const Canvas = struct {
+    pub const Surface = @import("raster.zig").Surface;
+    pub const Paint = @import("raster.zig").Paint;
+    pub const Blend = @import("raster.zig").Blend;
+
+    /// One terminal plotting shape. Maps borrow separate contours in plot
+    /// coordinates; longitude and latitude fit bounds [-180,180], [-90,90].
+    pub const Shape = struct {
+        geometry: union(enum) {
+            point: [2]f64,
+            line: [4]f64,
+            rectangle: [4]f64,
+            circle: [3]f64,
+            disc: [3]f64,
+            points: []const [2]f64,
+            polyline: []const [2]f64,
+            map: []const []const [2]f64,
+        },
+        paint: Paint = .{},
+        /// Cell attributes; foreground comes from paint.rgba.
+        style: Style = .{},
+    };
+
+    /// Borrowed picture resources. The caller chooses ids and retires them
+    /// through Layers, or uses Replacement with raster() for animated scenes.
+    pub const Picture = struct {
+        surface: *Surface,
+        layers: *visor.Layers,
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+        image: u32,
+        placement: u32 = 1,
+        order: visor.Layer.Order = .{},
+    };
+    pub const DrawOptions = struct {
+        caps: visor.Caps = .{},
+        picture: ?Picture = null,
+    };
+
+    /// Paint to pictures when supported and supplied; otherwise use marker.
+    /// A picture surface is cleared and fitted to the window. Pixels use
+    /// straight alpha; empty cell marks leave the window's contents alone.
+    pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {
+        if (win.rect.isEmpty()) return;
+        if (options.caps.kitty_graphics) {
+            if (options.picture) |pic| {
+                pic.surface.clear();
+                const p = c.raster(pic.surface);
+                for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
+                _ = try pic.layers.transmit(pic.allocator, pic.writer, pic.image, pic.surface.pixels, .{ .width = pic.surface.width, .height = pic.surface.height });
+                try pic.layers.declare(pic.allocator, .{ .image = pic.image, .placement = pic.placement, .rect = win.rect, .order = pic.order });
+                return;
+            }
+        }
+        const p = c.painter(win);
+        for (shapes) |shape| {
+            if (shape.paint.rgba[3] == 0) continue;
+            var style = shape.style;
+            style.fg = .rgb(shape.paint.rgba[0], shape.paint.rgba[1], shape.paint.rgba[2]);
+            try drawShape(p, shape.geometry, style);
+        }
+    }
+
+    /// The same plot bound to RGBA storage. Borrowed for the painter's life.
+    pub fn raster(c: Canvas, surface: *Surface) Raster {
+        return .{ .canvas = c, .surface = surface };
+    }
+
     /// What the left and right edges of the window are worth.
     x_bounds: [2]f64 = .{ 0, 1 },
     /// What the bottom and top edges are worth. The first is the bottom,
@@ -153,12 +212,52 @@ pub const Painter = struct {
     }
 
     /// Every point of a series, joined.
-    pub fn polyline(p: Painter, points: []const [2]f64, style: Style) (std.mem.Allocator.Error || error{InvalidHandle})!void {
-        if (points.len == 0) return;
-        if (points.len == 1) return p.point(points[0][0], points[0][1], style);
-        for (points[1..], 0..) |b, i| {
-            const a = points[i];
+    pub fn polyline(p: Painter, coords: []const [2]f64, style: Style) (std.mem.Allocator.Error || error{InvalidHandle})!void {
+        if (coords.len == 0) return;
+        if (coords.len == 1) return p.point(coords[0][0], coords[0][1], style);
+        for (coords[1..], 0..) |b, i| {
+            const a = coords[i];
             try p.line(a[0], a[1], b[0], b[1], style);
+        }
+    }
+
+    /// Every point independently, for a scatter plot.
+    pub fn points(p: Painter, coords: []const [2]f64, style: Style) !void {
+        for (coords) |at| try p.point(at[0], at[1], style);
+    }
+
+    /// Separate contours, with no line joining one contour to the next.
+    pub fn map(p: Painter, contours: []const []const [2]f64, style: Style) !void {
+        for (contours) |path| try p.polyline(path, style);
+    }
+
+    pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {
+        try p.round(x, y, radius, false, style);
+    }
+
+    pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {
+        try p.round(x, y, radius, true, style);
+    }
+
+    fn round(p: Painter, x: f64, y: f64, radius: f64, filled: bool, style: Style) !void {
+        if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(radius) or radius < 0) return;
+        if (radius == 0) return p.point(x, y, style);
+        const across = @as(u32, p.win.cols()) * p.canvas.marker.across();
+        const down = @as(u32, p.win.rows()) * p.canvas.marker.down();
+        if (!boundsValid(p.canvas) or across == 0 or down == 0) return;
+        const center = project(p.canvas, x, y, across, down);
+        const radii = projectRadius(p.canvas, radius, across, down);
+        // Cell marks are binary, so visit the finite mark grid and test the
+        // ellipse there. No coordinate-dependent iteration or scratch grid.
+        var gy: u32 = 0;
+        while (gy < down) : (gy += 1) {
+            var gx: u32 = 0;
+            while (gx < across) : (gx += 1) {
+                const nx = (@as(f64, @floatFromInt(gx)) - center[0]) / radii[0];
+                const ny = (@as(f64, @floatFromInt(gy)) - center[1]) / radii[1];
+                const norm = @sqrt(nx * nx + ny * ny);
+                if (if (filled) norm <= 1 else @abs(norm - 1) * @min(radii[0], radii[1]) <= 0.5) try p.mark(gx, gy, style);
+            }
         }
     }
 
@@ -219,6 +318,86 @@ pub const Painter = struct {
         return win.screen.textAt(win.rect.col + col, win.rect.row + row);
     }
 };
+
+/// Plot coordinates mapped to an antialiased pixel painter.
+pub const Raster = struct {
+    canvas: Canvas,
+    surface: *Canvas.Surface,
+
+    pub fn point(p: Raster, x: f64, y: f64, paint: Canvas.Paint) void {
+        if (!boundsValid(p.canvas) or !std.math.isFinite(x) or !std.math.isFinite(y)) return;
+        const at = project(p.canvas, x, y, p.surface.width, p.surface.height);
+        p.surface.line(at, at, paint);
+    }
+    pub fn line(p: Raster, x1: f64, y1: f64, x2: f64, y2: f64, paint: Canvas.Paint) void {
+        if (!boundsValid(p.canvas) or !std.math.isFinite(x1) or !std.math.isFinite(y1) or !std.math.isFinite(x2) or !std.math.isFinite(y2) or !std.math.isFinite(paint.width) or paint.width <= 0) return;
+        const a = project(p.canvas, x1, y1, p.surface.width, p.surface.height);
+        const b = project(p.canvas, x2, y2, p.surface.width, p.surface.height);
+        const margin = paint.width / 2 + 0.5;
+        const seg = clipSegment(a[0], a[1], b[0], b[1], .{ -margin, @as(f64, @floatFromInt(p.surface.width - 1)) + margin }, .{ -margin, @as(f64, @floatFromInt(p.surface.height - 1)) + margin }) orelse return;
+        p.surface.line(.{ seg[0], seg[1] }, .{ seg[2], seg[3] }, paint);
+    }
+    pub fn rect(p: Raster, x: f64, y: f64, width: f64, height: f64, paint: Canvas.Paint) void {
+        p.line(x, y, x + width, y, paint);
+        p.line(x + width, y, x + width, y + height, paint);
+        p.line(x + width, y + height, x, y + height, paint);
+        p.line(x, y + height, x, y, paint);
+    }
+    pub fn circle(p: Raster, x: f64, y: f64, radius: f64, paint: Canvas.Paint) void {
+        p.round(x, y, radius, false, paint);
+    }
+    pub fn disc(p: Raster, x: f64, y: f64, radius: f64, paint: Canvas.Paint) void {
+        p.round(x, y, radius, true, paint);
+    }
+    fn round(p: Raster, x: f64, y: f64, radius: f64, filled: bool, paint: Canvas.Paint) void {
+        if (!boundsValid(p.canvas) or !std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(radius) or radius < 0) return;
+        if (radius == 0) return p.point(x, y, paint);
+        p.surface.ellipse(project(p.canvas, x, y, p.surface.width, p.surface.height), projectRadius(p.canvas, radius, p.surface.width, p.surface.height), filled, paint);
+    }
+    pub fn points(p: Raster, coords: []const [2]f64, paint: Canvas.Paint) void {
+        for (coords) |at| p.point(at[0], at[1], paint);
+    }
+    pub fn polyline(p: Raster, coords: []const [2]f64, paint: Canvas.Paint) void {
+        if (coords.len == 1) p.point(coords[0][0], coords[0][1], paint);
+        if (coords.len < 2) return;
+        for (coords[1..], 0..) |b, i| p.line(coords[i][0], coords[i][1], b[0], b[1], paint);
+    }
+    pub fn map(p: Raster, contours: []const []const [2]f64, paint: Canvas.Paint) void {
+        for (contours) |path| p.polyline(path, paint);
+    }
+};
+
+fn drawShape(p: anytype, geometry: @FieldType(Canvas.Shape, "geometry"), paint: anytype) if (@TypeOf(p) == Raster) void else anyerror!void {
+    switch (geometry) {
+        .point => |v| return p.point(v[0], v[1], paint),
+        .line => |v| return p.line(v[0], v[1], v[2], v[3], paint),
+        .rectangle => |v| return p.rect(v[0], v[1], v[2], v[3], paint),
+        .circle => |v| return p.circle(v[0], v[1], v[2], paint),
+        .disc => |v| return p.disc(v[0], v[1], v[2], paint),
+        .points => |v| return p.points(v, paint),
+        .polyline => |v| return p.polyline(v, paint),
+        .map => |v| return p.map(v, paint),
+    }
+}
+
+fn boundsValid(c: Canvas) bool {
+    return std.math.isFinite(c.x_bounds[0]) and std.math.isFinite(c.x_bounds[1]) and c.x_bounds[0] != c.x_bounds[1] and
+        std.math.isFinite(c.y_bounds[0]) and std.math.isFinite(c.y_bounds[1]) and c.y_bounds[0] != c.y_bounds[1];
+}
+fn bounded(v: f128) f64 {
+    // Keep squared distances finite even for finite f64 extremes.
+    return @floatCast(std.math.clamp(v, -1e100, 1e100));
+}
+fn project(c: Canvas, x: f64, y: f64, width: u32, height: u32) [2]f64 {
+    const xmin: f128 = @min(c.x_bounds[0], c.x_bounds[1]);
+    const ymin: f128 = @min(c.y_bounds[0], c.y_bounds[1]);
+    const xs = @as(f128, @max(c.x_bounds[0], c.x_bounds[1])) - xmin;
+    const ys = @as(f128, @max(c.y_bounds[0], c.y_bounds[1])) - ymin;
+    return .{ bounded((@as(f128, x) - xmin) / xs * @as(f128, @floatFromInt(width - 1))), bounded((1 - (@as(f128, y) - ymin) / ys) * @as(f128, @floatFromInt(height - 1))) };
+}
+fn projectRadius(c: Canvas, radius: f64, width: u32, height: u32) [2]f64 {
+    return .{ @max(1e-100, bounded(@as(f128, radius) / @abs(@as(f128, c.x_bounds[1]) - c.x_bounds[0]) * @as(f128, @floatFromInt(width - 1)))), @max(1e-100, bounded(@as(f128, radius) / @abs(@as(f128, c.y_bounds[1]) - c.y_bounds[0]) * @as(f128, @floatFromInt(height - 1)))) };
+}
 
 /// Clips a segment to the canvas rectangle before it is quantized to marks.
 fn clipSegment(x1: f64, y1: f64, x2: f64, y2: f64, xb: [2]f64, yb: [2]f64) ?[4]f64 {

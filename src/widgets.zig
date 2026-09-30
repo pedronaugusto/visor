@@ -10,9 +10,9 @@
 //! a scrollbar's position. The widget reads it, may move it to keep the
 //! selection on screen, and forgets it.
 //!
-//! Nothing here allocates on its own. The calls that write text return an
-//! error because the screen interns a grapheme longer than six bytes, which
-//! is the one allocation anywhere on the frame path.
+//! Retained buffers take an allocator when initialized. Drawing into cells
+//! can allocate when the screen interns a long grapheme or a link; picture
+//! transmission allocates through the allocator supplied by the caller.
 //!
 //! This module imports `visor`. `visor` never imports this one: a base layer
 //! that depends on its widgets is not a base layer.
@@ -121,6 +121,7 @@ test {
     _ = @import("widgets/chart.zig");
     _ = @import("widgets/scrollbar.zig");
     _ = @import("widgets/canvas.zig");
+    _ = @import("widgets/canvas_test.zig");
     _ = @import("widgets/calendar.zig");
     _ = @import("widgets/harness.zig");
     _ = @import("widgets/text_input.zig");

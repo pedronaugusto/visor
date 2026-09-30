@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Canvas draws shared plotting shapes into antialiased RGBA pictures with normal or additive blending, or into terminal cells.
+
 - Conformance properties use checked cell placement and support focused test selection through the package build.
 
 - Documentation names the state owners and distinguishes inline text from pooled handle lifetimes.

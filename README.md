@@ -195,6 +195,53 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
+### Canvas
+
+`Canvas` draws points, lines, rectangle outlines, circles, discs, polylines
+and maps in plot coordinates. A map is a slice of separate contours supplied
+by the caller; there is no bundled geographic dataset. The existing
+`painter(window)` writes cells immediately, with braille, sextants, blocks,
+half blocks, dots or bars. Its y bounds name the bottom and top.
+
+```zig
+const widgets = @import("visor.widgets");
+const canvas: widgets.Canvas = .{
+    .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 }, .marker = .sextant,
+};
+const shapes: []const widgets.Canvas.Shape = &.{
+    .{ .geometry = .{ .circle = .{ 50, 50, 30 } },
+       .paint = .{ .rgba = .{ 255, 200, 0, 255 } } },
+    .{ .geometry = .{ .line = .{ 0, 0, 100, 100 } },
+       .paint = .{ .blend = .additive } },
+};
+try canvas.draw(window, shapes, .{}); // cells
+
+var surface = try widgets.Canvas.Surface.init(gpa, 640, 320);
+defer surface.deinit();
+try canvas.draw(window, shapes, .{
+    .caps = caps,
+    .picture = .{ .surface = &surface, .layers = &layers,
+                 .writer = writer, .allocator = gpa, .image = image_id },
+});
+```
+
+With kitty graphics and picture resources, `draw` clears the surface,
+rasterizes antialiased shapes and transmits and declares a picture beneath
+text through `Layers`. Without them it draws the same shapes as cells.
+Paint width is in output pixels; cell marks remain binary and use paint's
+RGB foreground. Pixel blending is straight-alpha source-over (`normal`)
+or saturated RGB light and alpha sums (`additive`). No glow or colour
+policy is built in. Invalid coordinates draw nothing; strokes are clipped
+before pixel iteration, including coverage just outside the plot.
+
+The caller owns the surface, image ids and retirement. For repeated frames,
+`canvas.raster(&surface)` paints without clearing or sending: pass its RGBA
+`pixels`, `width` and `height` through `Replacement.send` and declare the
+replacement as usual. This keeps picture acknowledgements and swaps with
+the same owner as every other picture. Surface pixels stay borrowed until
+`deinit`; no painter reallocates them. `examples/gallery.zig` draws cells
+and rasterizes pixels with these primitives.
+
 ## Design
 
 **A cell is forty-eight bytes and is compared as memory.** The grapheme lives
