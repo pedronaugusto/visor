@@ -285,8 +285,18 @@ pub const Tty = struct {
             t.restore();
             return;
         };
-        t.renderer = null;
         defer t.restore();
+        // Keep the restoration intent until the terminal accepts the leave
+        // bytes, including the flush. On failure `restore` retries through
+        // the saved descriptor using the still-entered renderer.
+        const entered = r.entered;
+        const region = r.region;
+        const shape = r.shape;
+        errdefer {
+            r.entered = entered;
+            r.region = region;
+            r.shape = shape;
+        }
         var buffer: [256]u8 = undefined;
         var out = t.writer(&buffer);
         try r.leave(&out.interface);
@@ -799,4 +809,32 @@ test "an entered terminal refuses to replace its renderer association" {
     try testing.expectError(error.AlreadyEntered, t.enter(&r, .{}, .alt, .{ .focus = true }));
     try testing.expect(r.entered.?.modes.paste);
     try testing.expect(!r.entered.?.modes.focus);
+}
+
+test "a failed leave flush still restores the entered modes on the saved terminal" {
+    if (is_windows) return error.SkipZigTest;
+    var pair = try conduit.Pty.open(.{});
+    defer pair.close(testing.io);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer r.deinit();
+    defer t.restore();
+    try t.enter(&r, .{}, .alt, .{ .paste = true });
+    var seen: [1024]u8 = undefined;
+    _ = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?25l");
+    // Fail the buffered writer, while the saved terminal remains usable by
+    // the primitive restoration path. Nothing closes the real descriptor.
+    const file = t.file;
+    t.file.handle = -1;
+    defer t.file = file;
+    try testing.expectError(error.WriteFailed, t.leave());
+    try testing.expect(t.saved == null);
+    try testing.expect(r.entered == null);
+    const master = pair.readFile().handle;
+    try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+    const n = std.posix.system.read(master, &seen, seen.len);
+    try testing.expect(std.posix.errno(n) == .SUCCESS);
+    const count: usize = @intCast(n);
+    try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?2004l") != null);
+    try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?1049l") != null);
 }

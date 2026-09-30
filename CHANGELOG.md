@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- A failed terminal leave or flush keeps the mode intent for restoration through the saved descriptor.
+
 - Rendering a different screen repaints even when its pooled cell IDs coincide, including when a screen address is reused.
 
 - A failed resize preserves the screen, its pool identities, borrowed slices and damage.
