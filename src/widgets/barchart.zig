@@ -105,6 +105,7 @@ pub const BarChart = struct {
     fn drawLying(c: BarChart, win: Window, top: u64) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         var label_width: u16 = 0;
         for (c.bars) |b| label_width = @max(label_width, win.width(b.label));
+        if (label_width >= win.cols()) return;
         if (label_width != 0) label_width += 1;
         const cols = win.cols() -| label_width;
         if (cols == 0) return;
@@ -158,9 +159,11 @@ pub const BarChart = struct {
     ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (text.len == 0) return;
         const taken = @min(win.width(text), room);
+        const start = @as(u32, col) + layout.offset(room, taken, .center);
+        if (start >= win.cols()) return;
         _ = try win.printSegment(
             .{ .text = text, .style = c.label_style },
-            .{ .col = col + layout.offset(room, taken, .center), .row = row, .wrap = .none },
+            .{ .col = @intCast(start), .row = row, .wrap = .none },
         );
     }
 };
@@ -267,3 +270,17 @@ test "lying bars start after the widest label, measured the way the screen measu
 }
 
 const sign = "\u{26a0}\u{fe0f}";
+
+test "a lying bar chart refuses a label gutter wider than the window" {
+    var h = try Harness.init(testing.allocator, 2, 1);
+    defer h.deinit();
+    try (BarChart{ .direction = .horizontal, .bars = &.{.{ .label = "x" ** std.math.maxInt(u16), .value = 1 }} }).draw(h.window());
+    try testing.expect(!h.screen.damage.any());
+}
+
+test "a bar label centred beyond the coordinate edge draws nothing" {
+    var screen = try visor.Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
+    defer screen.deinit();
+    try (BarChart{ .bars = &.{} }).drawLabel(screen.window(), "x", std.math.maxInt(u16) - 1, 0, std.math.maxInt(u16));
+    try testing.expect(!screen.damage.any());
+}

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Bar charts check their label gutter and centred labels before narrowing coordinates.
+
 - Wide rules stop before their last glyph crosses the coordinate edge.
 
 - A line gauge whose label fills the row leaves no room for its gap.
