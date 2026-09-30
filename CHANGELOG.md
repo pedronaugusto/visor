@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- The terminal emulator normalizes zero coordinates and clips line counts before narrowing them.
+
 - POSIX restoration restores raw mode before best-effort output and never waits for output space.
 
 - Canvas coordinates reject nonfinite input and keep finite extremes through normalization and line clipping.

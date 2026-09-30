@@ -447,15 +447,15 @@ pub const Term = struct {
         if (intermediates.len != 0) return;
         switch (final) {
             'm' => t.selectGraphicRendition(params),
-            'H', 'f' => t.moveTo(clamp(param(params, 1, 1) - 1), clamp(param(params, 0, 1) - 1)),
+            'H', 'f' => t.moveTo(coordinate(params, 1), coordinate(params, 0)),
             'A' => t.moveTo(t.col, t.row -| clamp(atLeastOne(params))),
             'B' => t.moveTo(t.col, t.row +| clamp(atLeastOne(params))),
             'C' => t.moveTo(t.col +| clamp(atLeastOne(params)), t.row),
             'D' => t.moveTo(t.col -| clamp(atLeastOne(params)), t.row),
             'E' => t.moveTo(0, t.row +| clamp(atLeastOne(params))),
             'F' => t.moveTo(0, t.row -| clamp(atLeastOne(params))),
-            'G', '`' => t.moveTo(clamp(param(params, 0, 1) - 1), t.row),
-            'd' => t.moveTo(t.col, clamp(param(params, 0, 1) - 1)),
+            'G', '`' => t.moveTo(coordinate(params, 0), t.row),
+            'd' => t.moveTo(t.col, coordinate(params, 0)),
             'J' => t.eraseScreen(param(params, 0, 0)),
             'K' => t.eraseLine(param(params, 0, 0)),
             'L' => t.insertLines(atLeastOne(params)),
@@ -579,8 +579,9 @@ pub const Term = struct {
             .cols = t.scr.size.cols,
             .rows = t.scroll_bottom - t.row + 1,
         };
-        t.scr.scroll(rect, -@as(i32, @intCast(n)));
-        t.blankVacated(rect, -@as(i32, @intCast(n)));
+        const count: i32 = @intCast(@min(n, rect.rows));
+        t.scr.scroll(rect, -count);
+        t.blankVacated(rect, -count);
     }
 
     /// `CSI n M`, inside the scrolling region.
@@ -592,8 +593,9 @@ pub const Term = struct {
             .cols = t.scr.size.cols,
             .rows = t.scroll_bottom - t.row + 1,
         };
-        t.scr.scroll(rect, @intCast(n));
-        t.blankVacated(rect, @intCast(n));
+        const count: i32 = @intCast(@min(n, rect.rows));
+        t.scr.scroll(rect, count);
+        t.blankVacated(rect, count);
     }
 
     /// `CSI n @`: blanks opened at the cursor, the rest of the row pushed
@@ -1143,6 +1145,11 @@ fn param(params: []const u8, n: usize, fallback: u32) u32 {
 /// too large for the grid is clamped by `moveTo` anyway.
 fn clamp(n: u32) u16 {
     return std.math.cast(u16, n) orelse std.math.maxInt(u16);
+}
+
+/// A one-based coordinate, with zero and a missing field both meaning one.
+fn coordinate(params: []const u8, n: usize) u16 {
+    return clamp(param(params, n, 1) -| 1);
 }
 
 /// The first parameter, never zero: the movement sequences all treat a
@@ -1860,4 +1867,15 @@ test "a failed terminal resize keeps its open link and both pool generations" {
             try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.cells[0].link).?.uri);
         }
     }.run, .{});
+}
+
+test "zero coordinates and oversized line counts stay inside the terminal grid" {
+    var t = try made(3, 2);
+    defer t.deinit();
+    try t.feed("\x1b[0;0Hq\x1b[0G\x1b[0d");
+    try testing.expectEqualStrings("q", textAt(&t, 0, 0));
+    try t.feed("\x1b[4294967295L");
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
+    try t.feed("q\x1b[0;0H\x1b[4294967295M");
+    try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
 }
