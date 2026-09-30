@@ -144,6 +144,7 @@ pub const Caps = struct {
         /// question nobody asked is not this package's problem to diagnose.
         pub fn feed(p: *Probe, event: morse.Event, now_ms: i64) void {
             const question = morse.probeAnswered(event) orelse return;
+            if (!p.questions.asks(question)) return;
             // A graphics answer about one of the program's pictures answers
             // nothing here.
             if (question == .graphics and event.reply.graphics.id != p.questions.graphics_id) return;
@@ -365,4 +366,17 @@ test "the graphics answer is the one carrying the id the program chose" {
 fn answer(bytes: []const u8) morse.Event {
     if (morse.Reply.parse(bytes)) |r| return .{ .reply = r };
     return .{ .unhandled = bytes };
+}
+
+test "a probe ignores disabled questions without extending its quiet period" {
+    var p: Caps.Probe = .{ .questions = .{ .graphics_id = 1, .sync_output = false, .unicode_core = false } };
+    p.feed(answer("\x1b[?62;4;22c"), 100);
+    p.feed(answer("\x1b[?2026;1$y"), 140);
+    p.feed(answer("\x1b[?2027;1$y"), 145);
+    try testing.expect(!p.caps.sync);
+    try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
+    try testing.expect(!p.answered.contains(.sync_output));
+    try testing.expect(!p.answered.contains(.unicode_core));
+    try testing.expectEqual(@as(?i64, 100), p.last_ms);
+    try testing.expect(p.settled(150, 50));
 }

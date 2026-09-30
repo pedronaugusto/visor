@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Probe replies to disabled questions leave capabilities and the quiet period unchanged.
+
 - Cell placement and printing compare wide extents before narrowing at the u16 coordinate edge.
 
 - A failed terminal leave or flush keeps the mode intent for restoration through the saved descriptor.
