@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- ASCII batching checks its first cell against the Unicode neighbour so a prepend cannot join across grid cells.
+
 - Codepoint measurement gives Unicode prepend characters their standalone column rather than dropping them as combining marks.
 
 - Terminal scroll margins share zero-default parsing and check their order after clipping to the grid.

@@ -1317,10 +1317,11 @@ pub const Renderer = struct {
             }
             try r.setStyle(out, c.style, stats);
             try r.setLink(out, s, c.link, caps, stats);
-            // Printable ASCII cannot join its left neighbour or need a width
-            // protocol. Send a style run together, rather than visiting the
-            // terminal state once for every byte. REP keeps its own run path.
-            if (!caps.rep and c.shape.kind == .narrow and !c.isScaled() and c.text.isAscii()) {
+            // ASCII cells break from one another. Check the first one's
+            // boundary, then send its style run together. REP keeps its own path.
+            if (!caps.rep and c.shape.kind == .narrow and !c.isScaled() and c.text.isAscii() and
+                joinedTo(s, row, col, c, c.text.buf[0..1], caps) == null)
+            {
                 var bytes: [256]u8 = undefined;
                 var n: usize = 0;
                 while (col <= to and n < bytes.len) {
@@ -3651,4 +3652,26 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
 fn storedRowsEqual(a: []const Cell, b: []const Cell) bool {
     if (a.len != b.len) return false;
     return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
+}
+
+test "an ASCII batch keeps its first cell apart from a Unicode prepend" {
+    for ([_][]const u8{"\u{d4e}"}) |prepend| {
+        var f = try Fixture.init(testing.allocator, 5, 1);
+        defer f.deinit();
+        var term = try Term.init(testing.allocator, f.screen.size);
+        defer term.deinit();
+        term.setMethod(.unicode);
+        f.caps.width_method = .unicode;
+        f.caps.rep = false;
+        try f.screen.write(0, 0, prepend, .{}, .none);
+        try f.screen.write(1, 0, "a", .{}, .none);
+        try f.screen.write(2, 0, "b", .{}, .none);
+        _ = try f.draw();
+        try term.feed(f.written());
+        try @import("term.zig").expectScreensEqual(&f.screen, term.screen());
+        try f.screen.write(1, 0, "c", .{}, .none);
+        _ = try f.draw();
+        try term.feed(f.written());
+        try @import("term.zig").expectScreensEqual(&f.screen, term.screen());
+    }
 }

@@ -1138,3 +1138,20 @@ test "a repeat after a cluster repeats the codepoint that began its cell" {
         }
     }
 }
+
+test "an ASCII batch stays apart from a prepend on the second emulator" {
+    for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
+        var h = try Harness.init(testing.allocator, .{ .cols = 5, .rows = 1 }, method);
+        defer h.deinit();
+        const o = try Oracle.init(testing.allocator, h.screen.size, method);
+        defer o.deinit();
+        h.caps.rep = false;
+        try h.enter(o);
+        try h.screen.write(0, 0, "\u{d4e}", .{}, .none);
+        try h.screen.write(1, 0, "a", .{}, .none);
+        try h.screen.write(2, 0, "b", .{}, .none);
+        _ = try h.frame(o);
+        try h.screen.write(1, 0, "c", .{}, .none);
+        _ = try h.frame(o);
+    }
+}
