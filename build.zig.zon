@@ -7,8 +7,8 @@
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#824aa3cd814519f2b3668bc37eb65291dc2b75c5",
-            .hash = "morse-0.7.0-OKnGoQzPDgATtIedytRn4048yl1qOcQ2bf0XQ8EX6mmF",
+            .url = "git+https://github.com/pedronaugusto/morse#52a5f90304d7d46bde9ecad8f3a5d53a989519a0",
+            .hash = "morse-0.7.0-OKnGoS_PDgD6qRwf1307De2MihX0Enx-nLvQb6fIDAu9",
         },
         .conduit = .{
             .url = "git+https://github.com/pedronaugusto/conduit#8adf8af91329333c2deb7db5e2b14fdbae9520d8",
