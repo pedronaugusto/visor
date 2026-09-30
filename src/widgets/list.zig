@@ -113,7 +113,7 @@ pub const List = struct {
         /// The item after this one, stopping at the last.
         pub fn next(s: *State, count: usize) void {
             if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| @min(i + 1, count - 1) else 0;
+            s.selected = if (s.selected) |i| @min(i +| 1, count - 1) else 0;
         }
 
         /// The item before this one, stopping at the first.
@@ -761,4 +761,10 @@ test "a row with its state at the right edge, drawn by hand and by the list, is 
         .text_min = 0,
     }).draw(by_list.window(), &state);
     try expectSameCells(&by_hand, &by_list);
+}
+
+test "navigation clamps a selection at the usize edge" {
+    var state: List.State = .{ .selected = std.math.maxInt(usize) };
+    state.next(3);
+    try testing.expectEqual(@as(?usize, 2), state.selected);
 }

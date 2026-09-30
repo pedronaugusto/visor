@@ -74,7 +74,7 @@ pub const Table = struct {
         /// The row after this one, stopping at the last.
         pub fn next(s: *State, count: usize) void {
             if (count == 0) return s.select(null);
-            s.selected = if (s.selected) |i| @min(i + 1, count - 1) else 0;
+            s.selected = if (s.selected) |i| @min(i +| 1, count - 1) else 0;
         }
 
         /// The row before this one, stopping at the first.
@@ -186,7 +186,7 @@ pub const Table = struct {
         if (room == 0) return;
         if (state.selected) |i| {
             if (i < state.offset) state.offset = i;
-            if (i >= state.offset + room) state.offset = i - room + 1;
+            if (i - state.offset >= room) state.offset = i - (room - 1);
         }
         const most = t.rows.len -| room;
         if (state.offset > most) state.offset = most;
@@ -427,4 +427,13 @@ test "a table drawn by hand at worked-out columns and the same table drawn by Ta
     _ = try by_hand.frame();
     _ = try by_table.frame();
     try visor.expectScreensEqual(&by_hand.screen, &by_table.screen);
+}
+
+test "navigation and scrolling clamp state at the usize edge" {
+    var state: Table.State = .{ .selected = std.math.maxInt(usize), .offset = std.math.maxInt(usize) };
+    const table: Table = .{ .rows = &.{}, .widths = &.{} };
+    table.scrollIntoView(2, &state);
+    try testing.expectEqual(@as(usize, 0), state.offset);
+    state.next(3);
+    try testing.expectEqual(@as(?usize, 2), state.selected);
 }

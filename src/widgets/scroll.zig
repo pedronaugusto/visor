@@ -64,7 +64,7 @@ pub const Scroll = struct {
         const most = total -| rows;
         var offset = state.offset;
         if (s.anchor == .bottom and offset != 0 and state.seen != 0 and total > state.seen) {
-            offset += total - state.seen;
+            offset +|= total - state.seen;
         }
         offset = @min(offset, most);
         state.offset = offset;
@@ -150,4 +150,11 @@ test "fewer rows than room shows them all and cannot scroll" {
     try testing.expectEqual(@as(usize, 0), state.offset);
     const b = Scroll.bar(v, 5);
     try testing.expectEqual(@as(usize, 5), b.viewport);
+}
+
+test "arriving rows clamp an offset at the usize edge" {
+    var state: Scroll.State = .{ .offset = std.math.maxInt(usize), .seen = 1 };
+    const view = (Scroll{}).view(&state, 3, 1);
+    try testing.expectEqual(@as(usize, 2), state.offset);
+    try testing.expectEqual(@as(usize, 0), view.start);
 }

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Navigation and anchored scrolling clamp state without overflowing at the usize edge.
+
 - Paragraph scrolling skips whole wide clusters at the u16 column edge.
 
 - Charts check label and legend margins before narrowing their dimensions.
