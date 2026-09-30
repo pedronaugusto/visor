@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Silence to a direct image transmission never makes an unread shared-memory picture ready.
+
 - Resizing the terminal emulator retains its open OSC 8 target, including before a cell uses it.
 
 - Breaking: `Layers.configureSharedMemory` replaces mutable shared-memory configuration; private object owners retain their cleanup Io, and names use a process-wide namespace.

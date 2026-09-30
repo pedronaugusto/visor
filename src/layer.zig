@@ -334,7 +334,7 @@ pub const Layers = struct {
     retired: std.ArrayList(u32) = .empty,
     /// Whether this terminal answers a transmit: unknown until the first
     /// answer (true), or until a grace period runs out with no answer ever
-    /// (false), after which nothing is waited for.
+    /// (false), after which direct transmissions are not waited for.
     answers: ?bool = null,
     /// How many images were taken as ready because the grace period ran
     /// out rather than because the terminal said so.
@@ -547,11 +547,13 @@ pub const Layers = struct {
 
     /// Whether the terminal has the image, so a layer can show it.
     ///
-    /// An image sent quietly is ready at once. One sent asking for an answer
+    /// An image sent quietly is ready at once. A direct transmission asking for an answer
     /// is ready when the answer says so, or when `grace_ms` has passed on
     /// the caller's clock since it went — and a terminal that lets the grace
     /// period run out without ever having answered is taken to be one that
-    /// never answers, so nothing after it is waited for. A refused image is
+    /// never answers, so later direct transmissions are not waited for.
+    /// A shared-memory trial needs its own answer: silence refuses the image
+    /// and releases its object. A refused image is
     /// not ready; send it again.
     pub fn ready(l: *Layers, id: u32, now_ms: i64, grace_ms: i64) bool {
         const held = l.find(id) orelse return false;
@@ -559,7 +561,10 @@ pub const Layers = struct {
             .ready => return true,
             .failed => return false,
             .loading => {
-                if (l.answers == false) {
+                // Silence permits only bytes sent through the escape code
+                // to be taken on trust. Shared memory needs its own proof.
+                const shared = l.sharedObject(id);
+                if (shared == null and l.answers == false) {
                     held.state = .ready;
                     return true;
                 }
@@ -567,7 +572,7 @@ pub const Layers = struct {
                 // A picture in shared memory is not taken on trust: a
                 // terminal that never said it read one is one that is
                 // not given another, and this one is sent again.
-                if (l.sharedObject(id)) |object| {
+                if (shared) |object| {
                     l.release(held);
                     if (l.policyFor(object)) |sm| sm.state = .no;
                     held.state = .failed;
@@ -1630,4 +1635,23 @@ test "shared memory keeps ownership through every allocation and partial output 
             try shm.put(testing.io, name, "gone");
         }
     }.run, .{});
+}
+
+test "direct transmission silence cannot make an unread shared picture ready" {
+    if (!shm.supported) return error.SkipZigTest;
+    var l: Layers = .{};
+    defer l.deinit(testing.allocator);
+    var sink: Writer.Discarding = .init(&.{});
+    _ = try l.transmit(testing.allocator, &sink.writer, 1, "png", .{ .format = .png, .answer = true });
+    try testing.expect(l.ready(1, 10, 10));
+    try testing.expectEqual(@as(?bool, false), l.answers);
+    l.configureSharedMemory(testing.io);
+    _ = try l.transmit(testing.allocator, &sink.writer, 2, "data", .{ .width = 1, .height = 1, .now_ms = 10 });
+    const name = l.image(2).?.shm.?;
+    defer shm.unlink(testing.io, name);
+    try testing.expect(!l.ready(2, 10, 10));
+    try testing.expect(!l.ready(2, 20, 10));
+    try testing.expectEqual(Image.State.failed, l.image(2).?.state);
+    try testing.expect(l.image(2).?.shm == null);
+    try shm.put(testing.io, name, "gone");
 }

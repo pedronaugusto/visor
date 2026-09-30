@@ -344,9 +344,11 @@ deleted by name after the frame's placements, with its pixels kept, so a
 picture swapped for another is covered before it goes. `Layers` sends the
 pixels too — chunked, deflated when that helps, quiet unless asked — and frees
 them, so a program writes no graphics command of its own. Nothing waits on the
-terminal's word unless asked to: an image sent quietly is shown at once, and
-one sent asking for an answer is shown on the answer or when the caller's grace
-period runs out, and a terminal that never answers is not waited for twice.
+terminal's word unless asked to: an image sent quietly is shown at once.
+A direct transmission asking for an answer is shown on the answer or when the
+caller's grace period runs out, and a terminal that never answers is not waited
+for twice. A shared-memory trial needs its own answer; silence refuses that
+picture and releases its object.
 
 `Replacement` keeps a current picture while a new one is in flight. Share an
 `ImageIds` range between replacements, with the probe's graphics id excluded.
