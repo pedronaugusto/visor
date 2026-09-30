@@ -21,8 +21,12 @@ pub fn build(b: *std.Build) void {
     const visor = b.dependency("visor", .{ .target = target, .optimize = optimize });
     const ghostty = b.dependency("ghostty", .{ .target = target, .optimize = optimize });
 
+    const test_filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
+    const filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
+
     const tests = b.addTest(.{
         .name = "visor-conformance",
+        .filters = filters,
         // The package's own build makes this call for its test binaries,
         // and this one compiles the same package: without it, Zig 0.16's
         // self-hosted x86_64 backend takes the whole compilation down with

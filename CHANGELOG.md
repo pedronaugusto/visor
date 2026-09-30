@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Conformance properties use checked cell placement and support focused test selection through the package build.
+
 - Documentation names the state owners and distinguishes inline text from pooled handle lifetimes.
 
 - Restoring the terminal emulator's saved cursor clamps it to the resized grid.

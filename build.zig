@@ -215,6 +215,7 @@ pub fn build(b: *std.Build) void {
     const conformance = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
     conformance.setCwd(b.path("conformance"));
     conformance.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
+    if (test_filter) |f| conformance.addArg(b.fmt("-Dtest-filter={s}", .{f}));
     conformance.has_side_effects = true;
     conformance_step.dependOn(&conformance.step);
 }
