@@ -176,6 +176,7 @@ pub const Window = struct {
         };
 
         /// The six glyphs a box is made of: two lines and four corners.
+        /// Inline printable clusters; invalid or oversized glyphs are skipped.
         pub const Glyphs = struct {
             /// The horizontal line, used above and below.
             horizontal: []const u8 = "\u{2500}",
@@ -628,7 +629,7 @@ pub const Window = struct {
                 .kind = if (cluster == 2) .wide else .narrow,
                 .drift = textmod.disagrees(glyph),
             },
-        }) catch unreachable;
+        }) catch return;
     }
 };
 
@@ -1082,4 +1083,11 @@ test "printing and measurement treat CRLF as one line break" {
         try testing.expectEqualStrings("b", screen.textAt(0, 1));
         try testing.expectEqualStrings("c", screen.textAt(0, 2));
     }
+}
+
+test "custom borders refuse malformed glyphs without changing the grid" {
+    var s = try made(4, 3);
+    defer s.deinit();
+    _ = s.window().child(.{ .border = .{ .where = .{ .top = true }, .glyphs = .{ .horizontal = "ab" } } });
+    for (0..4) |col| try testing.expectEqualStrings(" ", s.textAt(@intCast(col), 0));
 }

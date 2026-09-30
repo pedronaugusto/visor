@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Custom border drawing refuses malformed glyphs through checked placement instead of treating caller input as unreachable.
+
 - The allocation-free drawing test observes the allocators captured by both owners and refuses new allocations and resizes after warmup.
 
 - Screen fills and Window placement share whole-cell clipping so a wide or scaled fill stays inside its requested rectangle.
