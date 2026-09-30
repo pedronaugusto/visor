@@ -158,6 +158,8 @@ pub const Image = layer_mod.Image;
 pub const Layer = layer_mod.Layer;
 /// What this frame shows.
 pub const Layers = layer_mod.Layers;
+/// Options for sending pixels through Layers or Replacement.
+pub const Transmit = layer_mod.Transmit;
 /// One picture replaced without a gap, on caller-supplied time.
 pub const Replacement = layer_mod.Replacement;
 /// A rotating range of image ids that skips the graphics probe.
@@ -235,4 +237,15 @@ test {
 
 test "the exported version is a semantic version" {
     _ = try std.SemanticVersion.parse(version);
+}
+
+test "transmission options have one public name" {
+    const how: Transmit = .{ .width = 1, .height = 1, .compress = false };
+    try std.testing.expect(Transmit == layer_mod.Transmit);
+    var layers = Layers.init(std.testing.allocator);
+    defer layers.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    _ = try layers.transmit(&out.writer, 1, &.{ 0, 0, 0, 255 }, how);
+    try std.testing.expectEqual(@as(usize, 1), layers.images().len);
 }
