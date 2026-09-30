@@ -285,8 +285,7 @@ pub const List = struct {
         state.offset = @min(state.offset, l.items.len);
         if (rows == 0) return;
         if (state.selected) |sel| if (sel < l.items.len) {
-            if (sel < state.offset) state.offset = sel;
-            while (state.offset < sel and l.span(state.offset, sel) > rows) state.offset += 1;
+            state.offset = selectedStart(ItemHeights{ .items = l.items }, @min(state.offset, sel), sel, rows);
         };
         // The furthest offset whose items still fill the window.
         var most = l.items.len;
@@ -299,14 +298,28 @@ pub const List = struct {
         if (most == l.items.len and most > 0) most -= 1;
         if (state.offset > most) state.offset = most;
     }
+};
 
-    /// How many rows items `from` through `to` take.
-    fn span(l: List, from: usize, to: usize) usize {
-        var n: usize = 0;
-        for (l.items[from .. to + 1]) |it| n += it.rows();
-        return n;
+const ItemHeights = struct {
+    items: []const Item,
+    fn height(h: ItemHeights, at: usize) usize {
+        return h.items[at].rows();
     }
 };
+
+// The height source keeps selection geometry independent of drawing and
+// lets a test count the work done for a distant selection.
+fn selectedStart(heights: anytype, from: usize, selected: usize, room: u16) usize {
+    var first = selected;
+    var used = heights.height(selected);
+    while (first > from and used < room) {
+        const tall = heights.height(first - 1);
+        if (tall > room - used) break;
+        used += tall;
+        first -= 1;
+    }
+    return first;
+}
 
 const Run = List.Segment;
 
@@ -791,4 +804,21 @@ test "a list with no viewport still returns a bounded visible range" {
     const empty: List = .{ .items = &.{} };
     try testing.expectEqual(@as(usize, 0), empty.visible(0, &state).first);
     try testing.expectEqual(@as(usize, 0), state.offset);
+}
+
+test "a distant list selection reads each item height at most once" {
+    const Heights = struct {
+        reads: usize = 0,
+        fn height(h: *@This(), at: usize) usize {
+            h.reads += 1;
+            return 1 + at % 3;
+        }
+    };
+    var heights: Heights = .{};
+    const first = selectedStart(&heights, 0, 1023, 7);
+    try testing.expectEqual(@as(usize, 1020), first);
+    try testing.expect(heights.reads <= 1024);
+    heights.reads = 0;
+    try testing.expectEqual(@as(usize, 1023), selectedStart(&heights, 0, 1023, 0));
+    try testing.expect(heights.reads <= 1024);
 }
