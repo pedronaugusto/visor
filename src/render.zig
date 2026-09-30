@@ -157,6 +157,8 @@ pub const Renderer = struct {
     size: Size,
     /// What the terminal was last shown.
     prev: []Cell,
+    /// The pool generation whose identities the previous frame records.
+    pool_generation: u64 = 0,
     /// Rows the renderer has its own reason to write whole.
     force: []bool,
     /// Rows that have ever held a grapheme the two width models disagree
@@ -364,6 +366,11 @@ pub const Renderer = struct {
         // after the caller accepted every byte below.
         errdefer r.repaint();
         var stats: Stats = .{};
+
+        // Damage cannot distinguish a reused pool identity from the old
+        // bytes it named. Forget the whole baseline before comparing it.
+        if (r.pool_generation != s.pool_generation) r.repaint();
+        r.pool_generation = s.pool_generation;
 
         // A terminal told to measure clusters differently has redrawn
         // everything the two models disagreed about, and the model cannot
@@ -3554,4 +3561,32 @@ test "untrustCursor settles a cursor moved between otherwise unchanged frames" {
     f.renderer.untrustCursor();
     try f.expectBytes("\x1b[2;5H");
     try f.expectBytes("");
+}
+
+test "pool compaction repaints reused text and link identities, including through resize" {
+    for ([_]bool{ false, true }) |resize| {
+        var f: Fixture = try .init(testing.allocator, 8, 1);
+        defer f.deinit();
+        const old = "a\u{301}\u{302}\u{303}";
+        const new = "b\u{301}\u{302}\u{303}";
+        const old_link = try f.screen.link(testing.allocator, "https://old.invalid", "");
+        try f.screen.write(0, 0, old, .{}, old_link);
+        _ = try f.draw();
+        const previous = f.renderer.prev[0];
+
+        const new_link = try f.screen.link(testing.allocator, "https://new.invalid", "");
+        try f.screen.write(0, 0, new, .{}, new_link);
+        if (resize) {
+            // A resize can compact even when the renderer next sees its
+            // original size again.
+            try f.screen.resize(testing.allocator, .{ .cols = 9, .rows = 1 });
+            try f.screen.resize(testing.allocator, f.renderer.size);
+        } else try f.screen.compactPool(testing.allocator);
+        try testing.expect(previous.eql(f.screen.cells[0]));
+        const stats = try f.draw();
+        try testing.expectEqual(@as(u32, 1), stats.repainted);
+        try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
+        try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
+        try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+    }
 }

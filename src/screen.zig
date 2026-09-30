@@ -66,6 +66,8 @@ pub const Screen = struct {
     graphemes: pool.Graphemes,
     /// Every OSC 8 target the cells point at.
     links: pool.Links,
+    /// Changes whenever compaction replaces the pools and their identities.
+    pool_generation: u64 = 0,
     /// Which cells have changed since the last frame was written.
     damage: Damage,
     /// Where the cursor should end the frame.
@@ -181,6 +183,7 @@ pub const Screen = struct {
         s.links.deinit(gpa);
         s.graphemes = graphemes;
         s.links = links;
+        s.pool_generation += 1;
         s.damageAll();
     }
 
