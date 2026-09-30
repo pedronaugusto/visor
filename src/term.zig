@@ -299,7 +299,7 @@ pub const Term = struct {
         const w: u16 = @max(left.width(), @min(textmod.graphemeWidth(joined, .unicode), 2));
         var head = at;
         var row = t.row;
-        if (head + w > cols) {
+        if (@as(u32, head) + w > cols) {
             // Grown too wide for the end of the row: a spacer where it was,
             // and the whole cluster at the start of the next.
             var spacer: Cell = .blank(t.style);
@@ -807,7 +807,7 @@ pub const Term = struct {
             t.lineFeed();
         }
         const span: u32 = @as(u32, w) * scale;
-        if (t.col + span > cols or t.row + scale > rows) return;
+        if (t.col + span > cols or @as(u32, t.row) + scale > rows) return;
         const text = try t.scr.intern(grapheme);
         t.scr.writeOwnedCell(t.col, t.row, .init(.{
             .text = text,
@@ -1878,4 +1878,17 @@ test "zero coordinates and oversized line counts stay inside the terminal grid" 
     try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
     try t.feed("q\x1b[0;0H\x1b[4294967295M");
     try testing.expectEqualStrings(" ", textAt(&t, 0, 0));
+}
+
+test "a growing cluster and scaled text check the u16 coordinate edge before narrowing" {
+    var t = try made(std.math.maxInt(u16), 2);
+    defer t.deinit();
+    try t.feed("\x1b[1;65535H❤");
+    try t.feed("️");
+    try testing.expectEqualStrings("❤️", textAt(&t, 0, 1));
+    try testing.expectEqualStrings(" ", textAt(&t, std.math.maxInt(u16) - 1, 0));
+    var tall = try made(7, std.math.maxInt(u16));
+    defer tall.deinit();
+    try tall.feed("\x1b[65535;1H\x1b]66;s=7;x\x1b\\");
+    try testing.expectEqualStrings(" ", textAt(&tall, 0, std.math.maxInt(u16) - 1));
 }
