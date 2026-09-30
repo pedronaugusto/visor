@@ -16,10 +16,10 @@ pub fn main() !void {
 
     const size: visor.Size = .{ .cols = 80, .rows = 33 };
     var screen: visor.Screen = try .init(gpa, size);
-    defer screen.deinit(gpa);
+    defer screen.deinit();
     screen.method = .unicode;
     var renderer: visor.Renderer = try .init(gpa, size);
-    defer renderer.deinit(gpa);
+    defer renderer.deinit();
 
     try draw(screen.window());
 

@@ -280,7 +280,7 @@ pub const Renderer = struct {
             .hashes = &.{},
             .buf = &.{},
         };
-        try r.allocate(gpa, size);
+        try r.allocate(size);
         return r;
     }
 
@@ -288,8 +288,8 @@ pub const Renderer = struct {
     ///
     /// A `Tty` borrowing it must release it through `leave`, `restore` or
     /// `close` before this call.
-    pub fn deinit(r: *Renderer, gpa: Allocator) void {
-        r.release(gpa);
+    pub fn deinit(r: *Renderer) void {
+        r.release();
         r.* = undefined;
     }
 
@@ -298,7 +298,8 @@ pub const Renderer = struct {
     /// fitted, cut it, moved it up with the cursor, or took in a frame drawn
     /// at the old size after it had changed -- is its own business, and
     /// nothing about what it now shows is known.
-    pub fn resize(r: *Renderer, gpa: Allocator, size: Size) Allocator.Error!void {
+    pub fn resize(r: *Renderer, size: Size) Allocator.Error!void {
+        const gpa = r.gpa;
         var next: Renderer = .{
             .gpa = gpa,
             .size = size,
@@ -309,8 +310,8 @@ pub const Renderer = struct {
             .hashes = &.{},
             .buf = &.{},
         };
-        try next.allocate(gpa, size);
-        r.release(gpa);
+        try next.allocate(size);
+        r.release();
         r.size = size;
         r.prev = next.prev;
         r.force = next.force;
@@ -637,7 +638,8 @@ pub const Renderer = struct {
     //=====================================================================
 
     /// Takes the memory the renderer needs, all of it at once.
-    fn allocate(r: *Renderer, gpa: Allocator, size: Size) Allocator.Error!void {
+    fn allocate(r: *Renderer, size: Size) Allocator.Error!void {
+        const gpa = r.gpa;
         r.prev = try gpa.alloc(Cell, size.area());
         errdefer gpa.free(r.prev);
         @memset(r.prev, .blank(.{}));
@@ -656,7 +658,8 @@ pub const Renderer = struct {
     }
 
     /// Gives all of it back.
-    fn release(r: *Renderer, gpa: Allocator) void {
+    fn release(r: *Renderer) void {
+        const gpa = r.gpa;
         gpa.free(r.prev);
         gpa.free(r.force);
         gpa.free(r.drifted);
@@ -2233,10 +2236,10 @@ const Fixture = struct {
     fn init(gpa: Allocator, cols: u16, rows: u16) !Fixture {
         const size: Size = .{ .cols = cols, .rows = rows };
         var s: Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         // The renderer starts where `enter` leaves the terminal: blank,
         // cursor hidden and at the top-left, no style and no link.
         r.shown = false;
@@ -2251,8 +2254,8 @@ const Fixture = struct {
     }
 
     fn deinit(f: *Fixture) void {
-        f.screen.deinit(f.gpa);
-        f.renderer.deinit(f.gpa);
+        f.screen.deinit();
+        f.renderer.deinit();
         f.out.deinit();
     }
 
@@ -2318,7 +2321,7 @@ test "a link is opened once and closed once" {
     var f: Fixture = try .init(testing.allocator, 8, 1);
     defer f.deinit();
 
-    const l = try f.screen.link(testing.allocator, "https://ziglang.org", "id=1");
+    const l = try f.screen.link("https://ziglang.org", "id=1");
     try f.screen.write(0, 0, "z", .{}, l);
     try f.screen.write(1, 0, "i", .{}, l);
     try f.screen.write(2, 0, "g", .{}, .none);
@@ -2331,8 +2334,8 @@ test "a link's parameters are part of it" {
     var f: Fixture = try .init(testing.allocator, 8, 1);
     defer f.deinit();
 
-    const one = try f.screen.link(testing.allocator, "https://ziglang.org", "id=1");
-    const two = try f.screen.link(testing.allocator, "https://ziglang.org", "id=2");
+    const one = try f.screen.link("https://ziglang.org", "id=1");
+    const two = try f.screen.link("https://ziglang.org", "id=2");
     try testing.expect(one != two);
     try f.screen.write(0, 0, "a", .{}, one);
     try f.screen.write(1, 0, "b", .{}, two);
@@ -2751,7 +2754,7 @@ test "arithmetic row prices match emitted rows" {
     f.caps.rep = true;
     f.caps.scaled_text = true;
 
-    const link = try f.screen.link(testing.allocator, "https://ziglang.org", "id=price");
+    const link = try f.screen.link("https://ziglang.org", "id=price");
     for (0..40) |col| try f.screen.write(@intCast(col), 0, "x", .{}, .none);
     _ = try f.draw();
 
@@ -2811,7 +2814,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
         var f: Fixture = try .init(testing.allocator, cols, 2);
         defer f.deinit();
         f.caps.rep = random.boolean();
-        const link = try f.screen.link(testing.allocator, "https://ziglang.org", "id=run");
+        const link = try f.screen.link("https://ziglang.org", "id=run");
         // A cell is a glyph, a style and a link, or a blank; a row is blank
         // from some column on a quarter of the time.
         const Pick = struct { glyph: usize, style: usize, linked: bool, blank: bool };
@@ -3063,7 +3066,7 @@ test "cached row safety follows scrolled previous rows" {
 test "a screen of the wrong size is refused rather than drawn" {
     var f: Fixture = try .init(testing.allocator, 4, 2);
     defer f.deinit();
-    try f.screen.resize(testing.allocator, .{ .cols = 5, .rows = 2 });
+    try f.screen.resize(.{ .cols = 5, .rows = 2 });
     try testing.expectError(error.SizeMismatch, f.draw());
 }
 
@@ -3182,8 +3185,8 @@ test "growing an inline screen takes more rows and keeps what was above" {
     try t.feed(f.written());
 
     // Four rows from row 2 of a five-row terminal: one row scrolls off.
-    try f.screen.resize(testing.allocator, .{ .cols = 10, .rows = 4 });
-    try f.renderer.resize(testing.allocator, .{ .cols = 10, .rows = 4 });
+    try f.screen.resize(.{ .cols = 10, .rows = 4 });
+    try f.renderer.resize(.{ .cols = 10, .rows = 4 });
     try f.screen.write(0, 3, "d", .{}, .none);
     _ = try f.draw();
     try testing.expect(std.mem.startsWith(u8, f.written(), "\x1b]8;;\x1b\\\x1b[0m\x1b8\n\n\n\x1b[3A\x1b7\x1b[0J"));
@@ -3207,8 +3210,8 @@ test "after a resize every row is written, the blank ones erased" {
     // new layout has nothing there, and the old frame is not what the
     // terminal is known to show, so the row is erased, not skipped.
     const size: Size = .{ .cols = 6, .rows = 4 };
-    try f.screen.resize(testing.allocator, size);
-    try f.renderer.resize(testing.allocator, size);
+    try f.screen.resize(size);
+    try f.renderer.resize(size);
     f.screen.clear();
     try f.screen.write(0, 3, "y", .{}, .none);
     try f.expectBytes("\x1b]8;;\x1b\\\x1b[0m" ++
@@ -3257,8 +3260,8 @@ test "shrinking an inline screen gives its rows back blank" {
     try t.feed(f.written());
     try expectRowText(&t, 4, "x");
 
-    try f.screen.resize(testing.allocator, .{ .cols = 10, .rows = 2 });
-    try f.renderer.resize(testing.allocator, .{ .cols = 10, .rows = 2 });
+    try f.screen.resize(.{ .cols = 10, .rows = 2 });
+    try f.renderer.resize(.{ .cols = 10, .rows = 2 });
     _ = try f.draw();
     try t.feed(f.written());
     try expectRowText(&t, 0, "line 0");
@@ -3389,9 +3392,9 @@ test "the renderer gives its memory back under a failing allocator" {
     try testing.checkAllAllocationFailures(testing.allocator, struct {
         fn run(gpa: Allocator) !void {
             var r: Renderer = try .init(gpa, .{ .cols = 20, .rows = 8 });
-            defer r.deinit(gpa);
-            try r.resize(gpa, .{ .cols = 40, .rows = 12 });
-            try r.resize(gpa, .{ .cols = 10, .rows = 4 });
+            defer r.deinit();
+            try r.resize(.{ .cols = 40, .rows = 12 });
+            try r.resize(.{ .cols = 10, .rows = 4 });
         }
     }.run, .{});
 }
@@ -3567,19 +3570,19 @@ test "pool compaction repaints reused text and link identities, including throug
         defer f.deinit();
         const old = "a\u{301}\u{302}\u{303}";
         const new = "b\u{301}\u{302}\u{303}";
-        const old_link = try f.screen.link(testing.allocator, "https://old.invalid", "");
+        const old_link = try f.screen.link("https://old.invalid", "");
         try f.screen.write(0, 0, old, .{}, old_link);
         _ = try f.draw();
         const previous = f.renderer.prev[0];
 
-        const new_link = try f.screen.link(testing.allocator, "https://new.invalid", "");
+        const new_link = try f.screen.link("https://new.invalid", "");
         try f.screen.write(0, 0, new, .{}, new_link);
         if (resize) {
             // A resize can compact even when the renderer next sees its
             // original size again.
-            try f.screen.resize(testing.allocator, .{ .cols = 9, .rows = 1 });
-            try f.screen.resize(testing.allocator, f.renderer.size);
-        } else try f.screen.compactPool(testing.allocator);
+            try f.screen.resize(.{ .cols = 9, .rows = 1 });
+            try f.screen.resize(f.renderer.size);
+        } else try f.screen.compactPool();
         try testing.expect(previous.eql(f.screen.cells[0]));
         const stats = try f.draw();
         try testing.expectEqual(@as(u32, 1), stats.repainted);

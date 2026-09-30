@@ -29,10 +29,10 @@ pub fn main() !void {
 
     var size: visor.Size = .{ .cols = cols, .rows = 2 };
     var screen: visor.Screen = try .init(gpa, size);
-    defer screen.deinit(gpa);
+    defer screen.deinit();
     screen.method = caps.width_method;
     var renderer: visor.Renderer = try .init(gpa, size);
-    defer renderer.deinit(gpa);
+    defer renderer.deinit();
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
 
@@ -53,8 +53,8 @@ pub fn main() !void {
     // A third row, for a line of log. The terminal scrolls to make room
     // when there is none below, and what was above stays above.
     size = .{ .cols = cols, .rows = 3 };
-    try screen.resize(gpa, size);
-    try renderer.resize(gpa, size);
+    try screen.resize(size);
+    try renderer.resize(size);
     job.done = 12;
     job.note = "linked zig-out/bin/build";
     try job.draw(screen.window());

@@ -36,10 +36,10 @@ const Bench = struct {
     fn init(gpa: Allocator, cols: u16, rows: u16) !Bench {
         const size: geom.Size = .{ .cols = cols, .rows = rows };
         var s: Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         r.shown = false;
         r.cursor = .{ .col = 0, .row = 0 };
         return .{
@@ -52,8 +52,8 @@ const Bench = struct {
     }
 
     fn deinit(b: *Bench) void {
-        b.screen.deinit(b.gpa);
-        b.renderer.deinit(b.gpa);
+        b.screen.deinit();
+        b.renderer.deinit();
         b.out.deinit();
     }
 

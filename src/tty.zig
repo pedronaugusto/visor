@@ -606,7 +606,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     const before = try std.posix.tcgetattr(t.file.handle);
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer r.deinit(testing.allocator);
+    defer r.deinit();
     const modes: render.Modes = .{
         .keyboard = .{ .report_event_types = true },
         .mouse = .{ .motion = .press },
@@ -668,7 +668,7 @@ test "leaving through the terminal releases its renderer before destruction" {
     const undone = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?1049l");
     try testing.expect(std.mem.indexOf(u8, undone, "\x1b[?2004l") != null);
 
-    r.deinit(testing.allocator);
+    r.deinit();
     t.restore();
 }
 
@@ -728,7 +728,7 @@ test "two terminals cannot borrow the same entered renderer" {
     var a: Tty = .adopt(testing.io, first.slaveFile());
     var b: Tty = .adopt(testing.io, second.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer r.deinit(testing.allocator);
+    defer r.deinit();
     defer a.restore();
     defer b.restore();
     try a.enter(&r, .{}, .alt, .{ .paste = true });
@@ -747,9 +747,9 @@ test "restoring one entered terminal leaves the other renderer armed" {
     var a: Tty = .adopt(testing.io, first.slaveFile());
     var b: Tty = .adopt(testing.io, second.slaveFile());
     var ra = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer ra.deinit(testing.allocator);
+    defer ra.deinit();
     var rb = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer rb.deinit(testing.allocator);
+    defer rb.deinit();
     defer a.restore();
     defer b.restore();
     try a.enter(&ra, .{}, .alt, .{ .paste = true });
@@ -793,7 +793,7 @@ test "an entered terminal refuses to replace its renderer association" {
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer r.deinit(testing.allocator);
+    defer r.deinit();
     defer t.restore();
     try t.enter(&r, .{}, .alt, .{ .paste = true });
     try testing.expectError(error.AlreadyEntered, t.enter(&r, .{}, .alt, .{ .focus = true }));

@@ -796,10 +796,10 @@ const Fixture = struct {
     fn init(gpa: Allocator, cols: u16, rows: u16) !Fixture {
         const size: geom.Size = .{ .cols = cols, .rows = rows };
         var s: Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         r.shown = false;
         r.cursor = .{ .col = 0, .row = 0 };
         return .{
@@ -812,9 +812,9 @@ const Fixture = struct {
     }
 
     fn deinit(f: *Fixture) void {
-        f.screen.deinit(f.gpa);
+        f.screen.deinit();
         f.layers.deinit(f.gpa);
-        f.renderer.deinit(f.gpa);
+        f.renderer.deinit();
         f.out.deinit();
     }
 
@@ -924,8 +924,8 @@ test "after a resize every picture is placed again, and one that left is still d
     // The terminal took a new size and may have moved or dropped either;
     // the one the layout keeps in the same cells is placed there again.
     const size: geom.Size = .{ .cols = 24, .rows = 6 };
-    try f.screen.resize(testing.allocator, size);
-    try f.renderer.resize(testing.allocator, size);
+    try f.screen.resize(size);
+    try f.renderer.resize(size);
     try f.layers.declare(testing.allocator, stays);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 2), stats.placements);
@@ -1232,7 +1232,7 @@ test "a link survives a frame in which a neighbouring cell changed" {
     var f: Fixture = try .init(testing.allocator, 20, 2);
     defer f.deinit();
 
-    const l = try f.screen.link(testing.allocator, "https://ziglang.org", "id=1");
+    const l = try f.screen.link("https://ziglang.org", "id=1");
     try f.screen.write(0, 0, "z", .{}, l);
     try f.screen.write(1, 0, "i", .{}, l);
     try f.screen.write(2, 0, "g", .{}, l);
@@ -1247,7 +1247,7 @@ test "a link survives a frame in which a neighbouring cell changed" {
     }
 
     // And a link differing only in its parameters is a different link.
-    const other = try f.screen.link(testing.allocator, "https://ziglang.org", "id=2");
+    const other = try f.screen.link("https://ziglang.org", "id=2");
     try testing.expect(l != other);
     try f.screen.write(1, 0, "i", .{}, other);
     _ = try f.draw();

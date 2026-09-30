@@ -38,10 +38,10 @@ pub const Harness = struct {
     pub fn initMeasured(gpa: std.mem.Allocator, cols: u16, rows: u16, method: visor.Method) !Harness {
         const size: visor.Size = .{ .cols = cols, .rows = rows };
         var screen: visor.Screen = try .init(gpa, size);
-        errdefer screen.deinit(gpa);
+        errdefer screen.deinit();
         screen.method = method;
         var renderer: visor.Renderer = try .init(gpa, size);
-        errdefer renderer.deinit(gpa);
+        errdefer renderer.deinit();
         var term: visor.Term = try .init(gpa, size);
         errdefer term.deinit();
         term.setMethod(method);
@@ -57,8 +57,8 @@ pub const Harness = struct {
     }
 
     pub fn deinit(h: *Harness) void {
-        h.screen.deinit(h.gpa);
-        h.renderer.deinit(h.gpa);
+        h.screen.deinit();
+        h.renderer.deinit();
         h.term.deinit();
         h.out.deinit();
         h.text.deinit();

@@ -56,7 +56,7 @@ pub const Session = struct {
     /// belongs to the caller and must be excluded from its image ids.
     pub fn init(gpa: Allocator, ws: Winsize, questions: morse.Probe) Allocator.Error!Session {
         var screen = try Screen.init(gpa, ws.cells);
-        errdefer screen.deinit(gpa);
+        errdefer screen.deinit();
         return .{
             .gpa = gpa,
             .screen = screen,
@@ -70,8 +70,8 @@ pub const Session = struct {
     /// it; freeing memory writes nothing.
     pub fn deinit(s: *Session) void {
         s.layers.deinit(s.gpa);
-        s.renderer.deinit(s.gpa);
-        s.screen.deinit(s.gpa);
+        s.renderer.deinit();
+        s.screen.deinit();
         s.* = undefined;
     }
 
@@ -162,8 +162,8 @@ pub const Session = struct {
         const changed = !std.meta.eql(s.ws.cells, next.cells) or !std.meta.eql(s.ws.area, next.area);
         const confirmed = s.resize_report and s.caps.in_band_resize;
         if (changed) {
-            if (!std.meta.eql(s.screen.size, next.cells)) try s.screen.resize(s.gpa, next.cells);
-            if (!std.meta.eql(s.renderer.size, next.cells)) try s.renderer.resize(s.gpa, next.cells);
+            if (!std.meta.eql(s.screen.size, next.cells)) try s.screen.resize(next.cells);
+            if (!std.meta.eql(s.renderer.size, next.cells)) try s.renderer.resize(next.cells);
         }
         if (changed or confirmed) {
             s.renderer.repaint();

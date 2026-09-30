@@ -234,10 +234,10 @@ const Fixture = struct {
     fn init(gpa: std.mem.Allocator, cols: u16, rows: u16) !Fixture {
         const size: geomSize = .{ .cols = cols, .rows = rows };
         var s: Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         r.shown = false;
         r.cursor = .{ .col = 0, .row = 0 };
         return .{
@@ -250,8 +250,8 @@ const Fixture = struct {
     }
 
     fn deinit(f: *Fixture) void {
-        f.screen.deinit(f.gpa);
-        f.renderer.deinit(f.gpa);
+        f.screen.deinit();
+        f.renderer.deinit();
         f.out.deinit();
     }
 

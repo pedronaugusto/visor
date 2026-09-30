@@ -235,7 +235,7 @@ test "a paragraph scrolled sideways drops the columns off its left" {
 test "a line keeps its own style and its own link" {
     var h: Harness = try .init(testing.allocator, 6, 2);
     defer h.deinit();
-    const link = try h.screen.link(testing.allocator, "https://ziglang.org", "");
+    const link = try h.screen.link("https://ziglang.org", "");
     try (Paragraph{ .lines = &.{
         .{ .text = "warn", .style = .{ .fg = .ansi(.red) } },
         .{ .text = "zig", .link = link },

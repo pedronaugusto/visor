@@ -131,10 +131,10 @@ const Harness = struct {
 
     fn init(gpa: Allocator, size: geom.Size, method: textmod.Method) !Harness {
         var s: Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = method;
         var r: Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         return .{
             .gpa = gpa,
             .screen = s,
@@ -154,9 +154,9 @@ const Harness = struct {
     }
 
     fn deinit(h: *Harness) void {
-        h.screen.deinit(h.gpa);
+        h.screen.deinit();
         h.layers.deinit(h.gpa);
-        h.renderer.deinit(h.gpa);
+        h.renderer.deinit();
         h.out.deinit();
     }
 
@@ -265,7 +265,7 @@ fn operate(h: *Harness, dice: *corpus.Dice) !void {
             const g = graphemes[which_grapheme];
             const style = styles[dice.index(styles.len)];
             const which = dice.index(uris.len);
-            const link = try s.link(h.gpa, uris[which], params[which]);
+            const link = try s.link(uris[which], params[which]);
             try s.write(col, row, g, style, link);
         },
         7 => {
@@ -376,7 +376,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer fresh.deinit();
     fresh.setMethod(terminalMethod(method));
     var once: Renderer = try .init(gpa, size);
-    defer once.deinit(gpa);
+    defer once.deinit();
     once.repaint();
     h.out.clearRetainingCapacity();
     h.screen.damageAll();
@@ -467,13 +467,13 @@ fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
             const mid = nextSize(&dice, size);
             try stale(&h, &t, &dice, mid);
             if (told_each) {
-                try h.screen.resize(gpa, mid);
-                try h.renderer.resize(gpa, mid);
+                try h.screen.resize(mid);
+                try h.renderer.resize(mid);
             }
         }
         try stale(&h, &t, &dice, to);
-        try h.screen.resize(gpa, to);
-        try h.renderer.resize(gpa, to);
+        try h.screen.resize(to);
+        try h.renderer.resize(to);
         try checkGrid(&h.screen);
         size = to;
 
@@ -617,8 +617,8 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
                 .rows = dice.valueRangeAtMost(u16, 1, terminal_rows),
             };
             if (tally) |tl| tl.resizes.add(1);
-            try h.screen.resize(gpa, size);
-            try h.renderer.resize(gpa, size);
+            try h.screen.resize(size);
+            try h.renderer.resize(size);
         }
         var ops: usize = 0;
         const count = dice.valueRangeAtMost(u8, 1, 12);
@@ -1016,7 +1016,7 @@ test "a frame the damage map named but nothing changed in writes nothing at all"
     h.out.clearRetainingCapacity();
     _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
 
-    const link = try h.screen.link(gpa, "https://ziglang.org", "");
+    const link = try h.screen.link("https://ziglang.org", "");
     try h.screen.write(0, 0, "a", .{ .bold = true }, link);
     h.screen.damageAll();
     h.out.clearRetainingCapacity();

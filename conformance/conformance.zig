@@ -374,10 +374,10 @@ const Harness = struct {
 
     fn init(gpa: Allocator, size: visor.Size, method: visor.Method) !Harness {
         var s: visor.Screen = try .init(gpa, size);
-        errdefer s.deinit(gpa);
+        errdefer s.deinit();
         s.method = method;
         var r: visor.Renderer = try .init(gpa, size);
-        errdefer r.deinit(gpa);
+        errdefer r.deinit();
         return .{
             .gpa = gpa,
             .screen = s,
@@ -399,9 +399,9 @@ const Harness = struct {
     }
 
     fn deinit(h: *Harness) void {
-        h.screen.deinit(h.gpa);
+        h.screen.deinit();
         h.layers.deinit(h.gpa);
-        h.renderer.deinit(h.gpa);
+        h.renderer.deinit();
         h.out.deinit();
     }
 
@@ -414,8 +414,8 @@ const Harness = struct {
 
     /// The program told of a new size: the grid and the renderer follow.
     fn resize(h: *Harness, size: visor.Size) !void {
-        try h.screen.resize(h.gpa, size);
-        try h.renderer.resize(h.gpa, size);
+        try h.screen.resize(size);
+        try h.renderer.resize(size);
     }
 
     /// A frame drawn and not yet delivered: its bytes, which the caller
@@ -455,7 +455,7 @@ fn operate(h: *Harness, dice: *corpus.Dice) !void {
             const g = alphabet[which];
             const style = styles[dice.index(styles.len)];
             const target = dice.index(uris.len);
-            const link = try s.link(h.gpa, uris[target], params[target]);
+            const link = try s.link(uris[target], params[target]);
             try s.write(col, row, g, style, link);
         },
         3 => {
@@ -535,7 +535,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
     const fresh = try Oracle.init(gpa, size, method);
     defer fresh.deinit();
     var once: visor.Renderer = try .init(gpa, size);
-    defer once.deinit(gpa);
+    defer once.deinit();
     once.repaint();
     h.out.clearRetainingCapacity();
     h.screen.damageAll();
@@ -1039,9 +1039,9 @@ test "two links that differ only by their id are two links to the second emulato
     const o = try Oracle.init(gpa, size, .unicode);
     defer o.deinit();
 
-    const one = try h.screen.link(gpa, "https://ziglang.org", "id=one");
-    const two = try h.screen.link(gpa, "https://ziglang.org", "id=two");
-    const bare = try h.screen.link(gpa, "https://ziglang.org", "");
+    const one = try h.screen.link("https://ziglang.org", "id=one");
+    const two = try h.screen.link("https://ziglang.org", "id=two");
+    const bare = try h.screen.link("https://ziglang.org", "");
     try h.screen.write(0, 0, "a", .{}, one);
     try h.screen.write(1, 0, "b", .{}, two);
     try h.screen.write(2, 0, "c", .{}, bare);

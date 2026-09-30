@@ -54,9 +54,7 @@ pub const Cursor = struct {
 
 /// The grid.
 pub const Screen = struct {
-    /// The allocator `init` was given, kept because `write` may have to put a
-    /// grapheme in the pool and takes no allocator of its own. Every `gpa`
-    /// passed to a later call must be this one.
+    /// The allocator `init` was given, used by every operation this grid owns.
     gpa: Allocator,
     /// How big the grid is.
     size: Size,
@@ -97,8 +95,8 @@ pub const Screen = struct {
     }
 
     /// Gives the grid back.
-    pub fn deinit(s: *Screen, gpa: Allocator) void {
-        s.sameAllocator(gpa);
+    pub fn deinit(s: *Screen) void {
+        const gpa = s.gpa;
         gpa.free(s.cells);
         s.graphemes.deinit(gpa);
         s.links.deinit(gpa);
@@ -108,10 +106,11 @@ pub const Screen = struct {
 
     /// A new size, contents kept where they still fit, everything damaged.
     ///
-    /// The grapheme pool and the link table survive, so a cell that came
-    /// through the resize still names the bytes it named before.
-    pub fn resize(s: *Screen, gpa: Allocator, size: Size) Allocator.Error!void {
-        s.sameAllocator(gpa);
+    /// Compacts the pools; surviving cells keep their text and targets,
+    /// with identities rewritten to name the new pools. Borrowed slices
+    /// must not be retained across resize.
+    pub fn resize(s: *Screen, size: Size) Allocator.Error!void {
+        const gpa = s.gpa;
         if (std.meta.eql(s.size, size)) {
             s.damageAll();
             return;
@@ -119,7 +118,7 @@ pub const Screen = struct {
         // Before anything is committed, so that a resize either happens or
         // leaves the screen exactly as it was. The cells that survive carry
         // the new offsets with them.
-        try s.compactPool(gpa);
+        try s.compactPool();
 
         const cells = try gpa.alloc(Cell, size.area());
         errdefer gpa.free(cells);
@@ -155,8 +154,8 @@ pub const Screen = struct {
     ///
     /// It is a call, not a policy: `draw` never allocates and nothing is
     /// freed behind a live cell.
-    pub fn compactPool(s: *Screen, gpa: Allocator) Allocator.Error!void {
-        s.sameAllocator(gpa);
+    pub fn compactPool(s: *Screen) Allocator.Error!void {
+        const gpa = s.gpa;
         var graphemes: pool.Graphemes = .{};
         errdefer graphemes.deinit(gpa);
         var links: pool.Links = .{};
@@ -441,9 +440,8 @@ pub const Screen = struct {
     }
 
     /// A grapheme into the pool, deduplicated; inline when it fits.
-    pub fn intern(s: *Screen, gpa: Allocator, bytes: []const u8) Allocator.Error!Cell.Text {
-        s.sameAllocator(gpa);
-        return s.graphemes.intern(gpa, bytes);
+    pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
+        return s.graphemes.intern(s.gpa, bytes);
     }
 
     /// An OSC 8 target into the link table, deduplicated.
@@ -454,11 +452,10 @@ pub const Screen = struct {
     /// them as two.
     /// C0 controls and DEL in either field return `ControlInText` before
     /// the table changes, by the same rule morse applies when writing OSC.
-    pub fn link(s: *Screen, gpa: Allocator, uri: []const u8, params: []const u8) (Allocator.Error || error{ControlInText})!Link {
+    pub fn link(s: *Screen, uri: []const u8, params: []const u8) (Allocator.Error || error{ControlInText})!Link {
         try morse.checkText(uri);
         try morse.checkText(params);
-        s.sameAllocator(gpa);
-        return s.links.intern(gpa, uri, params);
+        return s.links.intern(s.gpa, uri, params);
     }
 
     /// The bytes of a cell's grapheme.
@@ -742,12 +739,6 @@ pub const Screen = struct {
         s.cursor.col = @min(s.cursor.col, s.size.cols - 1);
         s.cursor.row = @min(s.cursor.row, s.size.rows - 1);
     }
-
-    /// In Debug, says so when a call is handed an allocator that is not the
-    /// one the screen was made with.
-    fn sameAllocator(s: *const Screen, gpa: Allocator) void {
-        std.debug.assert(gpa.ptr == s.gpa.ptr and gpa.vtable == s.gpa.vtable);
-    }
 };
 
 /// The most rows a block reaches below its head: the largest scale, less
@@ -805,7 +796,7 @@ fn checkInvariants(s: *const Screen) !void {
 
 test "a fresh screen is blank and clean" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try testing.expectEqual(@as(usize, 8), s.cells.len);
     for (s.cells) |c| try testing.expect(c.eql(.blank(.{})));
@@ -815,7 +806,7 @@ test "a fresh screen is blank and clean" {
 
 test "a write outside the grid changes nothing" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(9, 0, "x", .{}, .none);
     try s.write(0, 9, "x", .{}, .none);
@@ -826,7 +817,7 @@ test "a write outside the grid changes nothing" {
 
 test "writing the same cell twice damages once and not at all the second time" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(1, 0, "a", .{}, .none);
     try testing.expectEqual(@as(usize, 1), s.damage.count());
@@ -837,7 +828,7 @@ test "writing the same cell twice damages once and not at all the second time" {
 
 test "bytes that are not UTF-8 go in as the replacement character" {
     var s: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 1 });
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try s.write(0, 0, "\xff", .{}, .none);
     try s.write(1, 0, "\xe4\xb8", .{}, .none);
     try testing.expectEqualStrings("\u{fffd}", s.textAt(0, 0));
@@ -848,7 +839,7 @@ test "bytes that are not UTF-8 go in as the replacement character" {
 
 test "a wide grapheme writes a head and a tail" {
     var s = try made(6, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(1, 0, "\u{4e2d}", .{}, .none);
     const head = s.readCell(1, 0).?;
@@ -862,7 +853,7 @@ test "a wide grapheme writes a head and a tail" {
 
 test "overwriting either half of a wide grapheme repairs the other" {
     var s = try made(6, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(1, 0, "\u{4e2d}", .{}, .none);
     try s.write(1, 0, "a", .{}, .none);
@@ -879,7 +870,7 @@ test "overwriting either half of a wide grapheme repairs the other" {
 
 test "a wide grapheme over a wide grapheme repairs both edges" {
     var s = try made(8, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(0, 0, "\u{4e2d}", .{}, .none);
     try s.write(2, 0, "\u{4e2d}", .{}, .none);
@@ -893,7 +884,7 @@ test "a wide grapheme over a wide grapheme repairs both edges" {
 
 test "a wide grapheme with one column left becomes a blank" {
     var s = try made(3, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(2, 0, "\u{4e2d}", .{ .bold = true }, .none);
     const c = s.readCell(2, 0).?;
@@ -904,7 +895,7 @@ test "a wide grapheme with one column left becomes a blank" {
 
 test "measured by codepoint, a cluster of wide codepoints takes a cell each, as far as the row goes" {
     var s: Screen = try .init(testing.allocator, .{ .cols = 7, .rows = 1 });
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     s.method = .wcwidth;
     try s.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{ .bold = true }, .none);
     try testing.expectEqualStrings("\u{1f469}\u{200d}", s.textAt(0, 0));
@@ -931,7 +922,7 @@ test "measured by codepoint, a cluster of wide codepoints takes a cell each, as 
 
 test "a caller's tail is taken as a blank" {
     var s = try made(3, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     s.writeOwnedCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
     try testing.expectEqualStrings(" ", s.textAt(1, 0));
     try checkInvariants(&s);
@@ -939,7 +930,7 @@ test "a caller's tail is taken as a blank" {
 
 test "a scaled grapheme is a head and a block of tails" {
     var s = try made(8, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try testing.expect(try s.writeScaled(1, 1, "\u{4e2d}", .{ .bold = true }, .none, 2));
     const head = s.readCell(1, 1).?;
@@ -963,7 +954,7 @@ test "a scaled grapheme is a head and a block of tails" {
 
 test "a block that would not fit is not written" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try testing.expect(!try s.writeScaled(3, 0, "a", .{}, .none, 2));
     try testing.expect(!try s.writeScaled(0, 1, "a", .{}, .none, 2));
     try testing.expect(!s.damage.any());
@@ -975,7 +966,7 @@ test "a block that would not fit is not written" {
 
 test "writing into any cell of a block clears the whole block" {
     var s = try made(8, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     for ([_]geom.Point{
         .{ .col = 0, .row = 0 }, .{ .col = 2, .row = 0 }, .{ .col = 0, .row = 2 }, .{ .col = 2, .row = 2 },
@@ -998,7 +989,7 @@ test "writing into any cell of a block clears the whole block" {
 
 test "a block written over a wide grapheme and another block takes both" {
     var s = try made(8, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try s.write(0, 0, "\u{4e2d}", .{}, .none);
     try testing.expect(try s.writeScaled(4, 1, "b", .{}, .none, 2));
     try testing.expect(try s.writeScaled(1, 0, "a", .{}, .none, 2));
@@ -1018,7 +1009,7 @@ test "a block written over a wide grapheme and another block takes both" {
 
 test "a scroll that tears a block clears what is left of it" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try testing.expect(try s.writeScaled(1, 1, "a", .{}, .none, 2));
     // The head's row moves up and the tails' row does not.
     s.scroll(.{ .col = 0, .row = 0, .cols = 6, .rows = 2 }, 1);
@@ -1039,7 +1030,7 @@ test "a scroll that moves a block's head into another block clears the moved one
     // beside the lower half of a block two tall, and clearing the torn
     // block took that half with it.
     var s = try made(7, 11);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try testing.expect(try s.writeScaled(3, 4, "a", .{}, .none, 2));
     try testing.expect(try s.writeScaled(2, 6, "~", .{ .bold = true }, .none, 3));
     s.scroll(.{ .col = 2, .row = 0, .cols = 1, .rows = 8 }, 1);
@@ -1056,7 +1047,7 @@ test "a scroll that moves a block's head into another block clears the moved one
 
 test "two blocks a scroll leaves overlapping are one block, the first in reading order" {
     var s = try made(8, 6);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     // One block high on the left, one lower down beside it; lifting the
     // lower block's column by a row lays its head over the first block's
     // lower half.
@@ -1068,16 +1059,16 @@ test "two blocks a scroll leaves overlapping are one block, the first in reading
 
 test "a resize that cuts a block off blanks it" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try testing.expect(try s.writeScaled(2, 1, "a", .{}, .none, 3));
-    try s.resize(testing.allocator, .{ .cols = 6, .rows = 3 });
+    try s.resize(.{ .cols = 6, .rows = 3 });
     for (s.cells) |c| try testing.expect(!c.isTail() and !c.isScaled());
     try checkInvariants(&s);
 }
 
 test "a control character is not something a cell holds" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try s.write(0, 0, "\n", .{}, .none);
     try s.write(1, 0, "\x1b", .{}, .none);
     try s.write(2, 0, "\x7f", .{}, .none);
@@ -1086,7 +1077,7 @@ test "a control character is not something a cell holds" {
 
 test "a fill covers only the rectangle and clips to the grid" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     s.fill(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 }, .blank(.{ .bg = .ansi(.blue) }));
     try testing.expect(s.readCell(0, 1).?.eql(.blank(.{})));
@@ -1102,7 +1093,7 @@ test "a fill covers only the rectangle and clips to the grid" {
 
 test "clear puts every cell back and damages only what it moved" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(2, 1, "x", .{}, .none);
     s.damage.clear();
@@ -1114,7 +1105,7 @@ test "clear puts every cell back and damages only what it moved" {
 
 test "a scroll up moves the rows and blanks what it vacated" {
     var s = try made(3, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     for (0..4) |r| try s.write(0, @intCast(r), &.{'a' + @as(u8, @intCast(r))}, .{}, .none);
     s.scroll(.fromSize(s.size), 1);
@@ -1127,7 +1118,7 @@ test "a scroll up moves the rows and blanks what it vacated" {
 
 test "a scroll down moves the rows the other way" {
     var s = try made(3, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     for (0..4) |r| try s.write(0, @intCast(r), &.{'a' + @as(u8, @intCast(r))}, .{}, .none);
     s.scroll(.fromSize(s.size), -2);
@@ -1140,7 +1131,7 @@ test "a scroll down moves the rows the other way" {
 
 test "a scroll further than the rectangle is tall blanks it" {
     var s = try made(3, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     try s.write(0, 0, "a", .{}, .none);
     s.scroll(.fromSize(s.size), 9);
     for (s.cells) |c| try testing.expect(c.eql(.blank(.{})));
@@ -1148,7 +1139,7 @@ test "a scroll further than the rectangle is tall blanks it" {
 
 test "a scroll that cuts a wide grapheme in half leaves two blanks" {
     var s = try made(6, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     // A wide grapheme straddling the rectangle's left edge on the row the
     // scroll brings up.
@@ -1159,7 +1150,7 @@ test "a scroll that cuts a wide grapheme in half leaves two blanks" {
 
 test "a wide grapheme moved beside another's covered column takes that column as its own" {
     var s: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     s.method = .unicode;
     try s.write(1, 0, "\u{4e2d}", .{ .bold = true }, .none);
     try s.write(1, 1, "\u{ff21}", .{ .italic = true }, .none);
@@ -1177,11 +1168,11 @@ test "a wide grapheme moved beside another's covered column takes that column as
 
 test "a resize keeps what still fits and damages everything" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(0, 0, "a", .{}, .none);
     try s.write(3, 1, "b", .{}, .none);
-    try s.resize(testing.allocator, .{ .cols = 6, .rows = 3 });
+    try s.resize(.{ .cols = 6, .rows = 3 });
     try testing.expectEqualStrings("a", s.textAt(0, 0));
     try testing.expectEqualStrings("b", s.textAt(3, 1));
     try testing.expect(s.readCell(5, 2).?.eql(.blank(.{})));
@@ -1191,26 +1182,26 @@ test "a resize keeps what still fits and damages everything" {
 
 test "a resize that cuts a wide grapheme off the right edge blanks it" {
     var s = try made(6, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     try s.write(3, 0, "\u{4e2d}", .{}, .none);
-    try s.resize(testing.allocator, .{ .cols = 4, .rows = 1 });
+    try s.resize(.{ .cols = 4, .rows = 1 });
     try testing.expectEqualStrings(" ", s.textAt(3, 0));
     try checkInvariants(&s);
 }
 
 test "a resize puts the cursor back inside" {
     var s = try made(10, 10);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     s.cursor = .{ .col = 9, .row = 9, .visible = true };
-    try s.resize(testing.allocator, .{ .cols = 4, .rows = 3 });
+    try s.resize(.{ .cols = 4, .rows = 3 });
     try testing.expectEqual(@as(u16, 3), s.cursor.col);
     try testing.expectEqual(@as(u16, 2), s.cursor.row);
 }
 
 test "a long grapheme is pooled and read back through the screen" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     const family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
     try s.write(0, 0, family, .{}, .none);
@@ -1222,9 +1213,9 @@ test "a long grapheme is pooled and read back through the screen" {
 
 test "copying a pooled cell between screens keeps its source text" {
     var a = try made(2, 1);
-    defer a.deinit(testing.allocator);
+    defer a.deinit();
     var b = try made(2, 1);
-    defer b.deinit(testing.allocator);
+    defer b.deinit();
 
     try a.write(0, 0, "source-long", .{}, .none);
     try b.write(1, 0, "target-long", .{}, .none);
@@ -1234,9 +1225,9 @@ test "copying a pooled cell between screens keeps its source text" {
 
 test "a link is interned and reaches the cell" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
-    const l = try s.link(testing.allocator, "https://ziglang.org", "id=1");
+    const l = try s.link("https://ziglang.org", "id=1");
     try s.write(0, 0, "z", .{}, l);
     try testing.expectEqual(l, s.readCell(0, 0).?.link);
     try testing.expectEqualStrings("id=1", s.target(l).?.params);
@@ -1247,34 +1238,34 @@ test "the screen survives every allocation failing in turn" {
     try testing.checkAllAllocationFailures(testing.allocator, struct {
         fn run(gpa: Allocator) !void {
             var s: Screen = try .init(gpa, .{ .cols = 8, .rows = 4 });
-            defer s.deinit(gpa);
+            defer s.deinit();
             s.method = .unicode;
-            _ = try s.intern(gpa, "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}");
-            _ = try s.link(gpa, "https://ziglang.org", "id=1");
+            _ = try s.intern("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}");
+            _ = try s.link("https://ziglang.org", "id=1");
             try s.write(0, 0, "\u{1f469}\u{200d}\u{1f680}", .{}, .none);
-            try s.resize(gpa, .{ .cols = 12, .rows = 6 });
-            try s.compactPool(gpa);
-            try s.resize(gpa, .{ .cols = 4, .rows = 2 });
+            try s.resize(.{ .cols = 12, .rows = 6 });
+            try s.compactPool();
+            try s.resize(.{ .cols = 4, .rows = 2 });
         }
     }.run, .{});
 }
 
 test "compacting the pool keeps what is on screen and drops what is not" {
     var s = try made(8, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     var buf: [24]u8 = undefined;
     for (0..64) |i| {
         const long = try std.fmt.bufPrint(&buf, "\u{1f468}\u{200d}{d:0>4}", .{i});
         try s.write(0, 0, long, .{}, .none);
-        _ = try s.link(testing.allocator, long, "");
+        _ = try s.link(long, "");
     }
     const kept = "\u{1f468}\u{200d}0063";
     try testing.expectEqualStrings(kept, s.textAt(0, 0));
     try testing.expect(s.graphemes.len() > kept.len);
     try testing.expectEqual(@as(usize, 64), s.links.count());
 
-    try s.compactPool(testing.allocator);
+    try s.compactPool();
     try testing.expectEqualStrings(kept, s.textAt(0, 0));
     try testing.expectEqual(@as(usize, kept.len), s.graphemes.len());
     try testing.expectEqual(@as(usize, 0), s.links.count());
@@ -1283,15 +1274,15 @@ test "compacting the pool keeps what is on screen and drops what is not" {
 
 test "compacting keeps the links cells still point at" {
     var s = try made(8, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
-    const stale = try s.link(testing.allocator, "https://example.invalid", "id=0");
+    const stale = try s.link("https://example.invalid", "id=0");
     _ = stale;
-    const live = try s.link(testing.allocator, "https://ziglang.org", "id=1");
+    const live = try s.link("https://ziglang.org", "id=1");
     try s.write(0, 0, "z", .{}, live);
     try testing.expectEqual(@as(usize, 2), s.links.count());
 
-    try s.compactPool(testing.allocator);
+    try s.compactPool();
     try testing.expectEqual(@as(usize, 1), s.links.count());
     const now = s.readCell(0, 0).?.link;
     try testing.expectEqualStrings("https://ziglang.org", s.target(now).?.uri);
@@ -1300,7 +1291,7 @@ test "compacting keeps the links cells still point at" {
 
 test "a resize rebuilds the pool rather than growing it forever" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     var buf: [24]u8 = undefined;
     for (0..32) |i| {
@@ -1308,34 +1299,34 @@ test "a resize rebuilds the pool rather than growing it forever" {
         try s.write(0, 0, long, .{}, .none);
     }
     const before = s.graphemes.len();
-    try s.resize(testing.allocator, .{ .cols = 6, .rows = 2 });
+    try s.resize(.{ .cols = 6, .rows = 2 });
     try testing.expect(s.graphemes.len() < before);
     try testing.expectEqualStrings("\u{1f468}\u{200d}0031", s.textAt(0, 0));
 }
 
 test "Screen.link refuses controls in either field before interning and preserves UTF-8" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
-    const first = try s.link(testing.allocator, "https://example.com/café", "id=🐈");
+    defer s.deinit();
+    const first = try s.link("https://example.com/café", "id=🐈");
     for (0..128) |n| {
         if (n >= 32 and n != 127) continue;
         const bad = [_]u8{ 'a', @intCast(n), 'b' };
-        try testing.expectError(error.ControlInText, s.link(testing.allocator, &bad, ""));
-        try testing.expectError(error.ControlInText, s.link(testing.allocator, "uri", &bad));
+        try testing.expectError(error.ControlInText, s.link(&bad, ""));
+        try testing.expectError(error.ControlInText, s.link("uri", &bad));
     }
     const target = s.links.get(first).?;
     try testing.expectEqualStrings("https://example.com/café", target.uri);
     try testing.expectEqualStrings("id=🐈", target.params);
-    const second = try s.link(testing.allocator, "uri", "");
+    const second = try s.link("uri", "");
     try testing.expectEqual(@intFromEnum(first) + 1, @intFromEnum(second));
 }
 
 test "owned text and targets survive drawing, compaction, resize and destruction" {
     var s = try made(4, 1);
     var live = true;
-    defer if (live) s.deinit(testing.allocator);
+    defer if (live) s.deinit();
     const long = "a\u{301}\u{302}\u{303}";
-    const link_id = try s.link(testing.allocator, "https://kept.invalid", "id=kept");
+    const link_id = try s.link("https://kept.invalid", "id=kept");
     try s.write(0, 0, long, .{}, link_id);
     try s.write(1, 0, "x", .{}, .none);
     const text = try s.dupeTextAt(testing.allocator, 0, 0);
@@ -1348,13 +1339,13 @@ test "owned text and targets survive drawing, compaction, resize and destruction
     var buf: [64]u8 = undefined;
     for (0..128) |i| {
         const unrelated = try std.fmt.bufPrint(&buf, "unrelated-{d}", .{i});
-        _ = try s.intern(testing.allocator, unrelated);
-        _ = try s.link(testing.allocator, unrelated, "");
+        _ = try s.intern(unrelated);
+        _ = try s.link(unrelated, "");
     }
     s.clear();
-    try s.compactPool(testing.allocator);
-    try s.resize(testing.allocator, .{ .cols = 8, .rows = 2 });
-    s.deinit(testing.allocator);
+    try s.compactPool();
+    try s.resize(.{ .cols = 8, .rows = 2 });
+    s.deinit();
     live = false;
     try testing.expectEqualStrings(long, text);
     try testing.expectEqualStrings("x", inline_text);
@@ -1364,8 +1355,8 @@ test "owned text and targets survive drawing, compaction, resize and destruction
 
 test "an owned target releases its first copy when the second allocation fails" {
     var s = try made(4, 1);
-    defer s.deinit(testing.allocator);
-    const id = try s.link(testing.allocator, "https://kept.invalid", "id=kept");
+    defer s.deinit();
+    const id = try s.link("https://kept.invalid", "id=kept");
     try testing.checkAllAllocationFailures(testing.allocator, struct {
         fn run(gpa: Allocator, screen: *const Screen, link_id: Link) !void {
             var copy = (try screen.dupeTarget(gpa, link_id)).?;
@@ -1373,4 +1364,23 @@ test "an owned target releases its first copy when the second allocation fails" 
             try testing.expectEqualStrings("id=kept", copy.params);
         }
     }.run, .{ &s, id });
+}
+
+test "managed screens and renderers use their captured allocator through every operation" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator) !void {
+            var s = try Screen.init(gpa, .{ .cols = 4, .rows = 1 });
+            defer s.deinit();
+            var r = try @import("render.zig").Renderer.init(gpa, s.size);
+            defer r.deinit();
+            const text = try s.intern("a\u{301}\u{302}\u{303}");
+            const link_id = try s.link("https://kept.invalid", "id=kept");
+            s.writeOwnedCell(0, 0, .{ .text = text, .link = link_id });
+            try s.compactPool();
+            try s.resize(.{ .cols = 8, .rows = 2 });
+            try r.resize(s.size);
+            var out: std.Io.Writer.Discarding = .init(&.{});
+            _ = try r.draw(&out.writer, &s, null, .{});
+        }
+    }.run, .{});
 }

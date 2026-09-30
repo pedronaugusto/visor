@@ -72,7 +72,7 @@ pub const Term = struct {
     /// A terminal of a size, showing nothing.
     pub fn init(gpa: Allocator, size: Size) Allocator.Error!Term {
         var scr: Screen = try .init(gpa, size);
-        errdefer scr.deinit(gpa);
+        errdefer scr.deinit();
         return .{
             .gpa = gpa,
             .scr = scr,
@@ -82,7 +82,7 @@ pub const Term = struct {
 
     /// Gives the terminal back.
     pub fn deinit(t: *Term) void {
-        t.scr.deinit(t.gpa);
+        t.scr.deinit();
         t.pending.deinit(t.gpa);
         for (t.graphics.items) |g| t.gpa.free(g);
         t.graphics.deinit(t.gpa);
@@ -112,7 +112,7 @@ pub const Term = struct {
     /// terminal to be blank leaves the old frame showing wherever the new
     /// one has nothing to write.
     pub fn resize(t: *Term, size: Size) Allocator.Error!void {
-        try t.scr.resize(t.gpa, size);
+        try t.scr.resize(size);
         t.scroll_top = 0;
         t.scroll_bottom = if (size.rows == 0) 0 else size.rows - 1;
         t.col = @min(t.col, if (size.cols == 0) 0 else size.cols - 1);
@@ -247,7 +247,7 @@ pub const Term = struct {
             t.lineFeed();
         }
         if (told) |_| {
-            const text = try t.scr.intern(t.gpa, grapheme);
+            const text = try t.scr.intern(grapheme);
             t.scr.writeOwnedCell(t.col, t.row, .init(.{
                 .text = text,
                 .style = t.style,
@@ -307,7 +307,7 @@ pub const Term = struct {
             head = 0;
             row = t.row;
         }
-        const text = try t.scr.intern(t.gpa, joined);
+        const text = try t.scr.intern(joined);
         t.scr.writeOwnedCell(head, row, .init(.{
             .text = text,
             .style = left.style,
@@ -747,7 +747,7 @@ pub const Term = struct {
             t.link = if (uri.len == 0)
                 .none
             else
-                t.scr.link(t.gpa, uri, params) catch |err| switch (err) {
+                t.scr.link(uri, params) catch |err| switch (err) {
                     error.ControlInText => return body.len,
                     error.OutOfMemory => return error.OutOfMemory,
                 };
@@ -803,7 +803,7 @@ pub const Term = struct {
         }
         const span: u32 = @as(u32, w) * scale;
         if (t.col + span > cols or t.row + scale > rows) return;
-        const text = try t.scr.intern(t.gpa, grapheme);
+        const text = try t.scr.intern(grapheme);
         t.scr.writeOwnedCell(t.col, t.row, .init(.{
             .text = text,
             .style = t.style,
@@ -1659,7 +1659,7 @@ test "the style dump names every style it used" {
 
 test "the style dump spells every attribute in one order, and a link is part of the style" {
     var sc: Screen = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    defer sc.deinit(testing.allocator);
+    defer sc.deinit();
     const everything: Style = .{
         .fg = .palette(208),
         .bg = .rgb(0x1e, 0x1e, 0x2e),
@@ -1675,8 +1675,8 @@ test "the style dump spells every attribute in one order, and a link is part of 
         .overline = true,
     };
     try sc.write(0, 0, "a", everything, .none);
-    const zig = try sc.link(testing.allocator, "https://ziglang.org", "id=1");
-    const other = try sc.link(testing.allocator, "https://ziglang.org", "id=2");
+    const zig = try sc.link("https://ziglang.org", "id=1");
+    const other = try sc.link("https://ziglang.org", "id=2");
     try sc.write(1, 0, "b", .{}, zig);
     // The same URI under another id prints the same line, so it is the same
     // style to anyone reading the dump.
@@ -1702,7 +1702,7 @@ test "past sixty-two styles every id is two characters, legend and grid alike" {
     const cols = 10;
     const rows = 7;
     var sc: Screen = try .init(testing.allocator, .{ .cols = cols, .rows = rows });
-    defer sc.deinit(testing.allocator);
+    defer sc.deinit();
     for (0..rows) |r| for (0..cols) |c| {
         const n: u8 = @intCast(r * cols + c);
         try sc.write(@intCast(c), @intCast(r), "x", .{ .fg = .rgb(n, 0, 0) }, .none);
@@ -1739,9 +1739,9 @@ test "past sixty-two styles every id is two characters, legend and grid alike" {
 
 test "comparing two screens names the first cell that differs" {
     var a: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 2 });
-    defer a.deinit(testing.allocator);
+    defer a.deinit();
     var b: Screen = try .init(testing.allocator, .{ .cols = 3, .rows = 2 });
-    defer b.deinit(testing.allocator);
+    defer b.deinit();
     try expectScreensEqual(&a, &b);
     try testing.expectEqual(@as(?geom.Point, null), firstDifference(&a, &b));
 
@@ -1768,12 +1768,12 @@ test "comparing two screens names the first cell that differs" {
 
 test "the dumps a program keeps its goldens in are these bytes" {
     var screen: Screen = try .init(testing.allocator, .{ .cols = 6, .rows = 2 });
-    defer screen.deinit(testing.allocator);
+    defer screen.deinit();
     screen.method = .unicode;
     try screen.write(0, 0, "a", .{ .fg = .ansi(.red), .bold = true }, .none);
     try screen.write(1, 0, "b", .{ .fg = .ansi(.bright_red), .bg = .palette(200) }, .none);
     try screen.write(2, 0, "\u{4E2D}", .{ .fg = .rgb(255, 16, 0), .underline = .curly, .underline_color = .palette(3) }, .none);
-    try screen.write(4, 0, "l", .{}, try screen.link(testing.allocator, "https://example.com", "id=1"));
+    try screen.write(4, 0, "l", .{}, try screen.link("https://example.com", "id=1"));
     try screen.write(0, 1, "r", .{ .reverse = true, .hidden = true, .strikethrough = true, .dim = true, .italic = true, .blink = true }, .none);
 
     var styles: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -1804,7 +1804,7 @@ test "the dumps a program keeps its goldens in are these bytes" {
 
 test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first appearance" {
     var screen: Screen = try .init(testing.allocator, .{ .cols = 64, .rows = 1 });
-    defer screen.deinit(testing.allocator);
+    defer screen.deinit();
     for (0..64) |c| screen.writeOwnedCell(@intCast(c), 0, .blank(.{ .fg = .palette(@intCast(c + 16)) }));
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();

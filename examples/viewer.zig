@@ -217,10 +217,10 @@ pub fn main() !void {
     var size: visor.Size = .{ .cols = 76, .rows = 16 };
 
     var screen: visor.Screen = try .init(gpa, size);
-    defer screen.deinit(gpa);
+    defer screen.deinit();
     screen.method = .unicode;
     var renderer: visor.Renderer = try .init(gpa, size);
-    defer renderer.deinit(gpa);
+    defer renderer.deinit();
 
     const caps: visor.Caps = .{ .width_method = .unicode, .truecolor = true, .osc8 = true };
     var out: std.Io.Writer.Allocating = .init(gpa);
@@ -251,8 +251,8 @@ pub fn main() !void {
     // resized in one place, and the next frame is drawn from the same
     // state: the widgets have no memory of the old size to be wrong about.
     size = .{ .cols = 54, .rows = 12 };
-    try screen.resize(gpa, size);
-    try renderer.resize(gpa, size);
+    try screen.resize(size);
+    try renderer.resize(size);
     try term.resize(size);
     renderer.repaint();
     try viewer.draw(screen.window());

@@ -617,7 +617,7 @@ fn rowText(s: *const Screen, row: u16, buf: []u8) []const u8 {
 
 test "the whole grid is a window and a child is inside it" {
     var s = try made(10, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
 
     const root = s.window();
     try testing.expectEqual(@as(u16, 10), root.cols());
@@ -631,7 +631,7 @@ test "the whole grid is a window and a child is inside it" {
 
 test "a child asked for outside its parent comes back empty" {
     var s = try made(10, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
     try testing.expect(c.rect.isEmpty());
     c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
@@ -640,7 +640,7 @@ test "a child asked for outside its parent comes back empty" {
 
 test "a child with no size given is the rest of the parent" {
     var s = try made(10, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 3, .row = 1 });
     try testing.expectEqual(@as(u16, 7), c.cols());
     try testing.expectEqual(@as(u16, 3), c.rows());
@@ -648,7 +648,7 @@ test "a child with no size given is the rest of the parent" {
 
 test "a write past the window's edge writes nothing at all" {
     var s = try made(6, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 1, .row = 0, .cols = 2, .rows = 1 });
     c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
     c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
@@ -658,7 +658,7 @@ test "a write past the window's edge writes nothing at all" {
 
 test "a bordered child draws its frame and names the inside" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const inside = s.window().child(.{ .border = .{ .where = .all } });
     try testing.expectEqual(Rect{ .col = 1, .row = 1, .cols = 4, .rows = 2 }, inside.rect);
 
@@ -670,7 +670,7 @@ test "a bordered child draws its frame and names the inside" {
 
 test "a border on one side takes one row from that side only" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const inside = s.window().child(.{ .border = .{ .where = .{ .top = true } } });
     try testing.expectEqual(Rect{ .col = 0, .row = 1, .cols = 6, .rows = 3 }, inside.rect);
     var buf: [64]u8 = undefined;
@@ -679,7 +679,7 @@ test "a border on one side takes one row from that side only" {
 
 test "print lays text out and says where it stopped" {
     var s = try made(10, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const at = try s.window().print(&.{
         .{ .text = "ab", .style = .{ .bold = true } },
         .{ .text = "cd" },
@@ -695,7 +695,7 @@ test "print lays text out and says where it stopped" {
 
 test "print wrapping by grapheme fills each row before the next" {
     var s = try made(3, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const at = try s.window().printSegment(.{ .text = "abcdefg" }, .{ .wrap = .grapheme });
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("abc", rowText(&s, 0, &buf));
@@ -707,7 +707,7 @@ test "print wrapping by grapheme fills each row before the next" {
 
 test "print wrapping by word breaks at a space" {
     var s = try made(10, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     _ = try s.window().printSegment(.{ .text = "the quick brown fox" }, .{ .wrap = .word });
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("the quick ", rowText(&s, 0, &buf));
@@ -716,7 +716,7 @@ test "print wrapping by word breaks at a space" {
 
 test "print not wrapping drops what does not fit and says so" {
     var s = try made(4, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const at = try s.window().printSegment(.{ .text = "abcdefg" }, .{ .wrap = .none });
     try testing.expect(at.overflow);
     var buf: [64]u8 = undefined;
@@ -726,7 +726,7 @@ test "print not wrapping drops what does not fit and says so" {
 
 test "print measuring only writes nothing" {
     var s = try made(10, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const at = try s.window().printSegment(.{ .text = "abcd" }, .{ .commit = false });
     try testing.expectEqual(@as(u16, 4), at.col);
     try testing.expect(!s.damage.any());
@@ -734,7 +734,7 @@ test "print measuring only writes nothing" {
 
 test "a newline in a segment ends the row whatever the wrap is" {
     var s = try made(6, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     _ = try s.window().printSegment(.{ .text = "ab\ncd" }, .{ .wrap = .none });
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("ab    ", rowText(&s, 0, &buf));
@@ -743,7 +743,7 @@ test "a newline in a segment ends the row whatever the wrap is" {
 
 test "a wide grapheme never straddles the window's right edge" {
     var s = try made(3, 2);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     _ = try s.window().printSegment(.{ .text = "ab\u{4e2d}" }, .{ .wrap = .grapheme });
     try testing.expectEqualStrings("\u{4e2d}", s.textAt(0, 1));
     try testing.expectEqual(Cell.Kind.spacer_tail, s.readCell(1, 1).?.shape.kind);
@@ -751,8 +751,8 @@ test "a wide grapheme never straddles the window's right edge" {
 
 test "a link on a segment reaches every cell of it" {
     var s = try made(8, 1);
-    defer s.deinit(testing.allocator);
-    const l = try s.link(testing.allocator, "https://ziglang.org", "");
+    defer s.deinit();
+    const l = try s.link("https://ziglang.org", "");
     _ = try s.window().printSegment(.{ .text = "zig", .link = l }, .{});
     for (0..3) |col| try testing.expectEqual(l, s.readCell(@intCast(col), 0).?.link);
     try testing.expectEqual(Link.none, s.readCell(3, 0).?.link);
@@ -760,7 +760,7 @@ test "a link on a segment reaches every cell of it" {
 
 test "width measures by the screen's own method" {
     var s = try made(8, 1);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const w = s.window();
     try testing.expectEqual(@as(u16, 3), w.width("abc"));
     try testing.expectEqual(@as(u16, 2), w.width("\u{4e2d}"));
@@ -769,7 +769,7 @@ test "width measures by the screen's own method" {
 
 test "a mouse report lands in the window's own coordinates or nowhere" {
     var s = try made(20, 10);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 4, .row = 2, .cols = 6, .rows = 3 });
 
     // Mouse reports count from one.
@@ -782,7 +782,7 @@ test "a mouse report lands in the window's own coordinates or nowhere" {
 
 test "a mouse report in pixels is refused rather than divided" {
     var s = try made(20, 10);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     var event = mouseAt(5, 3);
     event.pixels = true;
     try testing.expectEqual(@as(?Point, null), s.window().hit(event));
@@ -790,7 +790,7 @@ test "a mouse report in pixels is refused rather than divided" {
 
 test "the cursor is set in the window's coordinates" {
     var s = try made(20, 10);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 4, .row = 2, .cols = 6, .rows = 3 });
     c.showCursor(1, 1);
     try testing.expectEqual(@as(u16, 5), s.cursor.col);
@@ -806,7 +806,7 @@ test "the cursor is set in the window's coordinates" {
 
 test "fill and clear stay inside the window" {
     var s = try made(6, 3);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 1, .row = 1, .cols = 3, .rows = 1 });
     c.fill(.fromSize(c.size()), .blank(.{ .bg = .ansi(.blue) }));
     try testing.expect(s.readCell(0, 1).?.eql(.blank(.{})));
@@ -818,7 +818,7 @@ test "fill and clear stay inside the window" {
 
 test "a window scrolls only its own rectangle" {
     var s = try made(6, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const c = s.window().child(.{ .col = 0, .row = 1, .cols = 6, .rows = 2 });
     try s.write(0, 0, "a", .{}, .none);
     try s.write(0, 1, "b", .{}, .none);
@@ -833,9 +833,9 @@ test "a window scrolls only its own rectangle" {
 
 test "the link under a cell is what a click there opens, a wide grapheme's in both its columns" {
     var sc: Screen = try .init(testing.allocator, .{ .cols = 10, .rows = 2 });
-    defer sc.deinit(testing.allocator);
+    defer sc.deinit();
     const win = sc.window().child(.{ .col = 2, .row = 1 });
-    const link = try sc.link(testing.allocator, "file:///tmp/a.log", "");
+    const link = try sc.link("file:///tmp/a.log", "");
     _ = try win.print(&.{
         .{ .text = "see " },
         .{ .text = "a\u{4e2d}", .link = link },
@@ -850,7 +850,7 @@ test "the link under a cell is what a click there opens, a wide grapheme's in bo
 
 test "a row's text comes back as the terminal shows it, trailing blanks left off" {
     var sc: Screen = try .init(testing.allocator, .{ .cols = 12, .rows = 1 });
-    defer sc.deinit(testing.allocator);
+    defer sc.deinit();
     const win = sc.window();
     _ = try win.printSegment(.{ .text = "a b\u{4e2d}c" }, .{ .wrap = .none });
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -892,7 +892,7 @@ const Dimmer = struct {
 
 test "an ink draws every cell a window writes, where it lands on the screen, and a child inherits it" {
     var s = try made(10, 4);
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     var d: Dimmer = .{};
     const ink = d.ink();
     const root = s.window().inked(&ink);
@@ -925,7 +925,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
     // then carry every cell over in its look. The ink gives the same cells
     // with no scratch screen.
     var plain = try made(12, 5);
-    defer plain.deinit(testing.allocator);
+    defer plain.deinit();
     const panel: Window.ChildOptions = .{ .cols = 12, .rows = 5, .border = .{ .where = .all, .glyphs = .rounded, .style = .{ .bold = true } } };
     _ = try plain.window().child(panel).print(&.{
         .{ .text = "one two ", .style = .{ .italic = true } },
@@ -939,7 +939,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
     }
 
     var inked = try made(12, 5);
-    defer inked.deinit(testing.allocator);
+    defer inked.deinit();
     var d: Dimmer = .{};
     const ink = d.ink();
     _ = try inked.window().inked(&ink).child(panel).print(&.{
@@ -952,7 +952,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
 
 test "a rectangle of the window's own cells is the child over it, clipped" {
     var s = try Screen.init(testing.allocator, .{ .cols = 10, .rows = 4 });
-    defer s.deinit(testing.allocator);
+    defer s.deinit();
     const outer = s.window().child(.{ .col = 2, .row = 1 });
     const inner = outer.sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 1 });
     try testing.expectEqual(Rect{ .col = 5, .row = 2, .cols = 5, .rows = 1 }, inner.rect);

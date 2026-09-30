@@ -33,11 +33,11 @@ const caps: visor.Caps = .{
 // last shown. One allocator each, taken here and never again.
 const size: visor.Size = .{ .cols = 40, .rows = 7 };
 var screen: visor.Screen = try .init(gpa, size);
-defer screen.deinit(gpa);
+defer screen.deinit();
 screen.method = caps.width_method;
 
 var renderer: visor.Renderer = try .init(gpa, size);
-defer renderer.deinit(gpa);
+defer renderer.deinit();
 
 // Drawing code holds a window and nothing else. A child is clipped to
 // its parent, and a border is drawn as the child is made, so what
@@ -53,7 +53,7 @@ const panel = root.child(.{
 
 // Runs of styled text, wrapped. `print` never allocates and says
 // where it stopped.
-const link = try screen.link(gpa, "https://ziglang.org", "id=1");
+const link = try screen.link("https://ziglang.org", "id=1");
 _ = try panel.print(&.{
     .{ .text = "visor ", .style = .{ .bold = true } },
     .{ .text = "draws a grid", .style = .{ .fg = .ansi(.cyan) } },
