@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Behaviour change: `Screen.link` refuses C0 controls and DEL in the URI and params before interning.
+
 - Behaviour change: re-entering a used renderer repaints text and pictures; `setCaps` changes capabilities without leaving the screen, on morse 0.7.0.
 
 ## [0.3.0] - 2026-09-29

@@ -747,7 +747,10 @@ pub const Term = struct {
             t.link = if (uri.len == 0)
                 .none
             else
-                try t.scr.link(t.gpa, uri, params);
+                t.scr.link(t.gpa, uri, params) catch |err| switch (err) {
+                    error.ControlInText => return body.len,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
         }
         return body.len;
     }
@@ -1810,4 +1813,13 @@ test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first 
     try testing.expect(std.mem.startsWith(u8, got, "# 00 fg=palette:16 bg=default\n"));
     try testing.expect(std.mem.indexOf(u8, got, "\n# 10 fg=palette:78 bg=default\n# 11 fg=palette:79 bg=default\n") != null);
     try testing.expect(std.mem.endsWith(u8, got, "\n000102030405060708090a0b0c0d0e0f0g0h0i0j0k0l0m0n0o0p0q0r0s0t0u0v0w0x0y0z0A0B0C0D0E0F0G0H0I0J0K0L0M0N0O0P0Q0R0S0T0U0V0W0X0Y0Z1011\n"));
+}
+
+test "the terminal consumes a refused link without opening it" {
+    var t = try made(6, 1);
+    defer t.deinit();
+    try t.feed("\x1b]8;;https://bad/\x01tail\x1b\\x");
+    try testing.expectEqual(Link.none, t.screen().readCell(0, 0).?.link);
+    try t.feed("\x1b]8;;https://good\x1b\\y");
+    try testing.expect(t.screen().readCell(1, 0).?.link != .none);
 }

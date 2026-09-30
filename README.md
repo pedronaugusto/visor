@@ -542,6 +542,9 @@ Zig 0.16.0.
 
 MIT. See [LICENSE](LICENSE).
 
+`Screen.link` refuses C0 controls and DEL in a URI or params with
+`error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
+
 `Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
 place, writing only the mode differences and repainting on the next draw.
 Leaving and entering a renderer that has drawn also repaints text and pictures.

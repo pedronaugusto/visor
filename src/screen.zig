@@ -449,7 +449,11 @@ pub const Screen = struct {
     /// URI, empty for none. It is part of the link's identity: two targets
     /// that differ only by an `id=` are two links, because a terminal treats
     /// them as two.
-    pub fn link(s: *Screen, gpa: Allocator, uri: []const u8, params: []const u8) Allocator.Error!Link {
+    /// C0 controls and DEL in either field return `ControlInText` before
+    /// the table changes, by the same rule morse applies when writing OSC.
+    pub fn link(s: *Screen, gpa: Allocator, uri: []const u8, params: []const u8) (Allocator.Error || error{ControlInText})!Link {
+        try morse.checkText(uri);
+        try morse.checkText(params);
         s.sameAllocator(gpa);
         return s.links.intern(gpa, uri, params);
     }
@@ -1272,4 +1276,21 @@ test "a resize rebuilds the pool rather than growing it forever" {
     try s.resize(testing.allocator, .{ .cols = 6, .rows = 2 });
     try testing.expect(s.graphemes.len() < before);
     try testing.expectEqualStrings("\u{1f468}\u{200d}0031", s.textAt(0, 0));
+}
+
+test "Screen.link refuses controls in either field before interning and preserves UTF-8" {
+    var s = try made(4, 1);
+    defer s.deinit(testing.allocator);
+    const first = try s.link(testing.allocator, "https://example.com/café", "id=🐈");
+    for (0..128) |n| {
+        if (n >= 32 and n != 127) continue;
+        const bad = [_]u8{ 'a', @intCast(n), 'b' };
+        try testing.expectError(error.ControlInText, s.link(testing.allocator, &bad, ""));
+        try testing.expectError(error.ControlInText, s.link(testing.allocator, "uri", &bad));
+    }
+    const target = s.links.get(first).?;
+    try testing.expectEqualStrings("https://example.com/café", target.uri);
+    try testing.expectEqualStrings("id=🐈", target.params);
+    const second = try s.link(testing.allocator, "uri", "");
+    try testing.expectEqual(@intFromEnum(first) + 1, @intFromEnum(second));
 }
