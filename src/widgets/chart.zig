@@ -80,7 +80,7 @@ pub const Chart = struct {
 
         // The axis lines, and the plot inside them.
         const axis_col = gutter;
-        if (win.cols() <= axis_col + 1 or win.rows() <= label_row + 1) return;
+        if (win.cols() <= @as(u32, axis_col) + 1 or win.rows() <= @as(u32, label_row) + 1) return;
         const axis_row = win.rows() - 1 - label_row;
         const plot = win.child(.{
             .col = axis_col + 1,
@@ -176,9 +176,10 @@ pub const Chart = struct {
         for (c.datasets) |d| {
             if (d.name.len == 0) continue;
             widest = @max(widest, plot.width(d.name));
+            if (@as(u32, widest) + 2 > plot.cols() or @as(u32, named) + 3 > plot.rows()) return;
             named += 1;
         }
-        if (named == 0 or widest + 2 > plot.cols() or named + 2 > plot.rows()) return;
+        if (named == 0) return;
         const box = plot.child(.{
             .col = plot.cols() - widest - 2,
             .row = 0,
@@ -314,3 +315,18 @@ test "the gutter is as wide as the widest label, measured the way the screen mea
 }
 
 const sign = "\u{26a0}\u{fe0f}";
+
+test "chart labels reserve their margins before narrowing the width" {
+    var h = try Harness.init(testing.allocator, 8, 4);
+    defer h.deinit();
+    const long = "x" ** std.math.maxInt(u16);
+    try (Chart{ .datasets = &.{}, .y = .{ .labels = &.{long} } }).draw(h.window());
+    try testing.expect(!h.screen.damage.any());
+    try (Chart{ .datasets = &.{.{ .name = long, .points = &.{} }} }).draw(h.window());
+    _ = try h.frame();
+    const datasets = try testing.allocator.alloc(Dataset, @as(usize, std.math.maxInt(u16)) + 1);
+    defer testing.allocator.free(datasets);
+    @memset(datasets, .{ .name = "x", .points = &.{} });
+    try (Chart{ .datasets = datasets }).draw(h.window());
+    _ = try h.frame();
+}
