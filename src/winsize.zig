@@ -49,6 +49,17 @@ pub const CellSize = struct {
     reported: bool,
 };
 
+/// A mouse position counted from zero, plus its fraction within the cell.
+/// Cell reports point to the middle (0.5, 0.5); pixel reports preserve the
+/// fraction. Cell indices saturate at u32's limit for reports far outside
+/// the grid. No button, modifier or gesture policy is added here.
+pub const MouseLocation = struct {
+    col: u32,
+    row: u32,
+    x: f32,
+    y: f32,
+};
+
 /// How big the terminal is: its grid, and what it has said about pixels.
 pub const Winsize = struct {
     /// The grid, in cells.
@@ -78,6 +89,29 @@ pub const Winsize = struct {
             .width = @as(f32, @floatFromInt(ws.area.width)) / @as(f32, @floatFromInt(ws.cells.cols)),
             .height = @as(f32, @floatFromInt(ws.area.height)) / @as(f32, @floatFromInt(ws.cells.rows)),
             .reported = false,
+        };
+    }
+
+    /// Finds a mouse report's cell and fraction using the fractional
+    /// `CellSize`. Null for pixels when the cell size is unknown. Reports
+    /// count from one; zero is treated as the first cell or pixel.
+    pub fn locate(ws: Winsize, event: morse.MouseEvent) ?MouseLocation {
+        if (!event.pixels) return .{
+            .col = event.x -| 1,
+            .row = event.y -| 1,
+            .x = 0.5,
+            .y = 0.5,
+        };
+        const cell = ws.cellSize() orelse return null;
+        const x = @as(f64, @floatFromInt(event.x -| 1)) / cell.width;
+        const y = @as(f64, @floatFromInt(event.y -| 1)) / cell.height;
+        const col = @floor(x);
+        const row = @floor(y);
+        return .{
+            .col = @intFromFloat(@min(col, std.math.maxInt(u32))),
+            .row = @intFromFloat(@min(row, std.math.maxInt(u32))),
+            .x = @floatCast(x - col),
+            .y = @floatCast(y - row),
         };
     }
 
@@ -189,4 +223,36 @@ test "the size answers fold in, and anything else is ignored" {
 /// A reply as the input reads it.
 fn answer(bytes: []const u8) morse.Event {
     return .{ .reply = morse.Reply.parse(bytes).? };
+}
+
+test "Winsize.locate keeps a pixel mouse fraction and uses fractional cell sizes" {
+    const ws: Winsize = .{ .cells = .{ .cols = 100, .rows = 40 }, .cell = .{ .width = 10, .height = 20 } };
+    const mouse: morse.MouseEvent = .{ .button = .left, .x = 36, .y = 51, .press = true, .pixels = true };
+    const at = ws.locate(mouse).?;
+    try testing.expectEqual(@as(u32, 3), at.col);
+    try testing.expectEqual(@as(u32, 2), at.row);
+    try testing.expectEqual(@as(f32, 0.5), at.x);
+    try testing.expectEqual(@as(f32, 0.5), at.y);
+    const fractional: Winsize = .{ .cells = .{ .cols = 100, .rows = 40 }, .area = .{ .width = 920, .height = 840 } };
+    const fraction = fractional.locate(mouse).?;
+    try testing.expectEqual(@as(u32, 3), fraction.col);
+    try testing.expectApproxEqAbs(@as(f32, 35.0 / 9.2 - 3.0), fraction.x, 0.00001);
+    try testing.expectApproxEqAbs(@as(f32, 50.0 / 21.0 - 2.0), fraction.y, 0.00001);
+    try testing.expect((Winsize{}).locate(mouse) == null);
+}
+
+test "Winsize.locate centers cell reports, handles zero and bounds far-away pixels" {
+    var mouse: morse.MouseEvent = .{ .button = .none, .x = 1, .y = 3, .press = false };
+    try testing.expectEqual(MouseLocation{ .col = 0, .row = 2, .x = 0.5, .y = 0.5 }, (Winsize{}).locate(mouse).?);
+    const ws: Winsize = .{ .cell = .{ .width = 10, .height = 20 } };
+    mouse.x = 0;
+    mouse.y = 0;
+    mouse.pixels = true;
+    try testing.expectEqual(MouseLocation{ .col = 0, .row = 0, .x = 0, .y = 0 }, ws.locate(mouse).?);
+    const tiny: Winsize = .{ .cells = .{ .cols = 65535, .rows = 65535 }, .area = .{ .width = 1, .height = 1 } };
+    mouse.x = std.math.maxInt(u32);
+    mouse.y = std.math.maxInt(u32);
+    const far = tiny.locate(mouse).?;
+    try testing.expectEqual(std.math.maxInt(u32), far.col);
+    try testing.expect(far.x >= 0 and far.x < 1 and far.y >= 0 and far.y < 1);
 }

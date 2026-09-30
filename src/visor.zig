@@ -182,6 +182,8 @@ pub const Pixels = winsize_mod.Pixels;
 /// One cell in pixels, and whether the terminal said so or it was worked
 /// out from the text area.
 pub const CellSize = winsize_mod.CellSize;
+/// A mouse cell and its fraction, counted from zero.
+pub const MouseLocation = winsize_mod.MouseLocation;
 /// Puts the one open terminal back, the modes a renderer entered through it
 /// included. Allocates nothing, fails at nothing.
 pub const restoreGlobal = tty_mod.restoreGlobal;

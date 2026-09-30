@@ -574,3 +574,7 @@ the next read's budget, or null when done. It owns no clock or read: an early
 key can be handled by the application while forwarded probe replies arrive.
 `examples/live.zig` shows the loop; run it with `zig build live`. The examples
 step runs its `--check` path without a terminal.
+
+`Winsize.locate(mouse)` returns its zero-based column and row and fractions
+`x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
+cell reports point to the middle. Unknown pixel size returns null.
