@@ -463,7 +463,7 @@ fn modeError(err: terminal.RawModeError) Tty.ModeError {
 /// Puts every registered terminal back: the modes a renderer entered through
 /// `Tty.enter` undone — keyboard flags popped, mouse, paste, focus and
 /// colour-scheme reports off, the alternate screen left, the cursor shown —
-/// and then the terminal's own mode.
+/// and the terminal's own mode. POSIX restores raw mode first.
 ///
 /// Allocates nothing, fails at nothing, and is safe from a panic handler or
 /// an atexit hook. A terminal that was never put in raw mode is left alone.

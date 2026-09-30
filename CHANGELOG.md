@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Documentation names the state owners and distinguishes inline text from pooled handle lifetimes.
+
 - Restoring the terminal emulator's saved cursor clamps it to the resized grid.
 
 - Growing terminal clusters and scaled text compare wide extents before narrowing at the u16 edge.

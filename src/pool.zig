@@ -135,9 +135,9 @@ pub const Graphemes = struct {
         return p.bytes.items[off..][0..n];
     }
 
-    /// Empties the pool, keeping the memory. Every `Cell.Text` handed out
-    /// before this points at nothing: the caller clears the grid and
-    /// repaints.
+    /// Empties the pool, keeping the memory. Pooled `Cell.Text` handles
+    /// handed out before this become invalid; inline text remains portable.
+    /// The caller clears the grid and repaints.
     pub fn reset(p: *Graphemes) void {
         p.generation = 0;
         p.bytes.clearRetainingCapacity();

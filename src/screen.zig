@@ -20,8 +20,8 @@
 //!
 //! What this file will never hold: layout, widgets, pictures, a previous
 //! frame, or a single byte written to a terminal. The pictures are `Layers`,
-//! which a program keeps beside its screen and hands the renderer with it. The previous frame belongs to the
-//! renderer, which is the only thing that knows what the terminal was shown.
+//! which a program keeps beside its screen and hands the renderer with it.
+//! The previous frame belongs to the renderer, which is the only thing that knows what the terminal was shown.
 
 const std = @import("std");
 const morse = @import("morse");

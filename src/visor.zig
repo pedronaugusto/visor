@@ -67,7 +67,7 @@ pub const Style = cell_mod.Style;
 pub const Color = cell_mod.Color;
 /// Which underline a cell carries.
 pub const Underline = cell_mod.Underline;
-/// An OSC 8 target, as an index into the screen's link table.
+/// An OSC 8 handle bound to the generation of its issuing link pool.
 pub const Link = cell_mod.Link;
 /// The target a `Link` names: a URI and the parameters beside it.
 pub const Target = pool_mod.Target;
@@ -84,8 +84,8 @@ pub const mix = palette_mod.mix;
 // The grid and the views of it.
 //=========================================================================
 
-/// The grid: cells, size, cursor, the grapheme pool, the link table, the
-/// damage map and the layers.
+/// The grid: cells, size, cursor, the grapheme pool, the link table and the
+/// damage map. Pictures belong to the Layers kept beside it.
 pub const Screen = screen_mod.Screen;
 /// Where the terminal's cursor should end the frame.
 pub const Cursor = screen_mod.Cursor;
