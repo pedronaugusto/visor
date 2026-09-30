@@ -568,7 +568,7 @@ pub const Layers = struct {
                     held.state = .ready;
                     return true;
                 }
-                if (now_ms - held.sent_ms < grace_ms) return false;
+                if (now_ms -| held.sent_ms < grace_ms) return false;
                 // A picture in shared memory is not taken on trust: a
                 // terminal that never said it read one is one that is
                 // not given another, and this one is sent again.
@@ -1665,4 +1665,16 @@ test "a picture placement spells the one-based u16 coordinate edge without overf
     defer out.deinit();
     try testing.expectEqual(@as(usize, 1), try l.emit(&out.writer, .{ .kitty_graphics = true }));
     try testing.expect(std.mem.startsWith(u8, out.written(), "\x1b[65536;65536H"));
+}
+
+test "picture grace time spans the signed clock range" {
+    var layers: Layers = .{};
+    defer layers.deinit(testing.allocator);
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    _ = try layers.transmit(testing.allocator, &out.writer, 1, &.{ 1, 2, 3, 4 }, .{ .width = 1, .height = 1, .answer = true, .now_ms = std.math.minInt(i64) });
+    try testing.expect(layers.ready(1, std.math.maxInt(i64), 50));
+    layers.answers = null;
+    _ = try layers.transmit(testing.allocator, &out.writer, 2, &.{ 1, 2, 3, 4 }, .{ .width = 1, .height = 1, .answer = true, .now_ms = std.math.maxInt(i64) });
+    try testing.expect(!layers.ready(2, std.math.minInt(i64), 50));
 }

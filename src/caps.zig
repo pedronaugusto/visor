@@ -214,7 +214,7 @@ pub const Caps = struct {
         pub fn settled(p: *const Probe, now_ms: i64, quiet_ms: i64) bool {
             if (p.complete()) return true;
             if (!p.answered.contains(.device_attributes)) return false;
-            return now_ms - (p.last_ms orelse now_ms) >= quiet_ms;
+            return now_ms -| (p.last_ms orelse now_ms) >= quiet_ms;
         }
     };
 };
@@ -379,4 +379,12 @@ test "a probe ignores disabled questions without extending its quiet period" {
     try testing.expect(!p.answered.contains(.unicode_core));
     try testing.expectEqual(@as(?i64, 100), p.last_ms);
     try testing.expect(p.settled(150, 50));
+}
+
+test "probe quiet time spans the signed clock range" {
+    var probe: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    probe.feed(answer("\x1b[?62;4;22c"), std.math.minInt(i64));
+    try testing.expect(probe.settled(std.math.maxInt(i64), 50));
+    probe.last_ms = std.math.maxInt(i64);
+    try testing.expect(!probe.settled(std.math.minInt(i64), 50));
 }
