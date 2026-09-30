@@ -494,11 +494,11 @@ pub const Term = struct {
     fn setScrollRegion(t: *Term, params: []const u8) void {
         const rows = t.scr.size.rows;
         if (rows == 0) return;
-        const top = param(params, 0, 1);
-        const bottom = param(params, 1, rows);
+        const top = @min(nonzeroParam(params, 0, 1), rows) - 1;
+        const bottom = @min(nonzeroParam(params, 1, rows), rows) - 1;
         if (bottom <= top) return;
-        t.scroll_top = @intCast(@min(top - 1, rows - 1));
-        t.scroll_bottom = @intCast(@min(bottom - 1, rows - 1));
+        t.scroll_top = @intCast(top);
+        t.scroll_bottom = @intCast(bottom);
         t.moveTo(0, t.scroll_top);
     }
 
@@ -1150,6 +1150,12 @@ fn param(params: []const u8, n: usize, fallback: u32) u32 {
     return fallback;
 }
 
+// Position and count parameters treat zero as their default. SGR does not.
+fn nonzeroParam(params: []const u8, n: usize, fallback: u32) u32 {
+    const value = param(params, n, fallback);
+    return if (value == 0) fallback else value;
+}
+
 /// A parameter as a coordinate, saturating rather than wrapping: a number
 /// too large for the grid is clamped by `moveTo` anyway.
 fn clamp(n: u32) u16 {
@@ -1158,13 +1164,13 @@ fn clamp(n: u32) u16 {
 
 /// A one-based coordinate, with zero and a missing field both meaning one.
 fn coordinate(params: []const u8, n: usize) u16 {
-    return clamp(param(params, n, 1) -| 1);
+    return clamp(nonzeroParam(params, n, 1) - 1);
 }
 
 /// The first parameter, never zero: the movement sequences all treat a
 /// missing or zero count as one.
 fn atLeastOne(params: []const u8) u32 {
-    return @max(param(params, 0, 1), 1);
+    return nonzeroParam(params, 0, 1);
 }
 
 /// The underline style a `4:n` names.
@@ -1939,4 +1945,24 @@ test "style dump IDs grow beyond the two digit legend" {
         try testing.expectEqualStrings("", lines.next().?);
         try testing.expect(lines.next() == null);
     }
+}
+
+test "scroll margins normalize zero defaults before checking their region" {
+    var term = try made(4, 4);
+    defer term.deinit();
+    try term.feed("\x1b[0;2r");
+    try testing.expectEqual(@as(u16, 0), term.scroll_top);
+    try testing.expectEqual(@as(u16, 1), term.scroll_bottom);
+    try term.feed("\x1b[2;0r");
+    try testing.expectEqual(@as(u16, 1), term.scroll_top);
+    try testing.expectEqual(@as(u16, 3), term.scroll_bottom);
+    try term.feed("\x1b[0;0r");
+    try testing.expectEqual(@as(u16, 0), term.scroll_top);
+    try testing.expectEqual(@as(u16, 3), term.scroll_bottom);
+    try term.feed("\x1b[4294967294;4294967295r");
+    try testing.expectEqual(@as(u16, 0), term.scroll_top);
+    try testing.expectEqual(@as(u16, 3), term.scroll_bottom);
+    try term.feed("\x1b[4;2r");
+    try testing.expectEqual(@as(u16, 0), term.scroll_top);
+    try testing.expectEqual(@as(u16, 3), term.scroll_bottom);
 }

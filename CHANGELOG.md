@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Terminal scroll margins share zero-default parsing and check their order after clipping to the grid.
+
 - Calendar measurement and drawing both leave invalid months empty.
 
 - List and Table share bounded navigation so moving backward also clamps selections after items disappear.
