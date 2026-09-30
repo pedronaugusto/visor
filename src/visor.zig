@@ -143,6 +143,8 @@ pub const wrap = text_mod.wrap;
 pub const Row = text_mod.Row;
 /// The prefix of a string that fits, with the ellipsis counted.
 pub const fit = text_mod.fit;
+/// The suffix that fits beside a leading ellipsis, cut at a cluster boundary.
+pub const fitEnd = text_mod.fitEnd;
 
 //=========================================================================
 // Pictures.

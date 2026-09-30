@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `fitEnd` keeps a text suffix on a grapheme boundary beside a leading ellipsis.
+
 - `Winsize.locate` maps a mouse report to its cell and fraction using the fractional cell size.
 
 - `Session` holds the screen, renderer, size, caps, probe and layers, coalesces resizes and keeps mouse parsing in step; `ProbeWait` uses caller-supplied time.

@@ -578,3 +578,7 @@ step runs its `--check` path without a terminal.
 `Winsize.locate(mouse)` returns its zero-based column and row and fractions
 `x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
 cell reports point to the middle. Unknown pixel size returns null.
+
+`fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
+boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
+yourself only when the returned slice is shorter than the input.

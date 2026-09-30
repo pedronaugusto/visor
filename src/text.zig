@@ -405,6 +405,22 @@ pub fn fit(str: []const u8, cols: u16, ellipsis: []const u8, method: Method) []c
     return str[0..end];
 }
 
+/// The suffix that fits in `cols` columns beside a leading `ellipsis`, for
+/// paths and names whose end matters. Like `fit`, returns the whole string
+/// when it fits, otherwise a slice cut at a grapheme boundary; the caller
+/// writes the ellipsis first. No allocation and no joined string.
+pub fn fitEnd(str: []const u8, cols: u16, ellipsis: []const u8, method: Method) []const u8 {
+    var left = widthWide(str, method);
+    if (left <= cols) return str;
+    const room = cols -| width(ellipsis, method);
+    var it: Graphemes = .init(str);
+    while (it.nextAt()) |found| {
+        if (left <= room) return str[found.start..];
+        left -= graphemeWidth(found.bytes, method);
+    }
+    return str[str.len..];
+}
+
 const testing = std.testing;
 
 test "ascii is one column a byte" {
@@ -690,4 +706,27 @@ test "a cell of printable ASCII beside one ending in it is answered as the break
             }
         }
     }
+}
+
+test "fitEnd keeps the end with room for a leading ellipsis on cluster boundaries" {
+    try testing.expectEqualStrings("path", fitEnd("long/path", 5, "…", .unicode));
+    try testing.expectEqualStrings("path", fitEnd("path", 4, "…", .unicode));
+    try testing.expectEqualStrings("á", fitEnd("long/á", 2, "…", .unicode));
+    try testing.expectEqualStrings("👩‍🚀", fitEnd("long/👩‍🚀", 3, "…", .unicode));
+    try testing.expectEqualStrings("", fitEnd("long/👩‍🚀", 3, "…", .wcwidth));
+    try testing.expectEqualStrings("é🇵🇹", fitEnd("long/é🇵🇹", 4, "…", .unicode));
+    try testing.expectEqualStrings("", fitEnd("long/中", 2, "…", .unicode));
+    try testing.expectEqualStrings("", fitEnd("path", 0, "…", .unicode));
+    try testing.expectEqualStrings("", fitEnd("path", 1, "…", .unicode));
+    try testing.expectEqualStrings("", fitEnd("path", 2, "...", .unicode));
+    try testing.expectEqualStrings("ath", fitEnd("path", 3, "", .unicode));
+}
+
+test "fitEnd counts beyond saturated width and keeps a very long path's suffix" {
+    const long = try testing.allocator.alloc(u8, 70000);
+    defer testing.allocator.free(long);
+    @memset(long, 'x');
+    @memcpy(long[long.len - 4 ..], "name");
+    try testing.expectEqualStrings("name", fitEnd(long, 5, "…", .unicode));
+    try testing.expectEqual(@as(usize, 65534), fitEnd(long, std.math.maxInt(u16), "…", .unicode).len);
 }
