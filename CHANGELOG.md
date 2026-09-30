@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `Winsize.locate` maps a mouse report to its cell and fraction using the fractional cell size.
 
-- `Session` holds the screen, renderer, size, caps, probe and layers, coalesces resizes and keeps mouse parsing in step; `ProbeWait` uses caller-supplied time.
+- `Session` holds the screen, renderer, size, caps, probe and layers, coalesces resizes and keeps mouse parsing in step; `ProbeWait` uses caller-supplied time, with a live-loop example on POSIX and Windows.
 
 - `Replacement` keeps one picture in flight and swaps on acknowledgement or grace; `ImageIds` skips the probe and retirement frees inside `commitFrame(w, caps)`, including frames with no visible text or picture.
 
