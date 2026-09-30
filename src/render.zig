@@ -126,7 +126,7 @@ fn mouseChange(w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!vo
 const unknown: Cell = .{ .text = .{ .buf = @splat(0), .len = 0 }, .style = .{}, .link = .none, .shape = .{} };
 
 /// Anything `draw`, `enter` or `leave` can fail with.
-pub const Error = Writer.Error || error{
+pub const Error = morse.TextError || error{
     /// The screen is not the size the renderer was made or resized to.
     SizeMismatch,
 };
@@ -193,6 +193,8 @@ pub const Renderer = struct {
     repaint_all: bool = false,
     /// What `enter` turned on, so `leave` turns off exactly that.
     entered: ?Entered = null,
+    /// Whether a complete frame has been written through this renderer.
+    drawn: bool = false,
     /// In inline mode, how many rows of the terminal are the screen's,
     /// counted from the saved origin; null in the alternate screen. The next
     /// repaint takes or gives back rows when this and `size.rows` differ.
@@ -202,6 +204,8 @@ pub const Renderer = struct {
     pub const Entered = struct {
         /// Which screen the program took.
         mode: Mode,
+        /// Capabilities last applied by `enter` or `setCaps`.
+        caps: Caps,
         /// Whether in-band resize reports were turned on.
         in_band_resize: bool,
         /// Whether the terminal was asked to measure clusters, mode 2027.
@@ -398,6 +402,7 @@ pub const Renderer = struct {
             r.repaint_all = false;
         }
         if (layers) |l| l.commitFrame(caps);
+        r.drawn = true;
         stats.bytes = frame.n;
         return stats;
     }
@@ -411,12 +416,16 @@ pub const Renderer = struct {
     /// instead of when the program asks, which is ten frames a second on the
     /// tightest of them. `draw` writes the bracket, and only when the frame
     /// is large enough to be worth it.
+    /// Re-entering a renderer that drew a frame repaints every row and
+    /// picture on its next draw. Use `setCaps` to change caps in place.
     pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {
         // Record every mode before it may have reached a partially failing
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
+        errdefer r.repaint();
         r.entered = .{
             .mode = mode,
+            .caps = caps,
             .in_band_resize = caps.in_band_resize,
             .unicode_core = caps.width_method == .unicode,
             .modes = modes,
@@ -456,6 +465,7 @@ pub const Renderer = struct {
         r.shown = false;
         r.shape = null;
         r.repaint_all = false;
+        if (r.drawn) r.repaint();
     }
 
     /// Anything `setModes` can fail with.
@@ -464,6 +474,21 @@ pub const Renderer = struct {
         /// change and nothing that would undo the change.
         NotEntered,
     };
+
+    /// Applies capabilities without leaving or clearing the screen. Only
+    /// mode 2048 and 2027 differences are written now; the next draw
+    /// repaints text and pictures under the new capabilities. `leave`
+    /// remembers and undoes the modes now in effect.
+    pub fn setCaps(r: *Renderer, w: *Writer, caps: Caps) ModesError!void {
+        const was = r.entered orelse return error.NotEntered;
+        if (std.meta.eql(was.caps, caps)) return;
+        r.entered.?.caps = caps;
+        r.entered.?.in_band_resize = caps.in_band_resize;
+        r.entered.?.unicode_core = caps.width_method == .unicode;
+        r.repaint();
+        if (was.in_band_resize != caps.in_band_resize) try morse.inBandResize.set(w, caps.in_band_resize);
+        if (was.unicode_core != (caps.width_method == .unicode)) try morse.unicodeCore.set(w, caps.width_method == .unicode);
+    }
 
     /// Changes the input modes mid-session — mouse reports for one view and
     /// not another, say — writing only what differs, and remembers the
@@ -3459,4 +3484,42 @@ test "a cluster that would join the cell on its left, and is more than marks, re
         // and drawn again unchanged, nothing
         try f.expectBytes("");
     }
+}
+
+test "changing caps keeps the screen, and re-entering repaints every row and picture" {
+    var f: Fixture = try .init(testing.allocator, 8, 3);
+    defer f.deinit();
+    var layers: Layers = .{};
+    defer layers.deinit(testing.allocator);
+    var c = f.caps;
+    c.kitty_graphics = true;
+    try f.renderer.enter(&f.out.writer, c, .alt, .{});
+    for ("row one", 0..) |_, col| try f.screen.write(@intCast(col), 0, "row one"[col..][0..1], .{}, .none);
+    for ("row two", 0..) |_, col| try f.screen.write(@intCast(col), 1, "row two"[col..][0..1], .{}, .none);
+    const picture: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    try layers.declare(testing.allocator, picture);
+    _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
+    f.out.clearRetainingCapacity();
+    c.in_band_resize = true;
+    c.width_method = .wcwidth;
+    try f.renderer.setCaps(&f.out.writer, c);
+    try testing.expectEqualStrings("\x1b[?2048h\x1b[?2027l", f.out.written());
+    f.out.clearRetainingCapacity();
+    try layers.declare(testing.allocator, picture);
+    const changed = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
+    try testing.expectEqual(@as(u32, 3), changed.rows);
+    try testing.expect(changed.cells >= 14);
+    try testing.expectEqual(@as(u32, 1), changed.placements);
+    try f.renderer.leave(&f.out.writer);
+    try f.renderer.enter(&f.out.writer, c, .alt, .{});
+    f.out.clearRetainingCapacity();
+    try layers.declare(testing.allocator, picture);
+    const entered = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
+    try testing.expectEqual(@as(u32, 3), entered.rows);
+    try testing.expect(entered.cells >= 14);
+    try testing.expectEqual(@as(u32, 1), entered.placements);
+    f.out.clearRetainingCapacity();
+    try f.renderer.setCaps(&f.out.writer, c);
+    try testing.expectEqual(@as(usize, 0), f.out.written().len);
+    try testing.expect(!f.renderer.repaint_all);
 }

@@ -541,3 +541,7 @@ Zig 0.16.0.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+`Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
+place, writing only the mode differences and repainting on the next draw.
+Leaving and entering a renderer that has drawn also repaints text and pictures.
