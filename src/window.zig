@@ -277,10 +277,10 @@ pub const Window = struct {
         return w.child(.{ .col = r.col, .row = r.row, .cols = r.cols, .rows = r.rows });
     }
 
-    /// One cell, in this window's coordinates, clipped.
+    /// One cell, in this window's coordinates, clipped by its whole extent.
     /// Stale or foreign handles return `InvalidHandle`.
     pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
-        if (col >= w.rect.cols or row >= w.rect.rows) return;
+        if (!w.fitsCell(col, row, c)) return;
         var drawn = c;
         if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try w.screen.textOf(&c)), c.style));
         try w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, drawn);
@@ -289,7 +289,7 @@ pub const Window = struct {
     /// Copies a cell from another screen into this window.
     /// The cell must still belong to the source's current pool generations.
     pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) (std.mem.Allocator.Error || error{InvalidHandle})!void {
-        if (col >= w.rect.cols or row >= w.rect.rows) return;
+        if (!w.fitsCell(col, row, c)) return;
         var drawn = c;
         if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try source.textOf(&c)), c.style));
         try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, drawn);
@@ -301,7 +301,7 @@ pub const Window = struct {
         return w.screen.readCell(w.rect.col + col, w.rect.row + row);
     }
 
-    /// A grapheme measured, placed, and its tail written if it is wide.
+    /// A grapheme measured and placed only when its whole extent fits.
     pub fn write(
         w: Window,
         col: u16,
@@ -310,9 +310,19 @@ pub const Window = struct {
         style: Style,
         link: Link,
     ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
-        if (col >= w.rect.cols or row >= w.rect.rows) return;
-        const drawn = if (w.ink == null) style else w.styled(col, row, textmod.graphemeWidth(grapheme, w.screen.method), grapheme, style);
+        const span = textmod.graphemeWidth(grapheme, w.screen.method);
+        if (!w.fits(col, row, span, 1)) return;
+        const drawn = if (w.ink == null) style else w.styled(col, row, span, grapheme, style);
         try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, drawn, link);
+    }
+
+    // A window owns placement clipping; Screen owns handle checks and tails.
+    fn fits(w: Window, col: u16, row: u16, span: u16, height: u16) bool {
+        return col < w.cols() and row < w.rows() and @as(u32, col) + span <= w.cols() and @as(u32, row) + height <= w.rows();
+    }
+    fn fitsCell(w: Window, col: u16, row: u16, c: Cell) bool {
+        if (c.isTail() or c.shape.kind == .spacer_head) return w.fits(col, row, 1, 1);
+        return w.fits(col, row, c.width(), c.rows());
     }
 
     /// A grapheme drawn `scale` cells tall and `scale` times its width
@@ -341,12 +351,14 @@ pub const Window = struct {
     pub fn fill(w: Window, rect: Rect, c: Cell) error{InvalidHandle}!void {
         const inside = rect.intersect(.fromSize(w.size()));
         if (inside.isEmpty()) return;
-        if (w.ink != null) {
-            // Cell by cell, because the ink may draw each differently.
+        if (w.ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
+            // Multi-cell fills use the same extent check as direct placement.
+            // The fill's own rectangle is the boundary, not just the window.
+            const bounded = w.sub(inside);
             var row = inside.row;
             while (row < inside.bottom()) : (row += 1) {
                 var col = inside.col;
-                while (col < inside.right()) : (col += 1) try w.writeOwnedCell(col, @intCast(row), c);
+                while (col < inside.right()) : (col += 1) try bounded.writeOwnedCell(col - inside.col, @intCast(row - inside.row), c);
             }
             return;
         }
@@ -1002,4 +1014,38 @@ test "printing clips word widths and starting rows at the u16 coordinate edge" {
     const outside = try s.window().printSegment(.{ .text = "\n" }, .{ .row = std.math.maxInt(u16), .commit = false });
     try testing.expect(outside.overflow);
     try testing.expectEqual(std.math.maxInt(u16), outside.row);
+}
+
+test "window placement clips every glyph extent before touching a neighbour" {
+    for ([_]textmod.Method{ .unicode, .wcwidth, .explicit }) |method| {
+        var s = try made(8, 4);
+        defer s.deinit();
+        s.method = method;
+        var source = try made(8, 4);
+        defer source.deinit();
+        source.method = method;
+        try source.write(0, 0, "中", .{}, .none);
+        _ = try source.writeScaled(0, 1, "X", .{}, .none, 3);
+        const wide = source.readCell(0, 0).?;
+        const scaled = source.readCell(0, 1).?;
+        const win = s.window().child(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 });
+        try s.write(4, 1, "R", .{}, .none);
+        try s.write(1, 3, "B", .{}, .none);
+        try win.write(2, 0, "中", .{}, .none);
+        try testing.expectEqualStrings("R", s.textAt(4, 1));
+        try testing.expectEqualStrings(" ", s.textAt(3, 1));
+        try win.writeOwnedCell(2, 0, wide);
+        try testing.expectEqualStrings("R", s.textAt(4, 1));
+        try win.copyCell(&source, 2, 0, wide);
+        try testing.expectEqualStrings("R", s.textAt(4, 1));
+        try win.writeOwnedCell(0, 1, scaled);
+        try testing.expectEqualStrings("B", s.textAt(1, 3));
+        try win.copyCell(&source, 0, 1, scaled);
+        try testing.expectEqualStrings("B", s.textAt(1, 3));
+        try win.fill(.fromSize(win.size()), scaled);
+        try testing.expectEqualStrings("R", s.textAt(4, 1));
+        try testing.expectEqualStrings("B", s.textAt(1, 3));
+        try win.write(1, 0, "中", .{}, .none);
+        try testing.expectEqualStrings("中", s.textAt(2, 1));
+    }
 }

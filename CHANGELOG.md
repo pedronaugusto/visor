@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Window checks complete text and cell extents before placement, copying or multi-cell fills can cross a child boundary.
+
 - Sextants weights RGBA brightness and cell colour by alpha so transparent pixels leave cells alone.
 
 - Markdown reads a documented subset into an owned document and renders themed prose, quotes, lists, verbatim code and screen links to width.

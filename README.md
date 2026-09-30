@@ -328,6 +328,10 @@ are portable. Use `copyCell` with the source screen to transfer a live cell,
 or the owned-copy helpers to keep content through compaction. Raw pool
 constructors and raw text resolution are no longer public APIs.
 
+`Window` checks the whole glyph or scaled cell extent before direct writes
+and copies. Multi-cell fills use the fill rectangle as their boundary.
+A placement that cannot fit leaves the grid alone.
+
 `Screen.link` refuses C0 controls and DEL in a URI or params with
 `error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
 
