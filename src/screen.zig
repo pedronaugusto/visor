@@ -153,31 +153,39 @@ pub const Screen = struct {
             s.damageAll();
             return;
         }
-        // Prepare the grid and damage map before compaction commits new
-        // identities. Nothing fallible follows a successful compaction, so
+        // Prepare the grid and damage map before committing new pool
+        // identities. Nothing fallible follows a successful preparation, so
         // any allocation failure preserves cells, pools, borrows and damage.
         const cells = try gpa.alloc(StoredCell, size.area());
         errdefer gpa.free(cells);
         @memset(cells, .blank(.{}));
         var damage = try Damage.init(gpa, size.rows);
         errdefer damage.deinit(gpa);
-        try s.compactKeepingLink(retained);
-
         const rows = @min(s.size.rows, size.rows);
         const cols = @min(s.size.cols, size.cols);
         for (0..rows) |r| {
             const from = s._cells[r * s.size.cols ..][0..cols];
             @memcpy(cells[r * size.cols ..][0..cols], from);
         }
+        // This view borrows only the new grid and damage map. Healing needs
+        // geometry, never pools; it must finish before choosing the live roots.
+        var resized: Screen = .{
+            .gpa = gpa,
+            .size = size,
+            ._cells = cells,
+            .graphemes = .{},
+            .links = .{},
+            .damage = damage,
+        };
+        if (size.rows > 0) resized.heal(0, size.rows - 1);
+        const prepared = try s.preparePools(cells, retained);
+        s.commitPools(cells, prepared, retained);
         gpa.free(s._cells);
         s._cells = cells;
         s.damage.deinit(gpa);
-        s.damage = damage;
+        s.damage = resized.damage;
         s.size = size;
 
-        // A wide grapheme or a block that used to have room may not any
-        // more, and a block may have lost its lower rows.
-        if (size.rows > 0) s.heal(0, size.rows - 1);
         s.clampCursor();
         s.damageAll();
     }
@@ -199,6 +207,18 @@ pub const Screen = struct {
     }
 
     fn compactKeepingLink(s: *Screen, retained: ?*Link) Allocator.Error!void {
+        const prepared = try s.preparePools(s._cells, retained);
+        s.commitPools(s._cells, prepared, retained);
+        s.damageAll();
+    }
+
+    const PreparedPools = struct {
+        graphemes: pool.Graphemes,
+        links: pool.Links,
+        kept: @TypeOf(@as(StoredCell, .{}).link),
+    };
+
+    fn preparePools(s: *const Screen, cells: []const StoredCell, retained: ?*Link) Allocator.Error!PreparedPools {
         const gpa = s.gpa;
         var graphemes: pool.Graphemes = .{};
         errdefer graphemes.deinit(gpa);
@@ -208,7 +228,7 @@ pub const Screen = struct {
         // Everything the grid still shows, into the new pools. Nothing is
         // written back until this has succeeded, so a failure here leaves
         // the screen exactly as it was.
-        for (s._cells) |*c| {
+        for (cells) |*c| {
             if (c.text.isPooled()) _ = try graphemes.intern(gpa, internal.textOf(s, c));
             if (internal.target(s, c.link)) |t| _ = try links.intern(gpa, t.uri, t.params);
         }
@@ -220,9 +240,16 @@ pub const Screen = struct {
             const link_target = s.target(slot.*) orelse @panic("invalid retained link");
             break :kept try links.intern(gpa, link_target.uri, link_target.params);
         } else .none;
+        return .{ .graphemes = graphemes, .links = links, .kept = kept };
+    }
+
+    fn commitPools(s: *Screen, cells: []StoredCell, prepared: PreparedPools, retained: ?*Link) void {
+        const gpa = s.gpa;
+        var graphemes = prepared.graphemes;
+        var links = prepared.links;
         // And now the cells, which cannot fail: everything they name is
         // already in the new pools.
-        for (s._cells) |*c| {
+        for (cells) |*c| {
             if (c.text.isPooled()) {
                 c.text = graphemes.intern(gpa, internal.textOf(s, c)) catch unreachable;
             }
@@ -235,8 +262,7 @@ pub const Screen = struct {
         s.graphemes = graphemes;
         s.links = links;
         s.pool_generation = pool.nextGeneration();
-        if (retained) |slot| slot.* = cellmod.internal.exportLink(kept, s.pool_generation);
-        s.damageAll();
+        if (retained) |slot| slot.* = cellmod.internal.exportLink(prepared.kept, s.pool_generation);
     }
 
     /// The cell at a place, or null outside the grid.
@@ -1711,4 +1737,24 @@ test "copying a cell checks destination shape before allocating its pools" {
     try testing.expectEqual(@as(usize, 0), dest.graphemes.len());
     try testing.expectEqual(@as(usize, 0), dest.links.count());
     try testing.expect(!dest.damage.any());
+}
+
+test "shrinking a screen sweeps text and links that no cell keeps" {
+    var s = try Screen.init(testing.allocator, .{ .cols = 2, .rows = 1 });
+    defer s.deinit();
+    const link = try s.link("https://removed.example", "");
+    const glyph = "a\u{301}\u{302}\u{303}";
+    try s.write(1, 0, glyph, .{}, link);
+    try s.resize(.{ .cols = 1, .rows = 1 });
+    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s.links.count());
+
+    // A head can survive the rectangle but lose the room its block needs.
+    try s.resize(.{ .cols = 2, .rows = 1 });
+    const wide_link = try s.link("https://clipped.example", "");
+    try s.write(0, 0, "界\u{301}\u{302}", .{}, wide_link);
+    try s.resize(.{ .cols = 1, .rows = 1 });
+    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s.links.count());
+    try testing.expectEqualStrings(" ", s.textAt(0, 0));
 }

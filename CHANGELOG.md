@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Resize rebuilds pools from the clipped and repaired grid so discarded cells retain no text or links.
+
 - Raster strokes and ellipses keep finite extreme coordinates and tiny radii through their distance calculations.
 
 - Breaking: Cell construction/import checks glyphs and shapes with InvalidCell; terminal bridges use explicitly unchecked placement while pool handles remain checked.
