@@ -292,10 +292,12 @@ pub const Tty = struct {
         const entered = r.entered;
         const region = r._region;
         const shape = r.shape;
+        const cleanup = r._cleanup;
         errdefer {
             r.entered = entered;
             r._region = region;
             r.shape = shape;
+            r._cleanup = cleanup;
         }
         var buffer: [256]u8 = undefined;
         var out = t.writer(&buffer);

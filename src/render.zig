@@ -106,24 +106,73 @@ fn mouseOff(w: *Writer, m: morse.Mouse) Writer.Error!void {
     try morse.setMode(w, m.encoding.number(), false);
 }
 
-/// From one mouse the terminal is known to be in to another, writing only
-/// the settings that differ: the old mode off before the new one on, so the
-/// `l` cannot reset the setting the `h` just made.
-fn mouseChange(w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!void {
-    const old = was orelse {
-        if (now) |m| try morse.mouse(w, m);
-        return;
-    };
-    const new = now orelse return mouseOff(w, old);
-    if (old.motion != new.motion) {
-        try morse.setMode(w, old.motion.number(), false);
-        try morse.setMode(w, new.motion.number(), true);
+// Cleanup tracks commands that may have enabled a mode, separately from
+// the requested configuration. An off command clears its obligation only
+// after the writer accepts it. Keyboard pops must never be repeated after
+// success; DEC mode resets are idempotent.
+const ModeCleanup = struct {
+    keyboard: bool = false,
+    motion: std.enums.EnumSet(morse.Mouse.Motion) = .{},
+    encoding: std.enums.EnumSet(morse.Mouse.Encoding) = .{},
+    focus: bool = false,
+    paste: bool = false,
+    color_scheme: bool = false,
+    in_band_resize: bool = false,
+    unicode_core: bool = false,
+
+    fn init(caps: Caps, modes: Modes) ModeCleanup {
+        var held: ModeCleanup = .{
+            .keyboard = modes.keyboard != null,
+            .focus = modes.focus,
+            .paste = modes.paste,
+            .color_scheme = modes.color_scheme,
+            .in_band_resize = caps.in_band_resize,
+            .unicode_core = caps.width_method == .unicode,
+        };
+        if (modes.mouse) |m| {
+            held.motion.insert(m.motion);
+            held.encoding.insert(m.encoding);
+        }
+        return held;
     }
-    if (old.encoding != new.encoding) {
-        try morse.setMode(w, old.encoding.number(), false);
-        try morse.setMode(w, new.encoding.number(), true);
+
+    fn set(w: *Writer, held: *bool, number: u16, on: bool) Writer.Error!void {
+        if (on) held.* = true;
+        try morse.setMode(w, number, on);
+        held.* = on;
     }
-}
+
+    fn mouseChange(held: *ModeCleanup, w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!void {
+        const old = was orelse {
+            if (now) |m| {
+                held.motion.insert(m.motion);
+                held.encoding.insert(m.encoding);
+                try morse.mouse(w, m);
+                held.motion = .{};
+                held.encoding = .{};
+                held.motion.insert(m.motion);
+                held.encoding.insert(m.encoding);
+            }
+            return;
+        };
+        if (now == null or old.motion != now.?.motion) {
+            try morse.setMode(w, old.motion.number(), false);
+            held.motion.remove(old.motion);
+            if (now) |m| {
+                held.motion.insert(m.motion);
+                try morse.setMode(w, m.motion.number(), true);
+            }
+        }
+        if (now == null or old.encoding != now.?.encoding) {
+            try morse.setMode(w, old.encoding.number(), false);
+            held.encoding.remove(old.encoding);
+            if (now) |m| {
+                held.encoding.insert(m.encoding);
+                try morse.setMode(w, m.encoding.number(), true);
+            }
+        }
+    }
+};
 
 /// What the previous frame holds where the renderer does not know what the
 /// terminal shows: a cell with no grapheme at all, which no write puts on a
@@ -205,8 +254,9 @@ pub const Renderer = struct {
     method: ?textmod.Method = null,
     /// Whether the next draw writes every cell.
     repaint_all: bool = false,
-    /// What `enter` turned on, so `leave` turns off exactly that.
+    /// The session configuration requested, including a partially written change.
     entered: ?Entered = null,
+    _cleanup: ModeCleanup = .{},
     /// Whether a complete frame has been written through this renderer.
     drawn: bool = false,
     /// In inline mode, how many rows of the terminal are the screen's,
@@ -214,18 +264,17 @@ pub const Renderer = struct {
     /// repaint takes or gives back rows when this and `size.rows` differ.
     _region: ?u16 = null,
 
-    /// The modes `enter` switched, remembered so `leave` is its mirror.
+    /// The requested session configuration; cleanup separately tracks accepted commands.
     pub const Entered = struct {
         /// Which screen the program took.
         mode: Mode,
-        /// Capabilities last applied by `enter` or `setCaps`.
+        /// Capabilities last requested by `enter` or `setCaps`.
         caps: Caps,
-        /// Whether in-band resize reports were turned on.
+        /// Whether in-band resize reports were requested.
         in_band_resize: bool,
         /// Whether the terminal was asked to measure clusters, mode 2027.
         unicode_core: bool,
-        /// The input modes in effect: what `enter` set, as `setModes` has
-        /// changed it since.
+        /// Input modes last requested by `enter` or `setModes`.
         modes: Modes = .{},
     };
 
@@ -447,6 +496,7 @@ pub const Renderer = struct {
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
         errdefer r.repaint();
+        r._cleanup = .init(caps, modes);
         r.entered = .{
             .mode = mode,
             .caps = caps,
@@ -502,7 +552,7 @@ pub const Renderer = struct {
     /// Applies capabilities without leaving or clearing the screen. Only
     /// mode 2048 and 2027 differences are written now; the next draw
     /// repaints text and pictures under the new capabilities. `leave`
-    /// remembers and undoes the modes now in effect.
+    /// remembers every mode that may remain enabled after a failed write.
     pub fn setCaps(r: *Renderer, w: *Writer, caps: Caps) ModesError!void {
         const was = r.entered orelse return error.NotEntered;
         if (std.meta.eql(was.caps, caps)) return;
@@ -510,29 +560,35 @@ pub const Renderer = struct {
         r.entered.?.in_band_resize = caps.in_band_resize;
         r.entered.?.unicode_core = caps.width_method == .unicode;
         r.repaint();
-        if (was.in_band_resize != caps.in_band_resize) try morse.inBandResize.set(w, caps.in_band_resize);
-        if (was.unicode_core != (caps.width_method == .unicode)) try morse.unicodeCore.set(w, caps.width_method == .unicode);
+        if (was.in_band_resize != caps.in_band_resize) try ModeCleanup.set(w, &r._cleanup.in_band_resize, morse.inBandResize.number, caps.in_band_resize);
+        if (was.unicode_core != (caps.width_method == .unicode)) try ModeCleanup.set(w, &r._cleanup.unicode_core, morse.unicodeCore.number, caps.width_method == .unicode);
     }
 
     /// Changes the input modes mid-session — mouse reports for one view and
     /// not another, say — writing only what differs, and remembers the
-    /// change so `leave` undoes what is in effect then.
+    /// change so `leave` undoes what may remain enabled after a failed write.
     pub fn setModes(r: *Renderer, w: *Writer, modes: Modes) ModesError!void {
         const was = if (r.entered) |e| e.modes else return error.NotEntered;
         r.entered.?.modes = modes;
         if (was.keyboard) |old| {
             if (modes.keyboard) |new| {
                 if (old != new) try morse.kittyKeyboardSet(w, new, .replace);
-            } else try morse.kittyKeyboardPop(w);
-        } else if (modes.keyboard) |new| try morse.kittyKeyboardPush(w, new);
-        try mouseChange(w, was.mouse, modes.mouse);
-        if (was.focus != modes.focus) try morse.focusEvents.set(w, modes.focus);
-        if (was.paste != modes.paste) try morse.bracketedPaste.set(w, modes.paste);
-        if (was.color_scheme != modes.color_scheme) try morse.colorScheme.set(w, modes.color_scheme);
+            } else {
+                try morse.kittyKeyboardPop(w);
+                r._cleanup.keyboard = false;
+            }
+        } else if (modes.keyboard) |new| {
+            r._cleanup.keyboard = true;
+            try morse.kittyKeyboardPush(w, new);
+        }
+        try r._cleanup.mouseChange(w, was.mouse, modes.mouse);
+        if (was.focus != modes.focus) try ModeCleanup.set(w, &r._cleanup.focus, morse.focusEvents.number, modes.focus);
+        if (was.paste != modes.paste) try ModeCleanup.set(w, &r._cleanup.paste, morse.bracketedPaste.number, modes.paste);
+        if (was.color_scheme != modes.color_scheme) try ModeCleanup.set(w, &r._cleanup.color_scheme, morse.colorScheme.number, modes.color_scheme);
     }
 
-    /// The same in reverse, exactly and only what `enter` turned on, plus the
-    /// one thing that has to be written whether or not it was.
+    /// Turns off modes that may remain enabled, including a partially
+    /// written change. Accepted cleanup commands are not repeated on retry.
     ///
     /// Synchronised output goes off unconditionally: a program that died
     /// between the bracket's two halves has left the terminal holding the
@@ -552,15 +608,27 @@ pub const Renderer = struct {
         }
         try morse.cursorVisible.set(w, true);
         r.shown = true;
-        if (was.unicode_core) try morse.unicodeCore.set(w, false);
-        if (was.in_band_resize) try morse.inBandResize.set(w, false);
-        if (was.modes.color_scheme) try morse.colorScheme.set(w, false);
-        if (was.modes.paste) try morse.bracketedPaste.set(w, false);
-        if (was.modes.focus) try morse.focusEvents.set(w, false);
-        if (was.modes.mouse) |m| try mouseOff(w, m);
+        if (r._cleanup.unicode_core) try ModeCleanup.set(w, &r._cleanup.unicode_core, morse.unicodeCore.number, false);
+        if (r._cleanup.in_band_resize) try ModeCleanup.set(w, &r._cleanup.in_band_resize, morse.inBandResize.number, false);
+        if (r._cleanup.color_scheme) try ModeCleanup.set(w, &r._cleanup.color_scheme, morse.colorScheme.number, false);
+        if (r._cleanup.paste) try ModeCleanup.set(w, &r._cleanup.paste, morse.bracketedPaste.number, false);
+        if (r._cleanup.focus) try ModeCleanup.set(w, &r._cleanup.focus, morse.focusEvents.number, false);
+        var motion = r._cleanup.motion.iterator();
+        while (motion.next()) |m| {
+            try morse.setMode(w, m.number(), false);
+            r._cleanup.motion.remove(m);
+        }
+        var encoding = r._cleanup.encoding.iterator();
+        while (encoding.next()) |e| {
+            try morse.setMode(w, e.number(), false);
+            r._cleanup.encoding.remove(e);
+        }
         // Before the switch back: the stack this pops is the alternate
         // screen's own.
-        if (was.modes.keyboard != null) try morse.kittyKeyboardPop(w);
+        if (r._cleanup.keyboard) {
+            try morse.kittyKeyboardPop(w);
+            r._cleanup.keyboard = false;
+        }
         switch (was.mode) {
             .alt => try morse.altScreen.set(w, false),
             .@"inline" => {
@@ -3679,5 +3747,77 @@ test "an ASCII batch keeps its first cell apart from a Unicode prepend" {
         _ = try f.draw();
         try term.feed(f.written());
         try @import("term.zig").expectScreensEqual(&f.screen, term.screen());
+    }
+}
+
+test "leaving remembers each mode until its disabling command succeeds" {
+    const modes: Modes = .{
+        .keyboard = .{ .disambiguate_escape_codes = true },
+        .mouse = .{ .motion = .drag, .encoding = .sgr_pixels },
+        .focus = true,
+        .paste = true,
+        .color_scheme = true,
+    };
+    const disabled = [_][]const u8{ "\x1b[<u", "\x1b[?1002l", "\x1b[?1016l", "\x1b[?1004l", "\x1b[?2004l", "\x1b[?2031l" };
+    var expected: Writer.Allocating = .init(testing.allocator);
+    defer expected.deinit();
+    try morse.kittyKeyboardPop(&expected.writer);
+    try mouseOff(&expected.writer, modes.mouse.?);
+    try morse.focusEvents.set(&expected.writer, false);
+    try morse.bracketedPaste.set(&expected.writer, false);
+    try morse.colorScheme.set(&expected.writer, false);
+    for (0..expected.written().len) |prefix| {
+        var f: Fixture = try .init(testing.allocator, 4, 2);
+        defer f.deinit();
+        try f.renderer.enter(&f.out.writer, .{}, .alt, modes);
+        var bytes: [128]u8 = undefined;
+        var blocked: Writer = .fixed(bytes[0..prefix]);
+        try testing.expectError(error.WriteFailed, f.renderer.setModes(&blocked, .{}));
+        f.out.clearRetainingCapacity();
+        try f.renderer.leave(&f.out.writer);
+        for (disabled) |sequence| {
+            const accepted = std.mem.indexOf(u8, blocked.buffered(), sequence) != null;
+            const cleanup = std.mem.indexOf(u8, f.written(), sequence) != null;
+            try testing.expect(accepted or cleanup);
+            // A keyboard pop is not idempotent: the shell's stack frame
+            // must not be popped a second time after the first succeeded.
+            if (std.mem.eql(u8, sequence, "\x1b[<u")) try testing.expect(accepted != cleanup);
+        }
+    }
+}
+
+test "leaving remembers capabilities until their disabling commands succeed" {
+    for (0..16) |prefix| {
+        var f: Fixture = try .init(testing.allocator, 4, 2);
+        defer f.deinit();
+        try f.renderer.enter(&f.out.writer, .{ .in_band_resize = true, .width_method = .unicode }, .alt, .{});
+        var bytes: [16]u8 = undefined;
+        var blocked: Writer = .fixed(bytes[0..prefix]);
+        try testing.expectError(error.WriteFailed, f.renderer.setCaps(&blocked, .{ .width_method = .wcwidth }));
+        f.out.clearRetainingCapacity();
+        try f.renderer.leave(&f.out.writer);
+        for ([_][]const u8{ "\x1b[?2048l", "\x1b[?2027l" }) |sequence| {
+            try testing.expect(std.mem.indexOf(u8, blocked.buffered(), sequence) != null or std.mem.indexOf(u8, f.written(), sequence) != null);
+        }
+    }
+}
+
+test "retrying a partial leave does not pop the keyboard stack twice" {
+    var f: Fixture = try .init(testing.allocator, 4, 2);
+    defer f.deinit();
+    try f.renderer.enter(&f.out.writer, .{}, .alt, .{ .keyboard = .{ .disambiguate_escape_codes = true } });
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    const length = f.written().len;
+    for (0..length) |prefix| {
+        try f.renderer.enter(&f.out.writer, .{}, .alt, .{ .keyboard = .{ .disambiguate_escape_codes = true } });
+        var bytes: [128]u8 = undefined;
+        var blocked: Writer = .fixed(bytes[0..prefix]);
+        try testing.expectError(error.WriteFailed, f.renderer.leave(&blocked));
+        f.out.clearRetainingCapacity();
+        try f.renderer.leave(&f.out.writer);
+        const accepted = std.mem.count(u8, blocked.buffered(), "\x1b[<u");
+        const cleanup = std.mem.count(u8, f.written(), "\x1b[<u");
+        try testing.expectEqual(@as(usize, 1), accepted + cleanup);
     }
 }
