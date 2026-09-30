@@ -526,7 +526,7 @@ pub const Window = struct {
         var it: textmod.Graphemes = .init(segment.text);
         while (it.nextAt()) |found| {
             const g = found.bytes;
-            if (g.len == 1 and g[0] == '\n') {
+            if (textmod.isLineBreak(g)) {
                 at.col = 0;
                 at.row += 1;
                 if (at.row >= w.rect.rows) {
@@ -1067,5 +1067,20 @@ test "window placement clips every glyph extent before touching a neighbour" {
         try testing.expectEqualStrings("B", s.textAt(1, 3));
         try win.write(1, 0, "中", .{}, .none);
         try testing.expectEqualStrings("中", s.textAt(2, 1));
+    }
+}
+
+test "printing and measurement treat CRLF as one line break" {
+    for ([_]textmod.Wrap{ .none, .word, .grapheme }) |mode| {
+        var screen = try made(6, 3);
+        defer screen.deinit();
+        const win = screen.window();
+        const measured = try win.printSegment(.{ .text = "a\r\nb\r\nc" }, .{ .wrap = mode, .commit = false });
+        try testing.expectEqual(@as(u16, 2), measured.row);
+        const drawn = try win.printSegment(.{ .text = "a\r\nb\r\nc" }, .{ .wrap = mode });
+        try testing.expectEqualDeep(measured, drawn);
+        try testing.expectEqualStrings("a", screen.textAt(0, 0));
+        try testing.expectEqualStrings("b", screen.textAt(0, 1));
+        try testing.expectEqualStrings("c", screen.textAt(0, 2));
     }
 }

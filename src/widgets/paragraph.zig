@@ -324,3 +324,26 @@ test "horizontal scrolling skips a wide cluster crossing the u16 edge" {
     try paragraph.draw(h.window());
     try h.expectFrame("x\n");
 }
+
+test "paragraph rows and clipping treat CRLF as one line break" {
+    for ([_]visor.Wrap{ .none, .word, .grapheme }) |mode| {
+        const text = "long line\r\nb\r\n\r\nc";
+        var rows = Paragraph.Rows.init(text, 3, mode, .unicode);
+        var count: usize = 0;
+        while (rows.next()) |r| {
+            try testing.expect(std.mem.indexOfAny(u8, text[r.start..r.end], "\r\n") == null);
+            count += 1;
+        }
+        const paragraph: Paragraph = .{ .lines = &.{.{ .text = text }}, .wrap = mode };
+        try testing.expectEqual(count, paragraph.rowCount(3, .unicode));
+        var h = try Harness.init(testing.allocator, 3, @intCast(count));
+        defer h.deinit();
+        try paragraph.draw(h.window());
+        if (mode == .none) {
+            try testing.expectEqual(@as(usize, 4), count);
+            try h.expectFrame("lon\nb\n\nc\n");
+        } else {
+            try testing.expectEqualStrings("c", h.screen.textAt(0, @intCast(count - 1)));
+        }
+    }
+}

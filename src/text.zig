@@ -289,6 +289,12 @@ fn widthWide(str: []const u8, method: Method) usize {
     return total;
 }
 
+// Package-local interpretation of a hard break. Unicode groups CRLF into
+// one grapheme, so byte length alone cannot identify a newline.
+pub fn isLineBreak(grapheme: []const u8) bool {
+    return grapheme.len != 0 and grapheme[grapheme.len - 1] == '\n';
+}
+
 /// One row a wrap produced: the byte range of the string it covers, and the
 /// columns it takes.
 pub const Row = struct {
@@ -319,11 +325,11 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
     while (it.nextAt()) |found| {
         const g = found.bytes;
         const at = found.start;
-        if (g.len == 1 and g[0] == '\n') {
+        if (isLineBreak(g)) {
             rows_out[written] = .{ .start = row.start, .end = at, .columns = row.columns };
             written += 1;
             if (written == rows_out.len) return written;
-            row = .{ .start = at + 1, .end = at + 1, .columns = 0 };
+            row = .{ .start = at + g.len, .end = at + g.len, .columns = 0 };
             break_at = null;
             continue;
         }
@@ -333,11 +339,11 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
                 // Everything to the end of this line is dropped, but a
                 // newline still starts a row.
                 while (it.nextAt()) |skip| {
-                    if (skip.bytes.len == 1 and skip.bytes[0] == '\n') {
+                    if (isLineBreak(skip.bytes)) {
                         rows_out[written] = .{ .start = row.start, .end = at, .columns = row.columns };
                         written += 1;
                         if (written == rows_out.len) return written;
-                        row = .{ .start = skip.start + 1, .end = skip.start + 1, .columns = 0 };
+                        row = .{ .start = skip.start + skip.bytes.len, .end = skip.start + skip.bytes.len, .columns = 0 };
                         break;
                     }
                 } else {
