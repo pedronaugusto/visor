@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Layout clips areas before padding, placement or repetition, and divides part counts without narrowing their totals.
+
 - Picture placements convert to one-based terminal coordinates in u32 at the u16 edge.
 
 - A failed session resize preserves both grids, pool handles and borrowed content until their new storage is ready.

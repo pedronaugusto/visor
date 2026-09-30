@@ -87,13 +87,17 @@ pub const Padding = struct {
 
     /// What is left of `r` after the padding is taken off. Never wider or
     /// taller than `r`, and empty rather than negative.
-    pub fn apply(p: Padding, r: Rect) Rect {
+    pub fn apply(p: Padding, area: Rect) Rect {
+        return p.applyLogical(bounded(area)).clipped();
+    }
+
+    fn applyLogical(p: Padding, r: Rect) LogicalRect {
         const cols = r.cols -| p.left -| p.right;
         const rows = r.rows -| p.top -| p.bottom;
         if (cols == 0 or rows == 0) return .{ .col = r.col, .row = r.row };
         return .{
-            .col = r.col +| @min(p.left, r.cols),
-            .row = r.row +| @min(p.top, r.rows),
+            .col = @as(u32, r.col) + @min(p.left, r.cols),
+            .row = @as(u32, r.row) + @min(p.top, r.rows),
             .cols = cols,
             .rows = rows,
         };
@@ -130,13 +134,14 @@ pub const Layout = struct {
     pub fn split(l: Layout, area: Rect, out: []Rect) []Rect {
         const n = @min(l.constraints.len, out.len);
         if (n == 0) return out[0..0];
-        const inner = l.margin.apply(area);
+        // Divide the requested area before clipping its parts.
+        const inner = l.margin.applyLogical(area);
         const axis = switch (l.direction) {
             .horizontal => inner.cols,
             .vertical => inner.rows,
         };
         const gaps: u16 = @intCast(@min(
-            @as(u32, l.spacing) * (n - 1),
+            @as(u128, l.spacing) * (n - 1),
             @as(u32, std.math.maxInt(u16)),
         ));
         const total = axis -| gaps;
@@ -153,7 +158,7 @@ pub const Layout = struct {
         }
 
         // More than there is: the last parts lose it.
-        var taken: u32 = 0;
+        var taken: u128 = 0;
         for (out[0..n]) |r| taken += l.axisOf(r);
         if (taken > total) {
             var over = taken - total;
@@ -171,7 +176,7 @@ pub const Layout = struct {
         // What is left, shared among the parts that asked for a share.
         var left: u16 = @intCast(total - taken);
         while (left > 0) {
-            var denom: u32 = 0;
+            var denom: u128 = 0;
             for (l.constraints[0..n], out[0..n]) |c, r| {
                 if (l.axisOf(r) < capOf(c)) denom += weightOf(c);
             }
@@ -184,7 +189,7 @@ pub const Layout = struct {
                 if (have >= cap) continue;
                 const w = weightOf(c);
                 if (w == 0) continue;
-                const share: u16 = @intCast(@as(u32, left) * w / denom);
+                const share: u16 = @intCast(@as(u128, left) * w / denom);
                 const grant = @min(share, cap - have);
                 l.setAxis(r, have + grant);
                 granted += grant;
@@ -228,14 +233,14 @@ pub const Layout = struct {
                 .horizontal => {
                     r.col = coordinate;
                     r.cols = size;
-                    r.row = inner.row;
-                    r.rows = inner.rows;
+                    r.row = @intCast(@min(inner.row, std.math.maxInt(u16)));
+                    r.rows = inner.clipped().rows;
                 },
                 .vertical => {
                     r.row = coordinate;
                     r.rows = size;
-                    r.col = inner.col;
-                    r.cols = inner.cols;
+                    r.col = @intCast(@min(inner.col, std.math.maxInt(u16)));
+                    r.cols = inner.clipped().cols;
                 },
             }
             at = start + size + l.spacing;
@@ -273,17 +278,18 @@ pub const Layout = struct {
     /// from the start of it. The cells that do not divide evenly are left
     /// over at the end rather than given to some parts, so every part is
     /// the same size and a grid of them lines up whatever their number.
-    pub fn repeat(direction: Direction, area: Rect, spacing: u16, out: []Rect) []Rect {
+    pub fn repeat(direction: Direction, requested: Rect, spacing: u16, out: []Rect) []Rect {
+        const area = bounded(requested);
         const n = out.len;
         if (n == 0) return out;
         const axis: u32 = switch (direction) {
             .horizontal => area.cols,
             .vertical => area.rows,
         };
-        const gaps: u32 = @as(u32, spacing) * @as(u32, @intCast(n - 1));
-        const size: u32 = if (gaps >= axis) 0 else (axis - gaps) / @as(u32, @intCast(n));
+        const gaps: u128 = @as(u128, spacing) * (n - 1);
+        const size: u128 = if (gaps >= axis) 0 else (axis - gaps) / n;
         for (out, 0..) |*r, i| {
-            const at: u32 = @min(axis, @as(u32, @intCast(i)) * (size + spacing));
+            const at: u32 = @intCast(@min(axis, @as(u128, i) * (size + spacing)));
             const len: u16 = @intCast(@min(size, axis - at));
             r.* = switch (direction) {
                 .horizontal => .{ .col = area.col +| @as(u16, @intCast(at)), .row = area.row, .cols = len, .rows = area.rows },
@@ -337,12 +343,47 @@ pub const Layout = struct {
 /// What a title, a label or a centred dialogue needs: the caller says how
 /// big and where, and gets back the rectangle to draw in, clipped to the
 /// area it was given.
-pub fn place(area: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {
+pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {
+    const area = bounded(requested);
     const cols = @min(size.cols, area.cols);
     const rows = @min(size.rows, area.rows);
-    const col = area.col + offset(area.cols, cols, horizontal_align);
-    const row = area.row + offset(area.rows, rows, vertical_align);
+    const col: u16 = @intCast(@min(@as(u32, area.col) + offset(area.cols, cols, horizontal_align), std.math.maxInt(u16)));
+    const row: u16 = @intCast(@min(@as(u32, area.row) + offset(area.rows, rows, vertical_align), std.math.maxInt(u16)));
     return .{ .col = col, .row = row, .cols = cols, .rows = rows };
+}
+
+// A split plans on the requested area, then clips its parts. Its margin
+// may start outside u16 coordinates, so keep that position until clipping.
+const LogicalRect = struct {
+    col: u32,
+    row: u32,
+    cols: u16 = 0,
+    rows: u16 = 0,
+
+    fn right(r: LogicalRect) u32 {
+        return r.col + r.cols;
+    }
+
+    fn bottom(r: LogicalRect) u32 {
+        return r.row + r.rows;
+    }
+
+    fn clipped(r: LogicalRect) Rect {
+        const end = @as(u32, std.math.maxInt(u16)) + 1;
+        const cols: u16 = @intCast(@min(r.cols, end -| r.col));
+        const rows: u16 = @intCast(@min(r.rows, end -| r.row));
+        return .{
+            .col = @intCast(@min(r.col, std.math.maxInt(u16))),
+            .row = @intCast(@min(r.row, std.math.maxInt(u16))),
+            .cols = if (rows == 0) 0 else cols,
+            .rows = if (cols == 0) 0 else rows,
+        };
+    }
+};
+
+// The part of an area whose coordinates can be represented.
+fn bounded(area: Rect) Rect {
+    return (LogicalRect{ .col = area.col, .row = area.row, .cols = area.cols, .rows = area.rows }).clipped();
 }
 
 /// How far into `outer` something `inner` long starts.
@@ -653,4 +694,57 @@ test "repeated parts are one size, the spacing between them, the rest left at th
     // And down, the same.
     const rows = Layout.repeat(.vertical, .{ .rows = 7, .cols = 4 }, 1, out[0..2]);
     try std_testing.expectEqual(Rect{ .row = 4, .cols = 4, .rows = 3 }, rows[1]);
+}
+
+test "placing and repeating rectangles clip at the u16 coordinate edge" {
+    const edge = std.math.maxInt(u16);
+    const area: Rect = .{ .col = edge - 2, .row = edge - 2, .cols = 20, .rows = 20 };
+    const aligned = place(area, .{ .cols = 2, .rows = 2 }, .right, .right);
+    try std.testing.expectEqual(Rect{ .col = edge - 1, .row = edge - 1, .cols = 2, .rows = 2 }, aligned);
+    var out: [2]Rect = undefined;
+    _ = Layout.repeat(.horizontal, area, 1, &out);
+    for (out) |r| {
+        try std.testing.expect(r.right() <= @as(u32, edge) + 1);
+        try std.testing.expect(r.bottom() <= @as(u32, edge) + 1);
+        try std.testing.expect(r.cols <= 1);
+    }
+    _ = Layout.repeat(.vertical, area, 1, &out);
+    for (out) |r| {
+        try std.testing.expect(r.right() <= @as(u32, edge) + 1);
+        try std.testing.expect(r.bottom() <= @as(u32, edge) + 1);
+        try std.testing.expect(r.rows <= 1);
+    }
+    const padded = Padding.all(1).apply(area);
+    try std.testing.expectEqual(Rect{ .col = edge - 1, .row = edge - 1, .cols = 1, .rows = 1 }, padded);
+}
+
+test "layout part counts stay wide until the available cells are divided" {
+    const n = @as(usize, std.math.maxInt(u16)) + 3;
+    const constraints = try std.testing.allocator.alloc(Constraint, n);
+    defer std.testing.allocator.free(constraints);
+    const out = try std.testing.allocator.alloc(Rect, n);
+    defer std.testing.allocator.free(out);
+    const area: Rect = .{ .cols = 8, .rows = 1 };
+    for ([_]Constraint{ .{ .fill = std.math.maxInt(u16) }, .{ .fixed = std.math.maxInt(u16) } }) |constraint| {
+        @memset(constraints, constraint);
+        _ = Layout.horizontal(constraints).split(area, out);
+        var total: usize = 0;
+        for (out) |r| {
+            try std.testing.expect(r.right() <= area.right());
+            total += r.cols;
+        }
+        try std.testing.expectEqual(@as(usize, 8), total);
+    }
+    _ = Layout.repeat(.horizontal, area, std.math.maxInt(u16), out);
+    for (out) |r| try std.testing.expect(r.isEmpty());
+}
+
+test "split margins do not move off-grid content back onto the last coordinate" {
+    const edge = std.math.maxInt(u16);
+    const layout: Layout = .{ .direction = .horizontal, .constraints = &.{.{ .fill = 1 }}, .margin = .{ .left = 3 } };
+    const out = layout.splitFixed(1, .{ .col = edge - 1, .cols = 4, .rows = 1 });
+    try std.testing.expect(out[0].isEmpty());
+    const vertical: Layout = .{ .constraints = &.{.{ .fill = 1 }}, .margin = .{ .top = 3 } };
+    const down = vertical.splitFixed(1, .{ .row = edge - 1, .rows = 4, .cols = 1 });
+    try std.testing.expect(down[0].isEmpty());
 }
