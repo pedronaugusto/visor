@@ -124,7 +124,8 @@ pub const Window = struct {
         /// How a line that does not fit is broken.
         wrap: textmod.Wrap = .grapheme,
         /// Whether to write the cells, or only work out where they would
-        /// have gone.
+        /// have gone. Measurement (`false`) never allocates; committing can
+        /// allocate for previously unseen graphemes longer than six bytes.
         commit: bool = true,
     };
 
@@ -367,9 +368,11 @@ pub const Window = struct {
 
     /// Runs of styled, linked text laid into the window, wrapped.
     ///
-    /// Never allocates. A newline in a segment always ends a row; a word
-    /// break looks ahead within one segment, so a word split across two
-    /// segments breaks at the join.
+    /// With `commit = false`, only measures and never allocates. Committed
+    /// printing can allocate when it interns a previously unseen grapheme
+    /// longer than six bytes, by the same rule as `Screen.write`. A newline
+    /// always ends a row; a word break looks ahead within one segment, so a
+    /// word split across two segments breaks at the join.
     pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) std.mem.Allocator.Error!Print {
         var at: Print = .{ .col = opts.col, .row = opts.row };
         if (w.rect.isEmpty()) {
@@ -957,4 +960,26 @@ test "a rectangle of the window's own cells is the child over it, clipped" {
     const inner = outer.sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 1 });
     try testing.expectEqual(Rect{ .col = 5, .row = 2, .cols = 5, .rows = 1 }, inner.rect);
     try testing.expectEqual(outer.ink, inner.ink);
+}
+
+test "printing measures without allocating and commits only unseen pooled text with allocation" {
+    var fail = testing.FailingAllocator.init(testing.allocator, .{});
+    var s = try Screen.init(fail.allocator(), .{ .cols = 8, .rows = 2 });
+    defer s.deinit();
+    s.method = .unicode;
+    const long = "a\u{301}\u{302}\u{303}";
+    fail.fail_index = fail.alloc_index;
+    const measured = try s.window().printSegment(.{ .text = long }, .{ .commit = false });
+    try testing.expectEqual(@as(u16, 1), measured.col);
+    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
+    _ = try s.window().printSegment(.{ .text = "inline" }, .{});
+    try testing.expectError(error.OutOfMemory, s.window().printSegment(.{ .text = long }, .{}));
+    fail.fail_index = std.math.maxInt(usize);
+    _ = try s.window().printSegment(.{ .text = long }, .{});
+    const grown = fail.alloc_index;
+    fail.fail_index = grown;
+    s.clear();
+    _ = try s.window().printSegment(.{ .text = long }, .{});
+    try testing.expectEqual(grown, fail.alloc_index);
+    try testing.expectEqualStrings(long, s.textAt(0, 0));
 }

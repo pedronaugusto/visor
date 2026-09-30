@@ -8,9 +8,9 @@
 //! `*std.Io.Writer` the caller owns and flushes.
 //!
 //! One allocator, taken at `Screen.init` and `Renderer.init`. After that,
-//! the frame path allocates nothing: `print` does not,
-//! `draw` does not. `Screen.write` allocates only for a grapheme longer than
-//! six bytes that the screen has not seen before.
+//! `draw` allocates nothing. Measurement-only printing (`commit = false`)
+//! allocates nothing; committed printing and `Screen.write` can allocate
+//! for a grapheme longer than six bytes the screen has not seen before.
 //!
 //! Every escape sequence this package writes comes from `morse`, which is
 //! re-exported whole, so a consumer fetches one thing and a reviewer can

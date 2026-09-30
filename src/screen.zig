@@ -4,7 +4,8 @@
 //! One allocator, taken at `init`. After that, `writeCell`, `fill`, `clear`
 //! and `scroll` never allocate; `write` and `intern` allocate only when a
 //! grapheme is longer than the six bytes a cell holds inline and has not
-//! been seen before. Resize allocates. Nothing else does.
+//! been seen before. Interning new links, compaction and resize can allocate;
+//! owned-copy helpers allocate through the copy's allocator.
 //!
 //! The grid keeps its own invariants rather than trusting a caller to. A wide
 //! grapheme is a head and a tail, always adjacent and always in that order;

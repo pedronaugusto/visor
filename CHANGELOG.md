@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Printing documents its allocation rule: measurement allocates nothing; committing can allocate for unseen graphemes longer than six bytes.
+
 - Breaking: `Screen.deinit`, `resize`, `compactPool`, `intern` and `link`, and `Renderer.deinit` and `resize`, use their captured allocator without another allocator argument.
 
 - Borrowed text and target slices state their pool lifetime; `dupeTextAt`, `dupeTextOf` and `dupeTarget` make independent copies for retention.

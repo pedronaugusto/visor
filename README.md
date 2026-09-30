@@ -51,8 +51,8 @@ const panel = root.child(.{
     .border = .{ .where = .all, .glyphs = .rounded, .style = .{ .dim = true } },
 });
 
-// Runs of styled text, wrapped. `print` never allocates and says
-// where it stopped.
+// Runs of styled text, wrapped. `print` says where it stopped and can
+// allocate for an unseen grapheme longer than six bytes.
 const link = try screen.link("https://ziglang.org", "id=1");
 _ = try panel.print(&.{
     .{ .text = "visor ", .style = .{ .bold = true } },
@@ -156,10 +156,11 @@ itself should keep these six and add its own, or the two configurations build
 two sets of tables.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
-After that the frame path takes none: `print` does not allocate and `draw`
-does not allocate. `Screen.write` allocates only for
-a grapheme longer than six bytes the screen has not seen before, and says so
-with a `try`. Resizing allocates.
+`draw` allocates nothing. With `commit = false`, `print` only measures and
+allocates nothing. Committed printing and `Screen.write` can allocate for a
+grapheme longer than six bytes the screen has not seen before, and say so
+with a `try`. Interning new links, pool compaction and resizing can allocate.
+The owned-copy helpers allocate through the copy's allocator.
 
 Text and link targets returned by the screen are borrowed. Inline text
 lives in its cell; pooled text and targets live in growable pools, so

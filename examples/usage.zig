@@ -48,8 +48,8 @@ pub fn main() !void {
         .border = .{ .where = .all, .glyphs = .rounded, .style = .{ .dim = true } },
     });
 
-    // Runs of styled text, wrapped. `print` never allocates and says
-    // where it stopped.
+    // Runs of styled text, wrapped. `print` says where it stopped and can
+    // allocate for an unseen grapheme longer than six bytes.
     const link = try screen.link("https://ziglang.org", "id=1");
     _ = try panel.print(&.{
         .{ .text = "visor ", .style = .{ .bold = true } },

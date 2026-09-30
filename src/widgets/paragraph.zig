@@ -6,8 +6,9 @@
 //! a word break is where the base puts it.
 //!
 //! Nothing is measured twice: the rows are produced one at a time from a
-//! buffer on the stack, so a paragraph of any length scrolled to any row
-//! allocates nothing.
+//! buffer on the stack. Producing rows allocates nothing; drawing them can
+//! allocate for previously unseen graphemes longer than six bytes, as
+//! `Window.print` does.
 
 const std = @import("std");
 const visor = @import("visor");
