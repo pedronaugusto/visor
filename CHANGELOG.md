@@ -18,7 +18,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `Session` holds the screen, renderer, size, caps, probe and layers, coalesces resizes and keeps mouse parsing in step; `ProbeWait` uses caller-supplied time.
 
-- `Replacement` keeps one picture in flight and swaps on acknowledgement or grace; `ImageIds` skips the probe and retirement frees inside `commitFrame(w, caps)`.
+- `Replacement` keeps one picture in flight and swaps on acknowledgement or grace; `ImageIds` skips the probe and retirement frees inside `commitFrame(w, caps)`, including frames with no visible text or picture.
 
 - Behaviour change: `Screen.link` refuses C0 controls and DEL in the URI and params before interning.
 

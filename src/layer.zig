@@ -1421,3 +1421,24 @@ test "image ids stay within their range and refuse exhaustion" {
     try testing.expect(id != next);
     try testing.expectError(error.NoImageId, ids.acquire(&l));
 }
+
+test "a retired first picture is freed even when the frame has no text or placements" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    var ids = try ImageIds.init(2, 5, 1);
+    var p: Replacement = .{};
+    var sink: Writer.Discarding = .init(&.{});
+    const sent = try p.send(testing.allocator, &f.layers, &sink.writer, &ids, "pixels", .{ .answer = true });
+    f.layers.ack(.{ .id = sent.id, .message = "EBADPNG:bad" });
+    _ = try p.declare(testing.allocator, &f.layers, .{ .image = 0, .rect = .{ .cols = 2, .rows = 2 } }, 0, 250);
+    try testing.expect(p.takeDirty());
+    try testing.expectEqual(@as(usize, 0), f.layers.count());
+    try testing.expectEqual(@as(usize, 0), f.layers.declared.items.len);
+    try testing.expect(!f.screen.damage.any());
+    const drawn = try f.draw();
+    try testing.expect(f.layers.image(sent.id) == null);
+    try testing.expectEqual(@as(u32, 1), drawn.placements);
+    try testing.expectEqualStrings("\x1b_Ga=d,q=2,d=I,i=2\x1b\\", f.written());
+    try testing.expectEqual(f.written().len, drawn.bytes);
+    try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+}

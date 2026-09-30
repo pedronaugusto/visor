@@ -373,7 +373,7 @@ pub const Renderer = struct {
         }
         r.method = caps.width_method;
 
-        const pictures = if (layers) |l| l.declared.items.len != 0 or l.count() != 0 else false;
+        const pictures = if (layers) |l| l.declared.items.len != 0 or l.count() != 0 or l.retired.items.len != 0 else false;
         const body = r.repaint_all or s.damage.any() or r.anyForced() or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
