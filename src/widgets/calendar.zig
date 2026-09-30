@@ -129,6 +129,7 @@ pub const Calendar = struct {
 
     /// How many rows this month needs.
     pub fn rowsNeeded(c: Calendar) u16 {
+        if (daysInMonth(c.year, c.month) == 0) return 0;
         var rows: u16 = weeksIn(c);
         if (c.show_header) rows += 1;
         if (c.show_weekdays) rows += 1;
@@ -137,7 +138,7 @@ pub const Calendar = struct {
 
     /// Draws the month.
     pub fn draw(c: Calendar, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty() or c.month < 1 or c.month > 12) return;
+        if (win.rect.isEmpty() or daysInMonth(c.year, c.month) == 0) return;
         var row: u16 = 0;
 
         if (c.show_header) {
@@ -356,5 +357,18 @@ test "dates check the month and the day before calendar arithmetic" {
             try testing.expectError(error.InvalidDate, Date.init(year, @intCast(month), last + 1));
             _ = weekdayOf(date);
         }
+    }
+}
+
+test "an invalid calendar month occupies no rows and draws nothing" {
+    for ([_]u8{ 0, 13, 255 }) |month| {
+        const calendar: Calendar = .{ .year = 2026, .month = month };
+        try testing.expectEqual(@as(u16, 0), calendar.rowsNeeded());
+        var h: Harness = try .init(testing.allocator, Calendar.columns, 8);
+        defer h.deinit();
+        try calendar.draw(h.window());
+        for (0..8) |r| for (0..Calendar.columns) |c| {
+            try testing.expectEqualStrings(" ", h.screen.textAt(@intCast(c), @intCast(r)));
+        };
     }
 }
