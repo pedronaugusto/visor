@@ -226,8 +226,8 @@ pub const Tty = struct {
     }
 
     /// The mode as it was found, and the screen and input modes a renderer
-    /// entered through `enter` undone before it. Safe to call when nothing
-    /// was changed.
+    /// entered through `enter` undone as well. Safe to call when nothing
+    /// was changed; POSIX output is best effort when the terminal is full.
     pub fn restore(t: *Tty) void {
         const was = t.saved orelse return;
         const r = t.renderer;
@@ -491,9 +491,11 @@ pub const Panic = std.debug.FullPanic(struct {
 }.call);
 
 /// The way back, from whatever remembered it: the modes a renderer entered,
-/// undone through a buffer on the stack and one write that may fail, then the
-/// terminal's own mode.
+/// undone through a buffer on the stack and output that may fail. On POSIX,
+/// raw mode comes back first and the output never waits for space.
 fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
+    // Raw mode must come back even when output cannot accept a byte.
+    if (!is_windows) terminal.restore(was.handle, was.mode) catch {};
     if (renderer) |r| {
         var buffer: [512]u8 = undefined;
         var out: Writer = .fixed(&buffer);
@@ -505,16 +507,20 @@ fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
         terminal.restore(was.output, was.output_mode) catch {};
         return;
     }
-    // At once, not after the output drains, and with unread input thrown
-    // away: conduit's `restore` never waits on a terminal that is not reading
-    // (paused, or gone), which would hold a panicking program here for ever.
-    terminal.restore(was.handle, was.mode) catch {};
 }
 
 /// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
 /// error, because the caller may be a panic handler with a broken `Io` and
 /// nothing to report a failure to.
 fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: []const u8) void {
+    // Best effort: a full terminal must never hold up panic restoration.
+    const flags = if (!is_windows) std.posix.system.fcntl(handle, std.posix.F.GETFL, @as(u32, 0)) else 0;
+    if (!is_windows) {
+        if (std.posix.errno(flags) != .SUCCESS) return;
+        const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
+        fcntlSet(handle, std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock) catch return;
+    }
+    defer if (!is_windows) fcntlSet(handle, std.posix.F.SETFL, @intCast(flags)) catch {};
     var left = bytes;
     while (left.len != 0) {
         if (is_windows) {
@@ -531,7 +537,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
                 if (n == 0) return;
                 left = left[n..];
             },
-            .INTR, .AGAIN => continue,
+            .INTR => continue,
             else => return,
         }
     }
@@ -837,4 +843,45 @@ test "a failed leave flush still restores the entered modes on the saved termina
     const count: usize = @intCast(n);
     try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?2004l") != null);
     try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?1049l") != null);
+}
+
+test "primitive restoration output does not wait for a full descriptor" {
+    if (is_windows) return error.SkipZigTest;
+    const fds = try pipe();
+    defer for (fds) |fd| {
+        _ = std.posix.system.close(fd);
+    };
+    const flags = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
+    try testing.expect(std.posix.errno(flags) == .SUCCESS);
+    const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
+    try fcntlSet(fds[1], std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock);
+    var bytes: [4096]u8 = @splat('x');
+    while (true) {
+        const rc = std.posix.system.write(fds[1], &bytes, bytes.len);
+        if (std.posix.errno(rc) == .SUCCESS) continue;
+        try testing.expect(std.posix.errno(rc) == .AGAIN);
+        break;
+    }
+    try fcntlSet(fds[1], std.posix.F.SETFL, @intCast(flags));
+    const before = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
+    try testing.expect(std.posix.errno(before) == .SUCCESS);
+    var started: std.atomic.Value(bool) = .init(false);
+    var done: std.atomic.Value(bool) = .init(false);
+    const worker = try std.Thread.spawn(.{}, struct {
+        fn run(fd: std.posix.fd_t, began: *std.atomic.Value(bool), finished: *std.atomic.Value(bool)) void {
+            began.store(true, .release);
+            writeRaw(fd, "restoring");
+            finished.store(true, .release);
+        }
+    }.run, .{ fds[1], &started, &done });
+    defer {
+        // Release even the unfixed blocking writer before joining it.
+        if (!done.load(.acquire)) _ = std.posix.system.read(fds[0], &bytes, bytes.len);
+        worker.join();
+    }
+    while (!started.load(.acquire)) std.atomic.spinLoopHint();
+    try std.Io.sleep(testing.io, .fromMilliseconds(200), .awake);
+    try testing.expect(done.load(.acquire));
+    const after = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
+    try testing.expectEqual(before, after);
 }
