@@ -399,10 +399,8 @@ pub const Term = struct {
             },
             '8' => blk: {
                 if (t.saved) |s| {
-                    t.col = s.col;
-                    t.row = s.row;
+                    t.moveTo(s.col, s.row);
                     t.style = s.style;
-                    t.wrap_pending = false;
                 }
                 break :blk 2;
             },
@@ -1891,4 +1889,13 @@ test "a growing cluster and scaled text check the u16 coordinate edge before nar
     defer tall.deinit();
     try tall.feed("\x1b[65535;1H\x1b]66;s=7;x\x1b\\");
     try testing.expectEqualStrings(" ", textAt(&tall, 0, std.math.maxInt(u16) - 1));
+}
+
+test "a saved terminal cursor stays inside the grid after a resize" {
+    var t = try made(4, 3);
+    defer t.deinit();
+    try t.feed("\x1b[3;4H\x1b7");
+    try t.resize(.{ .cols = 1, .rows = 1 });
+    try t.feed("\x1b8x");
+    try testing.expectEqualStrings("x", textAt(&t, 0, 0));
 }

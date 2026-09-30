@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Restoring the terminal emulator's saved cursor clamps it to the resized grid.
+
 - Growing terminal clusters and scaled text compare wide extents before narrowing at the u16 edge.
 
 - The terminal emulator normalizes zero coordinates and clips line counts before narrowing them.
