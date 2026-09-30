@@ -112,7 +112,7 @@ pub const Term = struct {
     /// terminal to be blank leaves the old frame showing wherever the new
     /// one has nothing to write.
     pub fn resize(t: *Term, size: Size) Allocator.Error!void {
-        try t.scr.resize(size);
+        try @import("screen.zig").internal.resizeKeepingLink(&t.scr, size, &t.link);
         t.scroll_top = 0;
         t.scroll_bottom = if (size.rows == 0) 0 else size.rows - 1;
         t.col = @min(t.col, if (size.cols == 0) 0 else size.cols - 1);
@@ -1825,4 +1825,39 @@ test "the terminal consumes a refused link without opening it" {
     try testing.expectEqual(Link.none, t.screen().readCell(0, 0).?.link);
     try t.feed("\x1b]8;;https://good\x1b\\y");
     try testing.expect(t.screen().readCell(1, 0).?.link != .none);
+}
+
+test "a resize keeps the terminal's open link even before any cell uses it" {
+    var t = try Term.init(testing.allocator, .{ .cols = 4, .rows = 1 });
+    defer t.deinit();
+    try t.feed("\x1b]8;id=shown;https://shown.invalid\x1b\\a\x1b]8;id=open;https://open.invalid\x1b\\");
+    try t.resize(.{ .cols = 5, .rows = 1 });
+    const active = t.scr.target(t.link) orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("https://open.invalid", active.uri);
+    try testing.expectEqualStrings("id=open", active.params);
+    try t.feed("b");
+    try testing.expectEqualStrings("https://shown.invalid", t.scr.target(t.scr.cells[0].link).?.uri);
+    try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.cells[1].link).?.uri);
+    try testing.expectEqualStrings("a", t.scr.textAt(0, 0));
+    try testing.expectEqualStrings("b", t.scr.textAt(1, 0));
+}
+
+test "a failed terminal resize keeps its open link and both pool generations" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator) !void {
+            var t = try Term.init(gpa, .{ .cols = 4, .rows = 1 });
+            defer t.deinit();
+            try t.feed("\x1b]8;id=open;https://open.invalid\x1b\\");
+            const before = t.link;
+            const generation = t.scr.pool_generation;
+            t.resize(.{ .cols = 5, .rows = 2 }) catch |err| {
+                try testing.expectEqual(before, t.link);
+                try testing.expectEqual(generation, t.scr.pool_generation);
+                try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.link).?.uri);
+                return err;
+            };
+            try t.feed("x");
+            try testing.expectEqualStrings("https://open.invalid", t.scr.target(t.scr.cells[0].link).?.uri);
+        }
+    }.run, .{});
 }

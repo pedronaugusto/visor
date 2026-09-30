@@ -53,6 +53,13 @@ pub const Cursor = struct {
     shape: morse.CursorShape = .default,
 };
 
+// Cooperation inside the package; this namespace is not exported by visor.
+pub const internal = struct {
+    pub fn resizeKeepingLink(s: *Screen, size: Size, link: *Link) Allocator.Error!void {
+        try s.resizeKeepingLink(size, link);
+    }
+};
+
 /// The grid.
 pub const Screen = struct {
     /// The allocator `init` was given, used by every operation this grid owns.
@@ -112,6 +119,10 @@ pub const Screen = struct {
     /// with identities rewritten to name the new pools. Borrowed slices
     /// must not be retained across resize.
     pub fn resize(s: *Screen, size: Size) Allocator.Error!void {
+        try s.resizeKeepingLink(size, null);
+    }
+
+    fn resizeKeepingLink(s: *Screen, size: Size, retained: ?*Link) Allocator.Error!void {
         const gpa = s.gpa;
         if (std.meta.eql(s.size, size)) {
             s.damageAll();
@@ -125,7 +136,7 @@ pub const Screen = struct {
         @memset(cells, .blank(.{}));
         var damage = try Damage.init(gpa, size.rows);
         errdefer damage.deinit(gpa);
-        try s.compactPool();
+        try s.compactKeepingLink(retained);
 
         const rows = @min(s.size.rows, size.rows);
         const cols = @min(s.size.cols, size.cols);
@@ -159,6 +170,10 @@ pub const Screen = struct {
     /// It is a call, not a policy: `draw` never allocates and nothing is
     /// freed behind a live grid cell. Retained handles are refused after the sweep.
     pub fn compactPool(s: *Screen) Allocator.Error!void {
+        try s.compactKeepingLink(null);
+    }
+
+    fn compactKeepingLink(s: *Screen, retained: ?*Link) Allocator.Error!void {
         const gpa = s.gpa;
         var graphemes: pool.Graphemes = .{};
         errdefer graphemes.deinit(gpa);
@@ -172,6 +187,14 @@ pub const Screen = struct {
             if (c.text.isPooled()) _ = try graphemes.intern(gpa, (s.graphemes.slice(&c.text) catch unreachable));
             if (s.links.get(c.link)) |t| _ = try links.intern(gpa, t.uri, t.params);
         }
+        // The emulator's open OSC 8 target is live even before any cell
+        // uses it. Prepare its new handle with the grid's, so neither an
+        // allocation failure nor the commit can leave it naming an old pool.
+        const kept: Link = if (retained) |slot| kept: {
+            if (slot.* == .none) break :kept .none;
+            const link_target = s.target(slot.*) orelse @panic("invalid retained link");
+            break :kept try links.intern(gpa, link_target.uri, link_target.params);
+        } else .none;
         // And now the cells, which cannot fail: everything they name is
         // already in the new pools.
         for (s.cells) |*c| {
@@ -187,6 +210,7 @@ pub const Screen = struct {
         s.graphemes = graphemes;
         s.links = links;
         s.pool_generation = pool.nextGeneration();
+        if (retained) |slot| slot.* = kept;
         s.damageAll();
     }
 

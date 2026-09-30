@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Resizing the terminal emulator retains its open OSC 8 target, including before a cell uses it.
+
 - Breaking: `Layers.configureSharedMemory` replaces mutable shared-memory configuration; private object owners retain their cleanup Io, and names use a process-wide namespace.
 
 - Breaking: pooled Text and Link handles carry their pool generation, checked cell operations refuse stale or foreign handles, raw pooled constructors and resolution are removed, and Cell is forty-eight bytes.
