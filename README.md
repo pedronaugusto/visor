@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
@@ -241,6 +241,72 @@ replacement as usual. This keeps picture acknowledgements and swaps with
 the same owner as every other picture. Surface pixels stay borrowed until
 `deinit`; no painter reallocates them. `examples/gallery.zig` draws cells
 and rasterizes pixels with these primitives.
+
+### Markdown
+
+`Markdown.Document` reads text once and owns its source and runs. A widget
+borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
+method)` uses the same rows as `draw`, without allocation. Keep the document
+until its widgets are finished, then call `deinit`. Drawing can allocate for
+screen links and long graphemes, but never for parsing or layout.
+
+```zig
+var document = try widgets.Markdown.Document.init(gpa,
+    "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n"
+    ++ "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
+);
+defer document.deinit();
+const markdown: widgets.Markdown = .{
+    .document = &document,
+    .theme = .{
+        .heading = @splat(.{ .bold = true }),
+        .strong = .{ .bold = true }, .emphasis = .{ .italic = true },
+        .code = .{ .dim = true }, .inline_code = .{ .reverse = true },
+        .link = .{ .underline = .single }, .quote = .{ .dim = true },
+    },
+    .scroll = 0,
+};
+try markdown.draw(window);
+const rows = markdown.rowCount(window.cols(), screen.method);
+```
+
+The reader accepts the following subset; it is not CommonMark:
+
+- Paragraphs join adjacent source lines with a space and wrap at words,
+  splitting long words only between grapheme clusters. Blank lines keep a
+  blank row. Inline markup is read within each source line.
+- One to six leading `#` characters followed by a space or end of line make
+  a heading.
+- Repeated `>` prefixes, after at most three spaces, make nested quotes.
+  Each level draws a bar and a space, including on wrapped rows. At narrow
+  widths bars clip and leave no room for text.
+- `-`, `+`, `*`, or up to nine digits followed by `.` or `)`, then a space,
+  make list items. Space indentation nests them; wrapped and indented
+  continuation lines use the marker's hanging indent. Markers keep their
+  spelling. Four spaces or a leading tab otherwise start indented code.
+- Three or more backticks or tildes open fenced code. A closing fence uses
+  the same character, at least the opening length, and only spaces after
+  it. Fence lines and language labels are hidden; unfinished fences keep
+  reading code. In a quoted fence only its container prefixes are removed.
+- Code is verbatim and clipped, never wrapped or parsed as prose. Tabs draw
+  to four-column stops. `scroll_columns` scrolls code between whole clusters.
+- Paired `*` or `_` give emphasis; doubled markers give strong emphasis.
+  These may nest, up to 32 levels. Underscores inside words stay literal.
+  Backtick spans use matching run lengths and keep their content literal.
+  Backslash escapes ASCII punctuation. Unmatched markers remain text.
+- `[label](target)` links accept balanced target parentheses and no whitespace
+  or title; labels can carry inline styles. `<http://…>` and `<https://…>`
+  are autolinks. They become OSC 8 links through `Screen.link`. Targets with
+  terminal control bytes remain unlinked text.
+- Three or more matching `-`, `*` or `_` characters, with optional spaces
+  between them, draw a horizontal rule.
+
+There are no tables, images, HTML, reference links, setext headings, task
+checkboxes, footnotes, syntax highlighting or filesystem link resolution.
+Unsupported syntax stays text. The caller supplies every style; the default
+roles are neutral. Inline roles add enabled attributes to their block's
+style and replace colours they set. Quote, marker and rule roles style their
+own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Design
 

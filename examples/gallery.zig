@@ -22,6 +22,28 @@ pub fn main() !void {
     defer renderer.deinit();
 
     try draw(screen.window());
+    var document = try widgets.Markdown.Document.init(
+        gpa,
+        "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n" ++
+            "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
+    );
+    defer document.deinit();
+    const markdown: widgets.Markdown = .{
+        .document = &document,
+        .theme = .{
+            .heading = @splat(.{ .bold = true }),
+            .strong = .{ .bold = true },
+            .emphasis = .{ .italic = true },
+            .code = .{ .dim = true },
+            .inline_code = .{ .reverse = true },
+            .link = .{ .underline = .single },
+            .quote = .{ .dim = true },
+        },
+    };
+    var prose_screen = try visor.Screen.init(gpa, .{ .cols = 40, .rows = 12 });
+    defer prose_screen.deinit();
+    try markdown.draw(prose_screen.window());
+    std.debug.assert(markdown.rowCount(40, prose_screen.method) > 0);
     var surface = try widgets.Canvas.Surface.init(gpa, 160, 80);
     defer surface.deinit();
     const raster = (widgets.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(&surface);
