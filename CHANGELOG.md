@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-30
+
 - Gallery list names are neutral, and the README describes shared-memory pictures once.
 
 - `Renderer.untrustCursor` forgets a cursor moved between frames; renderer and README document the caller-owned writer contract.
