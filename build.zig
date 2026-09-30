@@ -87,6 +87,8 @@ pub fn build(b: *std.Build) void {
     //=====================================================================
 
     const fuzzable = false;
+    const test_filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
+    const filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
 
     // Input is read by a task beside the caller's, handed over through a
     // queue, and stopped by a cancel; a race at that crossing is a claim a
@@ -101,6 +103,7 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{
         .name = "visor-tests",
+        .filters = filters,
         .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/visor.zig"),
@@ -134,6 +137,7 @@ pub fn build(b: *std.Build) void {
     // user ever runs.
     const widget_tests = b.addTest(.{
         .name = "visor-widget-tests",
+        .filters = filters,
         .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/widgets.zig"),
@@ -184,7 +188,7 @@ pub fn build(b: *std.Build) void {
         examples_step.dependOn(&run_example.step);
         check_step.dependOn(&example.step);
     }
-    test_step.dependOn(examples_step);
+    if (test_filter == null) test_step.dependOn(examples_step);
 
     //=====================================================================
     // Conformance against an emulator that is not ours.

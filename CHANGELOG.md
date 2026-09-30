@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `zig build test -Dtest-filter=…` runs only matching tests.
+
 ## [0.4.0] - 2026-09-30
 
 ### Changed
