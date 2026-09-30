@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Tabs share wide span arithmetic between measurement, drawing and hit testing.
+
 - Bar charts check their label gutter and centred labels before narrowing coordinates.
 
 - Wide rules stop before their last glyph crosses the coordinate edge.

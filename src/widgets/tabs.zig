@@ -35,59 +35,88 @@ pub const Tabs = struct {
     ///
     /// The padding is part of the span, so a click on the space beside a
     /// title chooses it, which is what a person aiming at a tab means.
+    /// Spans are clipped to the largest window width; indexAt uses the
+    /// complete logical spans even when their endpoints do not fit in u16.
     pub fn spanOf(t: Tabs, which: usize, method: visor.Method) struct { col: u16, cols: u16 } {
-        var col: u16 = 0;
-        const divider = visor.width(t.divider, method);
-        for (t.titles, 0..) |title, i| {
-            const cols = visor.width(title, method) + t.padding * 2;
-            if (i == which) return .{ .col = col, .cols = cols };
-            col +|= cols +| divider;
+        var spans = t.spanIterator(method);
+        while (spans.next()) |span| {
+            if (span.which == which) return .{
+                .col = @intCast(@min(span.col, std.math.maxInt(u16))),
+                .cols = @intCast(@min(span.cols, std.math.maxInt(u16) - @min(span.col, std.math.maxInt(u16)))),
+            };
         }
-        return .{ .col = col, .cols = 0 };
+        return .{ .col = @intCast(@min(spans.col, std.math.maxInt(u16))), .cols = 0 };
     }
 
     /// Which title a column falls in, or null between or beyond them.
     pub fn indexAt(t: Tabs, col: u16, method: visor.Method) ?usize {
-        for (t.titles, 0..) |_, i| {
-            const span = t.spanOf(i, method);
-            if (col >= span.col and col < span.col + span.cols) return i;
+        var spans = t.spanIterator(method);
+        while (spans.next()) |span| {
+            if (col >= span.col and col < span.col + span.cols) return span.which;
         }
         return null;
     }
 
-    /// How many columns every title and divider takes together.
+    /// How many columns every title and divider takes together, saturated
+    /// at the largest window width.
     pub fn width(t: Tabs, method: visor.Method) u16 {
-        if (t.titles.len == 0) return 0;
-        const last = t.spanOf(t.titles.len - 1, method);
-        return last.col +| last.cols;
+        var end: u128 = 0;
+        var spans = t.spanIterator(method);
+        while (spans.next()) |span| end = span.col + span.cols;
+        return @intCast(@min(end, std.math.maxInt(u16)));
     }
 
     /// Draws the titles on the window's first row.
     pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
-        const method = win.screen.method;
-        const divider = win.width(t.divider);
-        for (t.titles, 0..) |title, i| {
-            const span = t.spanOf(i, method);
+        var spans = t.spanIterator(win.screen.method);
+        while (spans.next()) |span| {
             if (span.col >= win.cols()) return;
-            const style = if (i == t.selected) t.selected_style else t.style;
+            const style = if (span.which == t.selected) t.selected_style else t.style;
             win.fill(
-                .{ .col = span.col, .row = 0, .cols = span.cols, .rows = 1 },
+                .{ .col = @intCast(span.col), .row = 0, .cols = @intCast(@min(span.cols, win.cols() - span.col)), .rows = 1 },
                 .blank(style),
             ) catch unreachable;
-            _ = try win.printSegment(
-                .{ .text = title, .style = style },
-                .{ .col = span.col + t.padding, .row = 0, .wrap = .none },
+            const label_col = span.col + t.padding;
+            if (label_col < win.cols()) _ = try win.printSegment(
+                .{ .text = t.titles[span.which], .style = style },
+                .{ .col = @intCast(label_col), .row = 0, .wrap = .none },
             );
-            if (divider != 0 and i + 1 < t.titles.len) {
+            const divider_col = span.col + span.cols;
+            if (spans.divider != 0 and span.which + 1 < t.titles.len and divider_col < win.cols()) {
                 const divider_style = t.divider_style orelse continue;
                 _ = try win.printSegment(
                     .{ .text = t.divider, .style = divider_style },
-                    .{ .col = span.col + span.cols, .row = 0, .wrap = .none },
+                    .{ .col = @intCast(divider_col), .row = 0, .wrap = .none },
                 );
             }
         }
     }
+
+    // Drawing, measuring and hit testing consume the same logical spans.
+    // Keep them wide until a coordinate is known to fit in the window.
+    fn spanIterator(t: Tabs, method: visor.Method) Spans {
+        return .{ .tabs = t, .method = method, .divider = visor.width(t.divider, method) };
+    }
+
+    const Spans = struct {
+        tabs: Tabs,
+        method: visor.Method,
+        divider: u16,
+        which: usize = 0,
+        col: u128 = 0,
+
+        const Span = struct { which: usize, col: u128, cols: u32 };
+
+        fn next(it: *Spans) ?Span {
+            if (it.which == it.tabs.titles.len) return null;
+            const cols = @as(u32, visor.width(it.tabs.titles[it.which], it.method)) + @as(u32, it.tabs.padding) * 2;
+            const result: Span = .{ .which = it.which, .col = it.col, .cols = cols };
+            it.which += 1;
+            it.col += cols + it.divider;
+            return result;
+        }
+    };
 };
 
 const testing = std.testing;
@@ -157,4 +186,20 @@ test "a divider with no style is a gap left as it was" {
     // it chooses nothing.
     try testing.expectEqual(@as(?usize, null), t.indexAt(1, .unicode));
     try testing.expectEqual(@as(?usize, 1), t.indexAt(3, .unicode));
+}
+
+test "tabs share wide span arithmetic between drawing and hit testing" {
+    const edge = std.math.maxInt(u16);
+    const t: Tabs = .{ .titles = &.{ "a", "b" }, .padding = edge };
+    try testing.expectEqual(edge, t.width(.unicode));
+    try testing.expectEqual(@as(?usize, 0), t.indexAt(edge, .unicode));
+    try testing.expectEqual(@as(u16, 0), t.spanOf(1, .unicode).cols);
+    var h = try Harness.init(testing.allocator, 4, 1);
+    defer h.deinit();
+    try t.draw(h.window());
+    try h.expectFrame("\n");
+    try testing.expect(h.styleAt(0, 0).reverse);
+    const crossing: Tabs = .{ .titles = &.{ "a" ** (edge - 1), "b" }, .padding = 0, .divider = "||" };
+    try testing.expectEqual(@as(?usize, null), crossing.indexAt(edge, .unicode));
+    try testing.expectEqual(@as(u16, 0), crossing.spanOf(1, .unicode).cols);
 }
