@@ -282,6 +282,7 @@ pub const List = struct {
     /// Moves the offset as little as it takes to put the selection on
     /// screen, and never past the point where the last items fill it.
     fn scrollIntoView(l: List, rows: u16, state: *State) void {
+        state.offset = @min(state.offset, l.items.len);
         if (rows == 0) return;
         if (state.selected) |sel| if (sel < l.items.len) {
             if (sel < state.offset) state.offset = sel;
@@ -778,4 +779,16 @@ test "previous navigation clamps a list selection after its items shrink" {
         try testing.expectEqual(@as(?usize, null), state.selected);
         try testing.expectEqual(@as(usize, 0), state.offset);
     }
+}
+
+test "a list with no viewport still returns a bounded visible range" {
+    var state: List.State = .{ .offset = std.math.maxInt(usize) };
+    const list: List = .{ .items = &three };
+    const shown = list.visible(0, &state);
+    try testing.expect(shown.first <= three.len);
+    try testing.expectEqual(@as(usize, 0), shown.count);
+    try testing.expectEqual(three.len, shown.hidden);
+    const empty: List = .{ .items = &.{} };
+    try testing.expectEqual(@as(usize, 0), empty.visible(0, &state).first);
+    try testing.expectEqual(@as(usize, 0), state.offset);
 }

@@ -182,6 +182,7 @@ pub const Table = struct {
     /// Moves the offset as little as it takes to put the selection on
     /// screen, and never past the end of the rows.
     fn scrollIntoView(t: Table, room: u16, state: *State) void {
+        state.offset = @min(state.offset, t.rows.len);
         if (room == 0) return;
         if (state.selected) |i| {
             if (i < state.offset) state.offset = i;
@@ -445,6 +446,20 @@ test "previous navigation clamps a table selection after its rows shrink" {
         try testing.expectEqual(@as(?usize, expected), state.selected);
         state.previous(0);
         try testing.expectEqual(@as(?usize, null), state.selected);
+        try testing.expectEqual(@as(usize, 0), state.offset);
+    }
+}
+
+test "a table with no body viewport still returns a bounded visible range" {
+    for ([_]u16{ 0, 1 }) |height| {
+        var state: Table.State = .{ .offset = std.math.maxInt(usize) };
+        const table: Table = .{ .rows = &rows, .widths = &.{.{ .fill = 1 }}, .header = rows[0] };
+        const shown = table.visible(height, &state);
+        try testing.expect(shown.first <= rows.len);
+        try testing.expectEqual(@as(usize, 0), shown.count);
+        try testing.expectEqual(rows.len, shown.hidden);
+        const empty: Table = .{ .rows = &.{}, .widths = table.widths, .header = table.header };
+        try testing.expectEqual(@as(usize, 0), empty.visible(height, &state).first);
         try testing.expectEqual(@as(usize, 0), state.offset);
     }
 }

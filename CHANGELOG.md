@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- List and Table bound visible ranges even when the viewport has no body rows.
+
 - Wrapping and Window printing treat CRLF as one hard line break, including when clipping the rest of a line.
 
 - Input deadline tests count reads, cancellation and the supplied budget on a synthetic clock instead of asserting wall-clock elapsed time.
