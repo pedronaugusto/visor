@@ -223,28 +223,31 @@ pub const Painter = struct {
 /// Clips a segment to the canvas rectangle before it is quantized to marks.
 fn clipSegment(x1: f64, y1: f64, x2: f64, y2: f64, xb: [2]f64, yb: [2]f64) ?[4]f64 {
     if (!std.math.isFinite(x1) or !std.math.isFinite(y1) or
-        !std.math.isFinite(x2) or !std.math.isFinite(y2)) return null;
+        !std.math.isFinite(x2) or !std.math.isFinite(y2) or
+        !std.math.isFinite(xb[0]) or !std.math.isFinite(xb[1]) or
+        !std.math.isFinite(yb[0]) or !std.math.isFinite(yb[1])) return null;
     const xmin = @min(xb[0], xb[1]);
     const xmax = @max(xb[0], xb[1]);
     const ymin = @min(yb[0], yb[1]);
     const ymax = @max(yb[0], yb[1]);
     if (xmax <= xmin or ymax <= ymin) return null;
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    var interval: [2]f64 = .{ 0, 1 };
-    if (!clipEdge(-dx, x1 - xmin, &interval)) return null;
-    if (!clipEdge(dx, xmax - x1, &interval)) return null;
-    if (!clipEdge(-dy, y1 - ymin, &interval)) return null;
-    if (!clipEdge(dy, ymax - y1, &interval)) return null;
+    // Intermediates must hold the difference of any two finite f64 values.
+    const dx = @as(f128, x2) - x1;
+    const dy = @as(f128, y2) - y1;
+    var interval: [2]f128 = .{ 0, 1 };
+    if (!clipEdge(-dx, @as(f128, x1) - xmin, &interval)) return null;
+    if (!clipEdge(dx, @as(f128, xmax) - x1, &interval)) return null;
+    if (!clipEdge(-dy, @as(f128, y1) - ymin, &interval)) return null;
+    if (!clipEdge(dy, @as(f128, ymax) - y1, &interval)) return null;
     return .{
-        std.math.clamp(x1 + interval[0] * dx, xmin, xmax),
-        std.math.clamp(y1 + interval[0] * dy, ymin, ymax),
-        std.math.clamp(x1 + interval[1] * dx, xmin, xmax),
-        std.math.clamp(y1 + interval[1] * dy, ymin, ymax),
+        @floatCast(std.math.clamp(@as(f128, x1) + interval[0] * dx, xmin, xmax)),
+        @floatCast(std.math.clamp(@as(f128, y1) + interval[0] * dy, ymin, ymax)),
+        @floatCast(std.math.clamp(@as(f128, x1) + interval[1] * dx, xmin, xmax)),
+        @floatCast(std.math.clamp(@as(f128, y1) + interval[1] * dy, ymin, ymax)),
     };
 }
 
-fn clipEdge(p: f64, q: f64, interval: *[2]f64) bool {
+fn clipEdge(p: f128, q: f128, interval: *[2]f128) bool {
     if (p == 0) return q >= 0;
     const r = q / p;
     if (p < 0) {
@@ -259,11 +262,14 @@ fn clipEdge(p: f64, q: f64, interval: *[2]f64) bool {
 
 /// Where a number falls in a range, as a mark index, or null outside it.
 fn place(value: f64, bounds: [2]f64, marks: u32) ?u32 {
+    if (marks == 0 or !std.math.isFinite(value) or
+        !std.math.isFinite(bounds[0]) or !std.math.isFinite(bounds[1])) return null;
     const lo = @min(bounds[0], bounds[1]);
     const hi = @max(bounds[0], bounds[1]);
     if (hi <= lo) return null;
     if (value < lo or value > hi) return null;
-    const t = (value - lo) / (hi - lo);
+    const span = hi - lo;
+    const t = if (std.math.isFinite(span)) (value - lo) / span else (value / 2 - lo / 2) / (hi / 2 - lo / 2);
     const scaled: u32 = @intFromFloat(t * @as(f64, @floatFromInt(marks)));
     return @min(scaled, marks - 1);
 }
@@ -426,4 +432,24 @@ test "every point that locates to a mark puts one in that mark's cell" {
             }
         }
     }
+}
+
+test "canvas coordinates reject nonfinite values and retain finite extremes" {
+    var h = try Harness.init(testing.allocator, 4, 2);
+    defer h.deinit();
+    const ordinary = (Canvas{ .marker = .block }).painter(h.window());
+    for ([_]f64{ std.math.nan(f64), std.math.inf(f64), -std.math.inf(f64) }) |bad| {
+        try testing.expect(ordinary.locate(bad, 0) == null);
+        try testing.expect(ordinary.locate(0, bad) == null);
+        const invalid = (Canvas{ .x_bounds = .{ 0, bad } }).painter(h.window());
+        try testing.expect(invalid.locate(0, 0) == null);
+        try invalid.line(0, 0, 1, 1, .{});
+    }
+    const extreme = std.math.floatMax(f64);
+    const wide = (Canvas{ .marker = .block, .x_bounds = .{ -extreme, extreme }, .y_bounds = .{ -extreme, extreme } }).painter(h.window());
+    try testing.expectEqual(@as(u32, 0), wide.locate(-extreme, 0).?.x);
+    try testing.expectEqual(@as(u32, 2), wide.locate(0, 0).?.x);
+    try testing.expectEqual(@as(u32, 3), wide.locate(extreme, 0).?.x);
+    try wide.line(-extreme, 0, extreme, 0, .{});
+    try h.expectFrame("████\n\n");
 }
