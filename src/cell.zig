@@ -1,16 +1,16 @@
 //! What a grid holds: one cell, its grapheme, its style, its link.
 //!
-//! A cell is thirty-two bytes, has no padding and no indeterminate byte in
+//! A cell is forty-eight bytes, has no padding and no indeterminate byte in
 //! it, and is therefore compared -- a cell, or a whole row -- with one
 //! `memcmp`. That is what `morse.Style` being an `extern` struct with a
-//! defined layout buys, and it is fourteen times faster than comparing the
-//! fields of every cell in a frame.
+//! defined layout buys.
 //!
 //! The grapheme lives in the cell when it is six bytes or fewer, which
 //! covers every single-codepoint cluster and every base-and-mark pair up to
 //! two three-byte codepoints, and in the screen's pool when it is longer.
-//! The link is an index into the screen's link table. Both are interned, so
-//! two cells showing the same thing hold the same bytes.
+//! Pooled text and links carry the issuing pool generation, so retained
+//! handles cannot name content in a different pool. Both are interned, so
+//! cells showing the same thing within one generation hold the same bytes.
 //!
 //! This file never allocates, never writes a byte to a terminal, and never
 //! looks at a pool: it is the value type and nothing else. Resolving a
@@ -26,23 +26,21 @@ pub const Color = morse.Color;
 /// Which underline a cell carries.
 pub const Underline = morse.Underline;
 
-/// An OSC 8 target, as an index into the screen's link table.
-///
-/// `.none` is zero, so a zeroed cell carries no link. The payload counts from
-/// one; `index` gives the table position back.
-pub const Link = enum(u16) {
-    /// No link. What almost every cell carries.
+/// An OSC 8 handle bound to the link pool that issued it.
+/// `.none` is portable; every other handle is valid only in its pool generation.
+pub const Link = enum(u64) {
     none = 0,
     _,
 
-    /// The link table position, or null for `.none`.
+    /// The table position, or null for `.none`.
     pub fn index(l: Link) ?u16 {
-        return if (l == .none) null else @intFromEnum(l) - 1;
+        const payload: u16 = @truncate(@intFromEnum(l));
+        return if (payload == 0) null else payload - 1;
     }
 
-    /// The link for table position `i`.
-    pub fn at(i: u16) Link {
-        return @enumFromInt(i + 1);
+    /// The identity of the pool that issued this handle.
+    pub fn generation(l: Link) u64 {
+        return @intFromEnum(l) >> 16;
     }
 };
 
@@ -84,7 +82,7 @@ fn canonicalColor(color: Color) Color {
 /// One cell: its grapheme, its style, its link, its width and its kind.
 pub const Cell = extern struct {
     /// The OSC 8 target the cell belongs to. First, because it is the only
-    /// field that wants two-byte alignment and the cell must have no hole in
+    /// field that wants eight-byte alignment and the cell must have no hole in
     /// it.
     link: Link = .none,
     /// The grapheme, inline or pooled.
@@ -95,6 +93,8 @@ pub const Cell = extern struct {
     /// How wide the grapheme is, whether this cell draws it, and whether the
     /// two width models disagree about it.
     shape: Shape = .{},
+    /// Zeroed tail bytes keep whole-cell memory comparison defined.
+    _reserved: [4]u8 = @splat(0),
 
     /// The grapheme: up to six bytes stored in the cell, an offset into the
     /// screen's pool beyond.
@@ -102,11 +102,11 @@ pub const Cell = extern struct {
     /// `len` is the byte length when the grapheme is inline and `pooled`
     /// when it is not; in the pooled case `buf` carries a `u32` offset and a
     /// `u16` length, little-endian, which is exactly the six bytes. Unused
-    /// bytes are always zero, so two `Text` values are equal exactly when
-    /// the graphemes they name are.
+    /// bytes are always zero. Pooled text also carries its pool generation;
+    /// equality compares handles within that generation, not content across pools.
     ///
-    /// Six rather than seven because `morse.Style` is twenty-two bytes and
-    /// the cell is thirty-two. Six covers every single-codepoint cluster,
+    /// Six inline bytes keep the common graphemes inside the cell while
+    /// leaving room for checked handles. Six covers every single-codepoint cluster,
     /// and a base and a combining mark of three bytes each -- the warning
     /// sign with its presentation selector, which is the cluster this
     /// package cares most about, is exactly six.
@@ -114,6 +114,8 @@ pub const Cell = extern struct {
         /// The grapheme's bytes, or the offset and length of its place in
         /// the pool.
         buf: [6]u8,
+        /// The issuing pool identity, zero for inline text.
+        pool_generation: [6]u8 = @splat(0),
         /// The inline byte length, or `pooled`.
         len: u8,
 
@@ -130,14 +132,6 @@ pub const Cell = extern struct {
             std.debug.assert(bytes.len <= max_inline);
             var t: Text = .{ .buf = @splat(0), .len = @intCast(bytes.len) };
             @memcpy(t.buf[0..bytes.len], bytes);
-            return t;
-        }
-
-        /// A grapheme that lives in the screen's pool.
-        pub fn atOffset(pool_offset: u32, byte_len: u16) Text {
-            var t: Text = .{ .buf = @splat(0), .len = pooled };
-            std.mem.writeInt(u32, t.buf[0..4], pool_offset, .little);
-            std.mem.writeInt(u16, t.buf[4..6], byte_len, .little);
             return t;
         }
 
@@ -158,15 +152,15 @@ pub const Cell = extern struct {
             return std.mem.readInt(u16, t.buf[4..6], .little);
         }
 
-        /// The grapheme's bytes, read out of `pool` when it is not inline.
-        ///
-        /// Taken by pointer: a short grapheme lives in the `Text` itself, so
-        /// what comes back borrows from whatever holds it.
-        pub fn slice(t: *const Text, pool: []const u8) []const u8 {
-            if (!t.isPooled()) return t.buf[0..t.len];
-            const off = std.mem.readInt(u32, t.buf[0..4], .little);
-            const n = std.mem.readInt(u16, t.buf[4..6], .little);
-            return pool[off..][0..n];
+        /// Inline bytes, or null when resolving needs the issuing screen.
+        pub fn inlineSlice(t: *const Text) ?[]const u8 {
+            if (t.isPooled() or t.len > max_inline) return null;
+            return t.buf[0..t.len];
+        }
+
+        /// The issuing pool identity, zero for inline text.
+        pub fn generation(t: Text) u64 {
+            return std.mem.readInt(u48, &t.pool_generation, .little);
         }
 
         /// Whether the grapheme is one printable ASCII byte, which every
@@ -175,8 +169,8 @@ pub const Cell = extern struct {
             return t.len == 1 and t.buf[0] >= 0x20 and t.buf[0] < 0x7f;
         }
 
-        /// Whether two `Text` values name the same grapheme. True by
-        /// construction: both forms are canonical and the spare bytes zero.
+        /// Whether two texts are the same inline value or the same pooled
+        /// handle. Texts from different generations are different handles.
         pub fn eql(a: Text, b: Text) bool {
             return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
         }
@@ -311,21 +305,20 @@ pub fn rowsEqual(a: []const Cell, b: []const Cell) bool {
 
 comptime {
     // The whole point of the two-tier grapheme and morse's defined style
-    // layout: a cell that fits in a cache line four times over, is copied
-    // rather than pointed at, and is compared without reading a byte no one
-    // wrote.
-    std.debug.assert(@sizeOf(Cell) == 32);
-    std.debug.assert(@bitSizeOf(Cell) == 32 * 8);
-    std.debug.assert(@sizeOf(Cell.Text) == 7);
+    // layout: a value carrying checked handles, compared without reading
+    // a byte no one wrote.
+    std.debug.assert(@sizeOf(Cell) == 48);
+    std.debug.assert(@bitSizeOf(Cell) == 48 * 8);
+    std.debug.assert(@sizeOf(Cell.Text) == 13);
     std.debug.assert(@sizeOf(Style) == 22);
     std.debug.assert(@sizeOf(Cell.Shape) == 1);
 }
 
 const testing = std.testing;
 
-test "a cell is thirty-two bytes with no padding in it" {
-    try testing.expectEqual(@as(usize, 32), @sizeOf(Cell));
-    try testing.expectEqual(@as(usize, 32 * 8), @bitSizeOf(Cell));
+test "a cell is forty-eight bytes with no padding in it" {
+    try testing.expectEqual(@as(usize, 48), @sizeOf(Cell));
+    try testing.expectEqual(@as(usize, 48 * 8), @bitSizeOf(Cell));
 }
 
 test "two cells built the same way are the same memory" {
@@ -368,49 +361,30 @@ test "colours that differ only by their form are different cells" {
     try testing.expect(!p.eql(n));
 }
 
-test "a short grapheme lives in the cell and a long one in the pool" {
+test "inline text is portable and canonical" {
     const short: Cell.Text = .inlined("é");
     try testing.expect(!short.isPooled());
     try testing.expectEqual(@as(u16, 2), short.length());
-    try testing.expectEqualStrings("é", short.slice(""));
-
-    const astronaut = "\u{1f469}\u{200d}\u{1f680} in the pool";
-    const long: Cell.Text = .atOffset(11, astronaut.len);
-    try testing.expect(long.isPooled());
-    try testing.expectEqual(@as(?u32, 11), long.offset());
-    try testing.expectEqual(@as(u16, astronaut.len), long.length());
-
-    var pool: [64]u8 = @splat('x');
-    @memcpy(pool[11..][0..astronaut.len], astronaut);
-    try testing.expectEqualStrings(astronaut, long.slice(&pool));
-}
-
-test "text of the same grapheme is equal and of different graphemes is not" {
+    try testing.expectEqualStrings("é", short.inlineSlice().?);
     try testing.expect(Cell.Text.eql(.inlined("a"), .inlined("a")));
     try testing.expect(!Cell.Text.eql(.inlined("a"), .inlined("b")));
-    try testing.expect(!Cell.Text.eql(.inlined("a"), .atOffset(0, 1)));
-    try testing.expect(Cell.Text.eql(.atOffset(3, 4), .atOffset(3, 4)));
-    try testing.expect(!Cell.Text.eql(.atOffset(3, 4), .atOffset(3, 5)));
 }
 
 test "one printable ascii byte is the fast path and nothing else is" {
     try testing.expect(Cell.Text.inlined("a").isAscii());
     try testing.expect(Cell.Text.inlined(" ").isAscii());
     try testing.expect(!Cell.Text.inlined("\u{e9}").isAscii());
-    try testing.expect(!Cell.Text.atOffset(0, 9).isAscii());
 }
 
 test "a link is an index and none is the zero value" {
     const c: Cell = .{};
     try testing.expectEqual(Link.none, c.link);
     try testing.expectEqual(@as(?u16, null), Link.none.index());
-    try testing.expectEqual(@as(?u16, 0), Link.at(0).index());
-    try testing.expectEqual(@as(?u16, 41), Link.at(41).index());
 }
 
 test "a blank is a space in the style it was given" {
     const c: Cell = .blank(.{ .bg = .ansi(.blue) });
-    try testing.expectEqualStrings(" ", c.text.slice(""));
+    try testing.expectEqualStrings(" ", c.text.inlineSlice().?);
     try testing.expectEqual(@as(u4, 1), c.width());
     try testing.expect(!c.isTail());
     try testing.expect(c.isHead());

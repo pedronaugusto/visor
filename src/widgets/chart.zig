@@ -71,7 +71,7 @@ pub const Chart = struct {
     legend: bool = true,
 
     /// Draws the axes, the labels, the datasets and the legend.
-    pub fn draw(c: Chart, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
 
         var gutter: u16 = 0;
@@ -118,7 +118,7 @@ pub const Chart = struct {
     }
 
     /// The y labels, right-aligned in the gutter, the first at the bottom.
-    fn drawYLabels(c: Chart, win: Window, gutter: u16, axis_row: u16) std.mem.Allocator.Error!void {
+    fn drawYLabels(c: Chart, win: Window, gutter: u16, axis_row: u16) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (gutter == 0 or c.y.labels.len == 0) return;
         for (c.y.labels, 0..) |text, i| {
             const row = rowFor(i, c.y.labels.len, axis_row);
@@ -144,7 +144,7 @@ pub const Chart = struct {
         from: u16,
         row: u16,
         rows: u16,
-    ) std.mem.Allocator.Error!void {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (rows == 0 or row >= win.rows()) return;
         const room = win.cols() -| from;
         if (room == 0) return;
@@ -170,7 +170,7 @@ pub const Chart = struct {
     }
 
     /// The dataset names, in the plot's top-right corner.
-    fn drawLegend(c: Chart, plot: Window) std.mem.Allocator.Error!void {
+    fn drawLegend(c: Chart, plot: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         var widest: u16 = 0;
         var named: u16 = 0;
         for (c.datasets) |d| {

@@ -71,7 +71,7 @@ pub const Sextants = struct {
 
     /// Draws the picture from the window's top-left, pixel (2c, 3r) in cell
     /// (c, r). A cell with nothing lit in it is left as it is.
-    pub fn draw(s: Sextants, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(s: Sextants, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         const need = s.width * s.height * 4;
         if (s.pixels.len < need) return;

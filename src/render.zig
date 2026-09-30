@@ -926,7 +926,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
             if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
             cost += text.len;
             col += c.width();
@@ -1060,7 +1060,7 @@ pub const Renderer = struct {
             }
             cost += setStyleCost(r, state, c.style);
             cost += setLinkCost(state, s, c.link, caps);
-            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
             if (c.isScaled()) {
                 // OSC 66, two one-digit keys, their separator, the metadata
                 // terminator and ST.
@@ -1075,7 +1075,7 @@ pub const Renderer = struct {
             } else if (joinsAcross(s, row, col, c, text, caps)) |left| {
                 // The left cell blank, the cluster, two moves and the left
                 // cell again in its own style (`writeApart`).
-                cost += (col - left) + text.len + s.textOf(&cells[left]).len + 48;
+                cost += (col - left) + text.len + (s.textOf(&cells[left]) catch @panic("invalid cell in screen")).len + 48;
             } else {
                 cost += text.len;
             }
@@ -1125,7 +1125,7 @@ pub const Renderer = struct {
                 col += 1;
                 continue;
             }
-            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
             cost += text.len;
             if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
             if (cost > limit) return true;
@@ -1325,7 +1325,7 @@ pub const Renderer = struct {
             try r.setLink(out, s, c.link, caps, stats);
             // A covered cell shown as a blank is a space, whatever the head
             // it carried the text of.
-            const text: []const u8 = if (cells[col].isTail()) " " else s.textOf(&cells[col]);
+            const text: []const u8 = if (cells[col].isTail()) " " else (s.textOf(&cells[col]) catch @panic("invalid cell in screen"));
             if (c.isScaled()) {
                 try morse.textSize(out, .{ .scale = c.shape.scale, .width = c.glyphWidth() }, text);
                 stats.scaled += 1;
@@ -1366,7 +1366,7 @@ pub const Renderer = struct {
     fn writeApart(r: *Renderer, out: *Writer, s: *Screen, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8, stats: *Stats) Error!void {
         const cells = s.rowAt(row);
         const lc = visible(cells[left], caps);
-        const held = s.textOf(&cells[left]);
+        const held = (s.textOf(&cells[left]) catch @panic("invalid cell in screen"));
         try r.moveTo(out, left, row, stats);
         try r.setStyle(out, lc.style, stats);
         try r.setLink(out, s, .none, caps, stats);
@@ -1990,7 +1990,7 @@ fn joinedTo(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, caps: Cap
     var left = col - 1;
     // The covered column of a wide cluster: the cluster is in its head.
     if (visible(cells[left], caps).isTail() and left > 0) left -= 1;
-    const held: []const u8 = if (cells[left].isTail()) " " else s.textOf(&cells[left]);
+    const held: []const u8 = if (cells[left].isTail()) " " else (s.textOf(&cells[left]) catch @panic("invalid cell in screen"));
     if (!textmod.joinsCell(held, text)) return null;
     return left;
 }
@@ -2371,7 +2371,7 @@ test "a row cleared to the end is an erase and not a row of spaces" {
 
     for (0..40) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
     _ = try f.draw();
-    f.screen.fill(.{ .col = 4, .row = 0, .cols = 36, .rows = 1 }, .blank(.{}));
+    try f.screen.fill(.{ .col = 4, .row = 0, .cols = 36, .rows = 1 }, .blank(.{}));
     try f.expectBytes("\x1b[1;5H\x1b[0K");
 }
 
@@ -2381,7 +2381,7 @@ test "an interior blank run is one erase rather than a row of spaces" {
 
     for (0..40) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
     _ = try f.draw();
-    f.screen.fill(.{ .col = 4, .row = 0, .cols = 20, .rows = 1 }, .blank(.{}));
+    try f.screen.fill(.{ .col = 4, .row = 0, .cols = 20, .rows = 1 }, .blank(.{}));
     const stats = try f.draw();
     try f.expectBytesAgain("\x1b[1;5H\x1b[20X");
     try testing.expectEqual(@as(u32, 20), stats.erased);
@@ -2763,7 +2763,7 @@ test "arithmetic row prices match emitted rows" {
     try f.screen.write(0, 0, "a", .{ .bold = true }, link);
     try f.screen.write(2, 0, "b", .{ .fg = .rgb(1, 22, 203) }, .none);
     for (8..20) |col| try f.screen.write(@intCast(col), 0, "y", .{ .underline = .curly }, .none);
-    f.screen.fill(.{ .col = 30, .row = 0, .cols = 10, .rows = 1 }, .blank(.{}));
+    try f.screen.fill(.{ .col = 30, .row = 0, .cols = 10, .rows = 1 }, .blank(.{}));
 
     const Check = struct {
         fn row(fixture: *Fixture, whole: bool) !void {
@@ -2835,7 +2835,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
                 const col: u16 = @intCast(c);
                 const p = picks[c];
                 if (p.blank) {
-                    f.screen.fill(.{ .col = col, .row = 0, .cols = 1, .rows = 1 }, .blank(.{}));
+                    try f.screen.fill(.{ .col = col, .row = 0, .cols = 1, .rows = 1 }, .blank(.{}));
                 } else {
                     try f.screen.write(col, 0, glyphs[p.glyph], styles[p.style], if (p.linked) link else .none);
                 }
@@ -3585,7 +3585,9 @@ test "pool compaction repaints reused text and link identities, including throug
             try f.screen.resize(.{ .cols = 9, .rows = 1 });
             try f.screen.resize(f.renderer.size);
         } else try f.screen.compactPool();
-        try testing.expect(previous.eql(f.screen.cells[0]));
+        try testing.expectEqual(previous.text.offset(), f.screen.cells[0].text.offset());
+        try testing.expectEqual(previous.link.index(), f.screen.cells[0].link.index());
+        try testing.expect(!previous.eql(f.screen.cells[0]));
         const stats = try f.draw();
         try testing.expectEqual(@as(u32, 1), stats.repainted);
         try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
@@ -3608,7 +3610,9 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         const new_link = try next.link("https://new.invalid", "");
         const new = "b\u{301}\u{302}\u{303}";
         try next.write(0, 0, new, .{}, new_link);
-        try testing.expect(f.renderer.prev[0].eql(next.cells[0]));
+        try testing.expectEqual(f.renderer.prev[0].text.offset(), next.cells[0].text.offset());
+        try testing.expectEqual(f.renderer.prev[0].link.index(), next.cells[0].link.index());
+        try testing.expect(!f.renderer.prev[0].eql(next.cells[0]));
         // Damage belongs to the grid's writes; it says nothing about which
         // grid the terminal was previously shown.
         next.damage.clear();

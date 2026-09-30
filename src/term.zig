@@ -242,7 +242,7 @@ pub const Term = struct {
             var spacer: Cell = .blank(t.style);
             spacer.shape.kind = .spacer_head;
             var at = t.col;
-            while (at < cols) : (at += 1) t.scr.writeOwnedCell(at, t.row, spacer);
+            while (at < cols) : (at += 1) t.scr.writeOwnedCell(at, t.row, spacer) catch unreachable;
             t.col = 0;
             t.lineFeed();
         }
@@ -253,9 +253,12 @@ pub const Term = struct {
                 .style = t.style,
                 .link = t.link,
                 .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(grapheme) },
-            }));
+            })) catch unreachable;
         } else {
-            try t.scr.write(t.col, t.row, grapheme, t.style, t.link);
+            t.scr.write(t.col, t.row, grapheme, t.style, t.link) catch |err| switch (err) {
+                error.InvalidHandle => unreachable,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
         }
         t.previous = firstCodepoint(grapheme);
         t.col += w;
@@ -285,7 +288,7 @@ pub const Term = struct {
         }
         const left = t.scr.readCell(at, t.row) orelse return false;
         if (left.isTail() or left.isScaled()) return false;
-        const held = t.scr.textOf(&left);
+        const held = (t.scr.textOf(&left) catch @panic("invalid cell in screen"));
         if (!textmod.joinsCell(held, grapheme)) return false;
 
         var buf: [64]u8 = undefined;
@@ -301,7 +304,7 @@ pub const Term = struct {
             // and the whole cluster at the start of the next.
             var spacer: Cell = .blank(t.style);
             spacer.shape.kind = .spacer_head;
-            t.scr.writeOwnedCell(head, row, spacer);
+            t.scr.writeOwnedCell(head, row, spacer) catch unreachable;
             t.col = 0;
             t.lineFeed();
             head = 0;
@@ -313,7 +316,7 @@ pub const Term = struct {
             .style = left.style,
             .link = left.link,
             .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(joined) },
-        }));
+        })) catch unreachable;
         t.previous = firstCodepoint(joined);
         t.wrap_pending = false;
         t.col = head + w;
@@ -374,7 +377,7 @@ pub const Term = struct {
         for (0..distance) |k| {
             const row: u16 = @intCast(first + k);
             var col = rect.col;
-            while (col < rect.right()) : (col += 1) t.scr.writeOwnedCell(col, row, blank);
+            while (col < rect.right()) : (col += 1) t.scr.writeOwnedCell(col, row, blank) catch unreachable;
         }
     }
 
@@ -563,7 +566,7 @@ pub const Term = struct {
         const blank = t.erased();
         var i: u16 = 0;
         while (i < count and col + i < t.scr.size.cols) : (i += 1) {
-            t.scr.writeOwnedCell(col + i, row, blank);
+            t.scr.writeOwnedCell(col + i, row, blank) catch unreachable;
         }
     }
 
@@ -601,7 +604,7 @@ pub const Term = struct {
         var col = cols;
         while (col > t.col + count) {
             col -= 1;
-            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col - count, t.row).?);
+            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col - count, t.row).?) catch unreachable;
         }
         t.eraseRun(t.col, t.row, count);
     }
@@ -613,7 +616,7 @@ pub const Term = struct {
         const count: u16 = @intCast(@min(n, cols - t.col));
         var col = t.col;
         while (col + count < cols) : (col += 1) {
-            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col + count, t.row).?);
+            t.scr.writeOwnedCell(col, t.row, t.scr.readCell(col + count, t.row).?) catch unreachable;
         }
         t.eraseRun(cols - count, t.row, count);
     }
@@ -813,7 +816,7 @@ pub const Term = struct {
                 .drift = textmod.disagrees(grapheme),
                 .scale = scale,
             },
-        }));
+        })) catch unreachable;
         t.previous = firstCodepoint(grapheme);
         t.col = @intCast(t.col + span);
         if (t.col >= cols) {
@@ -876,7 +879,7 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
         var col: u16 = 0;
         while (col < s.size.cols) : (col += 1) {
             const c = &s.cells[s.index(col, row)];
-            try w.writeAll(if (c.isTail()) opts.tail else s.textOf(c));
+            try w.writeAll(if (c.isTail()) opts.tail else (s.textOf(c) catch @panic("invalid cell in screen")));
         }
         try w.writeByte('\n');
     }
@@ -1805,7 +1808,7 @@ test "the dumps a program keeps its goldens in are these bytes" {
 test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first appearance" {
     var screen: Screen = try .init(testing.allocator, .{ .cols = 64, .rows = 1 });
     defer screen.deinit();
-    for (0..64) |c| screen.writeOwnedCell(@intCast(c), 0, .blank(.{ .fg = .palette(@intCast(c + 16)) }));
+    for (0..64) |c| try screen.writeOwnedCell(@intCast(c), 0, .blank(.{ .fg = .palette(@intCast(c + 16)) }));
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
     try dumpScreenStyles(&screen, &out.writer);

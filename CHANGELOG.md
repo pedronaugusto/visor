@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: pooled Text and Link handles carry their pool generation, checked cell operations refuse stale or foreign handles, raw pooled constructors and resolution are removed, and Cell is forty-eight bytes.
+
 - Probe replies to disabled questions leave capabilities and the quiet period unchanged.
 
 - Cell placement and printing compare wide extents before narrowing at the u16 coordinate edge.

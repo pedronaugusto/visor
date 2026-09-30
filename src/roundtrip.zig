@@ -278,11 +278,11 @@ fn operate(h: *Harness, dice: *corpus.Dice) !void {
         3 => {
             const col: u16 = @intCast(dice.index(cols));
             const row: u16 = @intCast(dice.index(rows));
-            s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
+            try s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
         },
         4 => {
             const rect = randomRect(dice, cols, rows);
-            s.fill(rect, .blank(styles[dice.index(styles.len)]));
+            try s.fill(rect, .blank(styles[dice.index(styles.len)]));
         },
         5 => {
             const rect = randomRect(dice, cols, rows);

@@ -58,7 +58,7 @@ pub const Scrollbar = struct {
     };
 
     /// Draws the track and the thumb along the window's first column or row.
-    pub fn draw(b: Scrollbar, win: Window, state: State) std.mem.Allocator.Error!void {
+    pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         if (b.hide_when_whole and state.viewport >= state.content) return;
 
@@ -95,7 +95,7 @@ pub const Scrollbar = struct {
     }
 
     /// One cell along the bar's axis.
-    fn put(b: Scrollbar, win: Window, at: u16, glyph: []const u8, style: Style) std.mem.Allocator.Error!void {
+    fn put(b: Scrollbar, win: Window, at: u16, glyph: []const u8, style: Style) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         switch (b.direction) {
             .vertical => try win.write(0, at, glyph, style, .none),
             .horizontal => try win.write(at, 0, glyph, style, .none),

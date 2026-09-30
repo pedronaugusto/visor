@@ -197,7 +197,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 
 ## Design
 
-**A cell is thirty-two bytes and is compared as memory.** The grapheme lives
+**A cell is forty-eight bytes and is compared as memory.** The grapheme lives
 in the cell when it is six bytes or fewer, which covers every
 single-codepoint cluster and a base with a combining mark, and in a pool the
 screen owns when it is longer. The style is `morse.Style`, which has a
@@ -205,6 +205,14 @@ defined layout and no padding, so a whole row is one `memcmp` rather than a
 field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
+
+Pooled text and link handles carry their issuing pool generation. Compaction
+and resize invalidate retained handles; another screen cannot use them.
+`textOf`, cell writes, fills and copies return `InvalidHandle` before using a
+stale or foreign handle; `target` returns null. Inline text and `Link.none`
+are portable. Use `copyCell` with the source screen to transfer a live cell,
+or the owned-copy helpers to keep content through compaction. Raw pool
+constructors and raw text resolution are no longer public APIs.
 
 `Screen.link` refuses C0 controls and DEL in a URI or params with
 `error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.

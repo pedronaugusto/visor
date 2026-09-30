@@ -62,7 +62,7 @@ pub const Paragraph = struct {
     }
 
     /// Draws as many rows as the window has, starting at `scroll`.
-    pub fn draw(p: Paragraph, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         var produced: usize = 0;
         var row: u16 = 0;
@@ -247,7 +247,10 @@ test "a line keeps its own style and its own link" {
         \\
     );
     try testing.expectEqual(visor.Color.ansi(.red), h.styleAt(0, 0).fg);
-    try testing.expectEqual(link, h.term.screen().readCell(0, 1).?.link);
+    const shown = h.term.screen().readCell(0, 1).?.link;
+    try testing.expect(shown != link);
+    try testing.expectEqualStrings("https://ziglang.org", h.term.screen().target(shown).?.uri);
+    try testing.expectEqualStrings("", h.term.screen().target(shown).?.params);
 }
 
 test "the rows of a long line come out in order whatever the buffer holds" {

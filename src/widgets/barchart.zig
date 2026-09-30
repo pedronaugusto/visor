@@ -57,7 +57,7 @@ pub const BarChart = struct {
     show_values: bool = true,
 
     /// Draws every bar that fits.
-    pub fn draw(c: BarChart, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(c: BarChart, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty() or c.bars.len == 0) return;
         var top = c.max orelse 0;
         if (c.max == null) for (c.bars) |b| {
@@ -71,7 +71,7 @@ pub const BarChart = struct {
     }
 
     /// Bars that grow upward from the bottom row, their labels under them.
-    fn drawStanding(c: BarChart, win: Window, top: u64) std.mem.Allocator.Error!void {
+    fn drawStanding(c: BarChart, win: Window, top: u64) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         var labelled = false;
         for (c.bars) |b| {
             if (b.label.len != 0) labelled = true;
@@ -102,7 +102,7 @@ pub const BarChart = struct {
     }
 
     /// Bars that grow rightward, one row each, their labels to the left.
-    fn drawLying(c: BarChart, win: Window, top: u64) std.mem.Allocator.Error!void {
+    fn drawLying(c: BarChart, win: Window, top: u64) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         var label_width: u16 = 0;
         for (c.bars) |b| label_width = @max(label_width, win.width(b.label));
         if (label_width != 0) label_width += 1;
@@ -137,7 +137,7 @@ pub const BarChart = struct {
     }
 
     /// What a bar says about itself, on the bar.
-    fn drawValue(c: BarChart, win: Window, b: Bar, col: u16, row: u16) std.mem.Allocator.Error!void {
+    fn drawValue(c: BarChart, win: Window, b: Bar, col: u16, row: u16) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         var digits: [20]u8 = undefined;
         const text = b.text orelse std.fmt.bufPrint(&digits, "{d}", .{b.value}) catch return;
         if (text.len == 0) return;
@@ -155,7 +155,7 @@ pub const BarChart = struct {
         col: u16,
         row: u16,
         room: u16,
-    ) std.mem.Allocator.Error!void {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (text.len == 0) return;
         const taken = @min(win.width(text), room);
         _ = try win.printSegment(

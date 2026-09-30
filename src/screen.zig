@@ -1,7 +1,7 @@
 //! The grid: cells, the bytes they point at, and what changed since the last
 //! frame.
 //!
-//! One allocator, taken at `init`. After that, `writeCell`, `fill`, `clear`
+//! One allocator, taken at `init`. After that, `writeOwnedCell`, `fill`, `clear`
 //! and `scroll` never allocate; `write` and `intern` allocate only when a
 //! grapheme is longer than the six bytes a cell holds inline and has not
 //! been seen before. Interning new links, compaction and resize can allocate;
@@ -39,16 +39,6 @@ const Point = geom.Point;
 const Rect = geom.Rect;
 const Size = geom.Size;
 const Style = cellmod.Style;
-
-// Each pool pair has a process-wide identity, independent of a Screen's
-// address. Screens can move, or a new one can reuse a destroyed one's place;
-// neither makes offsets from different pools comparable. Atomic so screens
-// constructed on independent threads also get distinct identities.
-var pool_generations: std.atomic.Value(u64) = .init(1);
-
-fn nextPoolGeneration() u64 {
-    return pool_generations.fetchAdd(1, .monotonic);
-}
 
 /// Where the terminal's cursor should end the frame, whether it shows, and
 /// what shape it takes.
@@ -101,7 +91,7 @@ pub const Screen = struct {
             .cells = cells,
             .graphemes = .{},
             .links = .{},
-            .pool_generation = nextPoolGeneration(),
+            .pool_generation = pool.nextGeneration(),
             .damage = dmg,
         };
     }
@@ -167,7 +157,7 @@ pub const Screen = struct {
     /// and damage everything anyway.
     ///
     /// It is a call, not a policy: `draw` never allocates and nothing is
-    /// freed behind a live cell.
+    /// freed behind a live grid cell. Retained handles are refused after the sweep.
     pub fn compactPool(s: *Screen) Allocator.Error!void {
         const gpa = s.gpa;
         var graphemes: pool.Graphemes = .{};
@@ -179,14 +169,14 @@ pub const Screen = struct {
         // written back until this has succeeded, so a failure here leaves
         // the screen exactly as it was.
         for (s.cells) |*c| {
-            if (c.text.isPooled()) _ = try graphemes.intern(gpa, s.graphemes.slice(&c.text));
+            if (c.text.isPooled()) _ = try graphemes.intern(gpa, (s.graphemes.slice(&c.text) catch unreachable));
             if (s.links.get(c.link)) |t| _ = try links.intern(gpa, t.uri, t.params);
         }
         // And now the cells, which cannot fail: everything they name is
         // already in the new pools.
         for (s.cells) |*c| {
             if (c.text.isPooled()) {
-                c.text = graphemes.intern(gpa, s.graphemes.slice(&c.text)) catch unreachable;
+                c.text = graphemes.intern(gpa, (s.graphemes.slice(&c.text) catch unreachable)) catch unreachable;
             }
             if (s.links.get(c.link)) |t| {
                 c.link = links.intern(gpa, t.uri, t.params) catch unreachable;
@@ -196,7 +186,7 @@ pub const Screen = struct {
         s.links.deinit(gpa);
         s.graphemes = graphemes;
         s.links = links;
-        s.pool_generation = nextPoolGeneration();
+        s.pool_generation = pool.nextGeneration();
         s.damageAll();
     }
 
@@ -206,7 +196,8 @@ pub const Screen = struct {
         return s.cells[s.index(col, row)];
     }
 
-    /// One cell already owned by this screen, clipped and damage marked.
+    /// One cell checked against this screen, clipped and damage marked.
+    /// Stale or foreign text and link handles return `InvalidHandle` before any change.
     ///
     /// A cell two columns wide also writes its tail, and one drawn at a
     /// scale writes its whole block of tails; whatever any of them covered is
@@ -216,7 +207,14 @@ pub const Screen = struct {
     /// there would wrap it onto the next row; a block that does not fit
     /// becomes a blank too. A cell handed in as a tail is taken as a blank:
     /// tails are the grid's own bookkeeping.
-    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) void {
+    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+        _ = try s.textOf(&c);
+        if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
+        s.placeOwnedCell(col, row, c);
+    }
+
+    // The grid's own cells have already passed the handle checks.
+    fn placeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) void {
         if (col >= s.size.cols or row >= s.size.rows) return;
         const i = s.index(col, row);
 
@@ -267,15 +265,18 @@ pub const Screen = struct {
     }
 
     /// Copies a cell from another screen, re-interning every owned value.
-    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) Allocator.Error!void {
+    /// Stale handles or a cell belonging to a different source return `InvalidHandle`.
+    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) (Allocator.Error || error{InvalidHandle})!void {
+        _ = try source.textOf(&c);
+        if (c.link != .none and source.target(c.link) == null) return error.InvalidHandle;
         var put = c;
-        if (c.text.isPooled()) put.text = try s.graphemes.intern(s.gpa, source.graphemes.slice(&c.text));
+        if (c.text.isPooled()) put.text = try s.graphemes.intern(s.gpa, (try source.graphemes.slice(&c.text)));
         if (source.links.get(c.link)) |link_target| {
             put.link = try s.links.intern(s.gpa, link_target.uri, link_target.params);
         } else {
             put.link = .none;
         }
-        s.writeOwnedCell(col, row, put);
+        try s.writeOwnedCell(col, row, put);
     }
 
     /// A grapheme measured, placed, and its tail written if it is wide.
@@ -301,7 +302,8 @@ pub const Screen = struct {
         text: []const u8,
         style: Style,
         to: Link,
-    ) Allocator.Error!void {
+    ) (Allocator.Error || error{InvalidHandle})!void {
+        if (to != .none and s.target(to) == null) return error.InvalidHandle;
         const grapheme = valid(text);
         if (grapheme.len == 0) return;
         if (grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
@@ -326,7 +328,7 @@ pub const Screen = struct {
     fn writeOne(s: *Screen, col: u16, row: u16, grapheme: []const u8, w: u2, style: Style, to: Link) Allocator.Error!void {
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         const t = try s.graphemes.intern(s.gpa, grapheme);
-        s.writeOwnedCell(col, row, .{
+        s.placeOwnedCell(col, row, .{
             .text = t,
             .style = cellmod.canonical(style),
             .link = to,
@@ -355,7 +357,8 @@ pub const Screen = struct {
         style: Style,
         to: Link,
         scale: u3,
-    ) Allocator.Error!bool {
+    ) (Allocator.Error || error{InvalidHandle})!bool {
+        if (to != .none and s.target(to) == null) return error.InvalidHandle;
         if (scale <= 1) {
             try s.write(col, row, text, style, to);
             return true;
@@ -372,7 +375,7 @@ pub const Screen = struct {
         if (@as(u32, col) + @as(u32, w) * scale > s.size.cols) return false;
         if (@as(u32, row) + scale > s.size.rows) return false;
         const t = try s.graphemes.intern(s.gpa, grapheme);
-        s.writeOwnedCell(col, row, .{
+        s.placeOwnedCell(col, row, .{
             .text = t,
             .style = cellmod.canonical(style),
             .link = to,
@@ -393,13 +396,15 @@ pub const Screen = struct {
     }
 
     /// A rectangle of one cell.
-    pub fn fill(s: *Screen, rect: Rect, c: Cell) void {
+    pub fn fill(s: *Screen, rect: Rect, c: Cell) error{InvalidHandle}!void {
+        _ = try s.textOf(&c);
+        if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
         const r = rect.intersect(.fromSize(s.size));
         if (r.isEmpty()) return;
         var y = r.row;
         while (y < r.bottom()) : (y += 1) {
             var col = r.col;
-            while (col < r.right()) : (col += 1) s.writeOwnedCell(col, @intCast(y), c);
+            while (col < r.right()) : (col += 1) s.placeOwnedCell(col, @intCast(y), c);
         }
     }
 
@@ -427,7 +432,7 @@ pub const Screen = struct {
         const blank: Cell = .blank(.{});
 
         if (distance >= r.rows) {
-            s.fill(r, blank);
+            s.fill(r, blank) catch unreachable;
             return;
         }
         const shift: u16 = @intCast(distance);
@@ -454,6 +459,7 @@ pub const Screen = struct {
     }
 
     /// A grapheme into the pool, deduplicated; inline when it fits.
+    /// Pooled handles belong to this generation; compaction and resize invalidate them.
     pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
         return s.graphemes.intern(s.gpa, bytes);
     }
@@ -472,7 +478,7 @@ pub const Screen = struct {
         return s.links.intern(s.gpa, uri, params);
     }
 
-    /// The bytes of a cell's grapheme.
+    /// The bytes of a cell's grapheme, or `InvalidHandle` for stale or foreign text.
     ///
     /// The cell is taken by pointer because a grapheme of six bytes or
     /// fewer lives inside it: what comes back borrows from the cell, and a
@@ -482,7 +488,7 @@ pub const Screen = struct {
     /// them even when this cell is unchanged. Compaction, resize and
     /// deinitialization can also invalidate them. Use `dupeTextOf` to retain
     /// the bytes across drawing.
-    pub fn textOf(s: *const Screen, c: *const Cell) []const u8 {
+    pub fn textOf(s: *const Screen, c: *const Cell) error{InvalidHandle}![]const u8 {
         return s.graphemes.slice(&c.text);
     }
 
@@ -492,10 +498,11 @@ pub const Screen = struct {
     /// or compaction. Use `dupeTextAt` to retain them.
     pub fn textAt(s: *const Screen, col: u16, row_n: u16) []const u8 {
         if (col >= s.size.cols or row_n >= s.size.rows) return &.{};
-        return s.textOf(&s.cells[s.index(col, row_n)]);
+        return s.textOf(&s.cells[s.index(col, row_n)]) catch @panic("invalid cell in screen");
     }
 
-    /// The target a cell's link names, or null when it has none. Both slices
+    /// The target a cell's link names, or null for no link, a stale handle
+    /// or a foreign handle. Both slices
     /// borrow from the growable link pool: interning unrelated links,
     /// compaction, resize or deinitialization can invalidate them. Use
     /// `dupeTarget` to retain the target across drawing.
@@ -505,8 +512,8 @@ pub const Screen = struct {
 
     /// Copies a cell's text for retention. The caller owns the result and
     /// frees it with `gpa`, which belongs to the copy, not to this screen.
-    pub fn dupeTextOf(s: *const Screen, gpa: Allocator, c: *const Cell) Allocator.Error![]u8 {
-        return gpa.dupe(u8, s.textOf(c));
+    pub fn dupeTextOf(s: *const Screen, gpa: Allocator, c: *const Cell) (Allocator.Error || error{InvalidHandle})![]u8 {
+        return gpa.dupe(u8, try s.textOf(c));
     }
 
     /// Copies text at a place for retention, empty outside the grid. The
@@ -824,7 +831,7 @@ test "a write outside the grid changes nothing" {
 
     try s.write(9, 0, "x", .{}, .none);
     try s.write(0, 9, "x", .{}, .none);
-    s.writeOwnedCell(4, 0, .blank(.{ .bold = true }));
+    try s.writeOwnedCell(4, 0, .blank(.{ .bold = true }));
     try testing.expect(!s.damage.any());
     try testing.expectEqual(@as(?Cell, null), s.readCell(4, 0));
 }
@@ -937,7 +944,7 @@ test "measured by codepoint, a cluster of wide codepoints takes a cell each, as 
 test "a caller's tail is taken as a blank" {
     var s = try made(3, 1);
     defer s.deinit();
-    s.writeOwnedCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
+    try s.writeOwnedCell(1, 0, .{ .text = .inlined("x"), .shape = .{ .kind = .spacer_tail } });
     try testing.expectEqualStrings(" ", s.textAt(1, 0));
     try checkInvariants(&s);
 }
@@ -973,7 +980,7 @@ test "a block that would not fit is not written" {
     try testing.expect(!try s.writeScaled(0, 1, "a", .{}, .none, 2));
     try testing.expect(!s.damage.any());
     // Through the owned path, it is a blank rather than half a block.
-    s.writeOwnedCell(3, 0, .init(.{ .text = .inlined("a"), .shape = .{ .scale = 2 } }));
+    try s.writeOwnedCell(3, 0, .init(.{ .text = .inlined("a"), .shape = .{ .scale = 2 } }));
     try testing.expectEqualStrings(" ", s.textAt(3, 0));
     try checkInvariants(&s);
 }
@@ -1093,14 +1100,14 @@ test "a fill covers only the rectangle and clips to the grid" {
     var s = try made(6, 4);
     defer s.deinit();
 
-    s.fill(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 }, .blank(.{ .bg = .ansi(.blue) }));
+    try s.fill(.{ .col = 1, .row = 1, .cols = 3, .rows = 2 }, .blank(.{ .bg = .ansi(.blue) }));
     try testing.expect(s.readCell(0, 1).?.eql(.blank(.{})));
     try testing.expect(s.readCell(1, 1).?.eql(.blank(.{ .bg = .ansi(.blue) })));
     try testing.expect(s.readCell(3, 2).?.eql(.blank(.{ .bg = .ansi(.blue) })));
     try testing.expect(s.readCell(4, 2).?.eql(.blank(.{})));
     try testing.expect(s.readCell(1, 3).?.eql(.blank(.{})));
 
-    s.fill(.{ .col = 4, .row = 3, .cols = 99, .rows = 99 }, .blank(.{ .bold = true }));
+    try s.fill(.{ .col = 4, .row = 3, .cols = 99, .rows = 99 }, .blank(.{ .bold = true }));
     try testing.expect(s.readCell(5, 3).?.style.bold);
     try checkInvariants(&s);
 }
@@ -1389,7 +1396,7 @@ test "managed screens and renderers use their captured allocator through every o
             defer r.deinit();
             const text = try s.intern("a\u{301}\u{302}\u{303}");
             const link_id = try s.link("https://kept.invalid", "id=kept");
-            s.writeOwnedCell(0, 0, .{ .text = text, .link = link_id });
+            try s.writeOwnedCell(0, 0, .{ .text = text, .link = link_id });
             try s.compactPool();
             try s.resize(.{ .cols = 8, .rows = 2 });
             try r.resize(s.size);
@@ -1435,10 +1442,70 @@ test "cell extents clip safely at the u16 coordinate edge" {
     var s = try Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
     defer s.deinit();
     const last = s.size.cols - 1;
-    s.writeOwnedCell(last, 0, .{ .text = .inlined("x"), .shape = .{ .scale = 7 } });
+    try s.writeOwnedCell(last, 0, .{ .text = .inlined("x"), .shape = .{ .scale = 7 } });
     try testing.expect(s.cells[last].eql(.blank(.{})));
     // Measured by codepoint, a two-column part at the last column becomes
     // a spacer; stepping past it must not narrow an out-of-grid endpoint.
     try s.write(last, 0, "\u{1f680}", .{}, .none);
     try testing.expectEqual(Cell.Kind.spacer_head, s.cells[last].shape.kind);
+}
+
+test "retained handles cannot name foreign or compacted content" {
+    var a = try Screen.init(testing.allocator, .{ .cols = 2, .rows = 1 });
+    defer a.deinit();
+    var b = try Screen.init(testing.allocator, a.size);
+    defer b.deinit();
+    const old_text = try a.intern("retained-text");
+    const old_link = try a.link("https://old.invalid", "");
+    const foreign_text = try b.intern("different-one");
+    _ = try b.link("https://new.invalid", "");
+    try testing.expect(b.target(old_link) == null);
+    try testing.expect(!Cell.Text.eql(old_text, foreign_text));
+    try a.compactPool();
+    const new_text = try a.intern("different-one");
+    _ = try a.link("https://new.invalid", "");
+    try testing.expect(a.target(old_link) == null);
+    try testing.expect(!Cell.Text.eql(old_text, new_text));
+}
+
+test "checked cell operations refuse stale and foreign handles before changing the grid" {
+    var a = try Screen.init(testing.allocator, .{ .cols = 3, .rows = 1 });
+    defer a.deinit();
+    var b = try Screen.init(testing.allocator, a.size);
+    defer b.deinit();
+    const retained: Cell = .{ .text = try a.intern("retained-text"), .link = try a.link("https://old.invalid", "") };
+    try a.writeOwnedCell(0, 0, retained);
+    _ = try b.intern("different-one");
+    _ = try b.link("https://new.invalid", "");
+    const blank = b.cells[0];
+    const link_only: Cell = .{ .link = retained.link };
+    try testing.expectError(error.InvalidHandle, b.writeOwnedCell(0, 0, link_only));
+    try testing.expectError(error.InvalidHandle, b.fill(.fromSize(b.size), link_only));
+    try testing.expectError(error.InvalidHandle, b.copyCell(&b, 0, 0, link_only));
+    try testing.expectError(error.InvalidHandle, b.textOf(&retained));
+    try testing.expectError(error.InvalidHandle, b.writeOwnedCell(0, 0, retained));
+    try testing.expectError(error.InvalidHandle, b.fill(.fromSize(b.size), retained));
+    try testing.expectError(error.InvalidHandle, b.write(0, 0, "x", .{}, retained.link));
+    try testing.expectError(error.InvalidHandle, b.writeScaled(0, 0, "x", .{}, retained.link, 2));
+    try testing.expectError(error.InvalidHandle, b.copyCell(&b, 0, 0, retained));
+    try testing.expectError(error.InvalidHandle, b.dupeTextOf(testing.allocator, &retained));
+    try testing.expect(blank.eql(b.cells[0]));
+    try b.copyCell(&a, 0, 0, retained);
+    try testing.expectEqualStrings("retained-text", b.textAt(0, 0));
+    try testing.expectEqualStrings("https://old.invalid", b.target(b.cells[0].link).?.uri);
+
+    try a.compactPool();
+    try testing.expectError(error.InvalidHandle, a.textOf(&retained));
+    try testing.expectError(error.InvalidHandle, a.writeOwnedCell(1, 0, retained));
+    try testing.expectError(error.InvalidHandle, b.copyCell(&a, 1, 0, retained));
+    try testing.expect(a.target(retained.link) == null);
+    try testing.expectEqualStrings("retained-text", a.textAt(0, 0));
+    const after_compaction = a.cells[0];
+    try a.resize(.{ .cols = 4, .rows = 1 });
+    try testing.expectError(error.InvalidHandle, a.textOf(&after_compaction));
+    try testing.expect(a.target(after_compaction.link) == null);
+    try testing.expectEqualStrings("retained-text", a.textAt(0, 0));
+    const portable: Cell = .{ .text = .inlined("x") };
+    try a.writeOwnedCell(2, 0, portable);
+    try b.writeOwnedCell(2, 0, portable);
 }

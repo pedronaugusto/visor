@@ -106,7 +106,7 @@ pub const Table = struct {
 
     /// Draws the header and as many rows as are left, moving the offset
     /// when the selection would otherwise be off screen.
-    pub fn draw(t: Table, win: Window, state: *State) std.mem.Allocator.Error!void {
+    pub fn draw(t: Table, win: Window, state: *State) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty() or t.widths.len == 0) return;
 
         const marker_width = win.width(t.marker);
@@ -122,7 +122,7 @@ pub const Table = struct {
 
         var row: u16 = 0;
         if (t.header) |h| {
-            win.fill(.{ .col = 0, .row = 0, .cols = win.cols(), .rows = 1 }, .blank(t.header_style));
+            win.fill(.{ .col = 0, .row = 0, .cols = win.cols(), .rows = 1 }, .blank(t.header_style)) catch unreachable;
             try t.drawRow(body, cells, 0, h, t.header_style);
             row = 1;
         }
@@ -134,7 +134,7 @@ pub const Table = struct {
             win.fill(
                 .{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 },
                 .blank(if (chosen) style else t.style),
-            );
+            ) catch unreachable;
             if (marker_width != 0) {
                 const mark_style = t.marker_style orelse if (chosen) style else t.style;
                 if (chosen) {
@@ -143,7 +143,7 @@ pub const Table = struct {
                         .{ .col = 0, .row = row, .wrap = .none },
                     );
                 } else if (t.marker_style) |blank| {
-                    win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(blank));
+                    win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(blank)) catch unreachable;
                 }
             }
             try t.drawRow(body, cells, row, t.rows[which], style);
@@ -159,7 +159,7 @@ pub const Table = struct {
         row: u16,
         r: Row,
         style: Style,
-    ) std.mem.Allocator.Error!void {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         for (cells, 0..) |rect, i| {
             if (i >= r.cells.len) break;
             if (rect.cols == 0) continue;
@@ -389,18 +389,18 @@ test "a table drawn by hand at worked-out columns and the same table drawn by Ta
     var by_hand: Harness = try .init(testing.allocator, cols, names.len + 1);
     defer by_hand.deinit();
     const w = by_hand.window();
-    w.fill(.{ .row = 0, .cols = cols, .rows = 1 }, .blank(head));
+    try w.fill(.{ .row = 0, .cols = cols, .rows = 1 }, .blank(head));
     _ = try w.printSegment(.{ .text = "name", .style = head }, .{ .col = 2, .wrap = .none });
     _ = try w.printSegment(.{ .text = "size", .style = head }, .{ .col = 2 + name_cols + 1, .wrap = .none });
     for (names, sizes, 0..) |name, size, i| {
         const row: u16 = @intCast(i + 1);
         const on = i == sel;
         const style: Style = if (on) chosen_style else .{};
-        w.fill(.{ .row = row, .cols = cols, .rows = 1 }, .blank(style));
+        try w.fill(.{ .row = row, .cols = cols, .rows = 1 }, .blank(style));
         if (on) {
             _ = try w.printSegment(.{ .text = "\u{25b8} ", .style = hot }, .{ .row = row, .wrap = .none });
         } else {
-            w.fill(.{ .row = row, .cols = 2, .rows = 1 }, .blank(hot));
+            try w.fill(.{ .row = row, .cols = 2, .rows = 1 }, .blank(hot));
         }
         _ = try w.printSegment(.{ .text = name, .style = style }, .{ .col = 2, .row = row, .wrap = .none });
         _ = try w.printSegment(.{ .text = size, .style = style }, .{ .col = 2 + name_cols + 1, .row = row, .wrap = .none });

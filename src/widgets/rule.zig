@@ -39,7 +39,7 @@ pub const Rule = struct {
 
     /// Draws the rule along the window's first row, or down its first
     /// column, the whole length of the window.
-    pub fn draw(r: Rule, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(r: Rule, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         switch (r.direction) {
             .horizontal => {

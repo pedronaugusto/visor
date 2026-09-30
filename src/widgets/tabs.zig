@@ -63,7 +63,7 @@ pub const Tabs = struct {
     }
 
     /// Draws the titles on the window's first row.
-    pub fn draw(t: Tabs, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         const method = win.screen.method;
         const divider = win.width(t.divider);
@@ -74,7 +74,7 @@ pub const Tabs = struct {
             win.fill(
                 .{ .col = span.col, .row = 0, .cols = span.cols, .rows = 1 },
                 .blank(style),
-            );
+            ) catch unreachable;
             _ = try win.printSegment(
                 .{ .text = title, .style = style },
                 .{ .col = span.col + t.padding, .row = 0, .wrap = .none },
@@ -145,7 +145,7 @@ const sign = "\u{26a0}\u{fe0f}";
 test "a divider with no style is a gap left as it was" {
     var h: Harness = try .init(testing.allocator, 8, 1);
     defer h.deinit();
-    h.window().fill(.fromSize(h.window().size()), .init(.{ .text = .inlined("."), .style = .{ .italic = true } }));
+    try h.window().fill(.fromSize(h.window().size()), .init(.{ .text = .inlined("."), .style = .{ .italic = true } }));
     const t: Tabs = .{ .titles = &.{ "a", "b" }, .padding = 0, .divider = "  ", .divider_style = null };
     try t.draw(h.window());
     try h.expectFrame(

@@ -278,18 +278,20 @@ pub const Window = struct {
     }
 
     /// One cell, in this window's coordinates, clipped.
-    pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) void {
+    /// Stale or foreign handles return `InvalidHandle`.
+    pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
         var drawn = c;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), w.screen.textOf(&c), c.style));
-        w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, drawn);
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try w.screen.textOf(&c)), c.style));
+        try w.screen.writeOwnedCell(w.rect.col + col, w.rect.row + row, drawn);
     }
 
     /// Copies a cell from another screen into this window.
-    pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) std.mem.Allocator.Error!void {
+    /// The cell must still belong to the source's current pool generations.
+    pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
         var drawn = c;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), source.textOf(&c), c.style));
+        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), (try source.textOf(&c)), c.style));
         try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, drawn);
     }
 
@@ -307,7 +309,7 @@ pub const Window = struct {
         grapheme: []const u8,
         style: Style,
         link: Link,
-    ) std.mem.Allocator.Error!void {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (col >= w.rect.cols or row >= w.rect.rows) return;
         const drawn = if (w.ink == null) style else w.styled(col, row, textmod.graphemeWidth(grapheme, w.screen.method), grapheme, style);
         try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, drawn, link);
@@ -324,7 +326,7 @@ pub const Window = struct {
         style: Style,
         link: Link,
         scale: u3,
-    ) std.mem.Allocator.Error!bool {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!bool {
         const tall: u16 = @max(scale, 1);
         const wide: u16 = textmod.graphemeWidth(grapheme, w.screen.method);
         if (col >= w.rect.cols or row >= w.rect.rows) return false;
@@ -335,7 +337,8 @@ pub const Window = struct {
     }
 
     /// A rectangle of one cell, in this window's coordinates.
-    pub fn fill(w: Window, rect: Rect, c: Cell) void {
+    /// Stale or foreign handles return `InvalidHandle` before any cell changes.
+    pub fn fill(w: Window, rect: Rect, c: Cell) error{InvalidHandle}!void {
         const inside = rect.intersect(.fromSize(w.size()));
         if (inside.isEmpty()) return;
         if (w.ink != null) {
@@ -343,11 +346,11 @@ pub const Window = struct {
             var row = inside.row;
             while (row < inside.bottom()) : (row += 1) {
                 var col = inside.col;
-                while (col < inside.right()) : (col += 1) w.writeOwnedCell(col, @intCast(row), c);
+                while (col < inside.right()) : (col += 1) try w.writeOwnedCell(col, @intCast(row), c);
             }
             return;
         }
-        w.screen.fill(.{
+        try w.screen.fill(.{
             .col = w.rect.col + inside.col,
             .row = w.rect.row + inside.row,
             .cols = inside.cols,
@@ -357,7 +360,7 @@ pub const Window = struct {
 
     /// Every cell of the window blank and default.
     pub fn clear(w: Window) void {
-        w.fill(.fromSize(w.size()), .blank(.{}));
+        w.fill(.fromSize(w.size()), .blank(.{})) catch unreachable;
     }
 
     /// The window's rows moved by `n`, the vacated rows blank. A positive
@@ -373,7 +376,7 @@ pub const Window = struct {
     /// longer than six bytes, by the same rule as `Screen.write`. A newline
     /// always ends a row; a word break looks ahead within one segment, so a
     /// word split across two segments breaks at the join.
-    pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) std.mem.Allocator.Error!Print {
+    pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
         var at: Print = .{ .col = opts.col, .row = opts.row };
         if (w.rect.isEmpty()) {
             at.overflow = segments.len != 0;
@@ -384,7 +387,7 @@ pub const Window = struct {
     }
 
     /// One run.
-    pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) std.mem.Allocator.Error!Print {
+    pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
         return w.print(&.{segment}, opts);
     }
 
@@ -442,7 +445,7 @@ pub const Window = struct {
                 if (col != from) continue;
                 const head = w.screen.headOf(at_col, at_row) orelse continue;
                 text = w.screen.textAt(head.col, head.row);
-            } else text = w.screen.textOf(&c);
+            } else text = w.screen.textOf(&c) catch @panic("invalid cell in screen");
             if (std.mem.eql(u8, text, " ")) {
                 spaces += 1;
                 continue;
@@ -482,7 +485,7 @@ pub const Window = struct {
         segment: Segment,
         opts: PrintOptions,
         from: Print,
-    ) std.mem.Allocator.Error!Print {
+    ) (std.mem.Allocator.Error || error{InvalidHandle})!Print {
         var at = from;
         if (at.row >= w.rect.rows) {
             at.overflow = at.overflow or segment.text.len != 0;
@@ -594,7 +597,7 @@ pub const Window = struct {
                 .kind = if (cluster == 2) .wide else .narrow,
                 .drift = textmod.disagrees(glyph),
             },
-        });
+        }) catch unreachable;
     }
 };
 
@@ -632,7 +635,7 @@ test "the whole grid is a window and a child is inside it" {
 
     const c = root.child(.{ .col = 2, .row = 1, .cols = 4, .rows = 2 });
     try testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, c.rect);
-    c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
+    try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expectEqualStrings("x", s.textAt(2, 1));
 }
 
@@ -641,7 +644,7 @@ test "a child asked for outside its parent comes back empty" {
     defer s.deinit();
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
     try testing.expect(c.rect.isEmpty());
-    c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
+    try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expect(!s.damage.any());
 }
 
@@ -657,8 +660,8 @@ test "a write past the window's edge writes nothing at all" {
     var s = try made(6, 2);
     defer s.deinit();
     const c = s.window().child(.{ .col = 1, .row = 0, .cols = 2, .rows = 1 });
-    c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
-    c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
+    try c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
+    try c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
     try testing.expect(!s.damage.any());
     try testing.expectEqual(@as(?Cell, null), c.readCell(2, 0));
 }
@@ -815,7 +818,7 @@ test "fill and clear stay inside the window" {
     var s = try made(6, 3);
     defer s.deinit();
     const c = s.window().child(.{ .col = 1, .row = 1, .cols = 3, .rows = 1 });
-    c.fill(.fromSize(c.size()), .blank(.{ .bg = .ansi(.blue) }));
+    try c.fill(.fromSize(c.size()), .blank(.{ .bg = .ansi(.blue) }));
     try testing.expect(s.readCell(0, 1).?.eql(.blank(.{})));
     try testing.expect(s.readCell(1, 1).?.eql(.blank(.{ .bg = .ansi(.blue) })));
     try testing.expect(s.readCell(4, 1).?.eql(.blank(.{})));
@@ -917,7 +920,7 @@ test "an ink draws every cell a window writes, where it lands on the screen, and
     // A fill is cell by cell: a style that depends on the row lands row by
     // row, and each blank is a stroke with no glyph.
     const strokes = d.strokes;
-    root.fill(.{ .col = 0, .row = 0, .cols = 3, .rows = 2 }, .blank(.{ .italic = true }));
+    try root.fill(.{ .col = 0, .row = 0, .cols = 3, .rows = 2 }, .blank(.{ .italic = true }));
     try testing.expectEqual(strokes + 6, d.strokes);
     try testing.expect(!s.readCell(0, 0).?.style.dim);
     try testing.expect(s.readCell(0, 1).?.style.dim and s.readCell(0, 1).?.style.italic);

@@ -168,7 +168,7 @@ pub const List = struct {
 
     /// Draws as many items as the window has rows for, moving the offset
     /// when the selection would otherwise be off screen.
-    pub fn draw(l: List, win: Window, state: *State) std.mem.Allocator.Error!void {
+    pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         const shown = l.visible(win.rows(), state);
         const marker_width = win.width(l.marker);
@@ -185,7 +185,7 @@ pub const List = struct {
                 line += 1;
                 row += 1;
             }) {
-                if (fill) |ground| win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(ground));
+                if (fill) |ground| win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(ground)) catch unreachable;
                 const content = win.child(.{ .col = indent, .row = row, .rows = 1 });
                 if (line > 0) {
                     try l.drawRuns(content, item.below[line - 1], over, content.cols());
@@ -194,7 +194,7 @@ pub const List = struct {
                 if (marker_width != 0) {
                     const mark_style = l.marker_style orelse over orelse l.style orelse Style{};
                     const mark = if (chosen) l.marker else l.blank_marker orelse blank: {
-                        win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(mark_style));
+                        win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(mark_style)) catch unreachable;
                         break :blank "";
                     };
                     _ = try win.printSegment(
@@ -210,7 +210,7 @@ pub const List = struct {
     }
 
     /// An item's first row: its runs, and its aside against the right edge.
-    fn drawFirst(l: List, win: Window, runs: []const Segment, aside: []const Segment, over: ?Style) std.mem.Allocator.Error!void {
+    fn drawFirst(l: List, win: Window, runs: []const Segment, aside: []const Segment, over: ?Style) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         const room = win.cols();
         if (aside.len == 0) return l.drawRuns(win, runs, over, room);
 
@@ -249,7 +249,7 @@ pub const List = struct {
     /// Runs laid along one row from its first column and cut at `limit`: a
     /// run is cut where the next one's column begins, and the one that
     /// crosses `limit` is cut there with the ellipsis.
-    fn drawRuns(l: List, win: Window, runs: []const Segment, over: ?Style, limit: u16) std.mem.Allocator.Error!void {
+    fn drawRuns(l: List, win: Window, runs: []const Segment, over: ?Style, limit: u16) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         const end = @min(limit, win.cols());
         var at: u16 = 0;
         for (runs, 0..) |r, i| {
@@ -697,7 +697,7 @@ test "a picker drawn by hand at worked-out columns and the same picker drawn by 
     for (names, costs, 0..) |name, cost, i| {
         const row: u16 = @intCast(i);
         const on = i == sel;
-        w.fill(.{ .row = row, .cols = cols, .rows = 1 }, .blank(.{}));
+        try w.fill(.{ .row = row, .cols = cols, .rows = 1 }, .blank(.{}));
         _ = try w.printSegment(.{ .text = if (on) "\u{25b8}" else " ", .style = hot }, .{ .row = row, .wrap = .none });
         const fits = visor.width(name, .unicode) <= name_room;
         const kept = if (fits) name else visor.fit(name, name_room, "\u{2026}", .unicode);

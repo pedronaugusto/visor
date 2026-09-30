@@ -118,7 +118,7 @@ pub const Calendar = struct {
     }
 
     /// Draws the month.
-    pub fn draw(c: Calendar, win: Window) std.mem.Allocator.Error!void {
+    pub fn draw(c: Calendar, win: Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty() or c.month < 1 or c.month > 12) return;
         var row: u16 = 0;
 

@@ -22,8 +22,33 @@ const Allocator = std.mem.Allocator;
 const Text = cellmod.Cell.Text;
 const Link = cellmod.Link;
 
+// Identities never wrap: exhaustion refuses creation instead of reusing a
+// handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
+var generations: std.atomic.Value(u64) = .init(1);
+
+pub fn nextGeneration() u64 {
+    var next = generations.load(.monotonic);
+    while (true) {
+        if (next > std.math.maxInt(u48)) @panic("pool identities exhausted");
+        next = generations.cmpxchgWeak(next, next + 1, .monotonic, .monotonic) orelse return next;
+    }
+}
+
+fn pooledText(generation: u64, offset: u32, len: u16) Text {
+    var t: Text = .{ .buf = @splat(0), .len = Text.pooled };
+    std.mem.writeInt(u32, t.buf[0..4], offset, .little);
+    std.mem.writeInt(u16, t.buf[4..6], len, .little);
+    std.mem.writeInt(u48, &t.pool_generation, @intCast(generation), .little);
+    return t;
+}
+
+fn pooledLink(generation: u64, index: u16) Link {
+    return @enumFromInt((generation << 16) | (@as(u64, index) + 1));
+}
+
 /// The pool of graphemes longer than a cell holds inline.
 pub const Graphemes = struct {
+    generation: u64 = 0,
     /// Every long grapheme, back to back, in the order they were first seen.
     bytes: std.ArrayList(u8) = .empty,
     /// Where each one is, keyed by what it says.
@@ -75,10 +100,11 @@ pub const Graphemes = struct {
     /// else.
     pub fn intern(p: *Graphemes, gpa: Allocator, grapheme: []const u8) Allocator.Error!Text {
         if (grapheme.len <= Text.max_inline) return .inlined(grapheme);
+        if (p.generation == 0) p.generation = nextGeneration();
         const byte_len = std.math.cast(u16, grapheme.len) orelse return error.OutOfMemory;
 
         const found = p.index.getEntryAdapted(grapheme, Adapted{ .bytes = p.bytes.items });
-        if (found) |e| return .atOffset(e.key_ptr.offset, e.key_ptr.len);
+        if (found) |e| return pooledText(p.generation, e.key_ptr.offset, e.key_ptr.len);
 
         const offset = std.math.cast(u32, p.bytes.items.len) orelse return error.OutOfMemory;
         const borrowed = aliasOffset(p.bytes.items, grapheme);
@@ -88,10 +114,11 @@ pub const Graphemes = struct {
         p.bytes.appendSliceAssumeCapacity(source);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
-        return .atOffset(offset, byte_len);
+        return pooledText(p.generation, offset, byte_len);
     }
 
     /// The bytes of a grapheme, whichever tier it is in.
+    /// Stale or foreign pooled handles return `InvalidHandle`.
     ///
     /// The `Text` is taken by pointer because a short grapheme lives in it:
     /// the bytes come back borrowed from whatever holds the cell, and a
@@ -99,14 +126,20 @@ pub const Graphemes = struct {
     /// borrow from the growable pool: interning unrelated graphemes can
     /// invalidate them. Reset, compaction, resize and deinitialization also
     /// invalidate pooled slices.
-    pub fn slice(p: *const Graphemes, t: *const Text) []const u8 {
-        return t.slice(p.bytes.items);
+    pub fn slice(p: *const Graphemes, t: *const Text) error{InvalidHandle}![]const u8 {
+        if (!t.isPooled()) return t.inlineSlice() orelse error.InvalidHandle;
+        if (t.generation() == 0 or t.generation() != p.generation) return error.InvalidHandle;
+        const off: usize = t.offset().?;
+        const n = t.length();
+        if (off > p.bytes.items.len or n > p.bytes.items.len - off) return error.InvalidHandle;
+        return p.bytes.items[off..][0..n];
     }
 
     /// Empties the pool, keeping the memory. Every `Cell.Text` handed out
     /// before this points at nothing: the caller clears the grid and
     /// repaints.
     pub fn reset(p: *Graphemes) void {
+        p.generation = 0;
         p.bytes.clearRetainingCapacity();
         p.index.clearRetainingCapacity();
     }
@@ -146,6 +179,7 @@ pub const OwnedTarget = struct {
 
 /// Every link a screen's cells point at.
 pub const Links = struct {
+    generation: u64 = 0,
     /// The URIs and parameter lists, back to back.
     bytes: std.ArrayList(u8) = .empty,
     /// One entry a link, in the order they were first seen.
@@ -162,10 +196,10 @@ pub const Links = struct {
         links: *const Links,
 
         pub fn hash(ctx: Context, i: u16) u64 {
-            return hashTarget(ctx.links.get(.at(i)).?);
+            return hashTarget(ctx.links.get(pooledLink(ctx.links.generation, i)).?);
         }
         pub fn eql(ctx: Context, a: u16, b: u16) bool {
-            return eqlTarget(ctx.links.get(.at(a)).?, ctx.links.get(.at(b)).?);
+            return eqlTarget(ctx.links.get(pooledLink(ctx.links.generation, a)).?, ctx.links.get(pooledLink(ctx.links.generation, b)).?);
         }
     };
 
@@ -176,7 +210,7 @@ pub const Links = struct {
             return hashTarget(key);
         }
         pub fn eql(ctx: Adapted, key: Target, i: u16) bool {
-            return eqlTarget(key, ctx.links.get(.at(i)).?);
+            return eqlTarget(key, ctx.links.get(pooledLink(ctx.links.generation, i)).?);
         }
     };
 
@@ -204,8 +238,9 @@ pub const Links = struct {
     /// give the same `Link`.
     pub fn intern(l: *Links, gpa: Allocator, uri: []const u8, params: []const u8) Allocator.Error!Link {
         if (uri.len == 0) return .none;
+        if (l.generation == 0) l.generation = nextGeneration();
         const target: Target = .{ .uri = uri, .params = params };
-        if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return .at(i);
+        if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return pooledLink(l.generation, i);
 
         const uri_len = std.math.cast(u16, uri.len) orelse return error.OutOfMemory;
         const params_len = std.math.cast(u16, params.len) orelse return error.OutOfMemory;
@@ -231,14 +266,15 @@ pub const Links = struct {
             .params_len = params_len,
         });
         l.index.putAssumeCapacityContext(i, {}, .{ .links = l });
-        return .at(i);
+        return pooledLink(l.generation, i);
     }
 
-    /// The target a link names, or null for `.none` and for an index that
-    /// is outside this table. The returned slices borrow from the growable
+    /// The target a link names, or null for `.none`, a stale or foreign
+    /// handle, or an index outside this table. The returned slices borrow from the growable
     /// link pool: further interning, compaction, resize or deinitialization
     /// can invalidate them even when the original cell is unchanged.
     pub fn get(l: *const Links, link: Link) ?Target {
+        if (link == .none or link.generation() == 0 or link.generation() != l.generation) return null;
         const i = link.index() orelse return null;
         if (i >= l.entries.items.len) return null;
         const e = l.entries.items[i];
@@ -275,7 +311,7 @@ test "a short grapheme never reaches the pool" {
     const a = try p.intern(testing.allocator, "a");
     try testing.expect(!a.isPooled());
     try testing.expectEqual(@as(usize, 0), p.len());
-    try testing.expectEqualStrings("a", p.slice(&a));
+    try testing.expectEqualStrings("a", try p.slice(&a));
 
     const six = try p.intern(testing.allocator, "123456");
     try testing.expect(!six.isPooled());
@@ -295,7 +331,7 @@ test "a long grapheme is pooled once however often it is written" {
     const family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
     const first = try p.intern(testing.allocator, family);
     try testing.expect(first.isPooled());
-    try testing.expectEqualStrings(family, p.slice(&first));
+    try testing.expectEqualStrings(family, try p.slice(&first));
     const after = p.len();
 
     for (0..64) |_| {
@@ -312,8 +348,8 @@ test "two different long graphemes get two places" {
     const a = try p.intern(testing.allocator, "\u{1f468}\u{200d}\u{1f469}");
     const b = try p.intern(testing.allocator, "\u{1f468}\u{200d}\u{1f467}");
     try testing.expect(!Text.eql(a, b));
-    try testing.expectEqualStrings("\u{1f468}\u{200d}\u{1f469}", p.slice(&a));
-    try testing.expectEqualStrings("\u{1f468}\u{200d}\u{1f467}", p.slice(&b));
+    try testing.expectEqualStrings("\u{1f468}\u{200d}\u{1f469}", try p.slice(&a));
+    try testing.expectEqualStrings("\u{1f468}\u{200d}\u{1f467}", try p.slice(&b));
 }
 
 test "interning survives the pool being grown under it" {
@@ -328,7 +364,7 @@ test "interning survives the pool being grown under it" {
     }
     for (0..64) |i| {
         const g = try std.fmt.bufPrint(&buf, "long-{d:0>8}", .{i});
-        try testing.expectEqualStrings(g, p.slice(&kept[i]));
+        try testing.expectEqualStrings(g, try p.slice(&kept[i]));
         try testing.expect(Text.eql(kept[i], try p.intern(testing.allocator, g)));
     }
 }
@@ -339,9 +375,9 @@ test "interning a borrowed substring survives pool growth" {
 
     const whole = try p.intern(testing.allocator, "x-borrowed-long");
     p.bytes.shrinkAndFree(testing.allocator, p.bytes.items.len);
-    const borrowed = p.slice(&whole)[2..];
+    const borrowed = (try p.slice(&whole))[2..];
     const part = try p.intern(testing.allocator, borrowed);
-    try testing.expectEqualStrings("borrowed-long", p.slice(&part));
+    try testing.expectEqualStrings("borrowed-long", try p.slice(&part));
 }
 
 test "a link is interned and its parameters are part of it" {
@@ -386,7 +422,7 @@ test "a link index from another screen reads as nothing" {
     var l: Links = .{};
     defer l.deinit(testing.allocator);
     _ = try l.intern(testing.allocator, "a://b", "");
-    try testing.expectEqual(@as(?Target, null), l.get(.at(9)));
+    try testing.expectEqual(@as(?Target, null), l.get(pooledLink(l.generation, 9)));
 }
 
 test "the pool gives its memory back under a failing allocator" {

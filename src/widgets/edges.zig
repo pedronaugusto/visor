@@ -23,7 +23,7 @@ pub const Edges = struct {
 
     /// Draw the row on the window's first line. Cells the items do not
     /// cover are left as they were.
-    pub fn draw(r: Edges, win: visor.Window) std.mem.Allocator.Error!void {
+    pub fn draw(r: Edges, win: visor.Window) (std.mem.Allocator.Error || error{InvalidHandle})!void {
         if (win.rect.isEmpty()) return;
         const right_w = @min(width(r.right, win.screen.method), win.cols());
         const right_col = win.cols() - right_w;
