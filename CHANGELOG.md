@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Date uses checked init(year, month, day) construction and component accessors instead of mutable calendar literals.
+
 - Breaking: Style dumps use as many padded base-62 digits per cell as their legend needs, including more than two beyond 3,844 styles.
 
 - Breaking: Layers captures its allocator at init, allocating picture and Replacement operations take no allocator, and metadata is read through borrowed accessors.

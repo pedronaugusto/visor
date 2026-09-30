@@ -311,6 +311,10 @@ own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Design
 
+`Date.init(year, month, day)` checks Gregorian month and day invariants and
+returns `InvalidDate` for a date that does not exist. `year()`, `month()` and
+`day()` read its components; today and selected days use these checked values.
+
 `dumpScreenStyles` writes padded base-62 IDs, most significant digit first.
 Every ID in the legend and grid uses the fewest digits needed for the whole
 legend: one through 62 styles, two through 3,844, and more for larger legends.

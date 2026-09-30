@@ -234,10 +234,10 @@ fn drawCalendar(win: visor.Window) !void {
     try (widgets.Calendar{
         .year = 2026,
         .month = 9,
-        .today = .{ .year = 2026, .month = 9, .day = 19 },
+        .today = try widgets.Date.init(2026, 9, 19),
         .selected = &.{
-            .{ .year = 2026, .month = 9, .day = 5 },
-            .{ .year = 2026, .month = 9, .day = 26 },
+            try widgets.Date.init(2026, 9, 5),
+            try widgets.Date.init(2026, 9, 26),
         },
     }).draw(inside);
 }

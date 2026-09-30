@@ -14,16 +14,34 @@ const Window = visor.Window;
 
 /// A day, as a calendar counts them.
 pub const Date = struct {
-    /// The year, in the proleptic Gregorian calendar.
-    year: i32,
-    /// The month, one to twelve.
-    month: u8,
-    /// The day, one to however many the month has.
-    day: u8,
+    // Internal representation; dates are constructed through init.
+    _year: i32,
+    _month: u8,
+    _day: u8,
+
+    /// A Gregorian date, or InvalidDate when its month or day does not exist.
+    pub fn init(year_number: i32, month_number: u8, day_number: u8) error{InvalidDate}!Date {
+        const last = daysInMonth(year_number, month_number);
+        if (day_number == 0 or day_number > last) return error.InvalidDate;
+        return .{ ._year = year_number, ._month = month_number, ._day = day_number };
+    }
+
+    /// The proleptic Gregorian year, including year zero.
+    pub fn year(d: Date) i32 {
+        return d._year;
+    }
+    /// The month, one through twelve.
+    pub fn month(d: Date) u8 {
+        return d._month;
+    }
+    /// The day, one through the last day of the month.
+    pub fn day(d: Date) u8 {
+        return d._day;
+    }
 
     /// Whether two dates are the same day.
     pub fn eql(a: Date, b: Date) bool {
-        return a.year == b.year and a.month == b.month and a.day == b.day;
+        return a._year == b._year and a._month == b._month and a._day == b._day;
     }
 };
 
@@ -61,10 +79,10 @@ pub fn isLeapYear(year: i32) bool {
 /// every year the proleptic Gregorian calendar covers.
 pub fn weekdayOf(d: Date) Weekday {
     const shift = [12]i64{ 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
-    var y: i64 = d.year;
-    if (d.month < 3) y -= 1;
+    var y: i64 = d.year();
+    if (d.month() < 3) y -= 1;
     const era = @divFloor(y, 4) - @divFloor(y, 100) + @divFloor(y, 400);
-    const sunday_based = @mod(y + era + shift[d.month - 1] + @as(i64, d.day), 7);
+    const sunday_based = @mod(y + era + shift[d.month() - 1] + @as(i64, d.day()), 7);
     // Sakamoto counts from Sunday; this calendar counts from Monday.
     return @enumFromInt(@as(u3, @intCast(@mod(sunday_based + 6, 7))));
 }
@@ -157,7 +175,7 @@ pub const Calendar = struct {
         var column: u16 = first_column;
         while (day <= last) : (day += 1) {
             if (row >= win.rows()) return;
-            const date: Date = .{ .year = c.year, .month = c.month, .day = day };
+            const date = Date.init(c.year, c.month, day) catch unreachable;
             var buf: [2]u8 = undefined;
             const text = std.fmt.bufPrint(&buf, "{d:>2}", .{day}) catch unreachable;
             _ = try win.printSegment(
@@ -174,7 +192,7 @@ pub const Calendar = struct {
 
     /// Which column of the first week the first of the month falls in.
     fn firstColumn(c: Calendar) u16 {
-        const first: Date = .{ .year = c.year, .month = c.month, .day = 1 };
+        const first = Date.init(c.year, c.month, 1) catch unreachable;
         const weekday = @intFromEnum(weekdayOf(first));
         return (@as(u16, weekday) + 7 - @intFromEnum(c.starts_on)) % 7;
     }
@@ -203,12 +221,11 @@ const Harness = @import("harness.zig").Harness;
 
 test "weekday calculation covers the extreme i32 years" {
     const cases = [_]Date{
-        .{ .year = std.math.minInt(i32), .month = 1, .day = 1 },
-        .{ .year = std.math.maxInt(i32), .month = 12, .day = 31 },
+        (try Date.init(std.math.minInt(i32), 1, 1)),
+        (try Date.init(std.math.maxInt(i32), 12, 31)),
     };
     for (cases) |date| {
-        var equivalent = date;
-        equivalent.year = @intCast(2000 + @mod(@as(i64, date.year), 400));
+        const equivalent = try Date.init(@intCast(2000 + @mod(@as(i64, date.year()), 400)), date.month(), date.day());
         try testing.expectEqual(weekdayOf(equivalent), weekdayOf(date));
     }
 }
@@ -255,8 +272,8 @@ test "today and the chosen days are drawn in their own styles" {
         .month = 9,
         .show_header = false,
         .show_weekdays = false,
-        .today = .{ .year = 2026, .month = 9, .day = 3 },
-        .selected = &.{.{ .year = 2026, .month = 9, .day = 5 }},
+        .today = (try Date.init(2026, 9, 3)),
+        .selected = &.{(try Date.init(2026, 9, 5))},
     }).draw(h.window());
     // The first falls on a Tuesday, so the third is the fourth column and
     // the fifth is the sixth.
@@ -267,10 +284,10 @@ test "today and the chosen days are drawn in their own styles" {
 }
 
 test "the days of the week are the ones the calendar really has" {
-    try testing.expectEqual(Weekday.thursday, weekdayOf(.{ .year = 1970, .month = 1, .day = 1 }));
-    try testing.expectEqual(Weekday.saturday, weekdayOf(.{ .year = 2000, .month = 1, .day = 1 }));
-    try testing.expectEqual(Weekday.tuesday, weekdayOf(.{ .year = 2026, .month = 9, .day = 1 }));
-    try testing.expectEqual(Weekday.monday, weekdayOf(.{ .year = 1900, .month = 1, .day = 1 }));
+    try testing.expectEqual(Weekday.thursday, weekdayOf((try Date.init(1970, 1, 1))));
+    try testing.expectEqual(Weekday.saturday, weekdayOf((try Date.init(2000, 1, 1))));
+    try testing.expectEqual(Weekday.tuesday, weekdayOf((try Date.init(2026, 9, 1))));
+    try testing.expectEqual(Weekday.monday, weekdayOf((try Date.init(1900, 1, 1))));
 }
 
 test "February knows about leap years" {
@@ -318,6 +335,26 @@ test "every day of every month is drawn once and only once" {
             while (beyond < seen.len) : (beyond += 1) {
                 try testing.expectEqual(@as(u8, 0), seen[beyond]);
             }
+        }
+    }
+}
+
+test "dates check the month and the day before calendar arithmetic" {
+    for ([_]u8{ 0, 13, 255 }) |month| try testing.expectError(error.InvalidDate, Date.init(2026, month, 1));
+    for ([_]u8{ 0, 29, 255 }) |day| try testing.expectError(error.InvalidDate, Date.init(2026, 2, day));
+    try testing.expectError(error.InvalidDate, Date.init(1900, 2, 29));
+    const leap = try Date.init(2000, 2, 29);
+    try testing.expectEqual(@as(i32, 2000), leap.year());
+    try testing.expectEqual(@as(u8, 2), leap.month());
+    try testing.expectEqual(@as(u8, 29), leap.day());
+    try testing.expectEqual(Weekday.tuesday, weekdayOf(leap));
+    for ([_]i32{ std.math.minInt(i32), -400, 0, std.math.maxInt(i32) }) |year| {
+        for (1..13) |month| {
+            const last = daysInMonth(year, @intCast(month));
+            const date = try Date.init(year, @intCast(month), last);
+            try testing.expect(date.eql(try Date.init(year, @intCast(month), last)));
+            try testing.expectError(error.InvalidDate, Date.init(year, @intCast(month), last + 1));
+            _ = weekdayOf(date);
         }
     }
 }
