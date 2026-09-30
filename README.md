@@ -239,7 +239,8 @@ The caller owns the surface, image ids and retirement. For repeated frames,
 `pixels`, `width` and `height` through `Replacement.send` and declare the
 replacement as usual. This keeps picture acknowledgements and swaps with
 the same owner as every other picture. Surface pixels stay borrowed until
-`deinit`; no painter reallocates them. `examples/gallery.zig` draws cells
+`deinit`; no painter reallocates them. `Sextants` weights picture brightness
+and foreground RGB by alpha when showing an RGBA picture in cells. `examples/gallery.zig` draws cells
 and rasterizes pixels with these primitives.
 
 ### Markdown

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Sextants weights RGBA brightness and cell colour by alpha so transparent pixels leave cells alone.
+
 - Markdown reads a documented subset into an owned document and renders themed prose, quotes, lists, verbatim code and screen links to width.
 
 - Canvas draws shared plotting shapes into antialiased RGBA pictures with normal or additive blending, or into terminal cells.

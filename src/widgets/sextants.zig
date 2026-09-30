@@ -63,7 +63,7 @@ pub const Sextants = struct {
     /// How many down.
     height: usize,
     /// How bright a pixel must be to count as lit, as the sum of its red,
-    /// green and blue.
+    /// green and blue weighted by alpha coverage.
     threshold: u16 = 60,
     /// What every drawn cell starts from. Its foreground becomes the
     /// brightest lit pixel in the cell.
@@ -88,12 +88,18 @@ pub const Sextants = struct {
                     const py = @as(usize, row) * 3 + sy;
                     if (px >= s.width or py >= s.height) continue;
                     const i = (py * s.width + px) * 4;
-                    const light: u32 = @as(u32, s.pixels[i]) + s.pixels[i + 1] + s.pixels[i + 2];
+                    const alpha: u32 = s.pixels[i + 3];
+                    const rgb: [3]u8 = .{
+                        @intCast(@as(u32, s.pixels[i]) * alpha / 255),
+                        @intCast(@as(u32, s.pixels[i + 1]) * alpha / 255),
+                        @intCast(@as(u32, s.pixels[i + 2]) * alpha / 255),
+                    };
+                    const light: u32 = @as(u32, rgb[0]) + rgb[1] + rgb[2];
                     if (light <= s.threshold) continue;
                     mask |= @as(u6, 1) << @intCast(sy * 2 + sx);
                     if (light > best_light) {
                         best_light = light;
-                        best = .{ s.pixels[i], s.pixels[i + 1], s.pixels[i + 2] };
+                        best = rgb;
                     }
                 };
                 if (mask == 0) continue;
@@ -156,4 +162,17 @@ test "unavailable pixels do not overflow the declared picture dimensions" {
         try (Sextants{ .pixels = &.{}, .width = size[0], .height = size[1] }).draw(h.window());
     }
     try testing.expect(!h.screen.damage.any());
+}
+
+test "sextant brightness and foreground include pixel coverage" {
+    var h = try Harness.init(testing.allocator, 1, 1);
+    defer h.deinit();
+    const pixels = [_]u8{
+        255, 255, 255, 0,   100, 0, 0, 128,
+        0,   0,   0,   255, 0,   0, 0, 255,
+        0,   0,   0,   255, 0,   0, 0, 255,
+    };
+    try (Sextants{ .pixels = &pixels, .width = 2, .height = 3, .threshold = 40 }).draw(h.window());
+    try h.expectFrame("🬁\n");
+    try testing.expectEqual(visor.Color.rgb(50, 0, 0), h.styleAt(0, 0).fg);
 }
