@@ -46,7 +46,7 @@ pub const Rule = struct {
                 const glyph = r.glyph orelse solid;
                 const step = @max(visor.graphemeWidth(glyph, win.screen.method), 1);
                 var col: u16 = 0;
-                while (col + step <= win.cols()) : (col +|= step +| r.gap) try win.write(col, 0, glyph, r.style, .none);
+                while (@as(u32, col) + step <= win.cols()) : (col +|= step +| r.gap) try win.write(col, 0, glyph, r.style, .none);
             },
             .vertical => {
                 const glyph = r.glyph orelse vertical;
@@ -98,4 +98,12 @@ test "a spaced rule leaves the cells between its glyphs as they were" {
         \\
         \\
     );
+}
+
+test "a wide rule stops before crossing the u16 column edge" {
+    var screen = try visor.Screen.init(testing.allocator, .{ .cols = std.math.maxInt(u16), .rows = 1 });
+    defer screen.deinit();
+    try (Rule{ .glyph = "一" }).draw(screen.window());
+    try testing.expectEqualStrings("一", screen.textAt(std.math.maxInt(u16) - 3, 0));
+    try testing.expectEqualStrings(" ", screen.textAt(std.math.maxInt(u16) - 1, 0));
 }
