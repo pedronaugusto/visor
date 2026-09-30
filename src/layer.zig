@@ -54,8 +54,8 @@ pub const Image = struct {
     state: State = .ready,
     /// When it was sent, on the caller's clock, in milliseconds.
     sent_ms: i64 = 0,
-    /// The shared memory object it was sent through, until the terminal
-    /// answers: then it is unlinked, read or not.
+    /// The name it was sent through, until the terminal answers. This is
+    /// diagnostic metadata; Layers keeps the cleanup owner privately.
     shm: ?shm.Name = null,
 
     /// Whether the terminal has an image.
@@ -139,12 +139,30 @@ pub const Layer = struct {
 /// them is found by trying: the first picture asks for an answer, and an
 /// error or a grace period with no answer turns the medium off for good,
 /// that picture refused so the caller sends it again, in the escape code.
-pub const SharedMemory = struct {
+const SharedMemory = struct {
     /// What `/dev/shm` is written through where there is no libc.
     io: std.Io,
     state: enum { trying, yes, no } = .trying,
-    /// The next object's number.
-    seq: u32 = 0,
+    generation: u64,
+};
+
+// This is the owner, not the image snapshot or the current policy. Once
+// created it carries everything cleanup needs, even after reconfiguration.
+const SharedObject = struct {
+    id: u32,
+    name: shm.Name,
+    io: std.Io,
+    generation: u64,
+
+    fn init(policy: SharedMemory, id: u32, pixels: []const u8) shm.PutError!SharedObject {
+        const name = shm.nextName();
+        try shm.put(policy.io, name, pixels);
+        return .{ .id = id, .name = name, .io = policy.io, .generation = policy.generation };
+    }
+
+    fn deinit(object: SharedObject) void {
+        shm.unlink(object.io, object.name);
+    }
 };
 
 /// How an image is sent.
@@ -334,12 +352,28 @@ pub const Layers = struct {
     /// Pictures through shared memory, where the program allows it (the
     /// terminal is on this machine, or may be): null sends every picture
     /// in the escape code.
-    shared_memory: ?SharedMemory = null,
+    _shared_memory: ?SharedMemory = null,
+    _shared_objects: std.ArrayList(SharedObject) = .empty,
+
+    /// Allows shared memory through `io`, or disables it with null. This
+    /// changes future transmissions; live objects keep their own cleanup Io.
+    /// Repeating the same configuration keeps the terminal's learned answer.
+    /// Disable and enable again to retry a refused medium. The supplied Io
+    /// must outlive every outstanding object, including after configuration changes.
+    pub fn configureSharedMemory(l: *Layers, io: ?std.Io) void {
+        if (io) |next| {
+            if (l._shared_memory) |current| {
+                if (current.io.userdata == next.userdata and current.io.vtable == next.vtable) return;
+            }
+            l._shared_memory = .{ .io = next, .generation = shm.nextNamespace() };
+        } else l._shared_memory = null;
+    }
 
     /// Gives the lists and the window back, and unlinks any picture still
     /// in shared memory.
     pub fn deinit(l: *Layers, gpa: Allocator) void {
-        for (l.images.items) |*held| l.release(held);
+        for (l._shared_objects.items) |object| object.deinit();
+        l._shared_objects.deinit(gpa);
         l.images.deinit(gpa);
         l.declared.deinit(gpa);
         l.shown.deinit(gpa);
@@ -362,7 +396,7 @@ pub const Layers = struct {
     }
 
     /// Sends an image under `id`: through shared memory where that is
-    /// allowed and the terminal takes it (`shared_memory`), else chunked
+    /// allowed and the terminal takes it (`configureSharedMemory`), else chunked
     /// in the escape code, deflated when that helps; quiet unless an
     /// answer was asked for. Returns how many bytes went through the
     /// terminal's input: the name, or the pixels after compression and
@@ -387,7 +421,7 @@ pub const Layers = struct {
         pixels: []const u8,
         how: Transmit,
     ) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!usize {
-        if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
+        if (l._shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(gpa, w, sm, id, pixels, how)) |n| return n;
         };
         var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l.deflated);
@@ -436,10 +470,15 @@ pub const Layers = struct {
     /// The record of an image sent, replacing the one under its id; the
     /// terminal takes that image's placements down while it lands.
     fn record(l: *Layers, gpa: Allocator, rec: Image) Allocator.Error!void {
+        if (l.find(rec.id) == null) try l.images.ensureUnusedCapacity(gpa, 1);
+        l.recordReserved(rec);
+    }
+
+    fn recordReserved(l: *Layers, rec: Image) void {
         if (l.find(rec.id)) |held| {
             l.release(held);
             held.* = rec;
-        } else try l.images.append(gpa, rec);
+        } else l.images.appendAssumeCapacity(rec);
         l.forgetShown(rec.id);
     }
 
@@ -452,21 +491,21 @@ pub const Layers = struct {
         // Reserve before the OS object exists. Once it does, the image
         // record can take its name without any further allocation.
         if (l.find(id) == null) try l.images.ensureUnusedCapacity(gpa, 1);
-        const name = shm.nameOf(sm.seq);
-        sm.seq +%= 1;
-        shm.put(sm.io, name, pixels) catch {
+        if (l.sharedObject(id) == null) try l._shared_objects.ensureUnusedCapacity(gpa, 1);
+        const object = SharedObject.init(sm.*, id, pixels) catch {
             sm.state = .no;
             return null;
         };
         const trying = sm.state == .trying;
-        try l.record(gpa, .{
+        l.recordReserved(.{
             .id = id,
             .width = how.width,
             .height = how.height,
             .state = if (how.answer or trying) .loading else .ready,
             .sent_ms = how.now_ms,
-            .shm = name,
+            .shm = object.name,
         });
+        l._shared_objects.appendAssumeCapacity(object);
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
             .format = how.format,
@@ -475,17 +514,35 @@ pub const Layers = struct {
             .height = how.height,
             .size = size,
             .quiet = if (how.answer or trying) .answers else .silent,
-        }, name.slice());
-        return name.len;
+        }, object.name.slice());
+        return object.name.len;
     }
 
     /// An image's shared memory object, unlinked if it is still there:
     /// the terminal unlinks what it reads, and what it could not read is
     /// this program's to take away.
+    fn sharedObject(l: *const Layers, id: u32) ?SharedObject {
+        for (l._shared_objects.items) |object| {
+            if (object.id == id) return object;
+        }
+        return null;
+    }
+
     fn release(l: *Layers, held: *Image) void {
-        const name = held.shm orelse return;
         held.shm = null;
-        if (l.shared_memory) |sm| shm.unlink(sm.io, name);
+        for (l._shared_objects.items, 0..) |object, i| {
+            if (object.id != held.id) continue;
+            const owned = l._shared_objects.swapRemove(i);
+            owned.deinit();
+            return;
+        }
+    }
+
+    // A reply to an object from an earlier configuration cannot settle the
+    // current medium's trial or turn that medium off.
+    fn policyFor(l: *Layers, object: SharedObject) ?*SharedMemory {
+        const policy = if (l._shared_memory) |*sm| sm else return null;
+        return if (policy.generation == object.generation) policy else null;
     }
 
     /// Whether the terminal has the image, so a layer can show it.
@@ -510,9 +567,9 @@ pub const Layers = struct {
                 // A picture in shared memory is not taken on trust: a
                 // terminal that never said it read one is one that is
                 // not given another, and this one is sent again.
-                if (held.shm != null) {
+                if (l.sharedObject(id)) |object| {
                     l.release(held);
-                    if (l.shared_memory) |*sm| sm.state = .no;
+                    if (l.policyFor(object)) |sm| sm.state = .no;
                     held.state = .failed;
                     return false;
                 }
@@ -532,9 +589,9 @@ pub const Layers = struct {
         const held = l.find(id) orelse return;
         l.answers = true;
         held.state = if (response.ok()) .ready else .failed;
-        if (held.shm != null) {
+        if (l.sharedObject(id)) |object| {
             l.release(held);
-            if (l.shared_memory) |*sm| {
+            if (l.policyFor(object)) |sm| {
                 if (sm.state == .trying) sm.state = if (response.ok()) .yes else .no;
                 // a medium that worked and now fails (a terminal reached
                 // through ssh by a later attach, say) is off from here
@@ -1295,7 +1352,8 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     defer out.deinit();
 
     // tried, and read: the medium is on for good, the object gone
-    var l: Layers = .{ .shared_memory = .{ .io = io } };
+    var l: Layers = .{};
+    l.configureSharedMemory(io);
     defer l.deinit(gpa);
     const n = try l.transmit(gpa, &out.writer, 5, &pixels, .{ .width = 1, .height = 1 });
     try testing.expect(std.mem.indexOf(u8, out.written(), "t=s") != null);
@@ -1306,7 +1364,7 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     try testing.expect(!l.ready(5, 0, 1000));
     l.ack(.{ .id = 5, .message = "OK" });
     try testing.expect(l.ready(5, 0, 1000));
-    try testing.expect(l.shared_memory.?.state == .yes);
+    try testing.expect(l._shared_memory.?.state == .yes);
     try testing.expect(l.image(5).?.shm == null);
     // the object was unlinked: its name can be put again
     try shm.put(io, name, &pixels);
@@ -1322,11 +1380,12 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     defer out.deinit();
 
     // refused: the medium is off, the picture failed and is sent again
-    var l: Layers = .{ .shared_memory = .{ .io = io } };
+    var l: Layers = .{};
+    l.configureSharedMemory(io);
     defer l.deinit(gpa);
     _ = try l.transmit(gpa, &out.writer, 7, &pixels, .{ .width = 1, .height = 1 });
     l.ack(.{ .id = 7, .message = "EBADF:no such object" });
-    try testing.expect(l.shared_memory.?.state == .no);
+    try testing.expect(l._shared_memory.?.state == .no);
     try testing.expect(!l.ready(7, 0, 1000));
     out.clearRetainingCapacity();
     _ = try l.transmit(gpa, &out.writer, 7, &pixels, .{ .width = 1, .height = 1, .compress = false });
@@ -1334,12 +1393,13 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     try testing.expect(l.ready(7, 0, 1000));
 
     // silence: a terminal that never answers is not trusted with another
-    var q: Layers = .{ .shared_memory = .{ .io = io } };
+    var q: Layers = .{};
+    q.configureSharedMemory(io);
     defer q.deinit(gpa);
     _ = try q.transmit(gpa, &out.writer, 8, &pixels, .{ .width = 1, .height = 1, .now_ms = 0 });
     try testing.expect(!q.ready(8, 10, 1000));
     try testing.expect(!q.ready(8, 2000, 1000));
-    try testing.expect(q.shared_memory.?.state == .no);
+    try testing.expect(q._shared_memory.?.state == .no);
     try testing.expect(q.image(8).?.shm == null);
 }
 
@@ -1456,14 +1516,14 @@ test "a retired first picture is freed even when the frame has no text or placem
 
 test "shared memory reserves ownership before creating a name" {
     var fail = std.testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
-    var l: Layers = .{ .shared_memory = .{ .io = testing.io, .seq = 0xffffffe0 } };
+    var l: Layers = .{};
+    l.configureSharedMemory(testing.io);
     defer l.deinit(testing.allocator);
-    const name = shm.nameOf(l.shared_memory.?.seq);
-    defer shm.unlink(testing.io, name);
+    const before = shm.nextSequence();
     var buf: [256]u8 = undefined;
     var out: Writer = .fixed(&buf);
     try testing.expectError(error.OutOfMemory, l.transmit(fail.allocator(), &out, 1, &.{ 1, 2, 3, 4 }, .{ .compress = false }));
-    try testing.expectEqual(@as(u32, 0xffffffe0), l.shared_memory.?.seq);
+    try testing.expectEqual(before, shm.nextSequence());
     try testing.expectEqual(@as(usize, 0), l.images.items.len);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
@@ -1473,19 +1533,101 @@ test "shared memory validates the protocol size before any ownership or output" 
     if (@bitSizeOf(usize) <= 32) return error.SkipZigTest;
     const oversized: usize = @as(usize, std.math.maxInt(u32)) + 1;
     try testing.expectError(error.PayloadTooLarge, sharedSize(oversized));
-    var l: Layers = .{ .shared_memory = .{ .io = testing.io, .seq = 0xffffffd0 } };
+    var l: Layers = .{};
+    l.configureSharedMemory(testing.io);
     defer l.deinit(testing.allocator);
-    const name = shm.nameOf(l.shared_memory.?.seq);
-    // A collision refuses creation without reading the synthetic pixels
-    // even on the unfixed path. Its fallback cannot allocate a record.
-    if (shm.supported) try shm.put(testing.io, name, &.{ 1, 2, 3, 4 });
-    defer shm.unlink(testing.io, name);
+    const before = shm.nextSequence();
     var fail = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     var out: Writer = .fixed(&.{});
     // Only the length may be inspected: there are no pixels behind this
     // pointer, and validation must precede any attempt to read or copy it.
     const pixels = @as([*]const u8, @ptrFromInt(1))[0..oversized];
     try testing.expectError(error.PayloadTooLarge, l.transmit(fail.allocator(), &out, 1, pixels, .{ .compress = false }));
-    try testing.expectEqual(@as(u32, 0xffffffd0), l.shared_memory.?.seq);
+    try testing.expectEqual(before, shm.nextSequence());
     try testing.expectEqual(@as(usize, 0), l.images.capacity);
+}
+
+test "shared memory keeps its cleanup owner when configuration is cleared" {
+    if (!shm.supported) return error.SkipZigTest;
+    var l: Layers = .{};
+    l.configureSharedMemory(testing.io);
+    var sink: Writer.Discarding = .init(&.{});
+    _ = try l.transmit(testing.allocator, &sink.writer, 19, "data", .{ .width = 1, .height = 1 });
+    const name = l.image(19).?.shm.?;
+    defer shm.unlink(testing.io, name);
+    l.configureSharedMemory(null);
+    l.deinit(testing.allocator);
+    // Cleanup must have removed the object, regardless of current policy.
+    try shm.put(testing.io, name, "data");
+}
+
+test "shared memory names belong to the process rather than each Layers" {
+    if (!shm.supported) return error.SkipZigTest;
+    var a: Layers = .{};
+    a.configureSharedMemory(testing.io);
+    defer a.deinit(testing.allocator);
+    var b: Layers = .{};
+    b.configureSharedMemory(testing.io);
+    defer b.deinit(testing.allocator);
+    var sink: Writer.Discarding = .init(&.{});
+    _ = try a.transmit(testing.allocator, &sink.writer, 1, "data", .{ .width = 1, .height = 1 });
+    _ = try b.transmit(testing.allocator, &sink.writer, 1, "data", .{ .width = 1, .height = 1 });
+    const first = a.image(1).?.shm.?;
+    try testing.expect(b.image(1).?.shm != null);
+    const second = b.image(1).?.shm.?;
+    try testing.expect(!std.mem.eql(u8, first.slice(), second.slice()));
+    try testing.expectEqual(Image.State.loading, b.image(1).?.state);
+}
+
+test "shared memory reconfiguration cannot lose owners or accept an old policy reply" {
+    if (!shm.supported) return error.SkipZigTest;
+    var l: Layers = .{};
+    defer l.deinit(testing.allocator);
+    l.configureSharedMemory(testing.io);
+    var sink: Writer.Discarding = .init(&.{});
+    _ = try l.transmit(testing.allocator, &sink.writer, 1, "old!", .{ .width = 1, .height = 1 });
+    const first = l.image(1).?.shm.?;
+    defer shm.unlink(testing.io, first);
+    l.configureSharedMemory(null);
+    l.configureSharedMemory(testing.io);
+    const generation = l._shared_memory.?.generation;
+    _ = try l.transmit(testing.allocator, &sink.writer, 2, "new!", .{ .width = 1, .height = 1 });
+    const second = l.image(2).?.shm.?;
+    defer shm.unlink(testing.io, second);
+    l.ack(.{ .id = 1, .message = "EBADF:old configuration" });
+    try testing.expect(l._shared_memory.?.state == .trying);
+    try shm.put(testing.io, first, "gone");
+    shm.unlink(testing.io, first);
+    l.ack(.{ .id = 2, .message = "OK" });
+    try testing.expect(l._shared_memory.?.state == .yes);
+    l.configureSharedMemory(testing.io);
+    try testing.expectEqual(generation, l._shared_memory.?.generation);
+    try testing.expect(l._shared_memory.?.state == .yes);
+    try shm.put(testing.io, second, "gone");
+    shm.unlink(testing.io, second);
+}
+
+test "shared memory keeps ownership through every allocation and partial output failure" {
+    if (!shm.supported) return error.SkipZigTest;
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(gpa: Allocator) !void {
+            var l: Layers = .{};
+            l.configureSharedMemory(testing.io);
+            var owned = true;
+            defer if (owned) l.deinit(gpa);
+            var out: Writer = .fixed(&.{});
+            if (l.transmit(gpa, &out, 7, "data", .{ .width = 1, .height = 1 })) |_| return error.TestUnexpectedResult else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.WriteFailed => {},
+                else => return err,
+            }
+            const name = l.image(7).?.shm.?;
+            defer shm.unlink(testing.io, name);
+            try testing.expectEqual(@as(usize, 1), l._shared_objects.items.len);
+            l.configureSharedMemory(null);
+            l.deinit(gpa);
+            owned = false;
+            try shm.put(testing.io, name, "gone");
+        }
+    }.run, .{});
 }

@@ -181,7 +181,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `SharedMemory`, `Replacement`, `ImageIds`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement`, `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -216,6 +216,13 @@ constructors and raw text resolution are no longer public APIs.
 
 `Screen.link` refuses C0 controls and DEL in a URI or params with
 `error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
+
+`Layers.configureSharedMemory(io)` allows pictures through shared memory;
+pass null to disable it. The same Io preserves the terminal's learned answer.
+Each outstanding object owns its cleanup Io, so changing configuration cannot
+lose cleanup, and an older object's reply cannot settle a new configuration.
+The Io must outlive those objects. Names come from one atomic process-wide
+namespace and are never reused.
 
 **Damage is conservative.** A write marks a cell only when it changes it. If
 another write restores the displayed value before drawing, the mark remains:
@@ -352,11 +359,11 @@ The renderer calls that itself; callers of `emit` call it after their frame
 reaches the writer. Failed writes retain retirement for the next attempt.
 
 **A picture on the same machine goes through shared memory.** With
-`Layers.shared_memory` set, the pixels are put in a shared memory object and
+`Layers.configureSharedMemory(io)` called, the pixels are put in a shared memory object and
 only its name goes through the terminal's input: no deflate, no base64, and a
 picture that cost a frame costs a copy (a full-screen picture on a 4K display,
 from about 15 ms to under 3). The first one asks for an answer; an error, or no
-answer within the grace period, turns the medium off for good, and that picture
+answer within the grace period, turns the medium off for this configuration, and that picture
 is refused so the program sends it again in the escape code, which is what a
 terminal on another machine, over ssh, gets from then on. An object the
 terminal did not read is unlinked, never left behind.

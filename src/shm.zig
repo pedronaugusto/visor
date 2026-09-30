@@ -34,12 +34,33 @@ pub const supported = switch (builtin.os.tag) {
 
 pub const PutError = error{ Unsupported, SharedMemory };
 
-/// The `seq`th picture of this process's: `/visor-<pid>-<seq>`, unique
-/// while the process lives, and short enough everywhere.
-pub fn nameOf(seq: u32) Name {
+// The process owns this namespace; neither configuration nor a Layers
+// lifetime can reset it. Refuse exhaustion rather than ever reusing a name.
+var namespace: std.atomic.Value(u64) = .init(1);
+
+pub fn nextNamespace() u64 {
+    var next = namespace.load(.monotonic);
+    while (true) {
+        if (next == std.math.maxInt(u64)) @panic("shared memory names exhausted");
+        next = namespace.cmpxchgWeak(next, next + 1, .monotonic, .monotonic) orelse return next;
+    }
+}
+
+/// A process-wide name, reserved once and never reused.
+pub fn nextName() Name {
+    return nameOf(nextNamespace());
+}
+
+/// Read-only observation for the ownership reservation tests.
+pub fn nextSequence() u64 {
+    return namespace.load(.monotonic);
+}
+
+/// Hex keeps a full 32-bit pid and 64-bit sequence within macOS's limit.
+fn nameOf(seq: u64) Name {
     var n: Name = .{};
-    const pid: i64 = if (builtin.link_libc) std.c.getpid() else if (builtin.os.tag == .linux) std.os.linux.getpid() else 0;
-    const s = std.fmt.bufPrint(&n.buf, "/visor-{d}-{d}", .{ pid, seq }) catch unreachable;
+    const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+    const s = std.fmt.bufPrint(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;
     n.len = @intCast(s.len);
     return n;
 }
@@ -100,8 +121,7 @@ fn putDevShm(io: std.Io, name: Name, bytes: []const u8) PutError!void {
 test "a picture put in shared memory reads back whole, and is gone once unlinked" {
     if (!supported) return error.SkipZigTest;
     const io = std.testing.io;
-    const name = nameOf(0xfffffff0);
-    unlink(io, name);
+    const name = nextName();
     const pixels = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     try put(io, name, &pixels);
     defer unlink(io, name);
@@ -113,7 +133,7 @@ test "a picture put in shared memory reads back whole, and is gone once unlinked
 }
 
 test "a name is a slash and no other, and fits every system" {
-    const n = nameOf(std.math.maxInt(u32));
+    const n = nameOf(std.math.maxInt(u64));
     try std.testing.expect(n.len <= max_name);
     try std.testing.expectEqual(@as(u8, '/'), n.slice()[0]);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, n.slice(), "/"));
@@ -138,4 +158,28 @@ fn readBack(name: Name, len: usize) ![]const u8 {
     defer file.close(std.testing.io);
     const n = try file.readPositionalAll(std.testing.io, read_back[0..len], 0);
     return read_back[0..n];
+}
+
+test "the shared memory namespace is unique across threads" {
+    const Worker = struct {
+        fn run(values: *[128]u64) void {
+            for (values) |*value| value.* = nextNamespace();
+        }
+    };
+    var values: [4][128]u64 = undefined;
+    var threads: [4]std.Thread = undefined;
+    var started: usize = 0;
+    errdefer for (threads[0..started]) |thread| thread.join();
+    for (&threads, &values) |*thread, *batch| {
+        thread.* = try std.Thread.spawn(.{}, Worker.run, .{batch});
+        started += 1;
+    }
+    for (threads) |thread| thread.join();
+    started = 0;
+    var seen: std.AutoHashMap(u64, void) = .init(std.testing.allocator);
+    defer seen.deinit();
+    for (values) |batch| for (batch) |value| {
+        const entry = try seen.getOrPut(value);
+        try std.testing.expect(!entry.found_existing);
+    };
 }

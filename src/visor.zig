@@ -162,8 +162,6 @@ pub const Layers = layer_mod.Layers;
 pub const Replacement = layer_mod.Replacement;
 /// A rotating range of image ids that skips the graphics probe.
 pub const ImageIds = layer_mod.ImageIds;
-/// Pictures through shared memory, where the program allows it.
-pub const SharedMemory = layer_mod.SharedMemory;
 
 //=========================================================================
 // The terminal, and a terminal to test against.
