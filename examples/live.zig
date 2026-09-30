@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
     var session = try visor.Session.init(init.gpa, try tty.size(), .{ .graphics_id = 1 });
     defer session.deinit();
     // Register the way out before entry, including a partial entry.
-    defer tty.leave(&session.renderer) catch {};
+    defer tty.leave() catch {};
     try tty.enter(&session.renderer, session.caps, .alt, .{ .paste = true });
     try tty.watchResize();
     var output_buffer: [16 * 1024]u8 = undefined;

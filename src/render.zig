@@ -40,7 +40,6 @@ const Layers = @import("layer.zig").Layers;
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
 const Screen = @import("screen.zig").Screen;
-const tty = @import("tty.zig");
 
 const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
@@ -287,10 +286,9 @@ pub const Renderer = struct {
 
     /// Gives the previous frame back.
     ///
-    /// A renderer a `Tty` entered through is forgotten by the panic path
-    /// here, so the way out never reaches for a renderer that is gone.
+    /// A `Tty` borrowing it must release it through `leave`, `restore` or
+    /// `close` before this call.
     pub fn deinit(r: *Renderer, gpa: Allocator) void {
-        tty.forget(r);
         r.release(gpa);
         r.* = undefined;
     }

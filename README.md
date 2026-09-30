@@ -295,8 +295,11 @@ it: `enter` puts it in exactly the state asked for, whatever was on before,
 `setModes` changes only the setting that differs, the old mode off before the
 new one on, and `leave` turns off that motion and that encoding. Focus
 reports are a mode of their own. A screen entered through `Tty.enter` is
-undone the same way by `restoreGlobal` and the panic handler, from a buffer
-on the stack, so a program that dies leaves the shell with its keyboard, its
+undone by `Tty.leave()` or `restore`; `restoreGlobal` and the panic handler
+restore every registered terminal from a buffer on the stack. Keep each raw
+`Tty` at a stable address, and its entered renderer alive and at a stable
+address until restoration. Call terminal registration and restoration from
+one thread. A program that dies leaves the shell with its keyboard, its
 mouse and its cursor.
 
 **Synchronised output brackets a frame, not a session.** Mode 2026 left on for

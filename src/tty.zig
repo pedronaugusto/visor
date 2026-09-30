@@ -10,9 +10,9 @@
 //! signal handler is installed unless asked for, and no panic handler is
 //! installed behind anyone's back.
 //!
-//! The one piece of global state in this package lives here: the terminal
-//! that is currently in raw mode, so `restoreGlobal` can put it back from a
-//! panic handler, where there is nothing to pass and nothing that may fail.
+//! The registrations for raw terminals and resize watchers live here, so
+//! `restoreGlobal` can put every terminal back from a panic handler, where
+//! there is nothing to pass and nothing that may fail.
 //!
 //! The terminal's own calls -- raw mode and the way back, the size, the
 //! device's name and its foreground group -- are conduit's (`conduit.tty`),
@@ -39,25 +39,9 @@ const Writer = std.Io.Writer;
 const windows = std.os.windows;
 const is_windows = builtin.os.tag == .windows;
 
-/// The terminal that is in raw mode, so the way back can be taken without an
-/// argument, an allocator or a failure.
-///
-/// One program has one terminal, and a panic handler has nothing to be
-/// handed. It is written when `raw` succeeds and cleared when `restore`
-/// runs.
-var open_tty: ?Saved = null;
-
-/// The renderer a `Tty` entered a screen through, so the way back can undo
-/// the modes it switched as well as the terminal's mode.
-///
-/// Set by `Tty.enter` and cleared by `Tty.leave`, by the way back itself, and
-/// by `Renderer.deinit`, so it never names a renderer that is gone.
-var armed: ?*Renderer = null;
-
-/// Stops the way back reaching for `r`. `Renderer.deinit` calls this.
-pub fn forget(r: *const Renderer) void {
-    if (armed == r) armed = null;
-}
+/// Raw terminals registered for panic restoration. Each terminal owns its
+/// saved mode and renderer association; the list only makes them reachable.
+var open_ttys: ?*Tty = null;
 
 /// A pipe's descriptor, `-1` for none.
 const Fd = if (is_windows) i32 else std.posix.fd_t;
@@ -116,6 +100,9 @@ const Saved = if (is_windows) struct {
 };
 
 /// The descriptor, the saved mode, and the way back.
+/// Keep its address stable between `raw` and `restore`, and call these
+/// operations from one thread. An entered renderer must stay alive and at
+/// the same address until `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
     /// The terminal itself.
     file: Io.File,
@@ -126,6 +113,10 @@ pub const Tty = struct {
     /// What the terminal was before `raw`, or null when it has not been
     /// changed.
     saved: ?Saved = null,
+    /// The renderer exclusively borrowed by this terminal until restoration.
+    renderer: ?*Renderer = null,
+    /// The next raw terminal in the panic registrations.
+    next_raw: ?*Tty = null,
     /// This terminal's resize pipe, read end first, while it watches for a
     /// resize; `-1` otherwise.
     resize_pipe: [2]Fd = .{ -1, -1 },
@@ -208,9 +199,8 @@ pub const Tty = struct {
     /// Raw mode: no line editing, no echo, no signals from control keys, and
     /// a read that returns as soon as there is anything.
     ///
-    /// The mode the terminal was in is remembered, both here and in the one
-    /// global this package has, so `restoreGlobal` can put it back from a
-    /// panic.
+    /// The mode is remembered here, and this terminal is registered so
+    /// `restoreGlobal` can put it back from a panic.
     pub fn raw(t: *Tty) ModeError!void {
         if (t.saved != null) return;
         if (is_windows) {
@@ -226,13 +216,13 @@ pub const Tty = struct {
                 .output_mode = output_mode,
             };
             t.saved = saved;
-            open_tty = saved;
+            t.register();
             return;
         }
         const was = terminal.rawMode(t.file.handle) catch |err| return modeError(err);
         const saved: Saved = .{ .handle = t.file.handle, .mode = was };
         t.saved = saved;
-        open_tty = saved;
+        t.register();
     }
 
     /// The mode as it was found, and the screen and input modes a renderer
@@ -240,18 +230,38 @@ pub const Tty = struct {
     /// was changed.
     pub fn restore(t: *Tty) void {
         const was = t.saved orelse return;
-        restoreSaved(was);
+        const r = t.renderer;
+        t.renderer = null;
         t.saved = null;
-        open_tty = null;
+        t.unregister();
+        restoreSaved(was, r);
+    }
+
+    fn register(t: *Tty) void {
+        t.next_raw = open_ttys;
+        open_ttys = t;
+    }
+
+    fn unregister(t: *Tty) void {
+        var slot = &open_ttys;
+        while (slot.*) |held| {
+            if (held == t) {
+                slot.* = t.next_raw;
+                t.next_raw = null;
+                return;
+            }
+            slot = &held.next_raw;
+        }
     }
 
     /// Anything entering or leaving a screen can fail with.
-    pub const EnterError = ModeError || render.Error;
+    pub const EnterError = ModeError || render.Error || error{AlreadyEntered};
 
     /// Takes the screen: raw mode, then everything `Renderer.enter` writes,
     /// flushed. From here the way back — `leave`, `restore`, `close`,
     /// `restoreGlobal` and `Panic` — undoes the modes the renderer has on at
-    /// the time as well as the terminal's mode.
+    /// the time as well as the terminal's mode. An already-entered terminal
+    /// or renderer returns `AlreadyEntered` before raw mode changes.
     pub fn enter(
         t: *Tty,
         r: *Renderer,
@@ -259,8 +269,9 @@ pub const Tty = struct {
         mode: render.Mode,
         modes: render.Modes,
     ) EnterError!void {
+        if (t.renderer != null or r.entered != null) return error.AlreadyEntered;
         try t.raw();
-        armed = r;
+        t.renderer = r;
         var buffer: [256]u8 = undefined;
         var out = t.writer(&buffer);
         try r.enter(&out.interface, caps, mode, modes);
@@ -269,8 +280,12 @@ pub const Tty = struct {
 
     /// Gives the screen back: everything `Renderer.leave` writes, flushed,
     /// and then the terminal's mode as it was found.
-    pub fn leave(t: *Tty, r: *Renderer) render.Error!void {
-        forget(r);
+    pub fn leave(t: *Tty) render.Error!void {
+        const r = t.renderer orelse {
+            t.restore();
+            return;
+        };
+        t.renderer = null;
         defer t.restore();
         var buffer: [256]u8 = undefined;
         var out = t.writer(&buffer);
@@ -435,7 +450,7 @@ fn modeError(err: terminal.RawModeError) Tty.ModeError {
     };
 }
 
-/// Puts the one open terminal back: the modes a renderer entered through
+/// Puts every registered terminal back: the modes a renderer entered through
 /// `Tty.enter` undone — keyboard flags popped, mouse, paste, focus and
 /// colour-scheme reports off, the alternate screen left, the cursor shown —
 /// and then the terminal's own mode.
@@ -443,9 +458,7 @@ fn modeError(err: terminal.RawModeError) Tty.ModeError {
 /// Allocates nothing, fails at nothing, and is safe from a panic handler or
 /// an atexit hook. A terminal that was never put in raw mode is left alone.
 pub fn restoreGlobal() void {
-    const was = open_tty orelse return;
-    restoreSaved(was);
-    open_tty = null;
+    while (open_ttys) |t| t.restore();
 }
 
 /// A panic handler that puts the terminal back — screen, input modes and
@@ -470,9 +483,8 @@ pub const Panic = std.debug.FullPanic(struct {
 /// The way back, from whatever remembered it: the modes a renderer entered,
 /// undone through a buffer on the stack and one write that may fail, then the
 /// terminal's own mode.
-fn restoreSaved(was: Saved) void {
-    if (armed) |r| {
-        armed = null;
+fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
+    if (renderer) |r| {
         var buffer: [512]u8 = undefined;
         var out: Writer = .fixed(&buffer);
         r.leave(&out) catch {};
@@ -549,9 +561,9 @@ extern "kernel32" fn WriteFile(
 const testing = std.testing;
 
 test "the global restore does nothing when no terminal was taken" {
-    try testing.expectEqual(@as(?Saved, null), open_tty);
+    try testing.expect(open_ttys == null);
     restoreGlobal();
-    try testing.expectEqual(@as(?Saved, null), open_tty);
+    try testing.expect(open_ttys == null);
 }
 
 test "the panic handler is a type to install, not something installed" {
@@ -601,7 +613,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
         .paste = true,
     };
     try t.enter(&r, .{}, .alt, modes);
-    try testing.expect(armed == &r);
+    try testing.expect(t.renderer == &r);
     try testing.expect(t.saved != null);
 
     // What the renderer would write on the way out, worked out on a copy so
@@ -619,8 +631,8 @@ test "entering through the terminal arms the way back, and the panic path undoes
     // on a terminal that is not reading: nothing reads the master until
     // the mode is back.
     restoreGlobal();
-    try testing.expect(armed == null);
-    try testing.expectEqual(@as(?Saved, null), open_tty);
+    try testing.expect(t.renderer == null);
+    try testing.expect(open_ttys == null);
     // what is left of the way in, then the way out, whole
     var out: [1024]u8 = undefined;
     const undone = try readUntil(testing.io, pair.readFile(), &out, "\x1b[<u\x1b[?1049l");
@@ -633,12 +645,11 @@ test "entering through the terminal arms the way back, and the panic path undoes
     if (@hasField(@TypeOf(after.lflag), "PENDIN")) after.lflag.PENDIN = before.lflag.PENDIN;
     try testing.expectEqual(before.lflag, after.lflag);
     try testing.expectEqual(before.iflag, after.iflag);
-    // The tty still thinks it is raw; that is the caller's own record, and
-    // restoring it again is harmless.
-    t.saved = null;
+    try testing.expect(t.saved == null);
+    t.restore();
 }
 
-test "leaving through the terminal disarms, and a renderer that goes away is forgotten" {
+test "leaving through the terminal releases its renderer before destruction" {
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(.{});
     defer pair.close(testing.io);
@@ -651,18 +662,13 @@ test "leaving through the terminal disarms, and a renderer that goes away is for
     try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2004h") != null);
 
     // left with nothing reading the master: the way out must not wait on it
-    try t.leave(&r);
-    try testing.expect(armed == null);
+    try t.leave();
+    try testing.expect(t.renderer == null);
     try testing.expect(t.saved == null);
     const undone = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?1049l");
     try testing.expect(std.mem.indexOf(u8, undone, "\x1b[?2004l") != null);
 
-    // Entered again, and the renderer goes away without leaving: the way
-    // back forgets it rather than reaching for it.
-    try t.enter(&r, .{}, .alt, .{});
-    _ = try readAtLeast(testing.io, pair.readFile(), &seen, 1);
     r.deinit(testing.allocator);
-    try testing.expect(armed == null);
     t.restore();
 }
 
@@ -711,4 +717,86 @@ pub fn pipe() ![2]std.posix.fd_t {
     var fds: [2]std.posix.fd_t = undefined;
     if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
     return fds;
+}
+
+test "two terminals cannot borrow the same entered renderer" {
+    if (is_windows) return error.SkipZigTest;
+    var first = try conduit.Pty.open(.{});
+    defer first.close(testing.io);
+    var second = try conduit.Pty.open(.{});
+    defer second.close(testing.io);
+    var a: Tty = .adopt(testing.io, first.slaveFile());
+    var b: Tty = .adopt(testing.io, second.slaveFile());
+    var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer r.deinit(testing.allocator);
+    defer a.restore();
+    defer b.restore();
+    try a.enter(&r, .{}, .alt, .{ .paste = true });
+    try testing.expectError(error.AlreadyEntered, b.enter(&r, .{}, .alt, .{ .focus = true }));
+    try testing.expect(b.saved == null);
+    try testing.expect(r.entered.?.modes.paste);
+    try testing.expect(!r.entered.?.modes.focus);
+}
+
+test "restoring one entered terminal leaves the other renderer armed" {
+    if (is_windows) return error.SkipZigTest;
+    var first = try conduit.Pty.open(.{});
+    defer first.close(testing.io);
+    var second = try conduit.Pty.open(.{});
+    defer second.close(testing.io);
+    var a: Tty = .adopt(testing.io, first.slaveFile());
+    var b: Tty = .adopt(testing.io, second.slaveFile());
+    var ra = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer ra.deinit(testing.allocator);
+    var rb = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer rb.deinit(testing.allocator);
+    defer a.restore();
+    defer b.restore();
+    try a.enter(&ra, .{}, .alt, .{ .paste = true });
+    try b.enter(&rb, .{}, .alt, .{ .focus = true });
+    var seen: [1024]u8 = undefined;
+    _ = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?2004h");
+    _ = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1004h");
+    a.restore();
+    try testing.expect(ra.entered == null);
+    try testing.expect(rb.entered != null);
+    const left = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?1049l");
+    try testing.expect(std.mem.indexOf(u8, left, "\x1b[?2004l") != null);
+    try testing.expect(std.mem.indexOf(u8, left, "\x1b[?1004l") == null);
+    restoreGlobal();
+    try testing.expect(rb.entered == null);
+    try testing.expect(b.saved == null);
+    const restored = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1049l");
+    try testing.expect(std.mem.indexOf(u8, restored, "\x1b[?1004l") != null);
+}
+
+test "panic restoration restores every raw terminal and clears its registration" {
+    if (is_windows) return error.SkipZigTest;
+    var first = try conduit.Pty.open(.{});
+    defer first.close(testing.io);
+    var second = try conduit.Pty.open(.{});
+    defer second.close(testing.io);
+    var a: Tty = .adopt(testing.io, first.slaveFile());
+    var b: Tty = .adopt(testing.io, second.slaveFile());
+    defer a.restore();
+    defer b.restore();
+    try a.raw();
+    try b.raw();
+    restoreGlobal();
+    try testing.expect(a.saved == null);
+    try testing.expect(b.saved == null);
+}
+
+test "an entered terminal refuses to replace its renderer association" {
+    if (is_windows) return error.SkipZigTest;
+    var pair = try conduit.Pty.open(.{});
+    defer pair.close(testing.io);
+    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer r.deinit(testing.allocator);
+    defer t.restore();
+    try t.enter(&r, .{}, .alt, .{ .paste = true });
+    try testing.expectError(error.AlreadyEntered, t.enter(&r, .{}, .alt, .{ .focus = true }));
+    try testing.expect(r.entered.?.modes.paste);
+    try testing.expect(!r.entered.?.modes.focus);
 }
