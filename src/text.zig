@@ -260,7 +260,12 @@ fn codepointWidth(cp: u21) usize {
     return switch (cp) {
         // the five skin tones
         0x1f3fb...0x1f3ff => uucode.get(.wcwidth_standalone, cp),
-        else => if (uucode.get(.wcwidth_zero_in_grapheme, cp)) 0 else uucode.get(.wcwidth_standalone, cp),
+        // Prepends disappear only inside a cluster; codepoint measurement
+        // gives them their standalone column, just as it gives a modifier.
+        else => if (uucode.get(.wcwidth_zero_in_grapheme, cp) and uucode.get(.grapheme_break, cp) != .prepend)
+            0
+        else
+            uucode.get(.wcwidth_standalone, cp),
     };
 }
 
@@ -729,4 +734,16 @@ test "fitEnd counts beyond saturated width and keeps a very long path's suffix" 
     @memcpy(long[long.len - 4 ..], "name");
     try testing.expectEqualStrings("name", fitEnd(long, 5, "…", .unicode));
     try testing.expectEqual(@as(usize, 65534), fitEnd(long, std.math.maxInt(u16), "…", .unicode).len);
+}
+
+test "prepend characters keep their standalone column in codepoint measurement" {
+    const repha = "\u{d4e}";
+    try testing.expectEqual(@as(u16, 1), graphemeWidth(repha, .wcwidth));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth(repha, .unicode));
+    try testing.expectEqual(@as(u16, 2), graphemeWidth(repha ++ "a", .wcwidth));
+    try testing.expectEqual(@as(u16, 1), graphemeWidth(repha ++ "a", .unicode));
+    var parts = Parts.init(repha ++ "a");
+    try testing.expectEqual(@as(u2, 1), parts.next().?.cols);
+    try testing.expectEqual(@as(u2, 1), parts.next().?.cols);
+    try testing.expect(parts.next() == null);
 }

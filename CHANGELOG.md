@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Codepoint measurement gives Unicode prepend characters their standalone column rather than dropping them as combining marks.
+
 - Terminal scroll margins share zero-default parsing and check their order after clipping to the grid.
 
 - Calendar measurement and drawing both leave invalid months empty.
