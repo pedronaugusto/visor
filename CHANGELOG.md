@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Input deadline tests count reads, cancellation and the supplied budget on a synthetic clock instead of asserting wall-clock elapsed time.
+
 - Breaking: Screen and Renderer keep allocation, geometry, pool identity and damage storage internal; read geometry through dimensions() and change it through resize.
 
 - Replacement.settle advances acknowledgements and grace without creating a placement.

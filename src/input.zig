@@ -418,10 +418,7 @@ test "a read within a deadline hands over what came, and null once the deadline 
     var in = inputOver(&p.tty, &parser, &read, 5_000);
 
     // Nothing typed: the deadline ends the wait, and nothing is lost.
-    const before = std.Io.Timestamp.now(testing.io, .awake);
     try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }));
-    const waited = before.durationTo(std.Io.Timestamp.now(testing.io, .awake));
-    try testing.expect(waited.nanoseconds >= 25 * std.time.ns_per_ms);
 
     // What is typed is handed over, and what is buffered comes first even
     // with a deadline already gone by.
@@ -706,4 +703,58 @@ test "the pump is compiled for every target, the Windows wait included" {
     // so this is what makes the cross-compiled check analyse the wait there.
     _ = &Input.next;
     _ = &Input.nextWithin;
+}
+
+test "a silent deadline submits one read and cancels it with the remaining budget" {
+    // The Io observes the operations and advances a synthetic clock. It
+    // never reads a descriptor or waits on the machine running the test.
+    const Clocked = struct {
+        ticks: usize = 0,
+        waits: usize = 0,
+        cancels: usize = 0,
+        reads: usize = 0,
+        budget: Io.Timeout = .none,
+
+        fn now(ptr: ?*anyopaque, _: Io.Clock) Io.Timestamp {
+            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            defer self.ticks += 1;
+            return .fromNanoseconds(@as(i96, @intCast(self.ticks)) * 10 * std.time.ns_per_ms);
+        }
+        fn wait(ptr: ?*anyopaque, batch: *Io.Batch, timeout: Io.Timeout) Io.Batch.AwaitConcurrentError!void {
+            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            self.waits += 1;
+            self.budget = timeout;
+            var index = batch.submitted.head;
+            while (index != .none) {
+                const submission = batch.storage[index.toIndex()].submission;
+                if (submission.operation == .file_read_streaming) self.reads += 1;
+                index = submission.node.next;
+            }
+            return error.Timeout;
+        }
+        fn cancel(ptr: ?*anyopaque, _: *Io.Batch) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            self.cancels += 1;
+        }
+    };
+    var clocked: Clocked = .{};
+    var vtable = testing.io.vtable.*;
+    vtable.now = Clocked.now;
+    vtable.batchAwaitConcurrent = Clocked.wait;
+    vtable.batchCancel = Clocked.cancel;
+    const io: Io = .{ .userdata = &clocked, .vtable = &vtable };
+    var tty = Tty.adopt(io, .{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
+    var parser: [64]u8 = undefined;
+    var read: [16]u8 = undefined;
+    var in = inputOver(&tty, &parser, &read, 5_000);
+    // Exercise the Io wait on every host, including Windows where the
+    // real console wait has its own integration tests.
+    const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }).toDeadline(io);
+    try testing.expectEqual(Input.Woke.expired, try in.waitPosix(until));
+    try testing.expectEqual(@as(usize, 2), clocked.ticks);
+    try testing.expectEqual(@as(usize, 1), clocked.waits);
+    try testing.expectEqual(@as(usize, 1), clocked.reads);
+    try testing.expectEqual(@as(usize, 1), clocked.cancels);
+    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), clocked.budget.duration.raw.nanoseconds);
+    try testing.expectEqual(Io.Clock.awake, clocked.budget.duration.clock);
 }

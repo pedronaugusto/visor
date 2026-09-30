@@ -11,8 +11,6 @@
 //! microsecond is not. What the byte count stands in for is real: what a
 //! terminal takes to ingest a frame goes with the size of the frame.
 //!
-//! There is also a time here, printed and never asserted on, for a person
-//! running the suite to look at.
 
 const std = @import("std");
 
