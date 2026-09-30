@@ -72,7 +72,7 @@ test "canvas shapes use sextant and braille fallback or the picture owner" {
     var out: std.Io.Writer.Allocating = .init(t.allocator);
     defer out.deinit();
     h.screen.clear();
-    try (Canvas{}).draw(h.window(), shapes, .{ .caps = .{ .kitty_graphics = true }, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .allocator = t.allocator, .image = 10 } });
+    try (Canvas{}).draw(h.window(), shapes, .{ .caps = .{ .kitty_graphics = true }, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = 10 } });
     try t.expectEqual(@as(u32, 8), layers.image(10).?.width);
     _ = try layers.commitFrame(&out.writer, .{ .kitty_graphics = true });
     try t.expectEqual(@as(usize, 1), layers.count());
@@ -101,4 +101,8 @@ test "raster ellipses keep tiny finite radii through their arithmetic" {
     try t.expectEqual(@as(u8, 255), surface.pixels[3]);
     try t.expectEqual(@as(u8, 128), surface.pixels[7]);
     try t.expectEqual(@as(u8, 0), surface.pixels[11]);
+}
+
+test "canvas picture borrows owners rather than another allocator" {
+    try t.expect(!@hasField(Canvas.Picture, "allocator"));
 }

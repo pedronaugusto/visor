@@ -221,7 +221,7 @@ defer surface.deinit();
 try canvas.draw(window, shapes, .{
     .caps = caps,
     .picture = .{ .surface = &surface, .layers = &layers,
-                 .writer = writer, .allocator = gpa, .image = image_id },
+                 .writer = writer, .image = image_id },
 });
 ```
 

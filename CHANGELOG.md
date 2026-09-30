@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Canvas.Picture borrows Surface and Layers without a redundant allocator field.
+
 - visor.Transmit names the transmission options accepted by Layers and Replacement.
 
 - Markdown.Rows exposes the same borrowed visual ranges as drawing, with inline spans, block structure and opening fence metadata.

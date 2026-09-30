@@ -87,7 +87,6 @@ pub const Canvas = struct {
         surface: *Surface,
         layers: *visor.Layers,
         writer: *std.Io.Writer,
-        allocator: std.mem.Allocator,
         image: u32,
         placement: u32 = 1,
         order: visor.Layer.Order = .{},
