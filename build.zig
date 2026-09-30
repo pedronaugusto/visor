@@ -175,7 +175,13 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
-        examples_step.dependOn(&b.addRunArtifact(example).step);
+        const run_example = b.addRunArtifact(example);
+        if (std.mem.eql(u8, source, "examples/live.zig")) {
+            run_example.addArg("--check");
+            const live_step = b.step("live", "Run the session example in a terminal");
+            live_step.dependOn(&b.addRunArtifact(example).step);
+        }
+        examples_step.dependOn(&run_example.step);
         check_step.dependOn(&example.step);
     }
     test_step.dependOn(examples_step);
@@ -240,6 +246,7 @@ const example_sources = [_][]const u8{
     "examples/viewer.zig",
     "examples/gallery.zig",
     "examples/progress.zig",
+    "examples/live.zig",
 };
 
 /// The `uucode` fields this package builds into its tables.

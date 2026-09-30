@@ -558,3 +558,19 @@ caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
 drops the old placement, then frees its pixels inside `commitFrame(w, caps)`.
 The renderer calls that itself; callers of `emit` call it after their frame
 reaches the writer. Failed writes retain retirement for the next attempt.
+
+`Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
+`Caps.Probe` and `Layers` together. Its fields remain yours to use directly.
+Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
+keys and application policy are still yours. Drain the batch, call `resize(w)`
+once, paint `screen`, then `draw(w)` and flush your writer. Both grids follow
+the last resize; an unchanged in-band report repaints too, and each resize
+asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
+mouse parsing in step with the requested encoding. `setCaps` lets the caller
+apply its own overrides after a probe answer.
+
+`ProbeWait.init(now_ms, timeout_ms, quiet_ms).remaining(probe, now_ms)` gives
+the next read's budget, or null when done. It owns no clock or read: an early
+key can be handled by the application while forwarded probe replies arrive.
+`examples/live.zig` shows the loop; run it with `zig build live`. The examples
+step runs its `--check` path without a terminal.

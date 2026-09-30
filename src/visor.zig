@@ -33,6 +33,7 @@ const layer_mod = @import("layer.zig");
 const palette_mod = @import("palette.zig");
 const pool_mod = @import("pool.zig");
 const render_mod = @import("render.zig");
+const session_mod = @import("session.zig");
 const screen_mod = @import("screen.zig");
 const term_mod = @import("term.zig");
 const text_mod = @import("text.zig");
@@ -170,6 +171,10 @@ pub const Tty = tty_mod.Tty;
 /// with the lone escape settled on the caller's timeout and a resize woken
 /// out of the wait.
 pub const Input = input_mod.Input;
+/// The screen, renderer, size, probe and pictures held as a caller-owned value.
+pub const Session = session_mod.Session;
+/// A probe wait budget measured on caller-supplied time.
+pub const ProbeWait = session_mod.ProbeWait;
 /// How big the terminal is: the grid, and what it has said about pixels.
 pub const Winsize = winsize_mod.Winsize;
 /// A size in pixels, zero where unknown.
@@ -213,6 +218,7 @@ test {
     _ = @import("moved_rows.zig");
     _ = @import("shm.zig");
     _ = screen_mod;
+    _ = session_mod;
     _ = term_mod;
     _ = text_mod;
     _ = tty_mod;
