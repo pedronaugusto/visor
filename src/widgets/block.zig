@@ -103,9 +103,10 @@ pub const Block = struct {
         const room = win.cols() -| left -| right;
         if (room == 0 or row >= win.rows()) return;
         const taken = @min(win.width(t.text), room);
-        _ = try win.printSegment(
+        const title = win.child(.{ .col = left, .row = row, .cols = room, .rows = 1 });
+        _ = try title.printSegment(
             .{ .text = t.text, .style = t.style },
-            .{ .col = left + layout.offset(room, taken, t.where), .row = row, .wrap = .none },
+            .{ .col = layout.offset(room, taken, t.where), .wrap = .none },
         );
     }
 };
@@ -146,6 +147,24 @@ test "a title sits where it is told between the frame's sides" {
         \\╰───────two╯
         \\
     );
+}
+
+test "long block titles stay between the frame sides" {
+    for ([_]Align{ .left, .center, .right }) |where| {
+        var h: Harness = try .init(testing.allocator, 5, 3);
+        defer h.deinit();
+        _ = try (Block{
+            .borders = .all,
+            .title = .{ .text = "abcdef", .where = where },
+            .title_bottom = .{ .text = "界界", .where = where },
+        }).draw(h.window());
+        try h.expectFrame(
+            \\┌abc┐
+            \\│   │
+            \\└界─┘
+            \\
+        );
+    }
 }
 
 test "padding takes cells off the inside and nothing off the frame" {
