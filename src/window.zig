@@ -2,9 +2,10 @@
 //!
 //! A window is a rectangle and a pointer, copied by value and made fresh
 //! every frame. Everything written through one is clipped to it, so a widget
-//! that draws past its edge writes nothing rather than over its neighbour,
-//! and nothing here allocates: `print` walks the graphemes and puts them in
-//! cells, and the only memory it touches is the screen's.
+//! that draws past its edge writes nothing rather than over its neighbour.
+//! Measurement allocates nothing; committed printing can grow the screen's
+//! pool for an unseen grapheme longer than six bytes. The screen owns that
+//! storage.
 //!
 //! What this file will never hold: a retained tree, a parent pointer, an
 //! event, a focus model, or state that survives the frame. A window is a
