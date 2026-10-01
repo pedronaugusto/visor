@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: TextInput.Rows keeps borrowed text and iteration progress internal; construct through TextInput.rows and advance with next.
+
 - Breaking: Markdown.Rows keeps document, wrapping configuration and block progress internal; use init and next.
 
 - Breaking: Paragraph.Rows keeps borrowed text, wrapping configuration and refill state internal; use init and next.

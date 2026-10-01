@@ -64,48 +64,48 @@ pub const TextInput = struct {
     /// The rows of a text at a width, one at a time. Never empty: an empty
     /// text is one empty row.
     pub const Rows = struct {
-        text: []const u8,
-        cols: u16,
-        method: Method,
-        at: usize = 0,
-        done: bool = false,
+        _text: []const u8,
+        _cols: u16,
+        _method: Method,
+        _at: usize = 0,
+        _done: bool = false,
 
         /// The next row, or null after the last.
         pub fn next(r: *Rows) ?Row {
-            if (r.done) return null;
-            const start = r.at;
+            if (r._done) return null;
+            const start = r._at;
             var used: u32 = 0;
             var last_space: ?usize = null;
-            var it: visor.Graphemes = .init(r.text[start..]);
+            var it: visor.Graphemes = .init(r._text[start..]);
             while (it.nextAt()) |found| {
                 const i = start + found.start;
                 const g = found.bytes;
                 // A newline is one cluster, or two when a carriage return
                 // came before it; either ends the row and belongs to it.
                 if (g[g.len - 1] == '\n') {
-                    r.at = i + g.len;
+                    r._at = i + g.len;
                     return .{ .from = start, .to = i, .hard = true };
                 }
-                const w = visor.graphemeWidth(g, r.method);
+                const w = visor.graphemeWidth(g, r._method);
                 // A cluster wider than the whole row still takes a row: the
                 // alternative is a row that never ends.
-                if (used != 0 and used + w > r.cols) {
+                if (used != 0 and used + w > r._cols) {
                     const brk = if (last_space) |sp| sp + 1 else i;
-                    r.at = brk;
+                    r._at = brk;
                     return .{ .from = start, .to = brk };
                 }
                 if (g.len == 1 and g[0] == ' ') last_space = i;
                 used += w;
             }
-            r.done = true;
-            r.at = r.text.len;
-            return .{ .from = start, .to = r.text.len };
+            r._done = true;
+            r._at = r._text.len;
+            return .{ .from = start, .to = r._text.len };
         }
     };
 
     /// The rows of `text` at `cols` cells, measured by `method`.
     pub fn rows(text: []const u8, cols: u16, method: Method) Rows {
-        return .{ .text = text, .cols = @max(cols, 1), .method = method };
+        return .{ ._text = text, ._cols = @max(cols, 1), ._method = method };
     }
 
     /// How many rows `text` takes at `cols` cells.
@@ -450,10 +450,10 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally
             }
             try testing.expectEqual(@as(usize, 1), wide);
         }
-        owned = it.at;
-        if (!r.hard) try testing.expectEqual(r.to, it.at);
+        owned = it._at;
+        if (!r.hard) try testing.expectEqual(r.to, it._at);
     }
-    try testing.expect(it.done);
+    try testing.expect(it._done);
     try testing.expectEqual(t.len, owned);
     try testing.expectEqual(count, TextInput.rowCount(t, cols, method));
 
@@ -506,4 +506,10 @@ test "the layout's corpus draws every piece, every width, both methods and long 
     try testing.expect(t.cols.covers(1, 12));
     try testing.expect(t.method.covers(0, 1));
     try testing.expect(t.parts.least == 0 and t.parts.most >= 40);
+}
+
+test "input row iterator source and progress stay behind next" {
+    inline for (.{ "text", "cols", "method", "at", "done" }) |field| {
+        try testing.expect(!@hasField(TextInput.Rows, field));
+    }
 }
