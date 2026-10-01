@@ -663,10 +663,7 @@ pub const Screen = struct {
     /// owner keeps the copy's allocator `gpa`; call its `deinit` to free it.
     pub fn dupeTarget(s: *const Screen, gpa: Allocator, l: Link) Allocator.Error!?pool.OwnedTarget {
         const t = s.target(l) orelse return null;
-        const uri = try gpa.dupe(u8, t.uri);
-        errdefer gpa.free(uri);
-        const params = try gpa.dupe(u8, t.params);
-        return .{ .gpa = gpa, .uri = uri, .params = params };
+        return try pool.OwnedTarget.init(gpa, t);
     }
 
     /// The head whose grapheme covers a tail: the wide grapheme to its left,
@@ -1514,8 +1511,8 @@ test "owned text and targets survive drawing, compaction, resize and destruction
     live = false;
     try testing.expectEqualStrings(long, text);
     try testing.expectEqualStrings("x", inline_text);
-    try testing.expectEqualStrings("https://kept.invalid", target_copy.uri);
-    try testing.expectEqualStrings("id=kept", target_copy.params);
+    try testing.expectEqualStrings("https://kept.invalid", target_copy.target().uri);
+    try testing.expectEqualStrings("id=kept", target_copy.target().params);
 }
 
 test "an owned target releases its first copy when the second allocation fails" {
@@ -1526,7 +1523,7 @@ test "an owned target releases its first copy when the second allocation fails" 
         fn run(gpa: Allocator, screen: *const Screen, link_id: Link) !void {
             var copy = (try screen.dupeTarget(gpa, link_id)).?;
             defer copy.deinit();
-            try testing.expectEqualStrings("id=kept", copy.params);
+            try testing.expectEqualStrings("id=kept", copy.target().params);
         }
     }.run, .{ &s, id });
 }

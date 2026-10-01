@@ -161,13 +161,26 @@ pub const Target = struct {
 /// An independent copy of a link target. `deinit` releases both slices
 /// through the allocator the copy was made with.
 pub const OwnedTarget = struct {
-    gpa: Allocator,
-    uri: []const u8,
-    params: []const u8,
+    _gpa: Allocator,
+    _uri: []const u8,
+    _params: []const u8,
+
+    /// Copies both target slices, retaining the allocator that releases them.
+    pub fn init(gpa: Allocator, source: Target) Allocator.Error!OwnedTarget {
+        const uri = try gpa.dupe(u8, source.uri);
+        errdefer gpa.free(uri);
+        const params = try gpa.dupe(u8, source.params);
+        return .{ ._gpa = gpa, ._uri = uri, ._params = params };
+    }
+
+    /// The target borrowed read-only until deinit. The slice descriptors are copies.
+    pub fn target(t: *const OwnedTarget) Target {
+        return .{ .uri = t._uri, .params = t._params };
+    }
 
     pub fn deinit(t: *OwnedTarget) void {
-        t.gpa.free(t.uri);
-        t.gpa.free(t.params);
+        t._gpa.free(t._uri);
+        t._gpa.free(t._params);
         t.* = undefined;
     }
 };
@@ -432,4 +445,10 @@ test "the pool gives its memory back under a failing allocator" {
             }
         }
     }.run, .{});
+}
+
+test "owned link copies keep allocation and slices behind their owner" {
+    inline for (.{ "gpa", "uri", "params" }) |field| {
+        try testing.expect(!@hasField(OwnedTarget, field));
+    }
 }

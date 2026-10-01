@@ -168,7 +168,7 @@ interning unrelated text or links can invalidate their slices even when the
 cell is unchanged. Compaction, resize and deinitialization can invalidate
 pool slices too. `dupeTextAt` and `dupeTextOf` make copies the caller frees
 with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
-`deinit` frees its URI and params. These copies survive later drawing.
+`target()` lends const URI and params and `deinit` frees them. These copies survive later drawing.
 
 ## The API
 

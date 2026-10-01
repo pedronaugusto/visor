@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: OwnedTarget keeps its allocator and retained slices internal; init owns copying and target() lends the target read-only.
+
 - Breaking: ImageIds keeps its validated range, excluded probe id and allocation cursor internal; use init and acquire.
 
 - Breaking: Replacement picture ownership and refusal state are internal; current() and pending() return copied ids.
