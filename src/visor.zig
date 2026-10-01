@@ -189,8 +189,8 @@ pub const Pixels = winsize_mod.Pixels;
 pub const CellSize = winsize_mod.CellSize;
 /// A mouse cell and its fraction, counted from zero.
 pub const MouseLocation = winsize_mod.MouseLocation;
-/// Puts the one open terminal back, the modes a renderer entered through it
-/// included. Allocates nothing, fails at nothing.
+/// Puts every registered terminal back, including its renderer's modes.
+/// Allocates nothing, fails at nothing.
 pub const restoreGlobal = tty_mod.restoreGlobal;
 /// A panic handler that calls `restoreGlobal` and then Zig's. Yours to
 /// install; never installed behind your back.
