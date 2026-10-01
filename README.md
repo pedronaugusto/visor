@@ -182,7 +182,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `takeDirty`, `retire` — `ImageIds`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
@@ -608,14 +608,18 @@ in-band resize reports on when the probe asks, so a terminal that has them
 answers reset.
 
 `Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
-`Caps.Probe` and `Layers` together. Its fields remain yours to use directly.
+`Caps.Probe` and `Layers` together. Its component methods lend the owners; size, capabilities and probe progress
+are read through const queries.
 Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
 keys and application policy are still yours. Drain the batch, call `resize(w)`
-once, paint `screen`, then `draw(w)` and flush your writer. Both grids follow
+once, paint `screen()`, then `draw(w)` and flush your writer. Both grids follow
 the last resize; an unchanged in-band report repaints too, and each resize
 asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
 mouse parsing in step with the requested encoding. `setCaps` lets the caller
-apply its own overrides after a probe answer.
+apply its own overrides after a probe answer. With `Input`, use
+`renderer().setModes` and `Input.setMousePixels` together; `Session.setModes`
+is the convenience for a caller-owned morse parser. Input keeps its parser,
+buffers and unread bytes internal.
 
 `ProbeWait.init(now_ms, timeout_ms, quiet_ms).remaining(probe, now_ms)` gives
 the next read's budget, or null when done. It owns no clock or read: an early

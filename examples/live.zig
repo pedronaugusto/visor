@@ -43,7 +43,8 @@ pub fn main(init: std.process.Init) !void {
         _ = try session.handle(w, event, nowMs(io));
         try w.flush();
     }
-    try session.setModes(w, &input.parser, .{
+    input.setMousePixels(false);
+    try session.renderer().setModes(w, .{
         .paste = true,
         .keyboard = if (session.capabilities().kitty_keyboard) .{ .disambiguate_escape_codes = true } else null,
     });
