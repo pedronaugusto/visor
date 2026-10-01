@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     const w = &output.interface;
     var parser_buffer: [4096]u8 = undefined;
     var read_buffer: [4096]u8 = undefined;
-    var input = visor.Input.init(&tty, .{
+    var input = try visor.Input.init(&tty, .{
         .parser_buffer = &parser_buffer,
         .read_buffer = &read_buffer,
         .escape = .fromMilliseconds(20),

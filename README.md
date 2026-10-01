@@ -614,6 +614,11 @@ same read with the caller's deadline beside it, null when the deadline passes
 in silence, which is how a probe's quiet period is waited out without a
 second task or a cancelled read.
 
+`Input.init` borrows both buffers and refuses an empty read buffer with
+`error.EmptyReadBuffer`; use `try` when constructing it. The parser buffer
+must hold at least `morse.KeyParser.min_buffer` bytes, and the read buffer
+at least one. Both buffers and the `Tty` must outlive the reader.
+
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
 `Caps.Probe` writes morse's probe and folds the answers in, and is settled
