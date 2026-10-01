@@ -106,7 +106,7 @@ pub const Canvas = struct {
                 pic.surface.clear();
                 const p = c.raster(pic.surface);
                 for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
-                _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels, .{ .width = pic.surface.width, .height = pic.surface.height });
+                _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height });
                 try pic.layers.declare(.{ .image = pic.image, .placement = pic.placement, .rect = win.rect, .order = pic.order });
                 return;
             }
@@ -325,15 +325,15 @@ pub const Raster = struct {
 
     pub fn point(p: Raster, x: f64, y: f64, paint: Canvas.Paint) void {
         if (!boundsValid(p.canvas) or !std.math.isFinite(x) or !std.math.isFinite(y)) return;
-        const at = project(p.canvas, x, y, p.surface.width, p.surface.height);
+        const at = project(p.canvas, x, y, p.surface.dimensions().width, p.surface.dimensions().height);
         p.surface.line(at, at, paint);
     }
     pub fn line(p: Raster, x1: f64, y1: f64, x2: f64, y2: f64, paint: Canvas.Paint) void {
         if (!boundsValid(p.canvas) or !std.math.isFinite(x1) or !std.math.isFinite(y1) or !std.math.isFinite(x2) or !std.math.isFinite(y2) or !std.math.isFinite(paint.width) or paint.width <= 0) return;
-        const a = project(p.canvas, x1, y1, p.surface.width, p.surface.height);
-        const b = project(p.canvas, x2, y2, p.surface.width, p.surface.height);
+        const a = project(p.canvas, x1, y1, p.surface.dimensions().width, p.surface.dimensions().height);
+        const b = project(p.canvas, x2, y2, p.surface.dimensions().width, p.surface.dimensions().height);
         const margin = paint.width / 2 + 0.5;
-        const seg = clipSegment(a[0], a[1], b[0], b[1], .{ -margin, @as(f64, @floatFromInt(p.surface.width - 1)) + margin }, .{ -margin, @as(f64, @floatFromInt(p.surface.height - 1)) + margin }) orelse return;
+        const seg = clipSegment(a[0], a[1], b[0], b[1], .{ -margin, @as(f64, @floatFromInt(p.surface.dimensions().width - 1)) + margin }, .{ -margin, @as(f64, @floatFromInt(p.surface.dimensions().height - 1)) + margin }) orelse return;
         p.surface.line(.{ seg[0], seg[1] }, .{ seg[2], seg[3] }, paint);
     }
     pub fn rect(p: Raster, x: f64, y: f64, width: f64, height: f64, paint: Canvas.Paint) void {
@@ -351,7 +351,7 @@ pub const Raster = struct {
     fn round(p: Raster, x: f64, y: f64, radius: f64, filled: bool, paint: Canvas.Paint) void {
         if (!boundsValid(p.canvas) or !std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(radius) or radius < 0) return;
         if (radius == 0) return p.point(x, y, paint);
-        p.surface.ellipse(project(p.canvas, x, y, p.surface.width, p.surface.height), projectRadius(p.canvas, radius, p.surface.width, p.surface.height), filled, paint);
+        p.surface.ellipse(project(p.canvas, x, y, p.surface.dimensions().width, p.surface.dimensions().height), projectRadius(p.canvas, radius, p.surface.dimensions().width, p.surface.dimensions().height), filled, paint);
     }
     pub fn points(p: Raster, coords: []const [2]f64, paint: Canvas.Paint) void {
         for (coords) |at| p.point(at[0], at[1], paint);

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Canvas.Surface owns allocation and geometry internally; dimensions(), pixels() and pixelsMut() borrow its data, and resize commits cleared storage atomically.
+
 - Breaking: Term allocation, grid and stream state are internal; screen(), position(), savedCursor() and graphics() provide const views or values.
 
 - Breaking: Session allocation and coordinated state are internal; use component borrows and const size, capability and probe queries.

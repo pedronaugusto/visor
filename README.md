@@ -236,10 +236,13 @@ before pixel iteration, including coverage just outside the plot.
 
 The caller owns the surface, image ids and retirement. For repeated frames,
 `canvas.raster(&surface)` paints without clearing or sending: pass its RGBA
-`pixels`, `width` and `height` through `Replacement.send` and declare the
-replacement as usual. This keeps picture acknowledgements and swaps with
-the same owner as every other picture. Surface pixels stay borrowed until
-`deinit`; no painter reallocates them. `Sextants` weights picture brightness
+`pixels()` and `dimensions().width` / `dimensions().height` through
+`Replacement.send` and declare the replacement as usual. This keeps picture acknowledgements and swaps with
+the same owner as every other picture. Surface owns its allocator, dimensions
+and storage; `pixels()` lends const bytes
+and `pixelsMut()` lends bytes for editing. `resize(width, height)` prepares a
+cleared allocation before changing dimensions. Surface pixels stay borrowed
+until `resize` or `deinit`; no painter reallocates them. `Sextants` weights picture brightness
 and foreground RGB by alpha when showing an RGBA picture in cells. `examples/gallery.zig` draws cells
 and rasterizes pixels with these primitives.
 
