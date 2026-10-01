@@ -635,8 +635,10 @@ answers reset.
 `Caps.Probe` and `Layers` together. Its component methods lend the owners; size, capabilities and probe progress
 are read through const queries.
 Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
-keys and application policy are still yours. Drain the batch, call `resize(w)`
-once, paint `screen()`, then `draw(w)` and flush your writer. Both grids follow
+keys and application policy are still yours. Housekeeping is retained if
+capability output fails; a later event retries that output without replaying
+the input. Drain the batch, call `resize(w)` once, paint `screen()`, then
+`draw(w)` and flush your writer. Both grids follow
 the last resize; an unchanged in-band report repaints too, and each resize
 asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
 mouse parsing in step with the requested encoding. `setCaps` lets the caller

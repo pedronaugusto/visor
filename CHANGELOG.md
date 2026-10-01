@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Session retains size reports and graphics acknowledgements before retrying capability output that can fail.
 - Morse is pinned at 904d3a5, with timing tests on bench and astral AltGr text decoded by the same modifier rule.
 - Breaking: Input.init returns error.EmptyReadBuffer for empty read storage; callers must handle its error union.
 - Terminal documentation distinguishes Tty ownership from the descriptor use of shared-memory pictures.

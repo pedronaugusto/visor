@@ -156,18 +156,22 @@ pub const Session = struct {
     /// due. Size reports are coalesced until `resize`; caps and graphics
     /// replies are applied now. Keys, text and application policy stay with
     /// the caller. `now_ms` comes from the caller's clock for the probe.
+    /// Housekeeping is retained even when capability output fails; the next
+    /// event retries that output without replaying the consumed input.
     pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
         const was = s._probe.capabilities();
         s._probe.feed(event, now_ms);
         if (!std.meta.eql(was, s._probe.capabilities())) s._pending_caps = s._probe.capabilities();
-        var redraw = if (s._pending_caps) |caps| try s.setCaps(w, caps) else false;
+        // Consume the input before writing: the terminal cannot replay a
+        // resize or acknowledgement when capability output needs a retry.
+        var redraw = false;
         switch (event) {
             .resize => {
                 var next = s._pending orelse s._ws;
                 _ = next.update(event);
                 s._pending = next;
                 s._resize_report = true;
-                return true;
+                redraw = true;
             },
             .reply => |reply| switch (reply) {
                 .window_size => |report| {
@@ -176,9 +180,8 @@ pub const Session = struct {
                         _ = next.update(event);
                         s._pending = next;
                         s._resize_report = true;
-                        return true;
-                    }
-                    if (s._pending) |*next| redraw = next.update(event) or redraw else redraw = s._ws.update(event) or redraw;
+                        redraw = true;
+                    } else if (s._pending) |*next| redraw = next.update(event) or redraw else redraw = s._ws.update(event) or redraw;
                 },
                 .graphics => |response| {
                     const held = if (response.id) |id| s._layers.image(id) != null else false;
@@ -189,7 +192,8 @@ pub const Session = struct {
             },
             else => {},
         }
-        return redraw;
+        const policy_changed = if (s._pending_caps) |caps| try s.setCaps(w, caps) else false;
+        return policy_changed or redraw;
     }
 
     /// Applies the last size once, before the caller paints. Both grids
@@ -419,6 +423,51 @@ test "a session retries learned capabilities after failed output" {
     try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 12));
     try testing.expect(s.capabilities().osc8);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
+}
+
+test "session housekeeping survives failed capability output" {
+    const events = [_]morse.Event{
+        .{ .resize = .{ .cols = 4, .rows = 3, .xpixels = 40, .ypixels = 60 } },
+        .{ .reply = .{ .window_size = .{ .what = .text_area_cells, .width = 4, .height = 3 } } },
+        .{ .reply = .{ .window_size = .{ .what = .text_area_pixels, .width = 40, .height = 60 } } },
+        .{ .reply = .{ .window_size = .{ .what = .cell_pixels, .width = 10, .height = 20 } } },
+        .{ .reply = .{ .graphics = .{ .id = 2, .message = "OK" } } },
+    };
+    for (events) |event| {
+        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+        defer s.deinit();
+        var bytes: [4096]u8 = undefined;
+        var out: Writer = .fixed(&bytes);
+        try s.renderer().enter(&out, .{}, .alt, .{});
+        _ = try s.layers().transmit(&out, 2, &.{ 0, 0, 0, 255 }, .{ .width = 1, .height = 1, .answer = true });
+        var refused: Writer = .fixed(&.{});
+        const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
+        try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
+        try testing.expectError(error.WriteFailed, s.handle(&refused, event, 11));
+
+        // Output recovers on another event; the consumed input is not replayed.
+        out.end = 0;
+        try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, 12));
+        _ = try s.resize(&out);
+        switch (event) {
+            .resize => {
+                try testing.expectEqual(@as(u16, 4), s.screen().dimensions().cols);
+                try testing.expectEqual(@as(u16, 3), s.renderer().dimensions().rows);
+                try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 40, .height = 60 }, s.windowSize().area);
+            },
+            .reply => |reply| switch (reply) {
+                .window_size => |report| switch (report.what) {
+                    .text_area_cells => try testing.expectEqual(@as(u16, 4), s.screen().dimensions().cols),
+                    .text_area_pixels => try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 40, .height = 60 }, s.windowSize().area),
+                    .cell_pixels => try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),
+                    else => unreachable,
+                },
+                .graphics => try testing.expectEqual(@import("layer.zig").Image.State.ready, s.layers().image(2).?.state),
+                else => unreachable,
+            },
+            else => unreachable,
+        }
+    }
 }
 
 test "session policy can cancel pending learned capabilities at the current value" {
