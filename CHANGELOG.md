@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Replacement picture ownership and refusal state are internal; current() and pending() return copied ids.
+
 - Breaking: Caps.Probe owns its questions and answer progress internally; init and const queries replace literals and mutable fields.
 
 - Breaking: Input framing, parser and buffer state are internal; use mousePixels() and setMousePixels() to match requested mouse encoding.

@@ -181,7 +181,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `takeDirty`, `retire` — `ImageIds`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -537,7 +537,8 @@ picture and releases its object.
 `send` takes pixels and transmit options; `declare` takes the placement and
 caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
 `declare` again. Its result says another frame is needed while waiting;
-`takeDirty` asks for new pixels after a refusal. A swap places the new picture,
+`current()` and `pending()` return copied ids; ownership changes through the
+replacement methods. `takeDirty` asks for new pixels after a refusal. A swap places the new picture,
 drops the old placement, then frees its pixels inside `commitFrame(w, caps)`.
 The renderer calls that itself; callers of `emit` call it after their frame
 reaches the writer. Failed writes retain retirement for the next attempt.

@@ -217,16 +217,26 @@ pub const ImageIds = struct {
 /// One transmit may be in flight. The caller owns the value, its id range,
 /// grace period and any decision about when to produce another picture.
 pub const Replacement = struct {
-    current: ?u32 = null,
-    pending: ?u32 = null,
-    dirty: bool = false,
+    _current: ?u32 = null,
+    _pending: ?u32 = null,
+    _dirty: bool = false,
+
+    /// The usable picture id, by value; retire it through this owner.
+    pub fn current(p: *const Replacement) ?u32 {
+        return p._current;
+    }
+
+    /// The picture still awaiting settlement, by value.
+    pub fn pending(p: *const Replacement) ?u32 {
+        return p._pending;
+    }
 
     pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId, PayloadTooLarge };
 
     /// Whether another picture can be sent. Call `settle` or `declare` to settle a
     /// ready or refused pending picture before sending the next one.
     pub fn canSend(p: *const Replacement) bool {
-        return p.pending == null;
+        return p._pending == null;
     }
 
     /// Sends one new picture, returning its id and payload byte count.
@@ -240,10 +250,10 @@ pub const Replacement = struct {
         try layers._retired.ensureUnusedCapacity(gpa, 1);
         const bytes = layers.transmit(w, id, pixels, how) catch |err| {
             if (layers.image(id) != null) layers._retired.appendAssumeCapacity(id);
-            p.dirty = true;
+            p._dirty = true;
             return err;
         };
-        p.pending = id;
+        p._pending = id;
         return .{ .id = id, .bytes = bytes };
     }
 
@@ -253,31 +263,31 @@ pub const Replacement = struct {
     /// On allocation failure, current and pending ownership stay unchanged.
     pub fn settle(p: *Replacement, layers: *Layers, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
         // Reserve every retirement before changing either ownership slot.
-        const current_failed = if (p.current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
-        const reserve: usize = if (p.pending != null) 1 + @as(usize, @intFromBool(p.current != null)) else @intFromBool(current_failed);
+        const current_failed = if (p._current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
+        const reserve: usize = if (p._pending != null) 1 + @as(usize, @intFromBool(p._current != null)) else @intFromBool(current_failed);
         try layers._retired.ensureUnusedCapacity(layers._gpa, reserve);
-        if (p.pending) |id| {
+        if (p._pending) |id| {
             const ready = layers.ready(id, now_ms, grace_ms);
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
             if (failed) {
                 try layers.retire(id);
-                p.pending = null;
-                p.dirty = true;
+                p._pending = null;
+                p._dirty = true;
             } else if (ready) {
-                if (p.current) |old| try layers.retire(old);
-                p.current = id;
-                p.pending = null;
+                if (p._current) |old| try layers.retire(old);
+                p._current = id;
+                p._pending = null;
             }
         }
-        if (p.current) |id| {
+        if (p._current) |id| {
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
             if (failed) {
                 try layers.retire(id);
-                p.current = null;
-                p.dirty = true;
+                p._current = null;
+                p._dirty = true;
             }
         }
-        return p.pending != null;
+        return p._pending != null;
     }
 
     /// Settle and declare at want, overriding its image id. Returns true
@@ -285,11 +295,11 @@ pub const Replacement = struct {
     /// ownership unsettled and makes no declaration; use settle explicitly
     /// to advance hidden pictures.
     pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
-        var at = want orelse return p.pending != null;
+        var at = want orelse return p._pending != null;
         // A declaration must be able to commit after ownership changes.
         try layers._declared.ensureUnusedCapacity(layers._gpa, 1);
         const waiting = try p.settle(layers, now_ms, grace_ms);
-        if (p.current) |id| {
+        if (p._current) |id| {
             at.image = id;
             try layers.declare(at);
         }
@@ -299,19 +309,19 @@ pub const Replacement = struct {
     /// Whether a refusal or write failure asked for another picture since
     /// last checked. Call `settle` or `declare` after `Layers.ack` to fold refusals in.
     pub fn takeDirty(p: *Replacement) bool {
-        defer p.dirty = false;
-        return p.dirty;
+        defer p._dirty = false;
+        return p._dirty;
     }
 
     /// Retires everything this value owns at the next committed frame.
     pub fn retire(p: *Replacement, layers: *Layers) Allocator.Error!void {
         const gpa = layers._gpa;
         try layers._retired.ensureUnusedCapacity(gpa, 2);
-        if (p.current) |id| {
+        if (p._current) |id| {
             try layers.retire(id);
             layers.undeclareImage(id);
         }
-        if (p.pending) |id| {
+        if (p._pending) |id| {
             try layers.retire(id);
             layers.undeclareImage(id);
         }
@@ -1515,7 +1525,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     _ = try p.declare(&f.layers, at, 2001, 250);
     try testing.expect(p.takeDirty());
     try testing.expect(!p.takeDirty());
-    try testing.expectEqual(@as(?u32, 2), p.current);
+    try testing.expectEqual(@as(?u32, 2), p.current());
     _ = try f.draw();
     try testing.expect(f.layers.image(next.id) == null);
     const retry = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 3000 });
@@ -1766,23 +1776,23 @@ test "a replacement settles without declaring or hiding placements" {
             const first = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true, .now_ms = 100 });
             try testing.expect(try p.settle(&layers, 109, 10));
             try testing.expect(!try p.settle(&layers, 110, 10));
-            try testing.expectEqual(first.id, p.current.?);
+            try testing.expectEqual(first.id, p.current().?);
             const at: Layer = .{ .image = first.id, .rect = .{ .cols = 1, .rows = 1 } };
             try layers.declare(at);
             const next = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
             layers.ack(.{ .id = next.id, .message = "refused" });
             try testing.expect(!try p.settle(&layers, 0, 10));
             try testing.expect(p.takeDirty());
-            try testing.expectEqual(first.id, p.current.?);
+            try testing.expectEqual(first.id, p.current().?);
             try testing.expectEqualDeep(at, layers.declarations()[0]);
             const last = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
             layers.ack(.{ .id = last.id, .message = "OK" });
             try testing.expect(!try p.settle(&layers, 0, 10));
-            try testing.expectEqual(last.id, p.current.?);
+            try testing.expectEqual(last.id, p.current().?);
             try testing.expectEqualDeep(at, layers.declarations()[0]);
             layers.ack(.{ .id = last.id, .message = "refused" });
             try testing.expect(!try p.settle(&layers, 0, 10));
-            try testing.expectEqual(null, p.current);
+            try testing.expectEqual(null, p.current());
             try testing.expect(p.takeDirty());
         }
     };
@@ -1804,5 +1814,11 @@ test "failed direct transmission stays refused through grace and can be retried"
             _ = try layers.transmit(&sink.writer, 42, "rgba", .{ .compress = false });
             try testing.expect(layers.ready(42, 1000, 10));
         }
+    }
+}
+
+test "replacement ownership and refusal state stay behind their owner" {
+    inline for (.{ "current", "pending", "dirty" }) |field| {
+        try testing.expect(!@hasField(Replacement, field));
     }
 }
