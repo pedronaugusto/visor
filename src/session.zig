@@ -127,7 +127,9 @@ pub const Session = struct {
 
     /// Takes a screen and input modes, keeping pixel mouse parsing in step.
     /// Raw mode and restoration are the caller's (`Tty.enter` can do them).
+    /// A live or partial entry returns `AlreadyEntered` before parser changes.
     pub fn enter(s: *Session, w: *Writer, parser: *morse.KeyParser, mode: render.Mode, modes: render.Modes) Error!void {
+        if (s._renderer.entered() != null) return error.AlreadyEntered;
         parser.mouse_pixels = pixelMouse(modes);
         try s._renderer.enter(w, s._caps, mode, modes);
     }
@@ -298,6 +300,32 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
     try testing.expectEqualStrings("\x1b[?2048h", out.written());
     try testing.expect(s._renderer.entered().?.in_band_resize);
     try s.leave(&out.writer);
+}
+
+test "a second session entry preserves pixel mouse parsing" {
+    for ([_]bool{ false, true }) |partial| {
+        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 4, .rows = 2 } }, .{ .graphics_id = 1 });
+        defer s.deinit();
+        var buffer: [256]u8 = undefined;
+        var parser = morse.KeyParser.init(&buffer);
+        var out: Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        const modes: render.Modes = .{ .mouse = .{ .motion = .drag, .encoding = .sgr_pixels }, .paste = true };
+        if (partial) {
+            var refused: Writer = .fixed(&.{});
+            try testing.expectError(error.WriteFailed, s.enter(&refused, &parser, .alt, modes));
+        } else try s.enter(&out.writer, &parser, .alt, modes);
+        out.clearRetainingCapacity();
+        const result = s.enter(&out.writer, &parser, .alt, .{});
+        try testing.expect(parser.mouse_pixels);
+        try testing.expectError(error.AlreadyEntered, result);
+        try testing.expectEqual(@as(usize, 0), out.written().len);
+        var events = parser.feed("\x1b[<0;36;51M");
+        try testing.expect(events.next().?.mouse.pixels);
+        try s.leave(&out.writer);
+        try testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[?1016l") != null);
+        try testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[?2004l") != null);
+    }
 }
 
 test "the probe wait keeps DA1 quiet time and the overall deadline on caller time" {

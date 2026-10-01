@@ -357,7 +357,9 @@ their lifetime and coordinated resize.
 
 Renderer pen, cursor, width method, frame flags and cleanup intent are internal.
 `entered()` returns a copy of the requested configuration, including partial
-entry; use `enter`, `setModes`, `setCaps`, `repaint` and `untrustCursor` to
+entry. A second live `enter` returns `AlreadyEntered` before writing or changing
+state; leave before entering again. `Session.enter` also preserves the parser
+on refusal. Use `enter`, `setModes`, `setCaps`, `repaint` and `untrustCursor` to
 change terminal state.
 
 Allocation, pool identity, damage and renderer work buffers are internal

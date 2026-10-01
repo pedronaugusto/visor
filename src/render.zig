@@ -205,6 +205,8 @@ const unknown: Cell = .{ .text = .{ .buf = @splat(0), .len = 0 }, .style = .{}, 
 pub const Error = morse.TextError || error{
     /// The screen is not the size the renderer was made or resized to.
     SizeMismatch,
+    /// Entry is still live, including after a partial write; leave it first.
+    AlreadyEntered,
 };
 
 /// The frame size at or below which the synchronised-output bracket is not
@@ -517,9 +519,12 @@ pub const Renderer = struct {
     /// instead of when the program asks, which is ten frames a second on the
     /// tightest of them. `draw` writes the bracket, and only when the frame
     /// is large enough to be worth it.
-    /// Re-entering a renderer that drew a frame repaints every row and
-    /// picture on its next draw. Use `setCaps` to change caps in place.
+    /// A live entry, including a partial one, returns `AlreadyEntered`
+    /// before changing state or writing. Leave before entering again.
+    /// Re-entering after leave repaints every row and picture on its next
+    /// draw if a frame was drawn. Use `setCaps` to change caps in place.
     pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {
+        if (r._entered != null) return error.AlreadyEntered;
         // Record every mode before it may have reached a partially failing
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
@@ -2623,6 +2628,63 @@ test "entering and leaving write exactly the modes they turn on" {
         "\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2048l\x1b[?1049l",
         f.written(),
     );
+}
+
+test "a second live renderer entry preserves cleanup and the keyboard stack" {
+    for ([_]Mode{ .alt, .@"inline" }) |mode| {
+        var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+        defer r.deinit();
+        var out: Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        const modes: Modes = .{ .keyboard = .{ .disambiguate_escape_codes = true }, .paste = true };
+        try r.enter(&out.writer, .{ .in_band_resize = true }, mode, modes);
+        const entered = r.entered();
+        const length = out.written().len;
+        // Refuse both a replacement that would discard paste cleanup and
+        // an identical entry that would push the keyboard stack again.
+        try testing.expectError(error.AlreadyEntered, r.enter(&out.writer, .{}, .alt, .{}));
+        try testing.expectError(error.AlreadyEntered, r.enter(&out.writer, .{ .in_band_resize = true }, mode, modes));
+        try testing.expectEqual(length, out.written().len);
+        try testing.expectEqualDeep(entered, r.entered());
+        try r.leave(&out.writer);
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "\x1b[>1u"));
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "\x1b[<u"));
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "\x1b[?2004l"));
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "\x1b[?2048l"));
+        try testing.expect(r.entered() == null);
+        // Entry is available again only after cleanup finishes.
+        try r.enter(&out.writer, .{}, mode, .{});
+        try r.leave(&out.writer);
+    }
+}
+
+test "a second renderer entry refuses every partially written entry" {
+    for ([_]Mode{ .alt, .@"inline" }) |mode| {
+        const modes: Modes = .{ .keyboard = .{ .disambiguate_escape_codes = true }, .paste = true };
+        var expected: Writer.Allocating = .init(testing.allocator);
+        defer expected.deinit();
+        var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+        defer r.deinit();
+        try r.enter(&expected.writer, .{}, mode, modes);
+        const length = expected.written().len;
+        expected.clearRetainingCapacity();
+        try r.leave(&expected.writer);
+        for (0..length) |prefix| {
+            var bytes: [256]u8 = undefined;
+            var blocked: Writer = .fixed(bytes[0..prefix]);
+            try testing.expectError(error.WriteFailed, r.enter(&blocked, .{}, mode, modes));
+            const entered = r.entered();
+            var out: Writer.Allocating = .init(testing.allocator);
+            defer out.deinit();
+            try testing.expectError(error.AlreadyEntered, r.enter(&out.writer, .{}, .alt, .{}));
+            try testing.expectError(error.AlreadyEntered, r.enter(&out.writer, .{}, mode, modes));
+            try testing.expectEqual(@as(usize, 0), out.written().len);
+            try testing.expectEqualDeep(entered, r.entered());
+            try r.leave(&out.writer);
+            try testing.expectEqualStrings(expected.written(), out.written());
+            try testing.expect(r.entered() == null);
+        }
+    }
 }
 
 test "the input modes go on after the screen and come off before it, exactly" {
