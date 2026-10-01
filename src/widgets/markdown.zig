@@ -125,18 +125,18 @@ const VisualRow = struct {
 };
 
 const RowIterator = struct {
-    document: *const reader.Document,
-    cols: u16,
-    method: visor.Method,
-    block: usize = 0,
-    prose: ?Paragraph.Rows = null,
-    first: bool = true,
+    _document: *const reader.Document,
+    _cols: u16,
+    _method: visor.Method,
+    _block: usize = 0,
+    _prose: ?Paragraph.Rows = null,
+    _first: bool = true,
 
     pub fn init(document: *const reader.Document, cols: u16, method: visor.Method) RowIterator {
-        return .{ .document = document, .cols = cols, .method = method };
+        return .{ ._document = document, ._cols = cols, ._method = method };
     }
     fn row(it: *const RowIterator, b: reader.Block, start: usize, end: usize, first: bool) VisualRow {
-        const spans = it.document.spans()[b.first_span..b.end_span];
+        const spans = it._document.spans()[b.first_span..b.end_span];
         var low: usize = 0;
         var high = spans.len;
         while (low < high) {
@@ -149,30 +149,30 @@ const RowIterator = struct {
             const middle = low + (high - low) / 2;
             if (spans[middle].start < end) low = middle + 1 else high = middle;
         }
-        return .{ .block_index = it.block, .block = b, .start = start, .end = end, .first = first, .text = it.document.text()[start..end], .spans = spans[begin..low] };
+        return .{ .block_index = it._block, .block = b, .start = start, .end = end, .first = first, .text = it._document.text()[start..end], .spans = spans[begin..low] };
     }
 
     pub fn next(it: *RowIterator) ?VisualRow {
-        if (it.cols == 0) return null;
-        while (it.block < it.document.blocks().len) {
-            const b = it.document.blocks()[it.block];
+        if (it._cols == 0) return null;
+        while (it._block < it._document.blocks().len) {
+            const b = it._document.blocks()[it._block];
             const prefix = @as(u64, b.depth) * 2 + b.indent + b.marker.len;
-            if (b.kind != .prose and b.kind != .heading or prefix >= it.cols) {
+            if (b.kind != .prose and b.kind != .heading or prefix >= it._cols) {
                 const r = it.row(b, b.start, b.end, true);
-                it.block += 1;
+                it._block += 1;
                 return r;
             }
-            if (it.prose == null) {
-                it.prose = .init(it.document.text()[b.start..b.end], @intCast(it.cols - prefix), .word, it.method);
-                it.first = true;
+            if (it._prose == null) {
+                it._prose = .init(it._document.text()[b.start..b.end], @intCast(it._cols - prefix), .word, it._method);
+                it._first = true;
             }
-            if (it.prose.?.next()) |r| {
-                const out = it.row(b, b.start + r.start, b.start + r.end, it.first);
-                it.first = false;
+            if (it._prose.?.next()) |r| {
+                const out = it.row(b, b.start + r.start, b.start + r.end, it._first);
+                it._first = false;
                 return out;
             }
-            it.prose = null;
-            it.block += 1;
+            it._prose = null;
+            it._block += 1;
         }
         return null;
     }
@@ -191,4 +191,10 @@ fn overlay(base: visor.Style, role: visor.Style) visor.Style {
         }
     }
     return out;
+}
+
+test "markdown row iterator block and prose progress stay behind next" {
+    inline for (.{ "document", "cols", "method", "block", "prose", "first" }) |field| {
+        try std.testing.expect(!@hasField(Markdown.Rows, field));
+    }
 }
