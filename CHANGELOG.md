@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Session allocation and coordinated state are internal; use component borrows and const size, capability and probe queries.
+
 - Breaking: Renderer terminal state is internal; entered() returns the requested configuration by value, and mutations go through its methods.
 
 - List selection finds its visible suffix in one backward height scan instead of repeatedly rescanning the range.

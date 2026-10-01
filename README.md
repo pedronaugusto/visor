@@ -341,6 +341,12 @@ comparing the meaning are the same answer.
 Cells read from the screen carry checked text and link handles. The grid and
 renderer store compact cells; Screen owns their pool identity. Screen and
 Renderer geometry is read through `dimensions()` and changed through `resize`.
+Session owns coordinated size, capabilities and probe progress. Read them
+through `windowSize()`, `capabilities()` and `probe()`; change them through
+`handle`, `resize` and `setCaps`. `screen()`, `renderer()` and `layers()` lend
+the component owners for painting, terminal entry and pictures. Session owns
+their lifetime and coordinated resize.
+
 Renderer pen, cursor, width method, frame flags and cleanup intent are internal.
 `entered()` returns a copy of the requested configuration, including partial
 entry; use `enter`, `setModes`, `setCaps`, `repaint` and `untrustCursor` to

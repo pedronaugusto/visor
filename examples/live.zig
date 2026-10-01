@@ -17,7 +17,7 @@ pub fn main(init: std.process.Init) !void {
     defer session.deinit();
     // Register the way out before entry, including a partial entry.
     defer tty.leave() catch {};
-    try tty.enter(&session.renderer, session.caps, .alt, .{ .paste = true });
+    try tty.enter(session.renderer(), session.capabilities(), .alt, .{ .paste = true });
     try tty.watchResize();
     var output_buffer: [16 * 1024]u8 = undefined;
     var output = tty.writer(&output_buffer);
@@ -29,11 +29,11 @@ pub fn main(init: std.process.Init) !void {
         .read_buffer = &read_buffer,
         .escape = .fromMilliseconds(20),
     });
-    try session.probe.write(w);
+    try session.probe().write(w);
     try w.flush();
     const wait = visor.ProbeWait.init(nowMs(io), 500, 50);
     var count: usize = 0;
-    while (wait.remaining(&session.probe, nowMs(io))) |budget| {
+    while (wait.remaining(session.probe(), nowMs(io))) |budget| {
         const event = (try input.nextWithin(.{ .duration = .{
             .raw = .fromMilliseconds(budget),
             .clock = .awake,
@@ -45,7 +45,7 @@ pub fn main(init: std.process.Init) !void {
     }
     try session.setModes(w, &input.parser, .{
         .paste = true,
-        .keyboard = if (session.caps.kitty_keyboard) .{ .disambiguate_escape_codes = true } else null,
+        .keyboard = if (session.capabilities().kitty_keyboard) .{ .disambiguate_escape_codes = true } else null,
     });
     while (true) {
         _ = try session.resize(w);
@@ -76,7 +76,7 @@ fn nowMs(io: std.Io) i64 {
 }
 
 fn paint(session: *visor.Session, count: usize) !void {
-    const win = session.screen.window();
+    const win = session.screen().window();
     win.clear();
     var line: [128]u8 = undefined;
     const text = try std.fmt.bufPrint(&line, "Input events: {d}\nResize the terminal. q, Escape or Ctrl+C leaves.", .{count});
@@ -92,6 +92,6 @@ fn check(gpa: std.mem.Allocator) !void {
     _ = try session.resize(&out.writer);
     try paint(&session, 3);
     _ = try session.draw(&out.writer);
-    if (session.screen.dimensions().cols != 50 or out.written().len == 0) return error.ExampleFailed;
+    if (session.screen().dimensions().cols != 50 or out.written().len == 0) return error.ExampleFailed;
     if (!quit(.{ .key = .{ .key = .{ .char = 'c' }, .mods = .{ .ctrl = true } } })) return error.ExampleFailed;
 }
