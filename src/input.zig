@@ -102,7 +102,7 @@ pub const Input = struct {
     /// waiting at the caller's deadline stays held for the next call. What
     /// the event borrows is valid until the next call, as with `next`.
     pub fn nextWithin(in: *Input, timeout: Io.Timeout) Error!?morse.Event {
-        const until = timeout.toDeadline(in.tty.io);
+        const until = timeout.toDeadline(in.tty.ioContext());
         while (true) {
             // What was read already comes first, including the repeats a
             // console sequence can stand for.
@@ -170,7 +170,7 @@ pub const Input = struct {
     const Limit = struct { timeout: Io.Timeout, expires: bool };
 
     fn limit(in: *const Input, until: Io.Timeout) Limit {
-        const left = until.toDurationFromNow(in.tty.io);
+        const left = until.toDurationFromNow(in.tty.ioContext());
         if (in.ambiguous()) {
             const escape: Io.Clock.Duration = .{ .raw = in.escape, .clock = .awake };
             if (left) |l| if (l.raw.nanoseconds < in.escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
@@ -191,7 +191,7 @@ pub const Input = struct {
         const file = in.tty.inputFile();
         while (true) {
             const lim = in.limit(until);
-            const left = lim.timeout.toDurationFromNow(in.tty.io) orelse return in.readBlocking(file);
+            const left = lim.timeout.toDurationFromNow(in.tty.ioContext()) orelse return in.readBlocking(file);
             const ms: u32 = @intCast(std.math.clamp(left.raw.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
             switch (console.waitInput(file.handle, ms) catch return in.readBlocking(file)) {
                 .ready => {},
@@ -207,7 +207,7 @@ pub const Input = struct {
     }
 
     fn waitPosix(in: *Input, until: Io.Timeout) Error!Woke {
-        const io = in.tty.io;
+        const io = in.tty.ioContext();
         const tty_file = in.tty.inputFile();
         const lim = in.limit(until);
         const timeout = lim.timeout;
@@ -267,7 +267,7 @@ pub const Input = struct {
 
     /// One read with nothing beside it.
     fn readBlocking(in: *Input, file: Io.File) Error!Woke {
-        const n = file.readStreaming(in.tty.io, &.{in.read_buffer}) catch |err| switch (err) {
+        const n = file.readStreaming(in.tty.ioContext(), &.{in.read_buffer}) catch |err| switch (err) {
             error.EndOfStream => return .ended,
             else => |e| return e,
         };
@@ -305,7 +305,7 @@ const Piped = struct {
 
     fn deinit(p: *Piped) void {
         p.hangUp();
-        _ = std.posix.system.close(p.tty.file.handle);
+        p.tty.close();
     }
 
     fn type_(p: *Piped, bytes: []const u8) void {
