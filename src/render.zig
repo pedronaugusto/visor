@@ -143,7 +143,7 @@ const ModeCleanup = struct {
     }
 
     fn mouseChange(held: *ModeCleanup, w: *Writer, was: ?morse.Mouse, now: ?morse.Mouse) Writer.Error!void {
-        const old = was orelse {
+        if (was == null) {
             if (now) |m| {
                 held.motion.insert(m.motion);
                 held.encoding.insert(m.encoding);
@@ -152,26 +152,47 @@ const ModeCleanup = struct {
                 held.encoding = .{};
                 held.motion.insert(m.motion);
                 held.encoding.insert(m.encoding);
+                return;
             }
-            return;
-        };
-        if (now == null or old.motion != now.?.motion) {
-            try morse.setMode(w, old.motion.number(), false);
-            held.motion.remove(old.motion);
-            if (now) |m| {
+        }
+        var motions = held.motion.iterator();
+        while (motions.next()) |motion| {
+            if (now != null and now.?.motion == motion) continue;
+            try morse.setMode(w, motion.number(), false);
+            held.motion.remove(motion);
+        }
+        if (now) |m| {
+            if (was == null or was.?.motion != m.motion or std.meta.eql(was, now)) {
                 held.motion.insert(m.motion);
                 try morse.setMode(w, m.motion.number(), true);
             }
         }
-        if (now == null or old.encoding != now.?.encoding) {
-            try morse.setMode(w, old.encoding.number(), false);
-            held.encoding.remove(old.encoding);
-            if (now) |m| {
+        var encodings = held.encoding.iterator();
+        while (encodings.next()) |encoding| {
+            if (now != null and now.?.encoding == encoding) continue;
+            try morse.setMode(w, encoding.number(), false);
+            held.encoding.remove(encoding);
+        }
+        if (now) |m| {
+            if (was == null or was.?.encoding != m.encoding or std.meta.eql(was, now)) {
                 held.encoding.insert(m.encoding);
                 try morse.setMode(w, m.encoding.number(), true);
             }
         }
     }
+};
+
+// Requested configuration lives in Entered; this records only accepted
+// commands. Uncertain commands are retried even if the next request returns
+// to the old value. Mouse and DEC resets can repeat; keyboard stack commands
+// advance their accepted state before later commands are attempted.
+const ModeWrites = struct {
+    modes: Modes = .{},
+    in_band_resize: bool = false,
+    unicode_core: bool = false,
+    uncertain: std.EnumSet(Command) = .initEmpty(),
+
+    const Command = enum { keyboard, mouse, focus, paste, color_scheme, in_band_resize, unicode_core };
 };
 
 /// What the previous frame holds where the renderer does not know what the
@@ -263,6 +284,7 @@ pub const Renderer = struct {
     /// The session configuration requested, including a partially written change.
     _entered: ?Entered = null,
     _cleanup: ModeCleanup = .{},
+    _written: ModeWrites = .{},
     /// Whether a complete frame has been written through this renderer.
     _drawn: bool = false,
     /// In inline mode, how many rows of the terminal are the screen's,
@@ -503,6 +525,7 @@ pub const Renderer = struct {
         // one that did arrive leaves the caller's terminal changed.
         errdefer r.repaint();
         r._cleanup = .init(caps, modes);
+        r._written = .{};
         r._entered = .{
             .mode = mode,
             .caps = caps,
@@ -514,13 +537,8 @@ pub const Renderer = struct {
         if (mode == .alt) try morse.altScreen.set(w, true);
         // After the switch: the alternate screen has a keyboard stack of its
         // own, and this push belongs on it.
-        if (modes.keyboard) |flags| try morse.kittyKeyboardPush(w, flags);
-        if (modes.mouse) |m| try morse.mouse(w, m);
-        if (modes.focus) try morse.focusEvents.set(w, true);
-        if (modes.paste) try morse.bracketedPaste.set(w, true);
-        if (modes.color_scheme) try morse.colorScheme.set(w, true);
-        if (caps.in_band_resize) try morse.inBandResize.set(w, true);
-        if (caps.width_method == .unicode) try morse.unicodeCore.set(w, true);
+        try r.writeModes(w, modes);
+        try r.writeCaps(w, caps);
         try morse.resetStyle(w);
         switch (mode) {
             .alt => {
@@ -561,36 +579,73 @@ pub const Renderer = struct {
     /// remembers every mode that may remain enabled after a failed write.
     pub fn setCaps(r: *Renderer, w: *Writer, caps: Caps) ModesError!void {
         const was = r._entered orelse return error.NotEntered;
-        if (std.meta.eql(was.caps, caps)) return;
         r._entered.?.caps = caps;
         r._entered.?.in_band_resize = caps.in_band_resize;
         r._entered.?.unicode_core = caps.width_method == .unicode;
-        r.repaint();
-        if (was.in_band_resize != caps.in_band_resize) try ModeCleanup.set(w, &r._cleanup.in_band_resize, morse.inBandResize.number, caps.in_band_resize);
-        if (was.unicode_core != (caps.width_method == .unicode)) try ModeCleanup.set(w, &r._cleanup.unicode_core, morse.unicodeCore.number, caps.width_method == .unicode);
+        if (!std.meta.eql(was.caps, caps)) r.repaint();
+        try r.writeCaps(w, caps);
     }
 
-    /// Changes the input modes mid-session — mouse reports for one view and
-    /// not another, say — writing only what differs, and remembers the
-    /// change so `leave` undoes what may remain enabled after a failed write.
+    fn writeCaps(r: *Renderer, w: *Writer, caps: Caps) Writer.Error!void {
+        inline for (.{ .{ "in_band_resize", morse.inBandResize.number }, .{ "unicode_core", morse.unicodeCore.number } }) |command| {
+            const name = command[0];
+            const which = @field(ModeWrites.Command, name);
+            const on = if (comptime std.mem.eql(u8, name, "in_band_resize")) caps.in_band_resize else caps.width_method == .unicode;
+            if (@field(r._written, name) != on or r._written.uncertain.contains(which)) {
+                r._written.uncertain.insert(which);
+                try ModeCleanup.set(w, &@field(r._cleanup, name), command[1], on);
+                @field(r._written, name) = on;
+                r._written.uncertain.remove(which);
+            }
+        }
+    }
+
+    /// Changes the requested input modes and writes commands not yet accepted.
+    /// Leave remembers every mode that may remain enabled after a failed write.
     pub fn setModes(r: *Renderer, w: *Writer, modes: Modes) ModesError!void {
-        const was = if (r._entered) |e| e.modes else return error.NotEntered;
+        if (r._entered == null) return error.NotEntered;
         r._entered.?.modes = modes;
-        if (was.keyboard) |old| {
-            if (modes.keyboard) |new| {
-                if (old != new) try morse.kittyKeyboardSet(w, new, .replace);
-            } else {
+        try r.writeModes(w, modes);
+    }
+
+    fn writeModes(r: *Renderer, w: *Writer, modes: Modes) Writer.Error!void {
+        const was = r._written.modes;
+        if (!std.meta.eql(was.keyboard, modes.keyboard) or r._written.uncertain.contains(.keyboard)) {
+            r._written.uncertain.insert(.keyboard);
+            if (was.keyboard != null) {
+                if (modes.keyboard) |new| {
+                    try morse.kittyKeyboardSet(w, new, .replace);
+                } else {
+                    try morse.kittyKeyboardPop(w);
+                    r._cleanup.keyboard = false;
+                }
+            } else if (modes.keyboard) |new| {
+                r._cleanup.keyboard = true;
+                try morse.kittyKeyboardPush(w, new);
+            } else if (r._cleanup.keyboard) {
                 try morse.kittyKeyboardPop(w);
                 r._cleanup.keyboard = false;
             }
-        } else if (modes.keyboard) |new| {
-            r._cleanup.keyboard = true;
-            try morse.kittyKeyboardPush(w, new);
+            r._written.modes.keyboard = modes.keyboard;
+            r._written.uncertain.remove(.keyboard);
         }
-        try r._cleanup.mouseChange(w, was.mouse, modes.mouse);
-        if (was.focus != modes.focus) try ModeCleanup.set(w, &r._cleanup.focus, morse.focusEvents.number, modes.focus);
-        if (was.paste != modes.paste) try ModeCleanup.set(w, &r._cleanup.paste, morse.bracketedPaste.number, modes.paste);
-        if (was.color_scheme != modes.color_scheme) try ModeCleanup.set(w, &r._cleanup.color_scheme, morse.colorScheme.number, modes.color_scheme);
+        if (!std.meta.eql(was.mouse, modes.mouse) or r._written.uncertain.contains(.mouse)) {
+            r._written.uncertain.insert(.mouse);
+            try r._cleanup.mouseChange(w, was.mouse, modes.mouse);
+            r._written.modes.mouse = modes.mouse;
+            r._written.uncertain.remove(.mouse);
+        }
+        inline for (.{ .{ "focus", morse.focusEvents.number }, .{ "paste", morse.bracketedPaste.number }, .{ "color_scheme", morse.colorScheme.number } }) |command| {
+            const name = command[0];
+            const which = @field(ModeWrites.Command, name);
+            const on = @field(modes, name);
+            if (@field(was, name) != on or r._written.uncertain.contains(which)) {
+                r._written.uncertain.insert(which);
+                try ModeCleanup.set(w, &@field(r._cleanup, name), command[1], on);
+                @field(r._written.modes, name) = on;
+                r._written.uncertain.remove(which);
+            }
+        }
     }
 
     /// Turns off modes that may remain enabled, including a partially
@@ -650,6 +705,7 @@ pub const Renderer = struct {
         }
         r._region = null;
         r._entered = null;
+        r._written = .{};
     }
 
     /// In inline mode, makes the rows from the cursor's row the screen's,
@@ -1967,11 +2023,13 @@ pub const internal = struct {
         const region = r._region;
         const shape = r._shape;
         const cleanup = r._cleanup;
+        const written = r._written;
         errdefer {
             r._entered = entered;
             r._region = region;
             r._shape = shape;
             r._cleanup = cleanup;
+            r._written = written;
         }
         try r.leave(out);
         try out.flush();
@@ -3861,4 +3919,80 @@ test "renderer terminal state stays behind its owner" {
     try testing.expect(!r.entered().?.modes.paste);
     try r.leave(&out);
     try testing.expect(r.entered() == null);
+}
+
+test "retrying capability changes writes modes the first attempt did not accept" {
+    var r = try Renderer.init(testing.allocator, .{ .cols = 1, .rows = 1 });
+    defer r.deinit();
+    var initial: [1024]u8 = undefined;
+    var enter_out: Writer = .fixed(&initial);
+    try r.enter(&enter_out, .{}, .alt, .{});
+    var refused: Writer = .fixed(&.{});
+    const caps: Caps = .{ .in_band_resize = true, .width_method = .unicode };
+    try testing.expectError(error.WriteFailed, r.setCaps(&refused, caps));
+    var accepted: [128]u8 = undefined;
+    var retry: Writer = .fixed(&accepted);
+    try r.setCaps(&retry, caps);
+    try testing.expectEqualStrings("\x1b[?2048h\x1b[?2027h", retry.buffered());
+    retry.end = 0;
+    try r.setCaps(&retry, caps);
+    try testing.expectEqual(@as(usize, 0), retry.buffered().len);
+}
+
+test "retrying input modes resumes after an accepted keyboard push" {
+    var r = try Renderer.init(testing.allocator, .{ .cols = 1, .rows = 1 });
+    defer r.deinit();
+    var initial: [1024]u8 = undefined;
+    var enter_out: Writer = .fixed(&initial);
+    try r.enter(&enter_out, .{}, .alt, .{});
+    const modes: Modes = .{ .keyboard = .{ .disambiguate_escape_codes = true }, .focus = true, .paste = true };
+    var partial: [5]u8 = undefined;
+    var first: Writer = .fixed(&partial);
+    try testing.expectError(error.WriteFailed, r.setModes(&first, modes));
+    try testing.expectEqualStrings("\x1b[>1u", first.buffered());
+    var accepted: [128]u8 = undefined;
+    var retry: Writer = .fixed(&accepted);
+    try r.setModes(&retry, modes);
+    try testing.expectEqualStrings("\x1b[?1004h\x1b[?2004h", retry.buffered());
+    retry.end = 0;
+    try r.setModes(&retry, modes);
+    try testing.expectEqual(@as(usize, 0), retry.buffered().len);
+}
+
+test "retrying capabilities resumes after an accepted resize mode and can cancel uncertainty" {
+    var r = try Renderer.init(testing.allocator, .{ .cols = 1, .rows = 1 });
+    defer r.deinit();
+    var initial: [1024]u8 = undefined;
+    var out: Writer = .fixed(&initial);
+    try r.enter(&out, .{}, .alt, .{});
+    const caps: Caps = .{ .in_band_resize = true, .width_method = .unicode };
+    var prefix: [8]u8 = undefined;
+    var first: Writer = .fixed(&prefix);
+    try testing.expectError(error.WriteFailed, r.setCaps(&first, caps));
+    try testing.expectEqualStrings("\x1b[?2048h", first.buffered());
+    out.end = 0;
+    try r.setCaps(&out, caps);
+    try testing.expectEqualStrings("\x1b[?2027h", out.buffered());
+    var refused: Writer = .fixed(&.{});
+    try testing.expectError(error.WriteFailed, r.setCaps(&refused, .{}));
+    out.end = 0;
+    try r.setCaps(&out, caps);
+    try testing.expectEqualStrings("\x1b[?2048h", out.buffered());
+}
+
+test "retrying input modes can cancel an uncertain change without repeating a pop" {
+    var r = try Renderer.init(testing.allocator, .{ .cols = 1, .rows = 1 });
+    defer r.deinit();
+    var initial: [1024]u8 = undefined;
+    var out: Writer = .fixed(&initial);
+    try r.enter(&out, .{}, .alt, .{});
+    var prefix: [5]u8 = undefined;
+    var first: Writer = .fixed(&prefix);
+    try testing.expectError(error.WriteFailed, r.setModes(&first, .{ .keyboard = .{ .disambiguate_escape_codes = true }, .focus = true, .paste = true }));
+    out.end = 0;
+    try r.setModes(&out, .{});
+    try testing.expectEqualStrings("\x1b[<u\x1b[?1004l", out.buffered());
+    out.end = 0;
+    try r.setModes(&out, .{});
+    try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }

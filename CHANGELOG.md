@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Retrying failed Renderer mode or capability changes resumes commands not yet accepted without repeating an accepted keyboard push.
+
 - Breaking: Window keeps its clipped screen, rectangle and ink internal; screen() borrows the owner, rect() returns a copy, ink() borrows the drawing policy, and child, sub and inked construct views.
 
 
