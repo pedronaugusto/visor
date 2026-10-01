@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Graphemes and Parts keep borrowed source and iteration progress internal; construct with init and advance through next or nextAt.
+
 - Breaking: Damage row storage is internal; rowCount() returns its extent and marking, clearing and resize own its mutations.
 
 - Breaking: OwnedTarget keeps its allocator and retained slices internal; init owns copying and target() lends the target read-only.

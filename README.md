@@ -408,6 +408,10 @@ Damage owns its row storage behind marking and clearing methods; `rowCount()`
 returns its extent. Its allocation API is unmanaged: pass the init allocator
 to `resize` and `deinit`.
 
+Text and visual-row iterators keep their source, cursor and refill state
+internal. Construct them through `init` or `TextInput.rows`, and advance
+through `next` / `nextAt`. Reconstruct an iterator to start another traversal.
+
 **Damage is conservative.** A write marks a cell only when it changes it. If
 another write restores the displayed value before drawing, the mark remains:
 the screen does not duplicate the renderer's previous-frame baseline. The
