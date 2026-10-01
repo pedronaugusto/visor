@@ -998,7 +998,7 @@ test "the probe finds what the second emulator has, reset modes included" {
     var stream: vt.TerminalStream = .init(.{ .allocator = gpa, .handler = handler });
     defer stream.deinit();
 
-    var probe: visor.Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    var probe: visor.Caps.Probe = .init(.{ .graphics_id = 1 });
     var questions: std.Io.Writer.Allocating = .init(gpa);
     defer questions.deinit();
     try probe.write(&questions.writer);
@@ -1020,16 +1020,16 @@ test "the probe finds what the second emulator has, reset modes included" {
     // colours and the sizes, which it answers through handlers this build
     // does not install -- so the probe is settled by the device attributes
     // and a quiet period after the last answer, not at once.
-    try testing.expect(probe.answered.contains(.device_attributes));
+    try testing.expect(probe.hasAnswered(.device_attributes));
     try testing.expect(!probe.settled(0, 50));
     try testing.expect(probe.settled(50, 50));
-    try testing.expect(probe.caps.truecolor);
+    try testing.expect(probe.capabilities().truecolor);
     // Neither mode is on when the probe asks -- the emulator answers
     // reset -- and both are there to be used.
-    try testing.expect(probe.caps.sync);
-    try testing.expect(probe.caps.in_band_resize);
-    try testing.expectEqual(visor.Method.unicode, probe.caps.width_method);
-    try testing.expect(probe.caps.kitty_keyboard);
+    try testing.expect(probe.capabilities().sync);
+    try testing.expect(probe.capabilities().in_band_resize);
+    try testing.expectEqual(visor.Method.unicode, probe.capabilities().width_method);
+    try testing.expect(probe.capabilities().kitty_keyboard);
 }
 
 test "two links that differ only by their id are two links to the second emulator" {

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Caps.Probe owns its questions and answer progress internally; init and const queries replace literals and mutable fields.
+
 - Breaking: Input framing, parser and buffer state are internal; use mousePixels() and setMousePixels() to match requested mouse encoding.
 
 - Breaking: Tty descriptors, saved modes, renderer association and resize watcher are internal; ioContext() returns its captured Io by value.

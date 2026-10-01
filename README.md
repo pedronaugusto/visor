@@ -180,7 +180,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The views | `Window` — `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
-| What the terminal can do | `Caps`, `Caps.Probe` — `write`, `feed`, `complete`, `settled`. |
+| What the terminal can do | `Caps`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `takeDirty`, `retire` — `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
@@ -602,7 +602,9 @@ environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
 `Caps.Probe` writes morse's probe and folds the answers in, and is settled
 when every question is answered or, after the device attributes, when the
 terminal has been quiet for the caller's quiet period; a caller who would
-rather trust the environment sets the fields itself. A mode the terminal
+rather trust the environment configures a separate `Caps` value. Probe
+questions and learned progress are internal; construct it with `init`, feed
+answers, and read copied capabilities and `hasAnswered` / `lastAnswerMs`. A mode the terminal
 answers set or reset is one it has: nothing has turned synchronised output or
 in-band resize reports on when the probe asks, so a terminal that has them
 answers reset.

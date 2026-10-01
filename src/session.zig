@@ -26,8 +26,8 @@ pub const ProbeWait = struct {
     /// at the overall deadline. DA1 alone does not end the probe.
     pub fn remaining(wait: ProbeWait, probe: *const Caps.Probe, now_ms: i64) ?i64 {
         if (now_ms >= wait.end_ms or probe.settled(now_ms, wait.quiet_ms)) return null;
-        const until = if (probe.answered.contains(.device_attributes))
-            @min(wait.end_ms, (probe.last_ms orelse now_ms) +| wait.quiet_ms)
+        const until = if (probe.hasAnswered(.device_attributes))
+            @min(wait.end_ms, (probe.lastAnswerMs() orelse now_ms) +| wait.quiet_ms)
         else
             wait.end_ms;
         return @max(until -| now_ms, 0);
@@ -95,7 +95,7 @@ pub const Session = struct {
             ._screen = grid,
             ._renderer = try Renderer.init(gpa, ws.cells),
             ._ws = ws,
-            ._probe = .{ .questions = questions },
+            ._probe = .init(questions),
         };
     }
 
@@ -149,9 +149,9 @@ pub const Session = struct {
     /// replies are applied now. Keys, text and application policy stay with
     /// the caller. `now_ms` comes from the caller's clock for the probe.
     pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
-        const was = s._probe.caps;
+        const was = s._probe.capabilities();
         s._probe.feed(event, now_ms);
-        var redraw = if (!std.meta.eql(was, s._probe.caps)) try s.setCaps(w, s._probe.caps) else false;
+        var redraw = if (!std.meta.eql(was, s._probe.capabilities())) try s.setCaps(w, s._probe.capabilities()) else false;
         switch (event) {
             .resize => {
                 var next = s._pending orelse s._ws;
@@ -253,9 +253,9 @@ test "a session repaints an unchanged in-band size, including pictures" {
     defer s.deinit();
     var out: Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    s._probe.caps.in_band_resize = true;
-    s._probe.caps.kitty_graphics = true;
-    _ = try s.setCaps(&out.writer, s._probe.caps);
+    s._probe._caps.in_band_resize = true;
+    s._probe._caps.kitty_graphics = true;
+    _ = try s.setCaps(&out.writer, s._probe.capabilities());
     try s._screen.write(0, 0, "x", .{}, .none);
     const layer: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
     try s._layers.declare(layer);
@@ -294,7 +294,7 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
 }
 
 test "the probe wait keeps DA1 quiet time and the overall deadline on caller time" {
-    var probe: Caps.Probe = .{ .questions = .{ .graphics_id = 1 } };
+    var probe: Caps.Probe = .init(.{ .graphics_id = 1 });
     const wait = ProbeWait.init(1000, 500, 50);
     try testing.expectEqual(@as(?i64, 500), wait.remaining(&probe, 1000));
     probe.feed(.{ .reply = morse.Reply.parse("\x1b[?62c").? }, 1010);
@@ -302,9 +302,9 @@ test "the probe wait keeps DA1 quiet time and the overall deadline on caller tim
     probe.feed(.{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 1040);
     try testing.expectEqual(@as(?i64, 40), wait.remaining(&probe, 1050));
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1090));
-    probe.answered = .initEmpty();
+    probe._answered = .initEmpty();
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1500));
-    probe.answered = .initFull();
+    probe._answered = .initFull();
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1000));
 }
 
