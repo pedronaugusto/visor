@@ -1,8 +1,9 @@
 //! This program's own terminal.
 //!
 //! Separate, and optional. A program that already owns its terminal — a
-//! multiplexer, a test harness, a client with a daemon behind it — never
-//! imports this, and nothing else in the package touches a descriptor.
+//! multiplexer, a test harness, a client with a daemon behind it — needs
+//! none of this terminal ownership. Picture transport separately
+//! opens shared-memory objects when explicitly configured.
 //!
 //! What it owns is small and dangerous: the mode the terminal was found in,
 //! and the way back to it. Everything else — the timeouts, the event loop,
@@ -151,8 +152,8 @@ const Saved = if (is_windows) struct {
 /// The descriptor, the saved mode, and the way back.
 /// Keep its address stable between `raw` and `restore`, and call these
 /// operations, including resize registration for every terminal, from one
-/// thread. An entered renderer must stay alive and at
-/// the same address until `leave`, `restore` or `close` releases it.
+/// thread. An entered renderer must stay alive and at the same address until
+/// `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
     /// The terminal itself.
     _file: Io.File,

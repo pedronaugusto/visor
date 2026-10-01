@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Terminal documentation distinguishes Tty ownership from the descriptor use of shared-memory pictures.
 - Window documents the screen-owned allocations that committed printing can make.
 - Winsize owns cell-pixel invalidation for changed geometry from size replies as well as resize events.
 - Resize handlers preserve the interrupted thread's errno when a libc pipe write fails.

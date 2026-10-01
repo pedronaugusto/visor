@@ -514,7 +514,7 @@ it: `enter` puts it in exactly the state asked for, whatever was on before,
 new one on, and `leave` turns off that motion and that encoding. Focus
 reports are a mode of their own. A screen entered through `Tty.enter` is
 undone by `Tty.leave()` or `restore`; `restoreGlobal` and the panic handler
-restore every registered terminal from a buffer on the stack. Keep each raw
+restore every registered terminal from a buffer on the stack.
 `Tty` owns its descriptors, saved mode, renderer borrow and resize watcher.
 `ioContext()` returns the captured Io by value; use its methods for lifecycle
 changes. Keep `Tty` at a stable address, and its entered renderer alive and at a stable
