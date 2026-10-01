@@ -100,14 +100,14 @@ pub const Canvas = struct {
     /// A picture surface is cleared and fitted to the window. Pixels use
     /// straight alpha; empty cell marks leave the window's contents alone.
     pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         if (options.caps.kitty_graphics) {
             if (options.picture) |pic| {
                 pic.surface.clear();
                 const p = c.raster(pic.surface);
                 for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
                 _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height });
-                try pic.layers.declare(.{ .image = pic.image, .placement = pic.placement, .rect = win.rect, .order = pic.order });
+                try pic.layers.declare(.{ .image = pic.image, .placement = pic.placement, .rect = win.rect(), .order = pic.order });
                 return;
             }
         }
@@ -314,7 +314,7 @@ pub const Painter = struct {
     /// a copy's bytes are gone by the time the caller looks at them.
     fn existing(win: Window, col: u16, row: u16) []const u8 {
         if (col >= win.cols() or row >= win.rows()) return " ";
-        return win.screen.textAt(win.rect.col + col, win.rect.row + row);
+        return win.screen().textAt(win.rect().col + col, win.rect().row + row);
     }
 };
 

@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Window keeps its clipped screen, rectangle and ink internal; screen() borrows the owner, rect() returns a copy, ink() borrows the drawing policy, and child, sub and inked construct views.
+
+
 - Breaking: TextInput.Rows keeps borrowed text and iteration progress internal; construct through TextInput.rows and advance with next.
 
 - Breaking: Markdown.Rows keeps document, wrapping configuration and block progress internal; use init and next.

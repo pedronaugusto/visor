@@ -701,7 +701,7 @@ pub const Screen = struct {
 
     /// The whole grid as a window.
     pub fn window(s: *Screen) @import("window.zig").Window {
-        return .{ .screen = s, .rect = .fromSize(s.dimensions()) };
+        return .{ ._screen = s, ._rect = .fromSize(s.dimensions()) };
     }
 
     /// Everything dirty: the next draw writes the whole grid.

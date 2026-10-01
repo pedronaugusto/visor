@@ -141,7 +141,7 @@ const Viewer = struct {
             .border_style = .{ .dim = true },
             .title = .{ .text = file.name, .where = .center },
         }).draw(win);
-        if (inside.rect.isEmpty()) return;
+        if (inside.rect().isEmpty()) return;
 
         // A column for the bar, and the text in what is left.
         const text_window = inside.child(.{ .cols = inside.cols() -| 1 });
@@ -151,7 +151,7 @@ const Viewer = struct {
             .lines = &.{.{ .text = file.body }},
             .scroll = v.scroll,
         };
-        v.rows = paragraph.rowCount(text_window.cols(), text_window.screen.method);
+        v.rows = paragraph.rowCount(text_window.cols(), text_window.screen().method);
         v.page = text_window.rows();
         try paragraph.draw(text_window);
 

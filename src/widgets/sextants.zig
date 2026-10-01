@@ -72,7 +72,7 @@ pub const Sextants = struct {
     /// Draws the picture from the window's top-left, pixel (2c, 3r) in cell
     /// (c, r). A cell with nothing lit in it is left as it is.
     pub fn draw(s: Sextants, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         if (s.width == 0 or s.height == 0) return;
         // Prove that every pixel fits before multiplying dimensions or offsets.
         if (s.width > s.pixels.len / 4 / s.height) return;

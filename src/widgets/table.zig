@@ -106,7 +106,7 @@ pub const Table = struct {
     /// Draws the header and as many rows as are left, moving the offset
     /// when the selection would otherwise be off screen.
     pub fn draw(t: Table, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty() or t.widths.len == 0) return;
+        if (win.rect().isEmpty() or t.widths.len == 0) return;
 
         const marker_width = win.width(t.marker);
         const body = win.child(.{ .col = marker_width, .cols = win.cols() -| marker_width });

@@ -58,7 +58,7 @@ pub const BarChart = struct {
 
     /// Draws every bar that fits.
     pub fn draw(c: BarChart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty() or c.bars.len == 0) return;
+        if (win.rect().isEmpty() or c.bars.len == 0) return;
         var top = c.max orelse 0;
         if (c.max == null) for (c.bars) |b| {
             top = @max(top, b.value);

@@ -40,11 +40,11 @@ pub const Rule = struct {
     /// Draws the rule along the window's first row, or down its first
     /// column, the whole length of the window.
     pub fn draw(r: Rule, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         switch (r.direction) {
             .horizontal => {
                 const glyph = r.glyph orelse solid;
-                const step = @max(visor.graphemeWidth(glyph, win.screen.method), 1);
+                const step = @max(visor.graphemeWidth(glyph, win.screen().method), 1);
                 var col: u16 = 0;
                 while (@as(u32, col) + step <= win.cols()) : (col +|= step +| r.gap) try win.write(col, 0, glyph, r.style, .none);
             },

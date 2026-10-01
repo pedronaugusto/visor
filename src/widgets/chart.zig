@@ -72,7 +72,7 @@ pub const Chart = struct {
 
     /// Draws the axes, the labels, the datasets and the legend.
     pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
 
         var gutter: u16 = 0;
         for (c.y.labels) |l| gutter = @max(gutter, win.width(l));

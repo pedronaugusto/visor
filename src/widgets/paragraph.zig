@@ -63,14 +63,14 @@ pub const Paragraph = struct {
 
     /// Draws as many rows as the window has, starting at `scroll`.
     pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         var produced: usize = 0;
         var row: u16 = 0;
         for (p.lines) |line| {
             // The columns come off before the wrap, because a row that was
             // cut to the window's width and then shifted left would be a
             // window on a window.
-            const method = win.screen.method;
+            const method = win.screen().method;
             const body = skipColumns(line.text, p.scroll_columns, method);
             var it: Rows = .init(body, win.cols(), p.wrap, method);
             while (it.next()) |r| {

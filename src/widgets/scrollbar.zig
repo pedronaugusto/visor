@@ -59,7 +59,7 @@ pub const Scrollbar = struct {
 
     /// Draws the track and the thumb along the window's first column or row.
     pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         if (b.hide_when_whole and state.viewport >= state.content) return;
 
         const len = switch (b.direction) {

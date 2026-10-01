@@ -24,8 +24,8 @@ pub const Edges = struct {
     /// Draw the row on the window's first line. Cells the items do not
     /// cover are left as they were.
     pub fn draw(r: Edges, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
-        const right_w = @min(width(r.right, win.screen.method), win.cols());
+        if (win.rect().isEmpty()) return;
+        const right_w = @min(width(r.right, win.screen().method), win.cols());
         const right_col = win.cols() - right_w;
         const left_w = right_col -| (if (right_w > 0) r.gap else @as(u16, 0));
         try drawItems(r.left, win.child(.{ .cols = left_w, .rows = 1 }));
@@ -37,7 +37,7 @@ pub const Edges = struct {
         for (items) |item| {
             if (col >= win.cols()) break;
             _ = try win.printSegment(item, .{ .col = col, .wrap = .none });
-            col +|= visor.width(item.text, win.screen.method);
+            col +|= visor.width(item.text, win.screen().method);
         }
     }
 };

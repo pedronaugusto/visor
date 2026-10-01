@@ -67,7 +67,7 @@ pub const Block = struct {
     /// into it without checking, and a block in a window two cells tall
     /// writes its frame and nothing else.
     pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {
-        if (win.rect.isEmpty()) return win;
+        if (win.rect().isEmpty()) return win;
         if (b.style) |s| win.fill(.fromSize(win.size()), .blank(s)) catch unreachable;
 
         const inner = win.child(.{ .border = .{
@@ -152,7 +152,7 @@ test "padding takes cells off the inside and nothing off the frame" {
     var h: Harness = try .init(testing.allocator, 9, 5);
     defer h.deinit();
     const inner = try (Block{ .borders = .all, .padding = .all(1) }).draw(h.window());
-    try testing.expectEqual(visor.Rect{ .col = 2, .row = 2, .cols = 5, .rows = 1 }, inner.rect);
+    try testing.expectEqual(visor.Rect{ .col = 2, .row = 2, .cols = 5, .rows = 1 }, inner.rect());
     _ = try inner.printSegment(.{ .text = "abcdefgh" }, .{ .wrap = .none });
     try h.expectFrame(
         \\┌───────┐
@@ -168,7 +168,7 @@ test "a block with no room left gives back an empty window" {
     var h: Harness = try .init(testing.allocator, 4, 2);
     defer h.deinit();
     const inner = try (Block{ .borders = .all, .padding = .all(2) }).draw(h.window());
-    try testing.expect(inner.rect.isEmpty());
+    try testing.expect(inner.rect().isEmpty());
     try h.expectFrame(
         \\┌──┐
         \\└──┘
@@ -197,7 +197,7 @@ test "corners mark a frame without drawing it, and take no room from the inside"
         .border_style = .{ .dim = true },
         .padding = .{ .left = 2, .right = 2, .top = 1, .bottom = 1 },
     }).draw(h.window());
-    try testing.expectEqual(visor.Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, inner.rect);
+    try testing.expectEqual(visor.Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, inner.rect());
     _ = try inner.printSegment(.{ .text = "abcd" }, .{});
     try h.expectFrame(
         \\┌

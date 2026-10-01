@@ -39,7 +39,7 @@ pub const Gauge = struct {
 
     /// Draws the bar over every row of the window.
     pub fn draw(g: Gauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         const cols = win.cols();
         const clamped = @min(@max(g.ratio, 0), 1);
         const scaled = clamped * @as(f64, @floatFromInt(cols)) * 8;
@@ -92,7 +92,7 @@ pub const LineGauge = struct {
 
     /// Draws the label and the line on the window's first row.
     pub fn draw(g: LineGauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         var col: u16 = 0;
         if (g.label) |text| {
             const at = try win.printSegment(

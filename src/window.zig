@@ -34,15 +34,31 @@ pub const Size = geom.Size;
 /// An offset, clipped view of a `Screen`.
 pub const Window = struct {
     /// The grid this is a view of.
-    screen: *Screen,
+    _screen: *Screen,
     /// Where the view is and how big, in the screen's own coordinates,
     /// already clipped to it.
-    rect: Rect,
+    _rect: Rect,
     /// What every cell written through this window is drawn in, or null
     /// for the style it was written in. Children inherit it. A pointer, so
     /// the window a widget is handed stays three words, and the ink is the
     /// caller's to keep for as long as the window is used.
-    ink: ?*const Ink = null,
+    _ink: ?*const Ink = null,
+
+    /// The borrowed screen owner. Its lifetime and resize stay with its owner.
+    /// Recreate windows after the screen is resized.
+    pub fn screen(w: Window) *Screen {
+        return w._screen;
+    }
+
+    /// The rectangle already clipped to that screen, by value.
+    pub fn rect(w: Window) Rect {
+        return w._rect;
+    }
+
+    /// The borrowed drawing policy, or null for each cell's own style.
+    pub fn ink(w: Window) ?*const Ink {
+        return w._ink;
+    }
 
     /// A program's look, applied to every cell a window writes: the style a
     /// cell asked for, turned into the style it is drawn in, knowing where
@@ -77,18 +93,18 @@ pub const Window = struct {
     };
 
     /// The same view, drawing in `ink`.
-    pub fn inked(w: Window, ink: ?*const Ink) Window {
+    pub fn inked(w: Window, drawing: ?*const Ink) Window {
         var out = w;
-        out.ink = ink;
+        out._ink = drawing;
         return out;
     }
 
     /// The style a cell written at a place of this window is drawn in.
     fn styled(w: Window, col: u16, row: u16, span: u16, text: []const u8, style: Style) Style {
-        const ink = w.ink orelse return style;
-        return ink.apply(ink.ctx, .{
-            .col = w.rect.col + col,
-            .row = w.rect.row + row,
+        const drawing = w._ink orelse return style;
+        return drawing.apply(drawing.ctx, .{
+            .col = w._rect.col + col,
+            .row = w._rect.row + row,
             .cols = span,
             .text = text,
             .style = style,
@@ -223,17 +239,17 @@ pub const Window = struct {
 
     /// How many columns the window is.
     pub fn cols(w: Window) u16 {
-        return w.rect.cols;
+        return w._rect.cols;
     }
 
     /// How many rows the window is.
     pub fn rows(w: Window) u16 {
-        return w.rect.rows;
+        return w._rect.rows;
     }
 
     /// How big the window is.
     pub fn size(w: Window) Size {
-        return w.rect.size();
+        return w._rect.size();
     }
 
     /// A sub-window, clipped to this one, with an optional border drawn as
@@ -246,13 +262,13 @@ pub const Window = struct {
     /// back empty rather than wrong.
     pub fn child(w: Window, opts: ChildOptions) Window {
         const asked: Rect = .{
-            .col = w.rect.col +| opts.col,
-            .row = w.rect.row +| opts.row,
-            .cols = opts.cols orelse w.rect.cols -| opts.col,
-            .rows = opts.rows orelse w.rect.rows -| opts.row,
+            .col = w._rect.col +| opts.col,
+            .row = w._rect.row +| opts.row,
+            .cols = opts.cols orelse w._rect.cols -| opts.col,
+            .rows = opts.rows orelse w._rect.rows -| opts.row,
         };
-        const outer = asked.intersect(w.rect);
-        var c: Window = .{ .screen = w.screen, .rect = outer, .ink = w.ink };
+        const outer = asked.intersect(w._rect);
+        var c: Window = .{ ._screen = w._screen, ._rect = outer, ._ink = w._ink };
         if (!opts.border.where.any() or outer.isEmpty()) return c;
 
         c.drawBorder(opts.border);
@@ -268,7 +284,7 @@ pub const Window = struct {
             inner.cols -|= 1;
         }
         if (b.right) inner.cols -|= 1;
-        return .{ .screen = w.screen, .rect = inner, .ink = w.ink };
+        return .{ ._screen = w._screen, ._rect = inner, ._ink = w._ink };
     }
 
     /// The sub-window over `r`, a rectangle in this window's own cells —
@@ -281,22 +297,22 @@ pub const Window = struct {
     /// One cell, in this window's coordinates, clipped by its whole extent.
     /// Stale or foreign handles return `InvalidHandle`; malformed cells return `InvalidCell`.
     pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{ InvalidHandle, InvalidCell }!void {
-        const checked = try w.screen.cell(c);
+        const checked = try w._screen.cell(c);
         if (!w.fitsCell(col, row, checked)) return;
         var drawn = checked;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try w.screen.textOf(&checked), checked.style));
-        @import("screen.zig").internal.placeCell(w.screen, w.rect.col + col, w.rect.row + row, drawn);
+        if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try w._screen.textOf(&checked), checked.style));
+        @import("screen.zig").internal.placeCell(w._screen, w._rect.col + col, w._rect.row + row, drawn);
     }
 
     /// A source-terminal cell, clipped by its full extent. See Screen's
     /// writeOwnedCellUnchecked preconditions; handles are always checked.
     pub fn writeOwnedCellUnchecked(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
-        _ = try w.screen.textOf(&c);
-        if (c.link != .none and w.screen.target(c.link) == null) return error.InvalidHandle;
+        _ = try w._screen.textOf(&c);
+        if (c.link != .none and w._screen.target(c.link) == null) return error.InvalidHandle;
         if (!w.fitsCell(col, row, c)) return;
         var drawn = c;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), try w.screen.textOf(&c), c.style));
-        try w.screen.writeOwnedCellUnchecked(w.rect.col + col, w.rect.row + row, drawn);
+        if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), try w._screen.textOf(&c), c.style));
+        try w._screen.writeOwnedCellUnchecked(w._rect.col + col, w._rect.row + row, drawn);
     }
 
     /// Copies a cell from another screen into this window.
@@ -305,14 +321,14 @@ pub const Window = struct {
         const checked = try source.cell(c);
         if (!w.fitsCell(col, row, checked)) return;
         var drawn = checked;
-        if (w.ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try source.textOf(&checked), checked.style));
-        try w.screen.copyCell(source, w.rect.col + col, w.rect.row + row, drawn);
+        if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try source.textOf(&checked), checked.style));
+        try w._screen.copyCell(source, w._rect.col + col, w._rect.row + row, drawn);
     }
 
     /// What is there, or null outside the window.
     pub fn readCell(w: Window, col: u16, row: u16) ?Cell {
-        if (col >= w.rect.cols or row >= w.rect.rows) return null;
-        return w.screen.readCell(w.rect.col + col, w.rect.row + row);
+        if (col >= w._rect.cols or row >= w._rect.rows) return null;
+        return w._screen.readCell(w._rect.col + col, w._rect.row + row);
     }
 
     /// A grapheme measured and placed only when its whole extent fits.
@@ -324,13 +340,13 @@ pub const Window = struct {
         style: Style,
         link: Link,
     ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (link != .none and w.screen.target(link) == null) return error.InvalidHandle;
+        if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
         if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
         const valid = try @import("screen.zig").internal.glyph(grapheme);
-        const span = textmod.graphemeWidth(valid, w.screen.method);
+        const span = textmod.graphemeWidth(valid, w._screen.method);
         if (!w.fits(col, row, span, 1)) return;
-        const drawn = if (w.ink == null) style else w.styled(col, row, span, grapheme, style);
-        try w.screen.write(w.rect.col + col, w.rect.row + row, grapheme, drawn, link);
+        const drawn = if (w._ink == null) style else w.styled(col, row, span, grapheme, style);
+        try w._screen.write(w._rect.col + col, w._rect.row + row, grapheme, drawn, link);
     }
 
     // A window owns placement clipping; Screen owns handle checks and tails.
@@ -353,25 +369,25 @@ pub const Window = struct {
         link: Link,
         scale: u3,
     ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!bool {
-        if (link != .none and w.screen.target(link) == null) return error.InvalidHandle;
+        if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
         if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
         const valid = try @import("screen.zig").internal.glyph(grapheme);
         const tall: u16 = @max(scale, 1);
-        const wide: u16 = textmod.graphemeWidth(valid, w.screen.method);
-        if (col >= w.rect.cols or row >= w.rect.rows) return false;
-        if (@as(u32, col) + @as(u32, wide) * tall > w.rect.cols) return false;
-        if (@as(u32, row) + tall > w.rect.rows) return false;
-        const drawn = if (w.ink == null) style else w.styled(col, row, wide * tall, grapheme, style);
-        return w.screen.writeScaled(w.rect.col + col, w.rect.row + row, grapheme, drawn, link, scale);
+        const wide: u16 = textmod.graphemeWidth(valid, w._screen.method);
+        if (col >= w._rect.cols or row >= w._rect.rows) return false;
+        if (@as(u32, col) + @as(u32, wide) * tall > w._rect.cols) return false;
+        if (@as(u32, row) + tall > w._rect.rows) return false;
+        const drawn = if (w._ink == null) style else w.styled(col, row, wide * tall, grapheme, style);
+        return w._screen.writeScaled(w._rect.col + col, w._rect.row + row, grapheme, drawn, link, scale);
     }
 
     /// A rectangle of one cell, in this window's coordinates.
     /// Stale or foreign handles return `InvalidHandle` before any cell changes.
-    pub fn fill(w: Window, rect: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
-        _ = try w.screen.cell(c);
-        const inside = rect.intersect(.fromSize(w.size()));
+    pub fn fill(w: Window, area: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+        _ = try w._screen.cell(c);
+        const inside = area.intersect(.fromSize(w.size()));
         if (inside.isEmpty()) return;
-        if (w.ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
+        if (w._ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
             // Multi-cell fills use the same extent check as direct placement.
             // The fill's own rectangle is the boundary, not just the window.
             const bounded = w.sub(inside);
@@ -382,9 +398,9 @@ pub const Window = struct {
             }
             return;
         }
-        try w.screen.fill(.{
-            .col = w.rect.col + inside.col,
-            .row = w.rect.row + inside.row,
+        try w._screen.fill(.{
+            .col = w._rect.col + inside.col,
+            .row = w._rect.row + inside.row,
             .cols = inside.cols,
             .rows = inside.rows,
         }, c);
@@ -398,7 +414,7 @@ pub const Window = struct {
     /// The window's rows moved by `n`, the vacated rows blank. A positive
     /// `n` moves the contents up.
     pub fn scroll(w: Window, n: i32) void {
-        w.screen.scroll(w.rect, n);
+        w._screen.scroll(w._rect, n);
     }
 
     /// Runs of styled, linked text laid into the window, wrapped.
@@ -410,7 +426,7 @@ pub const Window = struct {
     /// word split across two segments breaks at the join.
     pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
         var at: Print = .{ .col = opts.col, .row = opts.row };
-        if (w.rect.isEmpty()) {
+        if (w._rect.isEmpty()) {
             at.overflow = segments.len != 0;
             return at;
         }
@@ -425,7 +441,7 @@ pub const Window = struct {
 
     /// The columns a string takes, by this screen's width method.
     pub fn width(w: Window, str: []const u8) u16 {
-        return textmod.width(str, w.screen.method);
+        return textmod.width(str, w._screen.method);
     }
 
     /// A mouse report in this window's own coordinates, or null when it fell
@@ -440,9 +456,9 @@ pub const Window = struct {
         if (mouse.x == 0 or mouse.y == 0) return null;
         const col = mouse.x - 1;
         const row = mouse.y - 1;
-        if (col < w.rect.col or row < w.rect.row) return null;
-        if (col >= w.rect.right() or row >= w.rect.bottom()) return null;
-        return .{ .col = @intCast(col - w.rect.col), .row = @intCast(row - w.rect.row) };
+        if (col < w._rect.col or row < w._rect.row) return null;
+        if (col >= w._rect.right() or row >= w._rect.bottom()) return null;
+        return .{ .col = @intCast(col - w._rect.col), .row = @intCast(row - w._rect.row) };
     }
 
     /// The OSC 8 target under a cell of the window, or null: what a click
@@ -451,12 +467,12 @@ pub const Window = struct {
     /// growable link pool: interning links, compaction, resize or destruction
     /// can invalidate its slices. `Screen.dupeTarget` makes a retained copy.
     pub fn linkAt(w: Window, col: u16, row: u16) ?Target {
-        if (col >= w.rect.cols or row >= w.rect.rows) return null;
-        const at_col = w.rect.col + col;
-        const at_row = w.rect.row + row;
-        const head = w.screen.headOf(at_col, at_row) orelse Point{ .col = at_col, .row = at_row };
-        const c = w.screen.readCell(head.col, head.row) orelse return null;
-        return w.screen.target(c.link);
+        if (col >= w._rect.cols or row >= w._rect.rows) return null;
+        const at_col = w._rect.col + col;
+        const at_row = w._rect.row + row;
+        const head = w._screen.headOf(at_col, at_row) orelse Point{ .col = at_col, .row = at_row };
+        const c = w._screen.readCell(head.col, head.row) orelse return null;
+        return w._screen.target(c.link);
     }
 
     /// The text of one row of the window from column `from` up to `to`, as
@@ -464,20 +480,20 @@ pub const Window = struct {
     /// when the range starts on its covered column, and the blanks at the
     /// end left off. What a selection copies.
     pub fn copyText(w: Window, out: *std.Io.Writer, row: u16, from: u16, to: u16) std.Io.Writer.Error!void {
-        if (row >= w.rect.rows) return;
-        const end = @min(to, w.rect.cols);
-        const at_row = w.rect.row + row;
+        if (row >= w._rect.rows) return;
+        const end = @min(to, w._rect.cols);
+        const at_row = w._rect.row + row;
         var spaces: usize = 0;
         var col = from;
         while (col < end) : (col += 1) {
-            const at_col = w.rect.col + col;
-            const c = w.screen.readCell(at_col, at_row) orelse break;
+            const at_col = w._rect.col + col;
+            const c = w._screen.readCell(at_col, at_row) orelse break;
             var text: []const u8 = undefined;
             if (c.isTail()) {
                 if (col != from) continue;
-                const head = w.screen.headOf(at_col, at_row) orelse continue;
-                text = w.screen.textAt(head.col, head.row);
-            } else text = w.screen.textOf(&c) catch @panic("invalid cell in screen");
+                const head = w._screen.headOf(at_col, at_row) orelse continue;
+                text = w._screen.textAt(head.col, head.row);
+            } else text = w._screen.textOf(&c) catch @panic("invalid cell in screen");
             if (std.mem.eql(u8, text, " ")) {
                 spaces += 1;
                 continue;
@@ -491,20 +507,20 @@ pub const Window = struct {
     /// Where the terminal's cursor should end the frame, in this window's
     /// coordinates.
     pub fn showCursor(w: Window, col: u16, row: u16) void {
-        if (col >= w.rect.cols or row >= w.rect.rows) return;
-        w.screen.cursor.col = w.rect.col + col;
-        w.screen.cursor.row = w.rect.row + row;
-        w.screen.cursor.visible = true;
+        if (col >= w._rect.cols or row >= w._rect.rows) return;
+        w._screen.cursor.col = w._rect.col + col;
+        w._screen.cursor.row = w._rect.row + row;
+        w._screen.cursor.visible = true;
     }
 
     /// No cursor this frame.
     pub fn hideCursor(w: Window) void {
-        w.screen.cursor.visible = false;
+        w._screen.cursor.visible = false;
     }
 
     /// The shape the terminal draws its cursor as.
     pub fn setCursorShape(w: Window, shape: morse.CursorShape) void {
-        w.screen.cursor.shape = shape;
+        w._screen.cursor.shape = shape;
     }
 
     //=====================================================================
@@ -519,7 +535,7 @@ pub const Window = struct {
         from: Print,
     ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
         var at = from;
-        if (at.row >= w.rect.rows) {
+        if (at.row >= w._rect.rows) {
             at.overflow = at.overflow or segment.text.len != 0;
             return at;
         }
@@ -529,7 +545,7 @@ pub const Window = struct {
             if (textmod.isLineBreak(g)) {
                 at.col = 0;
                 at.row += 1;
-                if (at.row >= w.rect.rows) {
+                if (at.row >= w._rect.rows) {
                     at.overflow = true;
                     return at;
                 }
@@ -538,18 +554,18 @@ pub const Window = struct {
             if (opts.wrap == .word and g.len == 1 and g[0] == ' ' and at.col == 0) continue;
             if (opts.wrap == .word and atWordStart(segment.text, found.start)) {
                 const word = wordWidth(w, segment.text, found.start);
-                if (@as(u32, at.col) + word > w.rect.cols and word <= w.rect.cols) {
+                if (@as(u32, at.col) + word > w._rect.cols and word <= w._rect.cols) {
                     at.col = 0;
                     at.row += 1;
-                    if (at.row >= w.rect.rows) {
+                    if (at.row >= w._rect.rows) {
                         at.overflow = true;
                         return at;
                     }
                 }
             }
-            const cluster = textmod.graphemeWidth(g, w.screen.method);
+            const cluster = textmod.graphemeWidth(g, w._screen.method);
             if (cluster == 0) continue;
-            if (@as(u32, at.col) + cluster > w.rect.cols) {
+            if (@as(u32, at.col) + cluster > w._rect.cols) {
                 switch (opts.wrap) {
                     .none => {
                         at.overflow = true;
@@ -558,7 +574,7 @@ pub const Window = struct {
                     .grapheme, .word => {
                         at.col = 0;
                         at.row += 1;
-                        if (at.row >= w.rect.rows) {
+                        if (at.row >= w._rect.rows) {
                             at.overflow = true;
                             return at;
                         }
@@ -583,14 +599,14 @@ pub const Window = struct {
     fn wordWidth(w: Window, text: []const u8, i: usize) u16 {
         var end = i;
         while (end < text.len and text[end] != ' ' and text[end] != '\n') end += 1;
-        return textmod.width(text[i..end], w.screen.method);
+        return textmod.width(text[i..end], w._screen.method);
     }
 
     /// The lines and corners a bordered child is framed with.
     fn drawBorder(w: Window, border: Border) void {
         const b = border.where;
-        const last_col = w.rect.cols -| 1;
-        const last_row = w.rect.rows -| 1;
+        const last_col = w._rect.cols -| 1;
+        const last_row = w._rect.rows -| 1;
         const glyphs = border.glyphs;
 
         if (b.top) w.fillLine(0, glyphs.horizontal, border.style);
@@ -607,20 +623,20 @@ pub const Window = struct {
     /// A row of one glyph.
     fn fillLine(w: Window, row: u16, glyph: []const u8, style: Style) void {
         var col: u16 = 0;
-        while (col < w.rect.cols) : (col += 1) w.put(col, row, glyph, style);
+        while (col < w._rect.cols) : (col += 1) w.put(col, row, glyph, style);
     }
 
     /// A column of one glyph.
     fn fillColumn(w: Window, col: u16, glyph: []const u8, style: Style) void {
         var row: u16 = 0;
-        while (row < w.rect.rows) : (row += 1) w.put(col, row, glyph, style);
+        while (row < w._rect.rows) : (row += 1) w.put(col, row, glyph, style);
     }
 
     /// One glyph, where a border's glyphs are short enough to live in a cell
     /// and an allocation would be a surprise.
     fn put(w: Window, col: u16, row: u16, glyph: []const u8, style: Style) void {
         if (glyph.len > Cell.Text.max_inline) return;
-        const cluster = textmod.graphemeWidth(glyph, w.screen.method);
+        const cluster = textmod.graphemeWidth(glyph, w._screen.method);
         if (cluster == 0) return;
         w.writeOwnedCell(col, row, .{
             .text = .inlined(glyph),
@@ -666,7 +682,7 @@ test "the whole grid is a window and a child is inside it" {
     try testing.expectEqual(@as(u16, 4), root.rows());
 
     const c = root.child(.{ .col = 2, .row = 1, .cols = 4, .rows = 2 });
-    try testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, c.rect);
+    try testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 4, .rows = 2 }, c.rect());
     try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expectEqualStrings("x", s.textAt(2, 1));
 }
@@ -675,7 +691,7 @@ test "a child asked for outside its parent comes back empty" {
     var s = try made(10, 4);
     defer s.deinit();
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
-    try testing.expect(c.rect.isEmpty());
+    try testing.expect(c.rect().isEmpty());
     try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
     try testing.expect(!s._damage.any());
 }
@@ -702,7 +718,7 @@ test "a bordered child draws its frame and names the inside" {
     var s = try made(6, 4);
     defer s.deinit();
     const inside = s.window().child(.{ .border = .{ .where = .all } });
-    try testing.expectEqual(Rect{ .col = 1, .row = 1, .cols = 4, .rows = 2 }, inside.rect);
+    try testing.expectEqual(Rect{ .col = 1, .row = 1, .cols = 4, .rows = 2 }, inside.rect());
 
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("\u{250c}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}", rowText(&s, 0, &buf));
@@ -714,7 +730,7 @@ test "a border on one side takes one row from that side only" {
     var s = try made(6, 4);
     defer s.deinit();
     const inside = s.window().child(.{ .border = .{ .where = .{ .top = true } } });
-    try testing.expectEqual(Rect{ .col = 0, .row = 1, .cols = 6, .rows = 3 }, inside.rect);
+    try testing.expectEqual(Rect{ .col = 0, .row = 1, .cols = 6, .rows = 3 }, inside.rect());
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("\u{2500}" ** 6, rowText(&s, 0, &buf));
 }
@@ -939,7 +955,7 @@ test "an ink draws every cell a window writes, where it lands on the screen, and
     const ink = d.ink();
     const root = s.window().inked(&ink);
     const inner = root.child(.{ .col = 2, .row = 1, .cols = 6, .rows = 2, .border = .{ .where = .{ .left = true } } });
-    try testing.expect(inner.ink != null);
+    try testing.expect(inner.ink() != null);
     _ = try inner.printSegment(.{ .text = "ab", .style = .{ .bold = true } }, .{});
     // In screen coordinates: the border took column 2, so "b" is at 4,1.
     try testing.expectEqual(Point{ .col = 4, .row = 1 }, d.last);
@@ -997,8 +1013,8 @@ test "a rectangle of the window's own cells is the child over it, clipped" {
     defer s.deinit();
     const outer = s.window().child(.{ .col = 2, .row = 1 });
     const inner = outer.sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 1 });
-    try testing.expectEqual(Rect{ .col = 5, .row = 2, .cols = 5, .rows = 1 }, inner.rect);
-    try testing.expectEqual(outer.ink, inner.ink);
+    try testing.expectEqual(Rect{ .col = 5, .row = 2, .cols = 5, .rows = 1 }, inner.rect());
+    try testing.expectEqual(outer.ink(), inner.ink());
 }
 
 test "printing measures without allocating and commits only unseen pooled text with allocation" {
@@ -1090,4 +1106,16 @@ test "custom borders refuse malformed glyphs without changing the grid" {
     defer s.deinit();
     _ = s.window().child(.{ .border = .{ .where = .{ .top = true }, .glyphs = .{ .horizontal = "ab" } } });
     for (0..4) |col| try testing.expectEqualStrings(" ", s.textAt(@intCast(col), 0));
+}
+
+test "window geometry stays with the screen that clipped it" {
+    inline for (.{ "screen", "rect", "ink" }) |field| try testing.expect(!@hasField(Window, field));
+    var s = try Screen.init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer s.deinit();
+    const w = s.window().sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 20 });
+    try testing.expect(w.screen() == &s);
+    var rectangle = w.rect();
+    rectangle.cols = 0;
+    try testing.expectEqual(Rect{ .col = 3, .row = 1, .cols = 1, .rows = 1 }, w.rect());
+    try testing.expect(w.ink() == null);
 }

@@ -41,8 +41,8 @@ pub const Markdown = struct {
     /// Draw visible rows. Links are interned in the destination Screen;
     /// unsafe targets remain text. No parser or layout allocations occur.
     pub fn draw(m: Markdown, win: visor.Window) !void {
-        if (win.rect.isEmpty()) return;
-        var rows = Rows.init(m.document, win.cols(), win.screen.method);
+        if (win.rect().isEmpty()) return;
+        var rows = Rows.init(m.document, win.cols(), win.screen().method);
         var skipped: usize = 0;
         while (skipped < m.scroll) : (skipped += 1) _ = rows.next() orelse return;
         var y: u16 = 0;
@@ -79,7 +79,7 @@ pub const Markdown = struct {
             var code_column: u32 = 0;
             while (it.nextAt()) |g| {
                 const tab = block.kind == .code and std.mem.eql(u8, g.bytes, "\t");
-                const w: u32 = if (tab) 4 - code_column % 4 else visor.graphemeWidth(g.bytes, win.screen.method);
+                const w: u32 = if (tab) 4 - code_column % 4 else visor.graphemeWidth(g.bytes, win.screen().method);
                 code_column += w;
                 if (block.kind == .code and skipped_columns < m.scroll_columns) {
                     skipped_columns += w;
@@ -97,7 +97,7 @@ pub const Markdown = struct {
                     if (span.flags.code) ink = overlay(ink, m.theme.inline_code);
                     if (span.uri.len > 0) {
                         ink = overlay(ink, m.theme.link);
-                        link = win.screen.link(span.uri, "") catch |err| switch (err) {
+                        link = win.screen().link(span.uri, "") catch |err| switch (err) {
                             error.ControlInText => .none,
                             else => return err,
                         };

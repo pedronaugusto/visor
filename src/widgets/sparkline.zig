@@ -55,7 +55,7 @@ pub const Sparkline = struct {
 
     /// Draws one column a point, bottom-aligned.
     pub fn draw(s: Sparkline, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty() or s.data.len == 0) return;
+        if (win.rect().isEmpty() or s.data.len == 0) return;
         const cols = win.cols();
         const rows = win.rows();
 

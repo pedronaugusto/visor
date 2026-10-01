@@ -168,7 +168,7 @@ pub const List = struct {
     /// Draws as many items as the window has rows for, moving the offset
     /// when the selection would otherwise be off screen.
     pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
+        if (win.rect().isEmpty()) return;
         const shown = l.visible(win.rows(), state);
         const marker_width = win.width(l.marker);
         const indent = marker_width +| l.gap;
@@ -270,7 +270,7 @@ pub const List = struct {
                 at = start + w;
                 continue;
             }
-            const kept = visor.fit(r.text, room, l.ellipsis, win.screen.method);
+            const kept = visor.fit(r.text, room, l.ellipsis, win.screen().method);
             _ = try win.print(&.{
                 .{ .text = kept, .style = style, .link = r.link },
                 .{ .text = l.ellipsis, .style = style, .link = r.link },

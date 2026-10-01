@@ -52,8 +52,8 @@ pub const Keys = struct {
     /// keys are left as they are, so a strip drawn over a background keeps
     /// it.
     pub fn draw(k: Keys, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
-        if (win.rect.isEmpty()) return;
-        const method = win.screen.method;
+        if (win.rect().isEmpty()) return;
+        const method = win.screen().method;
         const w = k.width(method);
         var col: u16 = switch (k.where) {
             .left => k.margin,
