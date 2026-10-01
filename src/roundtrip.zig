@@ -551,7 +551,7 @@ test "the round trip holds across resizes against a terminal told every width" {
 /// saved origin names.
 fn expectRegionEqual(want: *const Screen, t: *const Term) !void {
     const got = t.screen();
-    const origin = (t.saved orelse return error.NoOrigin).row;
+    const origin = (t.savedCursor() orelse return error.NoOrigin).row;
     try testing.expect(origin + want.dimensions().rows <= got.dimensions().rows);
     var row: u16 = 0;
     while (row < want.dimensions().rows) : (row += 1) {
@@ -652,12 +652,12 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
     try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
 
     // And the way out leaves the frame and puts the cursor below it.
-    const origin = t.saved.?.row;
+    const origin = t.savedCursor().?.row;
     h.out.clearRetainingCapacity();
     try h.renderer.leave(&h.out.writer);
     try t.feed(h.out.written());
-    try testing.expectEqual(@as(u16, 0), t.col);
-    try testing.expectEqual(@min(origin + size.rows, @as(u16, terminal_rows) - 1), t.row);
+    try testing.expectEqual(@as(u16, 0), t.position().col);
+    try testing.expectEqual(@min(origin + size.rows, @as(u16, terminal_rows) - 1), t.position().row);
 }
 
 test "the round trip holds for an inline screen measuring by codepoint" {
@@ -847,7 +847,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         try testing.expectEqual(commands, stats.placements);
         if (!h.caps.kitty_graphics) try testing.expectEqual(@as(usize, 0), commands);
         expected_commands += commands;
-        try testing.expectEqual(expected_commands, whole.graphics.items.len);
+        try testing.expectEqual(expected_commands, whole.graphics().len);
 
         // A deletion names one placement, keeps the bytes, and happens only
         // for a picture that left -- not for one whose image was sent again

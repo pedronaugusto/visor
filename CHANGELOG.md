@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: Term allocation, grid and stream state are internal; screen(), position(), savedCursor() and graphics() provide const views or values.
+
 - Breaking: Session allocation and coordinated state are internal; use component borrows and const size, capability and probe queries.
 
 - Breaking: Renderer terminal state is internal; entered() returns the requested configuration by value, and mutations go through its methods.

@@ -103,7 +103,7 @@ fn frame(
     const stats = try renderer.draw(&out.writer, screen, null, caps);
     try term.feed(out.written());
     std.debug.assert((try renderer.draw(&out.writer, screen, null, caps)).bytes == 0);
-    const origin = term.saved.?.row;
+    const origin = term.savedCursor().?.row;
     var row: u16 = 0;
     while (row < screen.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
@@ -131,6 +131,6 @@ fn show(gpa: std.mem.Allocator, term: *const visor.Term, what: []const u8, stats
     var row: u16 = 0;
     while (lines.next()) |line| : (row += 1) {
         if (row >= term.screen().dimensions().rows) break;
-        std.debug.print("{c}|{s}|\n", .{ @as(u8, if (row == term.row) '>' else ' '), line });
+        std.debug.print("{c}|{s}|\n", .{ @as(u8, if (row == term.position().row) '>' else ' '), line });
     }
 }

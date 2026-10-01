@@ -3225,8 +3225,8 @@ test "entering inline mode takes the rows at the cursor and leaves the prompt ab
     try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     try testing.expectEqualStrings("\x1b[?2027h\x1b[0m\r\n\n\x1b[2A\x1b7\x1b[0J\x1b[?25l", f.written());
     try t.feed(f.written());
-    try testing.expectEqual(@as(u16, 2), t.row);
-    try testing.expectEqual(@as(u16, 2), t.saved.?.row);
+    try testing.expectEqual(@as(u16, 2), t.position().row);
+    try testing.expectEqual(@as(u16, 2), t.savedCursor().?.row);
 
     try f.screen.write(0, 0, "a", .{}, .none);
     try f.screen.write(4, 2, "b", .{ .bold = true }, .none);
@@ -3255,7 +3255,7 @@ test "an inline screen at the bottom of the terminal scrolls it to make room" {
     try t.feed(f.written());
     // Two lines scrolled off; the third is the row above the screen.
     try expectRowText(&t, 0, "line 2");
-    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+    try testing.expectEqual(@as(u16, 1), t.savedCursor().?.row);
 
     try f.screen.write(0, 2, "x", .{}, .none);
     _ = try f.draw();
@@ -3309,7 +3309,7 @@ test "growing an inline screen takes more rows and keeps what was above" {
     try testing.expect(std.mem.startsWith(u8, f.written(), "\x1b]8;;\x1b\\\x1b[0m\x1b8\n\n\n\x1b[3A\x1b7\x1b[0J"));
     try t.feed(f.written());
     try expectRowText(&t, 0, "line 1");
-    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+    try testing.expectEqual(@as(u16, 1), t.savedCursor().?.row);
     try expectRowText(&t, 1, "a");
     try expectRowText(&t, 2, "b");
     try expectRowText(&t, 3, "");
@@ -3386,7 +3386,7 @@ test "shrinking an inline screen gives its rows back blank" {
     try expectRowText(&t, 2, "x");
     try expectRowText(&t, 3, "");
     try expectRowText(&t, 4, "");
-    try testing.expectEqual(@as(u16, 1), t.saved.?.row);
+    try testing.expectEqual(@as(u16, 1), t.savedCursor().?.row);
     try f.expectBytes("");
 }
 
@@ -3449,8 +3449,8 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     try f.renderer.leave(&f.out.writer);
     try testing.expectEqualStrings("\x1b[?2026l\x1b[0m\x1b[?25h\x1b[?2027l\x1b8\x1b[2B\n\r", f.written());
     try t.feed(f.written());
-    try testing.expectEqual(@as(u16, 4), t.row);
-    try testing.expectEqual(@as(u16, 0), t.col);
+    try testing.expectEqual(@as(u16, 4), t.position().row);
+    try testing.expectEqual(@as(u16, 0), t.position().col);
     try expectRowText(&t, 3, "x");
     try testing.expect(t.screen().cursor.visible);
 
@@ -3469,7 +3469,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     g.out.clearRetainingCapacity();
     try g.renderer.leave(&g.out.writer);
     try u.feed(g.written());
-    try testing.expectEqual(@as(u16, 2), u.row);
+    try testing.expectEqual(@as(u16, 2), u.position().row);
     try expectRowText(&u, 1, "y");
     try expectRowText(&u, 2, "");
 }

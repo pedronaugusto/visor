@@ -341,6 +341,11 @@ comparing the meaning are the same answer.
 Cells read from the screen carry checked text and link handles. The grid and
 renderer store compact cells; Screen owns their pool identity. Screen and
 Renderer geometry is read through `dimensions()` and changed through `resize`.
+Term owns its grid, allocator and stream state. `screen()` and `graphics()`
+lend read-only views; `position()` and `savedCursor()` return copied positions.
+Feed bytes and resize through the terminal so its cursor, links and grid stay
+together.
+
 Session owns coordinated size, capabilities and probe progress. Read them
 through `windowSize()`, `capabilities()` and `probe()`; change them through
 `handle`, `resize` and `setCaps`. `screen()`, `renderer()` and `layers()` lend
