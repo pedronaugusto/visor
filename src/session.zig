@@ -34,8 +34,8 @@ pub const ProbeWait = struct {
     }
 };
 
-/// Convenience around independent values the caller may use directly.
-/// Drain input through `handle`, call `resize` once, paint `screen`, then
+/// Coordinates component owners, terminal geometry and capability policy.
+/// Drain input through `handle`, call `resize` once, paint `screen()`, then
 /// `draw`. Neither this value nor any of its writes flushes output.
 pub const Session = struct {
     _gpa: Allocator,
@@ -43,6 +43,8 @@ pub const Session = struct {
     _renderer: Renderer,
     _ws: Winsize,
     _caps: Caps = .{},
+    /// Learned policy waiting for the renderer to accept its mode commands.
+    _pending_caps: ?Caps = null,
     _probe: Caps.Probe,
     _layers: Layers,
     /// Last size of a drained batch, applied by `resize` before painting.
@@ -110,9 +112,13 @@ pub const Session = struct {
 
     /// Applies caller-selected caps as well as the probe's learned ones.
     /// An application can call this after `handle` to apply its own policy.
+    /// Success supersedes pending learned policy; failure keeps it retryable.
     pub fn setCaps(s: *Session, w: *Writer, caps: Caps) Error!bool {
-        if (std.meta.eql(s._caps, caps)) return false;
-        if (s._renderer.entered() != null) try s._renderer.setCaps(w, caps) else s._renderer.repaint();
+        const changed = !std.meta.eql(s._caps, caps);
+        if (s._renderer.entered() != null) try s._renderer.setCaps(w, caps) else if (changed) s._renderer.repaint();
+        // A successful explicit policy also supersedes a queued probe change.
+        s._pending_caps = null;
+        if (!changed) return false;
         s._caps = caps;
         s._screen.method = caps.width_method;
         s._layers.repaint();
@@ -151,7 +157,8 @@ pub const Session = struct {
     pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
         const was = s._probe.capabilities();
         s._probe.feed(event, now_ms);
-        var redraw = if (!std.meta.eql(was, s._probe.capabilities())) try s.setCaps(w, s._probe.capabilities()) else false;
+        if (!std.meta.eql(was, s._probe.capabilities())) s._pending_caps = s._probe.capabilities();
+        var redraw = if (s._pending_caps) |caps| try s.setCaps(w, caps) else false;
         switch (event) {
             .resize => {
                 var next = s._pending orelse s._ws;
@@ -362,4 +369,46 @@ test "session allocation and coordinated state stay behind their owner" {
     try testing.expect(s.capabilities().osc8);
     try testing.expectEqual(@as(usize, 0), s.layers().images().len);
     try s.probe().write(&out);
+}
+
+test "a session retries learned capabilities after failed output" {
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    defer s.deinit();
+    var bytes: [1024]u8 = undefined;
+    var out: Writer = .fixed(&bytes);
+    try s.renderer().enter(&out, .{}, .alt, .{});
+    var refused: Writer = .fixed(&.{});
+    const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
+    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
+    try testing.expect(s.probe().capabilities().in_band_resize);
+    try testing.expect(!s.capabilities().in_band_resize);
+    out.end = 0;
+    try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, 11));
+    try testing.expect(s.capabilities().in_band_resize);
+    try testing.expectEqualStrings("\x1b[?2048h", out.buffered());
+    var policy = s.capabilities();
+    policy.osc8 = true;
+    _ = try s.setCaps(&out, policy);
+    out.end = 0;
+    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 12));
+    try testing.expect(s.capabilities().osc8);
+    try testing.expectEqual(@as(usize, 0), out.buffered().len);
+}
+
+test "session policy can cancel pending learned capabilities at the current value" {
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    defer s.deinit();
+    var bytes: [1024]u8 = undefined;
+    var out: Writer = .fixed(&bytes);
+    try s.renderer().enter(&out, .{}, .alt, .{});
+    var refused: Writer = .fixed(&.{});
+    const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
+    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
+    out.end = 0;
+    try testing.expect(!try s.setCaps(&out, s.capabilities()));
+    try testing.expectEqualStrings("\x1b[?2048l", out.buffered());
+    out.end = 0;
+    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 11));
+    try testing.expect(!s.renderer().entered().?.caps.in_band_resize);
+    try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
