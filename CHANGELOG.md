@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Breaking: ImageIds keeps its validated range, excluded probe id and allocation cursor internal; use init and acquire.
+
 - Breaking: Replacement picture ownership and refusal state are internal; current() and pending() return copied ids.
 
 - Breaking: Caps.Probe owns its questions and answer progress internally; init and const queries replace literals and mutable fields.

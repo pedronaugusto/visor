@@ -189,24 +189,24 @@ pub const Transmit = struct {
 /// replacements. Skips zero, the probe id and every image still held by
 /// `Layers`, including those awaiting retirement.
 pub const ImageIds = struct {
-    first: u32,
-    last: u32,
-    graphics_id: u32,
-    next: u32,
+    _first: u32,
+    _last: u32,
+    _graphics_id: u32,
+    _next: u32,
 
     pub fn init(first: u32, last: u32, graphics_id: u32) error{InvalidIdRange}!ImageIds {
         if (first == 0 or first > last or (first == last and first == graphics_id)) return error.InvalidIdRange;
-        return .{ .first = first, .last = last, .graphics_id = graphics_id, .next = first };
+        return .{ ._first = first, ._last = last, ._graphics_id = graphics_id, ._next = first };
     }
 
     /// A free id, or `NoImageId` while the range is wholly occupied.
     pub fn acquire(ids: *ImageIds, layers: *const Layers) error{NoImageId}!u32 {
-        const start = ids.next;
+        const start = ids._next;
         while (true) {
-            const id = ids.next;
-            ids.next = if (id == ids.last) ids.first else id + 1;
-            if (id != ids.graphics_id and layers.image(id) == null) return id;
-            if (ids.next == start) return error.NoImageId;
+            const id = ids._next;
+            ids._next = if (id == ids._last) ids._first else id + 1;
+            if (id != ids._graphics_id and layers.image(id) == null) return id;
+            if (ids._next == start) return error.NoImageId;
         }
     }
 };
@@ -1820,5 +1820,11 @@ test "failed direct transmission stays refused through grace and can be retried"
 test "replacement ownership and refusal state stay behind their owner" {
     inline for (.{ "current", "pending", "dirty" }) |field| {
         try testing.expect(!@hasField(Replacement, field));
+    }
+}
+
+test "image id bounds and allocation cursor stay behind their owner" {
+    inline for (.{ "first", "last", "graphics_id", "next" }) |field| {
+        try testing.expect(!@hasField(ImageIds, field));
     }
 }

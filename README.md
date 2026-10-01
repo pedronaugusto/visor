@@ -534,6 +534,8 @@ picture and releases its object.
 
 `Replacement` keeps a current picture while a new one is in flight. Share an
 `ImageIds` range between replacements, with the probe's graphics id excluded.
+Construct it through `init` and issue ids through `acquire`; bounds and the
+allocation cursor are internal.
 `send` takes pixels and transmit options; `declare` takes the placement and
 caller-supplied time and grace. Pass graphics replies to `Layers.ack` and call
 `declare` again. Its result says another frame is needed while waiting;
