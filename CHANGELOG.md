@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Resize watching withdraws handler borrows before closing either pipe end so teardown cannot write to a closed or reused descriptor.
+
 - Block titles keep whole glyphs between the frame sides, including when clipped.
 - Late graphics replies cannot make failed images ready before retransmission.
 - Breaking: Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.

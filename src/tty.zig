@@ -46,11 +46,51 @@ var open_ttys: ?*Tty = null;
 /// A pipe's descriptor, `-1` for none.
 const Fd = if (is_windows) i32 else std.posix.fd_t;
 
-/// The write end of every watching `Tty`'s resize pipe, `-1` for a free
-/// slot. The signal is the process's, so the one handler has to reach every
-/// terminal that watches it; each `Tty` owns its pipe and only names its
-/// write end here. Atomic because the handler reads it at any moment.
-var watchers: [max_watchers]std.atomic.Value(Fd) = @splat(.init(-1));
+/// Subscriptions to the process's resize signal. A Tty owns its pipe;
+/// its slot lends the write end to handlers until withdrawal has finished.
+var watchers: [max_watchers]ResizeWatch = @splat(.{});
+
+const ResizeWatch = struct {
+    // The low bit admits new borrows; the other bits count existing ones.
+    // One atomic word makes taking a borrow and closing admission ordered:
+    // a handler either increments first, or sees admission closed. These
+    // native-word atomics are lock-free on every supported POSIX target.
+    const admitted: usize = 1;
+    const borrow: usize = 2;
+    state: std.atomic.Value(usize) = .init(0),
+    fd: Fd = -1,
+
+    fn publish(w: *ResizeWatch, fd: Fd) void {
+        std.debug.assert(w.fd == -1);
+        w.fd = fd;
+        w.state.store(admitted, .release);
+    }
+
+    fn acquire(w: *ResizeWatch) ?Fd {
+        var state = w.state.load(.monotonic);
+        while (state & admitted != 0) {
+            state = w.state.cmpxchgWeak(state, state + borrow, .acquire, .monotonic) orelse return w.fd;
+        }
+        return null;
+    }
+
+    fn release(w: *ResizeWatch) void {
+        _ = w.state.fetchSub(borrow, .release);
+    }
+
+    fn withdraw(w: *ResizeWatch) void {
+        _ = w.state.fetchAnd(~admitted, .acq_rel);
+        // No handler waits on the owner: each only writes a nonblocking
+        // byte and releases. On this thread an interrupt finishes before
+        // withdrawal resumes; on another thread its borrow keeps BOTH ends
+        // open here, avoiding descriptor reuse and a write without a reader.
+        while (w.state.load(.acquire) != 0) {
+            if (builtin.is_test) ResizePause.quiescing.store(true, .release);
+            std.atomic.spinLoopHint();
+        }
+        w.fd = -1;
+    }
+};
 /// How many terminals can watch at once. A program has one terminal; a
 /// test, or a program that also drives a pseudo-terminal of its own, a few.
 const max_watchers = 8;
@@ -66,8 +106,10 @@ var resize_was: if (is_windows) void else std.posix.Sigaction = undefined;
 fn onWinch(_: std.posix.SIG) callconv(.c) void {
     const byte: [1]u8 = .{'w'};
     for (&watchers) |*w| {
-        const fd = w.load(.acquire);
-        if (fd != -1) _ = std.posix.system.write(fd, &byte, 1);
+        const fd = w.acquire() orelse continue;
+        if (builtin.is_test) ResizePause.borrowed();
+        _ = std.posix.system.write(fd, &byte, 1);
+        w.release();
     }
 }
 
@@ -101,7 +143,8 @@ const Saved = if (is_windows) struct {
 
 /// The descriptor, the saved mode, and the way back.
 /// Keep its address stable between `raw` and `restore`, and call these
-/// operations from one thread. An entered renderer must stay alive and at
+/// operations, including resize registration for every terminal, from one
+/// thread. An entered renderer must stay alive and at
 /// the same address until `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
     /// The terminal itself.
@@ -373,8 +416,8 @@ pub const Tty = struct {
             try fcntlSet(fd, std.posix.F.SETFD, std.posix.FD_CLOEXEC);
         }
         for (&watchers) |*w| {
-            if (w.load(.acquire) != -1) continue;
-            w.store(fds[1], .release);
+            if (w.fd != -1) continue;
+            w.publish(fds[1]);
             break;
         }
         t._resize_pipe = fds;
@@ -391,11 +434,12 @@ pub const Tty = struct {
 
     /// Stops this terminal watching, and closes its pipe; when it was the
     /// last one watching, puts back the `SIGWINCH` handler the first one
-    /// found. Safe to call when nothing is being watched.
+    /// found. Waits for any handler already writing this pipe before either
+    /// end is closed. Safe to call when nothing is being watched.
     pub fn unwatchResize(t: *Tty) void {
         if (is_windows or t._resize_pipe[0] == -1) return;
         for (&watchers) |*w| {
-            if (w.load(.acquire) == t._resize_pipe[1]) w.store(-1, .release);
+            if (w.fd == t._resize_pipe[1]) w.withdraw();
         }
         watching -= 1;
         if (watching == 0) std.posix.sigaction(.WINCH, &resize_was, null);
@@ -886,4 +930,57 @@ test "terminal descriptors and restoration state stay behind their owner" {
     inline for (.{ "file", "io", "input", "saved", "renderer", "next_raw", "resize_pipe" }) |field| {
         try testing.expect(!@hasField(Tty, field));
     }
+}
+
+// A controlled pause after the handler has borrowed the descriptor. These
+// gates do not exist in a library build.
+const ResizePause = struct {
+    var enabled: bool = false;
+    var held: std.atomic.Value(bool) = .init(false);
+    var quiescing: std.atomic.Value(bool) = .init(false);
+    var released: std.atomic.Value(bool) = .init(false);
+
+    fn borrowed() void {
+        if (!enabled) return;
+        held.store(true, .release);
+        while (!released.load(.acquire)) std.atomic.spinLoopHint();
+    }
+};
+
+test "resize teardown waits for a handler that has borrowed its descriptor" {
+    if (is_windows) return error.SkipZigTest;
+    var t: Tty = .adopt(testing.io, undefined);
+    try t.watchResize();
+    defer t.unwatchResize();
+    const fds = t._resize_pipe;
+    ResizePause.held.store(false, .release);
+    ResizePause.quiescing.store(false, .release);
+    ResizePause.released.store(false, .release);
+    ResizePause.enabled = true;
+    defer ResizePause.enabled = false;
+    const handler = try std.Thread.spawn(.{}, onWinch, .{std.posix.SIG.WINCH});
+    defer handler.join();
+    defer ResizePause.released.store(true, .release);
+    while (!ResizePause.held.load(.acquire)) std.atomic.spinLoopHint();
+
+    var done: std.atomic.Value(bool) = .init(false);
+    const teardown = try std.Thread.spawn(.{}, struct {
+        fn run(tty: *Tty, finished: *std.atomic.Value(bool)) void {
+            tty.unwatchResize();
+            finished.store(true, .release);
+        }
+    }.run, .{ &t, &done });
+    defer {
+        ResizePause.released.store(true, .release);
+        teardown.join();
+    }
+    // Teardown either reaches quiescence with the borrow held, or returns
+    // before the handler writes. No clock or scheduling guess decides it.
+    while (!ResizePause.quiescing.load(.acquire) and !done.load(.acquire)) std.atomic.spinLoopHint();
+    const returned_early = done.load(.acquire);
+    const read_open = std.posix.errno(std.posix.system.fcntl(fds[0], std.posix.F.GETFD, @as(u32, 0))) == .SUCCESS;
+    const write_open = std.posix.errno(std.posix.system.fcntl(fds[1], std.posix.F.GETFD, @as(u32, 0))) == .SUCCESS;
+    try testing.expect(!returned_early);
+    try testing.expect(read_open);
+    try testing.expect(write_open);
 }
