@@ -173,9 +173,7 @@ pub const Session = struct {
                 .window_size => |report| {
                     if (report.what == .text_area_cells) {
                         var next = s._pending orelse s._ws;
-                        const before = next.cells;
                         _ = next.update(event);
-                        if (!std.meta.eql(before, next.cells)) next.cell = .{};
                         s._pending = next;
                         s._resize_report = true;
                         return true;

@@ -134,11 +134,14 @@ pub const Winsize = struct {
                 const was = ws.*;
                 switch (report.what) {
                     .cell_pixels => ws.cell = .{ .width = report.width, .height = report.height },
-                    .text_area_pixels => ws.area = .{ .width = report.width, .height = report.height },
-                    .text_area_cells => ws.cells = .{
-                        .cols = clamp16(report.width),
-                        .rows = clamp16(report.height),
-                    },
+                    .text_area_pixels => return ws.resized(.{
+                        .cells = ws.cells,
+                        .area = .{ .width = report.width, .height = report.height },
+                    }),
+                    .text_area_cells => return ws.resized(.{
+                        .cells = .{ .cols = clamp16(report.width), .rows = clamp16(report.height) },
+                        .area = ws.area,
+                    }),
                     .screen_pixels, .screen_cells => return false,
                 }
                 return !std.meta.eql(was, ws.*);
@@ -255,4 +258,22 @@ test "Winsize.locate centers cell reports, handles zero and bounds far-away pixe
     const far = tiny.locate(mouse).?;
     try testing.expectEqual(std.math.maxInt(u32), far.col);
     try testing.expect(far.x >= 0 and far.x < 1 and far.y >= 0 and far.y < 1);
+}
+
+test "window size replies invalidate cell pixels only when geometry changes" {
+    const replies = [_][]const u8{ "\x1b[8;30;100t", "\x1b[4;600;900t" };
+    for (replies) |reply| {
+        var ws: Winsize = .{
+            .cells = .{ .cols = 80, .rows = 24 },
+            .area = .{ .width = 720, .height = 480 },
+            .cell = .{ .width = 9, .height = 20 },
+        };
+        // Both reply forms carry the same geometry as an in-band resize;
+        // cached font measurements have the same lifetime for either route.
+        try testing.expect(ws.update(answer(reply)));
+        try testing.expect(!ws.cell.known());
+        ws.cell = .{ .width = 10, .height = 21 };
+        try testing.expect(!ws.update(answer(reply)));
+        try testing.expectEqual(Pixels{ .width = 10, .height = 21 }, ws.cell);
+    }
 }
