@@ -104,47 +104,47 @@ pub const Paragraph = struct {
 /// absolute ranges. A paragraph of ten thousand rows therefore costs the
 /// same thirty-two rows of stack as a paragraph of two.
 const RowIterator = struct {
-    text: []const u8,
-    cols: u16,
-    mode: visor.Wrap,
-    method: visor.Method,
-    base: usize = 0,
-    buf: [32]visor.Row = undefined,
-    have: usize = 0,
-    at: usize = 0,
+    _text: []const u8,
+    _cols: u16,
+    _mode: visor.Wrap,
+    _method: visor.Method,
+    _base: usize = 0,
+    _buf: [32]visor.Row = undefined,
+    _have: usize = 0,
+    _at: usize = 0,
     /// Whether the last refill saw the end of the text.
-    last: bool = false,
+    _last: bool = false,
 
     /// Break `text` into rows `cols` wide, the way `Paragraph.draw` does.
     pub fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) RowIterator {
-        return .{ .text = text, .cols = cols, .mode = mode, .method = method };
+        return .{ ._text = text, ._cols = cols, ._mode = mode, ._method = method };
     }
 
     /// The next row, as a range of the whole text, or null after the last.
     pub fn next(it: *RowIterator) ?visor.Row {
-        if (it.at == it.have) {
-            if (it.last) return null;
-            it.have = visor.wrap(it.text[it.base..], it.cols, it.mode, it.method, &it.buf);
-            it.at = 0;
-            if (it.have == 0) return null;
-            if (it.have < it.buf.len) {
-                it.last = true;
+        if (it._at == it._have) {
+            if (it._last) return null;
+            it._have = visor.wrap(it._text[it._base..], it._cols, it._mode, it._method, &it._buf);
+            it._at = 0;
+            if (it._have == 0) return null;
+            if (it._have < it._buf.len) {
+                it._last = true;
             } else {
                 // The last row of a full buffer is where the next refill
                 // starts, so it is handed out by that refill and not by
                 // this one.
-                it.have -= 1;
+                it._have -= 1;
             }
         }
-        const r = it.buf[it.at];
+        const r = it._buf[it._at];
         const out: visor.Row = .{
-            .start = it.base + r.start,
-            .end = it.base + r.end,
+            .start = it._base + r.start,
+            .end = it._base + r.end,
             .columns = r.columns,
         };
-        it.at += 1;
+        it._at += 1;
         // The row that was held back is where the next refill starts.
-        if (it.at == it.have and !it.last) it.base += it.buf[it.have].start;
+        if (it._at == it._have and !it._last) it._base += it._buf[it._have].start;
         return out;
     }
 };
@@ -345,5 +345,11 @@ test "paragraph rows and clipping treat CRLF as one line break" {
         } else {
             try testing.expectEqualStrings("c", h.screen.textAt(0, @intCast(count - 1)));
         }
+    }
+}
+
+test "paragraph row iterator source and refill state stay behind next" {
+    inline for (.{ "text", "cols", "mode", "method", "base", "buf", "have", "at", "last" }) |field| {
+        try testing.expect(!@hasField(Paragraph.Rows, field));
     }
 }
