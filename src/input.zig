@@ -453,7 +453,7 @@ test "a read within a deadline hands over what came, and null once the deadline 
 
 test "a resize wakes the wait and carries the size and pixels the system has now" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{ .rows = 30, .cols = 100, .x_pixel = 900, .y_pixel = 600 });
+    var pair = try conduit.Pty.open(testing.allocator, .{ .rows = 30, .cols = 100, .x_pixel = 900, .y_pixel = 600 });
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
     try t.watchResize();

@@ -612,7 +612,7 @@ fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
 
 test "entering through the terminal arms the way back, and the panic path undoes exactly that" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{});
+    var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
     const before = try std.posix.tcgetattr(t._file.handle);
@@ -663,7 +663,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
 
 test "leaving through the terminal releases its renderer before destruction" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{});
+    var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
 
@@ -695,7 +695,7 @@ test "opening this program's terminal compiles and fails cleanly without one" {
 
 test "the size carries the text area in pixels where the terminal set it" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{ .rows = 40, .cols = 132, .x_pixel = 1188, .y_pixel = 800 });
+    var pair = try conduit.Pty.open(testing.allocator, .{ .rows = 40, .cols = 132, .x_pixel = 1188, .y_pixel = 800 });
     defer pair.close(testing.io);
 
     var t: Tty = .adopt(testing.io, pair.slaveFile());
@@ -733,9 +733,9 @@ pub fn pipe() ![2]std.posix.fd_t {
 
 test "two terminals cannot borrow the same entered renderer" {
     if (is_windows) return error.SkipZigTest;
-    var first = try conduit.Pty.open(.{});
+    var first = try conduit.Pty.open(testing.allocator, .{});
     defer first.close(testing.io);
-    var second = try conduit.Pty.open(.{});
+    var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
     var a: Tty = .adopt(testing.io, first.slaveFile());
     var b: Tty = .adopt(testing.io, second.slaveFile());
@@ -752,9 +752,9 @@ test "two terminals cannot borrow the same entered renderer" {
 
 test "restoring one entered terminal leaves the other renderer armed" {
     if (is_windows) return error.SkipZigTest;
-    var first = try conduit.Pty.open(.{});
+    var first = try conduit.Pty.open(testing.allocator, .{});
     defer first.close(testing.io);
-    var second = try conduit.Pty.open(.{});
+    var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
     var a: Tty = .adopt(testing.io, first.slaveFile());
     var b: Tty = .adopt(testing.io, second.slaveFile());
@@ -784,9 +784,9 @@ test "restoring one entered terminal leaves the other renderer armed" {
 
 test "panic restoration restores every raw terminal and clears its registration" {
     if (is_windows) return error.SkipZigTest;
-    var first = try conduit.Pty.open(.{});
+    var first = try conduit.Pty.open(testing.allocator, .{});
     defer first.close(testing.io);
-    var second = try conduit.Pty.open(.{});
+    var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
     var a: Tty = .adopt(testing.io, first.slaveFile());
     var b: Tty = .adopt(testing.io, second.slaveFile());
@@ -801,7 +801,7 @@ test "panic restoration restores every raw terminal and clears its registration"
 
 test "an entered terminal refuses to replace its renderer association" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{});
+    var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
@@ -815,7 +815,7 @@ test "an entered terminal refuses to replace its renderer association" {
 
 test "a failed leave flush still restores the entered modes on the saved terminal" {
     if (is_windows) return error.SkipZigTest;
-    var pair = try conduit.Pty.open(.{});
+    var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(testing.io, pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });

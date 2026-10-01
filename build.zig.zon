@@ -7,12 +7,12 @@
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#52a5f90304d7d46bde9ecad8f3a5d53a989519a0",
-            .hash = "morse-0.7.0-OKnGoS_PDgD6qRwf1307De2MihX0Enx-nLvQb6fIDAu9",
+            .url = "git+https://github.com/pedronaugusto/morse#af2dc63f05d4610465aaa7577cf301e881bac33d",
+            .hash = "morse-0.7.0-OKnGoaDdDgCzuPQ8dGFheA0Ge3PNdoTcECdmVRDBnWtD",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#8adf8af91329333c2deb7db5e2b14fdbae9520d8",
-            .hash = "conduit-0.5.1-4rIA73HFDADAllqv4wdcU4McfenXIP5UEZD0_yIetuhb",
+            .url = "git+https://github.com/pedronaugusto/conduit#04f88cfeb68e687aba60e0ec9f5230ff9a2c6c0f",
+            .hash = "conduit-0.5.1-4rIA7yuKDwD7IeK1oW98CWuvu7rM0LCc5WsPwqqFQElb",
         },
     },
     .minimum_zig_version = "0.16.0",
