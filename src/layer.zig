@@ -914,8 +914,8 @@ const Fixture = struct {
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
         errdefer r.deinit();
-        r.shown = false;
-        r.cursor = .{ .col = 0, .row = 0 };
+        r._shown = false;
+        r._cursor = .{ .col = 0, .row = 0 };
         return .{
             .gpa = gpa,
             .layers = .init(gpa),

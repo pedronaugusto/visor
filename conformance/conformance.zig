@@ -553,9 +553,9 @@ fn corrupt(r: *visor.Renderer, dice: *corpus.Dice) void {
     while (i < count and r._prev.len != 0) : (i += 1) {
         r._prev[dice.index(r._prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
-    r.style = styles[dice.index(styles.len)];
-    r.cursor = null;
-    r.shown = null;
+    r._style = styles[dice.index(styles.len)];
+    r._cursor = null;
+    r._shown = null;
 }
 
 test "the second emulator agrees, measuring by codepoint" {

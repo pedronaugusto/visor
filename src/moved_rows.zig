@@ -55,7 +55,7 @@ pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u
         try morse.scrollDown(out, found.distance);
     }
     if (!whole) try morse.scrollRegionReset(out);
-    r.cursor = null;
+    r._cursor = null;
 
     render.internal.shiftPrev(r, found.top, found.bottom, found.distance, found.up);
     return @as(u32, found.bottom - found.top) + 1;
@@ -78,7 +78,7 @@ const Found = struct {
 /// band of rows it explains, then checks that band cell by cell.
 fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
     const rows = r.dimensions().rows;
-    if (rows < 3 or r.repaint_all) return null;
+    if (rows < 3 or r._repaint_all) return null;
     if (s._damage.count() < min_dirty_rows) return null;
     for (r._force) |f| if (f) return null;
 
@@ -238,8 +238,8 @@ const Fixture = struct {
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
         errdefer r.deinit();
-        r.shown = false;
-        r.cursor = .{ .col = 0, .row = 0 };
+        r._shown = false;
+        r._cursor = .{ .col = 0, .row = 0 };
         return .{
             .gpa = gpa,
             .screen = s,
@@ -367,8 +367,8 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     var t: @import("term.zig").Term = try .init(gpa, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
-    f.renderer.shown = null;
-    f.renderer.cursor = null;
+    f.renderer._shown = null;
+    f.renderer._cursor = null;
 
     for ([_]u16{ 2, 8 }) |row| try f.screen.write(1, row, "\u{4e2d}", .{}, .none);
     try f.screen.write(5, 2, "\u{4e2d}", .{}, .none);

@@ -80,7 +80,7 @@ pub const Session = struct {
     /// An application can call this after `handle` to apply its own policy.
     pub fn setCaps(s: *Session, w: *Writer, caps: Caps) Error!bool {
         if (std.meta.eql(s.caps, caps)) return false;
-        if (s.renderer.entered != null) try s.renderer.setCaps(w, caps) else s.renderer.repaint();
+        if (s.renderer.entered() != null) try s.renderer.setCaps(w, caps) else s.renderer.repaint();
         s.caps = caps;
         s.screen.method = caps.width_method;
         s.layers.repaint();
@@ -97,7 +97,7 @@ pub const Session = struct {
     /// Changes modes and the parser's flag together. Pixel reports are
     /// byte-identical to cell reports; the requested encoding decides.
     pub fn setModes(s: *Session, w: *Writer, parser: *morse.KeyParser, modes: render.Modes) Renderer.ModesError!void {
-        if (s.renderer.entered == null) return error.NotEntered;
+        if (s.renderer.entered() == null) return error.NotEntered;
         parser.mouse_pixels = pixelMouse(modes);
         try s.renderer.setModes(w, modes);
     }
@@ -257,7 +257,7 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
     out.clearRetainingCapacity();
     try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 0));
     try testing.expectEqualStrings("\x1b[?2048h", out.written());
-    try testing.expect(s.renderer.entered.?.in_band_resize);
+    try testing.expect(s.renderer.entered().?.in_band_resize);
     try s.leave(&out.writer);
 }
 

@@ -269,7 +269,7 @@ pub const Tty = struct {
         mode: render.Mode,
         modes: render.Modes,
     ) EnterError!void {
-        if (t.renderer != null or r.entered != null) return error.AlreadyEntered;
+        if (t.renderer != null or r.entered() != null) return error.AlreadyEntered;
         try t.raw();
         t.renderer = r;
         var buffer: [256]u8 = undefined;
@@ -289,20 +289,9 @@ pub const Tty = struct {
         // Keep the restoration intent until the terminal accepts the leave
         // bytes, including the flush. On failure `restore` retries through
         // the saved descriptor using the still-entered renderer.
-        const entered = r.entered;
-        const region = r._region;
-        const shape = r.shape;
-        const cleanup = r._cleanup;
-        errdefer {
-            r.entered = entered;
-            r._region = region;
-            r.shape = shape;
-            r._cleanup = cleanup;
-        }
         var buffer: [256]u8 = undefined;
         var out = t.writer(&buffer);
-        try r.leave(&out.interface);
-        try out.interface.flush();
+        try render.internal.leaveFlushed(r, &out.interface);
     }
 
     /// How big the terminal is, from the operating system: the grid, and
@@ -752,8 +741,8 @@ test "two terminals cannot borrow the same entered renderer" {
     try a.enter(&r, .{}, .alt, .{ .paste = true });
     try testing.expectError(error.AlreadyEntered, b.enter(&r, .{}, .alt, .{ .focus = true }));
     try testing.expect(b.saved == null);
-    try testing.expect(r.entered.?.modes.paste);
-    try testing.expect(!r.entered.?.modes.focus);
+    try testing.expect(r._entered.?.modes.paste);
+    try testing.expect(!r._entered.?.modes.focus);
 }
 
 test "restoring one entered terminal leaves the other renderer armed" {
@@ -776,13 +765,13 @@ test "restoring one entered terminal leaves the other renderer armed" {
     _ = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?2004h");
     _ = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1004h");
     a.restore();
-    try testing.expect(ra.entered == null);
-    try testing.expect(rb.entered != null);
+    try testing.expect(ra._entered == null);
+    try testing.expect(rb._entered != null);
     const left = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?1049l");
     try testing.expect(std.mem.indexOf(u8, left, "\x1b[?2004l") != null);
     try testing.expect(std.mem.indexOf(u8, left, "\x1b[?1004l") == null);
     restoreGlobal();
-    try testing.expect(rb.entered == null);
+    try testing.expect(rb._entered == null);
     try testing.expect(b.saved == null);
     const restored = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1049l");
     try testing.expect(std.mem.indexOf(u8, restored, "\x1b[?1004l") != null);
@@ -815,8 +804,8 @@ test "an entered terminal refuses to replace its renderer association" {
     defer t.restore();
     try t.enter(&r, .{}, .alt, .{ .paste = true });
     try testing.expectError(error.AlreadyEntered, t.enter(&r, .{}, .alt, .{ .focus = true }));
-    try testing.expect(r.entered.?.modes.paste);
-    try testing.expect(!r.entered.?.modes.focus);
+    try testing.expect(r._entered.?.modes.paste);
+    try testing.expect(!r._entered.?.modes.focus);
 }
 
 test "a failed leave flush still restores the entered modes on the saved terminal" {
@@ -837,7 +826,7 @@ test "a failed leave flush still restores the entered modes on the saved termina
     defer t.file = file;
     try testing.expectError(error.WriteFailed, t.leave());
     try testing.expect(t.saved == null);
-    try testing.expect(r.entered == null);
+    try testing.expect(r._entered == null);
     const master = pair.readFile().handle;
     try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
     const n = std.posix.system.read(master, &seen, seen.len);

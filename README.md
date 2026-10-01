@@ -341,6 +341,11 @@ comparing the meaning are the same answer.
 Cells read from the screen carry checked text and link handles. The grid and
 renderer store compact cells; Screen owns their pool identity. Screen and
 Renderer geometry is read through `dimensions()` and changed through `resize`.
+Renderer pen, cursor, width method, frame flags and cleanup intent are internal.
+`entered()` returns a copy of the requested configuration, including partial
+entry; use `enter`, `setModes`, `setCaps`, `repaint` and `untrustCursor` to
+change terminal state.
+
 Allocation, pool identity, damage and renderer work buffers are internal
 `_` storage, owned by their initialized value. Row access returns
 a borrowed row with `len()` and checked `get(col)` values; writes go through
