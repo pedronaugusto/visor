@@ -404,6 +404,10 @@ lose cleanup, and an older object's reply cannot settle a new configuration.
 The Io must outlive those objects. Names come from one atomic process-wide
 namespace and are never reused.
 
+Damage owns its row storage behind marking and clearing methods; `rowCount()`
+returns its extent. Its allocation API is unmanaged: pass the init allocator
+to `resize` and `deinit`.
+
 **Damage is conservative.** A write marks a cell only when it changes it. If
 another write restores the displayed value before drawing, the mark remains:
 the screen does not duplicate the renderer's previous-frame baseline. The

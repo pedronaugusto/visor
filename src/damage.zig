@@ -25,9 +25,10 @@ pub const Span = struct {
 };
 
 /// The dirty map: per row, the first and last column touched.
+/// Unmanaged allocation: pass the init allocator to resize and deinit.
 pub const Damage = struct {
     /// One entry a row. `first > last` means the row is clean.
-    rows: []Entry,
+    _rows: []Entry,
 
     /// A row's span in the form it is stored in, so that a clean row is
     /// representable without a second field.
@@ -36,17 +37,22 @@ pub const Damage = struct {
         last: u16 = 0,
     };
 
+    /// The number of rows this map owns, copied rather than borrowed storage.
+    pub fn rowCount(d: *const Damage) usize {
+        return d._rows.len;
+    }
+
     /// A clean map for a grid of `rows` rows.
     pub fn init(gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!Damage {
         const entries = try gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        return .{ .rows = entries };
+        return .{ ._rows = entries };
     }
 
     /// Gives the map back.
     pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {
-        gpa.free(d.rows);
-        d.* = .{ .rows = &.{} };
+        gpa.free(d._rows);
+        d.* = .{ ._rows = &.{} };
     }
 
     /// A map for a new number of rows. Everything becomes clean; the caller
@@ -54,22 +60,22 @@ pub const Damage = struct {
     pub fn resize(d: *Damage, gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!void {
         const entries = try gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        gpa.free(d.rows);
-        d.rows = entries;
+        gpa.free(d._rows);
+        d._rows = entries;
     }
 
     /// The span of a row, or null when nothing in it changed.
     pub fn row(d: *const Damage, n: u16) ?Span {
-        if (n >= d.rows.len) return null;
-        const e = d.rows[n];
+        if (n >= d._rows.len) return null;
+        const e = d._rows[n];
         if (e.first > e.last) return null;
         return .{ .first = e.first, .last = e.last };
     }
 
     /// Records that a cell changed.
     pub fn mark(d: *Damage, col: u16, r: u16) void {
-        if (r >= d.rows.len) return;
-        const e = &d.rows[r];
+        if (r >= d._rows.len) return;
+        const e = &d._rows[r];
         if (e.first > e.last) {
             e.* = .{ .first = col, .last = col };
             return;
@@ -80,8 +86,8 @@ pub const Damage = struct {
 
     /// Records that a range of columns in a row changed, both ends inside.
     pub fn markSpan(d: *Damage, first: u16, last: u16, r: u16) void {
-        if (r >= d.rows.len or first > last) return;
-        const e = &d.rows[r];
+        if (r >= d._rows.len or first > last) return;
+        const e = &d._rows[r];
         if (first < e.first) e.first = first;
         if (last > e.last) e.last = last;
     }
@@ -92,24 +98,24 @@ pub const Damage = struct {
             d.clear();
             return;
         }
-        @memset(d.rows, .{ .first = 0, .last = cols - 1 });
+        @memset(d._rows, .{ .first = 0, .last = cols - 1 });
     }
 
     /// Everything clean, which is what `draw` leaves behind.
     pub fn clear(d: *Damage) void {
-        @memset(d.rows, .{});
+        @memset(d._rows, .{});
     }
 
     /// Whether any row is dirty.
     pub fn any(d: *const Damage) bool {
-        for (d.rows) |e| if (e.first <= e.last) return true;
+        for (d._rows) |e| if (e.first <= e.last) return true;
         return false;
     }
 
     /// How many rows are dirty.
     pub fn count(d: *const Damage) usize {
         var n: usize = 0;
-        for (d.rows) |e| {
+        for (d._rows) |e| {
             if (e.first <= e.last) n += 1;
         }
         return n;
@@ -181,6 +187,10 @@ test "a resized map is clean and the right length" {
     defer d.deinit(testing.allocator);
     d.markAll(4);
     try d.resize(testing.allocator, 5);
-    try testing.expectEqual(@as(usize, 5), d.rows.len);
+    try testing.expectEqual(@as(usize, 5), d.rowCount());
     try testing.expect(!d.any());
+}
+
+test "damage storage stays behind its allocation owner" {
+    try testing.expect(!@hasField(Damage, "rows"));
 }
