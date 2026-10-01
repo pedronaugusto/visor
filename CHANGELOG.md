@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Late graphics replies cannot make failed images ready before retransmission.
 - Breaking: Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.
 - Session retains learned capabilities across failed output and retries them on the next event until accepted or superseded by caller policy.
 - Retrying failed Renderer mode or capability changes resumes commands not yet accepted without repeating an accepted keyboard push.

@@ -648,12 +648,12 @@ pub const Layers = struct {
 
     /// The terminal answered about an image: ready or refused. An answer
     /// about an id this program never sent — the answer to a probe, say —
-    /// changes nothing.
+    /// changes nothing. A failed image stays refused until transmitted again.
     pub fn ack(l: *Layers, response: morse.GraphicsResponse) void {
         const id = response.id orelse return;
         const held = l.find(id) orelse return;
         l._answers = true;
-        held.state = if (response.ok()) .ready else .failed;
+        if (held.state != .failed) held.state = if (response.ok()) .ready else .failed;
         if (l.sharedObject(id)) |object| {
             l.release(held);
             if (l.policyFor(object)) |sm| {
@@ -1797,6 +1797,27 @@ test "a replacement settles without declaring or hiding placements" {
         }
     };
     try testing.checkAllAllocationFailures(testing.allocator, Check.run, .{});
+}
+
+test "a late graphics answer cannot revive a failed transmission" {
+    var l = Layers.init(testing.allocator);
+    defer l.deinit();
+    var blocked: Writer = .fixed(&.{});
+    try testing.expectError(error.WriteFailed, l.transmit(&blocked, 7, "pixels", .{ .compress = false, .answer = true }));
+    l.ack(.{ .id = 7, .message = "OK" });
+    try testing.expectEqual(Image.State.failed, l.image(7).?.state);
+    try testing.expect(!l.ready(7, 1000, 10));
+    var sink: Writer.Discarding = .init(&.{});
+    _ = try l.transmit(&sink.writer, 7, "pixels", .{ .compress = false, .answer = true });
+    try testing.expectEqual(Image.State.loading, l.image(7).?.state);
+    l.ack(.{ .id = 7, .message = "OK" });
+    try testing.expect(l.ready(7, 1000, 10));
+    // A terminal refusal also requires a new transmission before readiness.
+    l.ack(.{ .id = 7, .message = "EBADPNG:bad data" });
+    l.ack(.{ .id = 7, .message = "OK" });
+    try testing.expectEqual(Image.State.failed, l.image(7).?.state);
+    try l.free(&sink.writer, 7);
+    try testing.expect(l.image(7) == null);
 }
 
 test "failed direct transmission stays refused through grace and can be retried" {
