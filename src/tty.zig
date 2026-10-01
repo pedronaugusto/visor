@@ -104,6 +104,13 @@ var resize_was: if (is_windows) void else std.posix.Sigaction = undefined;
 /// handler may do. A full pipe already holds a wake, so a write that would
 /// block is dropped.
 fn onWinch(_: std.posix.SIG) callconv(.c) void {
+    // libc writes can change the interrupted thread's errno, even for the
+    // expected full-pipe case. Raw Linux syscalls return their error instead.
+    const errno_ptr: ?*c_int = if (std.posix.system == std.c) std.c._errno() else null;
+    const saved_errno = if (errno_ptr) |p| p.* else 0;
+    defer if (errno_ptr) |p| {
+        p.* = saved_errno;
+    };
     const byte: [1]u8 = .{'w'};
     for (&watchers) |*w| {
         const fd = w.acquire() orelse continue;
@@ -983,4 +990,26 @@ test "resize teardown waits for a handler that has borrowed its descriptor" {
     try testing.expect(!returned_early);
     try testing.expect(read_open);
     try testing.expect(write_open);
+}
+
+test "a resize handler preserves errno when its pipe is full" {
+    if (is_windows or std.posix.system != std.c) return error.SkipZigTest;
+    const errno_ptr = std.c._errno();
+    const saved = errno_ptr.*;
+    defer errno_ptr.* = saved;
+    var t: Tty = .adopt(testing.io, undefined);
+    try t.watchResize();
+    defer t.unwatchResize();
+    const bytes: [4096]u8 = @splat('x');
+    while (true) {
+        const rc = std.posix.system.write(t._resize_pipe[1], &bytes, bytes.len);
+        if (std.posix.errno(rc) == .SUCCESS) continue;
+        try testing.expectEqual(std.posix.E.AGAIN, std.posix.errno(rc));
+        break;
+    }
+    const interrupted = @intFromEnum(std.posix.E.NOENT);
+    errno_ptr.* = interrupted;
+    onWinch(.WINCH);
+    const after = errno_ptr.*;
+    try testing.expectEqual(interrupted, after);
 }
