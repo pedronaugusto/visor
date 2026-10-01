@@ -17,10 +17,11 @@
 //! check the rule with `grep`. The width tables come from `uucode`, pinned
 //! with the field list the README prints.
 //!
-//! Nothing here reads an environment variable, starts a thread, installs a
-//! signal handler, or keeps a clock. `Caps` says what the terminal can do
-//! and the caller fills it in — from `Caps.Probe`, which asks the terminal,
-//! or from anywhere else it likes.
+//! The drawing core reads no environment variable, starts no thread,
+//! installs no signal handler and keeps no clock. The optional terminal
+//! adapter installs SIGWINCH handling when asked through `Tty.watchResize`.
+//! `Caps` says what the terminal can do and the caller fills it in — from
+//! `Caps.Probe`, which asks the terminal, or from anywhere else it likes.
 
 const std = @import("std");
 
