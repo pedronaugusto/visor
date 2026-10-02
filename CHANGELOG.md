@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 - Bound local Zig build caches before builds, retaining downloaded packages and tools.
+- Pin conduit at confirmed per-child scope completion and fallible private-scope release.
 
 - The root restoreGlobal documentation names every registered terminal it restores.
 - Session retains size reports and graphics acknowledgements before retrying capability output that can fail.
