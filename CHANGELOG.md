@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Bound local Zig build caches before builds, retaining downloaded packages and tools.
+
 - The root restoreGlobal documentation names every registered terminal it restores.
 - Session retains size reports and graphics acknowledgements before retrying capability output that can fail.
 - Morse is pinned at 904d3a5, with timing tests on bench and astral AltGr text decoded by the same modifier rule.

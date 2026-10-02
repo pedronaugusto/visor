@@ -728,6 +728,8 @@ compiled and not run.
 
 ## Testing
 
+Local build scripts clear `.zig-cache/{o,h,z,tmp}` above the measured cap in `ci/cache.sh`; run `sh ci/cache.sh` before direct Zig builds (only a rebuild is lost).
+
 `zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
 than the process, and CI runs it in Debug, ReleaseSafe, ReleaseFast and
