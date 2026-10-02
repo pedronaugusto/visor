@@ -9,12 +9,28 @@ from verify import verify
 
 p = argparse.ArgumentParser(description='Complete visor quiet pass; --smoke never samples benchmark clocks')
 p.add_argument('--smoke', action='store_true')
+p.add_argument('--check-prepared', action='store_true', help='Verify artifacts without building or measuring')
 args = p.parse_args()
+sys.path.insert(0, str(ROOT))
+from prepared import Prepared
+prepared = Prepared(ROOT, BUILD)
+if not args.smoke:
+    from quiet_support import capture
+    if capture(['git','rev-parse','main']) != PINS['after']:
+        raise SystemExit('main has moved: refresh revisions.json and merge main into bench before measuring')
+    prepared.check()
+if args.check_prepared:
+    raise SystemExit(0)
 zig, rust = tools_setup()
-snapshots()
-run([zig, 'build', '-j1', '-Doptimize=ReleaseFast', '--prefix', BUILD / 'zig-out'])
-run(rust + ['cargo', 'build', '-j1', '--release', '--locked', '--manifest-path', 'src/rust/Cargo.toml'])
-run([sys.executable, "src/prepare_notcurses.py"])
+if args.smoke:
+    snapshots()
+    run([zig, 'build', '-j1', '-Doptimize=ReleaseFast', '--prefix', BUILD / 'zig-out'])
+    run(rust + ['cargo', 'build', '-j1', '--release', '--locked', '--manifest-path', 'src/rust/Cargo.toml'])
+    run([sys.executable, "src/prepare_notcurses.py"])
+prepared.require(BUILD/'zig-out/bin')
+prepared.require(BUILD/'cargo-target/release/visor-comparison')
+prepared.require(BUILD/'notcurses-bench')
+prepared.require(BUILD/'terminfo')
 info = machine(zig, rust)
 from quiet_support import capture
 info["cc"] = capture([os.environ.get("CC", "cc"), "--version"]).splitlines()[0]
@@ -68,4 +84,6 @@ for task in ['buffer_diff', 'unchanged_idle', 'picture_layers', 'picture_unchang
 correctness = {'checks':checks, 'count':len(checks), 'oracle':'Independent ASCII, SGR, cursor, erase and kitty placement decoder',
                'notcurses':'Public render+rasterize API, dedicated sink redirected to memory; fixed RGB terminfo; no terminal opened. Native profiling counters are not retrieved or recorded.'}
 finish('visor', args.smoke, info, samples, correctness, json.loads((ROOT / 'versions.json').read_text()),
-       'about 5–10 minutes with warm caches; allow 15 minutes')
+       '1–5 minutes quiet-only; see bench/QUIET-PREP.md for counts and assumptions')
+
+if args.smoke: prepared.write()

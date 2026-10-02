@@ -40,6 +40,7 @@ def snapshots():
         raise SystemExit('main has moved: refresh revisions.json and merge main into bench before measuring')
 
 def tools_setup():
+    os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1', PYTHONDONTWRITEBYTECODE='1', HOMEBREW_NO_AUTO_UPDATE='1')
     os.environ['BENCH_MODE'] = 'smoke' if '--smoke' in __import__('sys').argv else 'full'
     zig = os.environ.get('ZIG', 'zig')
     if capture([zig, 'version']) != '0.16.0':
@@ -52,6 +53,8 @@ def tools_setup():
     rustup = os.environ.get('RUSTUP', 'rustup')
     probe = subprocess.run([rustup, 'run', '1.93.0', 'rustc', '--version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if probe.returncode:
+        if '--smoke' not in __import__('sys').argv:
+            raise SystemExit('Missing prepared Rust toolchain; run bench/quiet.sh --smoke')
         run([rustup, 'toolchain', 'install', '1.93.0', '--profile', 'minimal', '--no-self-update'])
     return zig, [rustup, 'run', '1.93.0']
 

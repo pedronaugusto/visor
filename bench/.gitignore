@@ -5,3 +5,5 @@
 /zig-out/
 /zig-pkg/
 /src/rust/target/
+
+/__pycache__/

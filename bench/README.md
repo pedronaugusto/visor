@@ -9,7 +9,7 @@ On an idle machine, `./bench/quiet.sh` runs the complete timed pass. On macOS
 the entry point prevents sleep during the pass.
 
 Allow **15 minutes per package** in the quiet window; expected warm-cache
-execution is about **5–10 minutes**, an estimate rather than a measured
+execution is about **1–5 minutes** after smoke preparation, an estimate rather than a measured
 duration. First source downloads/compilation can add several minutes. Builds
 and correctness finish before timed workloads begin. Results are plain
 Markdown plus JSON under `bench/results/<UTC-date>/smoke-<time>.*` or
@@ -118,3 +118,5 @@ where exposed, and null time fields for smoke. Markdown records machine info,
 workloads and (only for a full pass) paired B/A medians. No timing results are
 committed. Earlier measurements from a busy machine are not reproduced or
 claimed here; the prepared quiet pass will provide fresh evidence.
+
+See [QUIET-PREP.md](QUIET-PREP.md) for the preparation contract and duration estimate.
