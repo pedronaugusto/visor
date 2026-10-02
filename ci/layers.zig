@@ -94,11 +94,22 @@ pub const layers: []const gantry.rules.Layer = &.{
     } },
 };
 
+pub const entries: []const []const u8 = &.{};
+
 pub const modules: []const gantry.NamedModule = &.{
     .{ .name = "visor", .path = "src/visor.zig", .from = "src/**" },
     .{ .name = "corpus", .path = "src/corpus.zig" },
 };
 pub const references: []const gantry.rules.ReferenceRule = &.{
+    .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
+        "builtin",
+        "conduit",
+        "conduit.tty",
+        "manifest",
+        "morse",
+        "std",
+        "uucode",
+    } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },
     .{ .name = "conduit owner", .target = "conduit", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit.tty owner", .target = "conduit.tty", .except_from = &.{"src/dependencies.zig"} },
