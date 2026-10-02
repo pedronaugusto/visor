@@ -1,0 +1,7 @@
+/build/
+/results/
+/src/__pycache__/
+/.zig-cache/
+/zig-out/
+/zig-pkg/
+/src/rust/target/

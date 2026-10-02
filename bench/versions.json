@@ -1,0 +1,14 @@
+{
+  "zig": "0.16.0",
+  "rust": "1.93.0",
+  "ratatui": "0.30.1",
+  "crossterm": "0.29.0",
+  "ratatui_core": "0.1.2",
+  "ratatui_crossterm": "0.1.2",
+  "notcurses": "3.0.17",
+  "ncurses": "6.6",
+  "notcurses_url": "https://github.com/dankamongmen/notcurses/archive/refs/tags/v3.0.17.tar.gz",
+  "notcurses_sha256": "b0fbe824984fe25b5a16770dbd00b85d44db5d09cc35bd881b95335d0db53128",
+  "ncurses_url": "https://invisible-mirror.net/archives/ncurses/ncurses-6.6.tar.gz",
+  "ncurses_sha256": "355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11"
+}

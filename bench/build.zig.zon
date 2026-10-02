@@ -1,0 +1,11 @@
+.{
+    .name = .visor_bench,
+    .version = "0.1.0",
+    .fingerprint = 0xb6d224f9370a7b75,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .before = .{ .path = "build/revisions/before" },
+        .after = .{ .path = "build/revisions/after" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}
