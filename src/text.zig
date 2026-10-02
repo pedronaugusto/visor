@@ -12,7 +12,7 @@
 //! cells does not need them, and a terminal that does has its own.
 
 const std = @import("std");
-const uucode = @import("uucode");
+const uucode = @import("dependencies.zig").uucode;
 
 /// How the terminal measures text.
 pub const Method = enum {

@@ -17,6 +17,7 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+sh ci/cache.sh
 
 image=visor-linux-zig-0.16.0
 

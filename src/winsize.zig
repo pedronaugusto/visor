@@ -18,7 +18,7 @@
 //! caller's behalf, or a guess from the environment.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const geom = @import("geom.zig");
 

@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Reject undeclared dependencies, duplicate layer membership and imports of source executables.
+
+- Check named source layers, cycles, entry files and dependency owners during source CI.
+
+- Keep drawing policies below their owners and assemble integration tests above them.
+- Resolve Markdown document types without importing their own file.
+- Give terminal and Unicode dependencies one source owner.
+
+- Bound local Zig build caches before builds, retaining downloaded packages and tools.
+- Pin conduit at confirmed per-child scope completion and fallible private-scope release.
+
 - The root restoreGlobal documentation names every registered terminal it restores.
 - Session retains size reports and graphics acknowledgements before retrying capability output that can fail.
 - Morse is pinned at 904d3a5, with timing tests on bench and astral AltGr text decoded by the same modifier rule.

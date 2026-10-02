@@ -15,7 +15,7 @@
 //! rather than guessing a theme.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const Color = morse.Color;
 const Writer = std.Io.Writer;

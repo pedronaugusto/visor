@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, layers]
   pull_request:
   workflow_dispatch:
 
@@ -77,9 +77,13 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - name: Formatting
-        run: zig fmt --check build.zig build.zig.zon src examples
+        run: zig fmt --check build.zig build.zig.zon src examples ci
       - name: Casts out of the type system carry their reason
         run: python3 ci/casts.py
+      - name: Source import boundaries
+        run: zig build check-imports
+      - name: Import gate regression checks
+        run: python3 ci/test_imports.py
 
   # The round trip again, against a terminal emulator that is not ours.
   # `Term` ships with this package, so a property that compares the renderer

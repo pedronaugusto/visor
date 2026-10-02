@@ -108,29 +108,3 @@ pub const Line = @import("widgets/paragraph.zig").Line;
 pub const Item = @import("widgets/list.zig").Item;
 /// A day, as a calendar counts them.
 pub const Date = @import("widgets/calendar.zig").Date;
-
-test {
-    _ = layout_mod;
-    _ = @import("widgets/block.zig");
-    _ = @import("widgets/paragraph.zig");
-    _ = @import("widgets/markdown_test.zig");
-    _ = @import("widgets/edges.zig");
-    _ = @import("widgets/list.zig");
-    _ = @import("widgets/table.zig");
-    _ = @import("widgets/tabs.zig");
-    _ = @import("widgets/gauge.zig");
-    _ = @import("widgets/sparkline.zig");
-    _ = @import("widgets/barchart.zig");
-    _ = @import("widgets/chart.zig");
-    _ = @import("widgets/scrollbar.zig");
-    _ = @import("widgets/canvas.zig");
-    _ = @import("widgets/canvas_test.zig");
-    _ = @import("widgets/calendar.zig");
-    _ = @import("widgets/harness.zig");
-    _ = @import("widgets/text_input.zig");
-    _ = @import("widgets/scroll.zig");
-    _ = @import("widgets/keys.zig");
-    _ = @import("widgets/rule.zig");
-    _ = @import("widgets/sextants.zig");
-    std.testing.refAllDecls(@This());
-}
