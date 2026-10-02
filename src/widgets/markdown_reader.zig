@@ -18,12 +18,16 @@ pub const Block = struct {
     end_span: usize = 0,
 };
 
+const documentBlock = Block;
+const documentSpan = Span;
+const documentFence = Fence;
+
 /// Parsed Markdown, independent of width, theme and screen. Owns all bytes.
 /// Do not copy an initialized Document; deinit it once after its widgets.
 pub const Document = struct {
-    pub const Block = @import("markdown_reader.zig").Block;
-    pub const Span = @import("markdown_reader.zig").Span;
-    pub const Fence = @import("markdown_reader.zig").Fence;
+    pub const Block = documentBlock;
+    pub const Span = documentSpan;
+    pub const Fence = documentFence;
     _allocator: std.mem.Allocator,
     _source: []u8,
     _text: std.ArrayList(u8) = .empty,
