@@ -35,7 +35,7 @@ const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
-const moved_rows = @import("moved_rows.zig");
+const moved_rows = @import("moved_rows_impl.zig").Rows(@This());
 const Layers = @import("layer.zig").Layers;
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;

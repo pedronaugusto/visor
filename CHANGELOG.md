@@ -6,9 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Give terminal and Unicode dependencies one source owner.
+- Check named source layers, cycles, entry files and dependency owners during source CI.
 
+- Keep drawing policies below their owners and assemble integration tests above them.
 - Resolve Markdown document types without importing their own file.
+- Give terminal and Unicode dependencies one source owner.
 
 - Bound local Zig build caches before builds, retaining downloaded packages and tools.
 - Pin conduit at confirmed per-child scope completion and fallible private-scope release.

@@ -223,6 +223,9 @@ test {
     _ = pool_mod;
     _ = render_mod;
     _ = @import("moved_rows.zig");
+    _ = @import("screen_test.zig");
+    _ = @import("window_test.zig");
+    _ = @import("layer_test.zig");
     _ = @import("shm.zig");
     _ = screen_mod;
     _ = session_mod;
