@@ -5,7 +5,10 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .before = .{ .path = "build/revisions/before" },
-        .after = .{ .path = "build/revisions/after" },
+        .after = .{
+            .url = "https://github.com/pedronaugusto/visor/archive/394bd42316214485781f5ef4f32ce693ecfdd3c2.tar.gz",
+            .hash = "visor-0.4.0-kZcQUzoDEQDbHyaIeDOD9HUpARySjxCW5fzprSLsWjrC",
+        },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src" },
 }

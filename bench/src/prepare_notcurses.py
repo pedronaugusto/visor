@@ -54,7 +54,7 @@ cmake = BUILD / 'notcurses-cmake'
 host_prefix = capture(['brew', '--prefix']) if sys.platform == 'darwin' else '/usr'
 env['PKG_CONFIG_PATH'] = str(prefix / 'lib/pkgconfig') + os.pathsep + env.get('PKG_CONFIG_PATH', '')
 with (BUILD / 'notcurses-build.log').open('w') as log:
-    run(['cmake', '-S', notcurses, '-B', cmake, '-DCMAKE_BUILD_TYPE=Release',
+    run(['cmake', '-S', notcurses, '-B', cmake, '-DCMAKE_BUILD_TYPE=' + os.environ.get('BENCH_CMAKE_BUILD_TYPE', 'Release'),
          '-DUSE_MULTIMEDIA=none', '-DUSE_DEFLATE=OFF', '-DUSE_CXX=OFF', '-DUSE_DOCTEST=OFF',
          '-DUSE_PANDOC=OFF', '-DBUILD_TESTING=OFF', '-DBUILD_EXECUTABLES=OFF',
          '-DBUILD_FFI_LIBRARY=OFF', '-DUSE_POC=OFF', '-DUSE_STATIC=ON',
@@ -64,7 +64,7 @@ with (BUILD / 'notcurses-build.log').open('w') as log:
 run(['tic', '-x', '-o', BUILD / 'terminfo', ROOT / 'src/notcurses.terminfo'], env=env)
 cc = shlex.split(os.environ.get('CC', 'cc'))
 link = ['-ldl'] if sys.platform.startswith('linux') else []
-run(cc + ['-O3', '-std=gnu17', '-UNDEBUG', '-I' + str(notcurses / 'include'), '-I' + str(cmake / 'include'),
+run(cc + [os.environ.get('BENCH_C_OPTIMIZE', '-O3'), '-std=gnu17', '-UNDEBUG', '-I' + str(notcurses / 'include'), '-I' + str(cmake / 'include'),
           '-I' + host_prefix + '/include', ROOT / 'src/notcurses.c', cmake / 'libnotcurses-core.a',
           '-L' + str(prefix / 'lib'), '-L' + host_prefix + '/lib', '-ltinfow', '-lunistring', '-lz',
           '-lpthread', '-lm'] + link + ['-o', BUILD / 'notcurses-bench'])
