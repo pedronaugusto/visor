@@ -24,7 +24,7 @@
 //! The previous frame belongs to the renderer, which is the only thing that knows what the terminal was shown.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");

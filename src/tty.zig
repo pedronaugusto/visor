@@ -27,8 +27,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const morse = @import("morse");
-const terminal = @import("conduit.tty");
+const morse = @import("dependencies.zig").morse;
+const terminal = @import("dependencies.zig").tty;
 
 const Winsize = @import("winsize.zig").Winsize;
 const render = @import("render.zig");
@@ -774,7 +774,7 @@ test "a file that is not a terminal has no size" {
 
 /// The pseudo-terminal the suite runs against is conduit's, as the
 /// terminal primitives are.
-const conduit = @import("conduit");
+const conduit = @import("dependencies.zig").conduit;
 
 /// A pipe, for a test that wants a file that is not a terminal.
 pub fn pipe() ![2]std.posix.fd_t {

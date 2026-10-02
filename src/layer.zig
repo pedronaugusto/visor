@@ -28,7 +28,7 @@
 //! clock.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;

@@ -16,7 +16,7 @@
 //! cells is not a match.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const render = @import("render.zig");

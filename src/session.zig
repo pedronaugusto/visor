@@ -1,7 +1,7 @@
 //! A terminal session as a value: the grid, renderer, size, capabilities,
 //! probe and pictures. The caller owns input, output, time and the loop.
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 const Screen = @import("screen.zig").Screen;
 const render = @import("render.zig");
 const Renderer = render.Renderer;

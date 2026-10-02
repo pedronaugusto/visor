@@ -16,7 +16,7 @@
 //! no bell. Anything it does not recognise is dropped rather than guessed at.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");

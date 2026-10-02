@@ -47,7 +47,7 @@ const winsize_mod = @import("winsize.zig");
 /// One fetch, one import: a program that wants a hyperlink or the clipboard
 /// or the kitty keyboard protocol reaches them through here rather than
 /// adding a second dependency.
-pub const morse = @import("morse");
+pub const morse = @import("dependencies.zig").morse;
 
 /// The version of the last release this source is, or descends from, as the
 /// manifest states it: a tree with changes under `[Unreleased]` in the

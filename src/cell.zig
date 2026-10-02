@@ -18,7 +18,7 @@
 //! pooled grapheme or a link needs the screen that owns it.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 /// Everything SGR can say about a cell. There is no second style type here.
 pub const Style = morse.Style;

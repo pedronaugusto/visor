@@ -25,7 +25,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 
 const tty_mod = @import("tty.zig");
 const Tty = tty_mod.Tty;
@@ -296,10 +296,10 @@ fn keyWaiting(records: []const console.InputRecord) bool {
 }
 
 /// The console's input records and waits are conduit's.
-const console = @import("conduit.tty").console;
+const console = @import("dependencies.zig").tty.console;
 
 const testing = std.testing;
-const conduit = @import("conduit");
+const conduit = @import("dependencies.zig").conduit;
 const corpus = @import("corpus");
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.

@@ -14,7 +14,7 @@
 //! a table of terminal names, or a timeout.
 
 const std = @import("std");
-const morse = @import("morse");
+const morse = @import("dependencies.zig").morse;
 const textmod = @import("text.zig");
 
 /// What this terminal can do. Every field is safe at its default.
