@@ -185,8 +185,9 @@ pub const Tty = struct {
     /// Anything asking its size can fail with.
     pub const SizeError = error{ NotATerminal, Unexpected };
 
-    /// The program's controlling terminal: `/dev/tty` on POSIX, the console
-    /// handles on Windows, opened by `conduit.tty.openControlling`.
+    /// The program's controlling terminal: `/dev/tty` on POSIX (on macOS
+    /// under a name `poll` can wait on), the console handles on Windows,
+    /// opened by `conduit.tty.openControlling`.
     ///
     /// Not the standard streams: a program whose output is a pipe still has
     /// a terminal, and a program drawing a screen wants the terminal rather
@@ -194,19 +195,6 @@ pub const Tty = struct {
     pub fn open(io: Io) OpenError!Tty {
         const own = try terminal.openControlling(io);
         if (is_windows) return .{ ._file = own.output, ._io = io, ._input = own.input };
-        if (builtin.os.tag == .macos) {
-            // The kernel's poll cannot wait on /dev/tty here -- it answers
-            // POLLNVAL at once -- and the reader waits on the terminal and
-            // the resize pipe together. The device the standard streams are
-            // on is the same terminal under a name poll does work on.
-            var path: [std.posix.PATH_MAX]u8 = undefined;
-            if (deviceOf(own.output.handle, &path)) |device| {
-                if (Io.Dir.openFileAbsolute(io, device, .{ .mode = .read_write })) |real| {
-                    own.close(io);
-                    return .{ ._file = real, ._io = io, ._input = {} };
-                } else |_| {}
-            }
-        }
         return .{ ._file = own.output, ._io = io, ._input = {} };
     }
 
@@ -457,22 +445,6 @@ pub const Tty = struct {
         return if (is_windows) t._input else t._file;
     }
 };
-
-/// The device behind `/dev/tty`, found as the device one of the standard
-/// streams is open on when it is the same terminal: the same foreground
-/// process group, which belongs to one session and so to one terminal.
-/// Null when no standard stream is on it. macOS only.
-fn deviceOf(ctty: std.posix.fd_t, buf: *[std.posix.PATH_MAX]u8) ?[]const u8 {
-    const group = terminal.foregroundGroup(ctty) catch return null;
-    for ([_]std.posix.fd_t{ 0, 1, 2 }) |fd| {
-        const theirs = terminal.foregroundGroup(fd) catch continue;
-        if (theirs != group) continue;
-        const path = terminal.ttyName(fd, buf) catch continue;
-        if (!std.mem.startsWith(u8, path, "/dev/") or std.mem.eql(u8, path, "/dev/tty")) continue;
-        return path;
-    }
-    return null;
-}
 
 /// A primitive's failure as this file's.
 fn modeError(err: terminal.RawModeError) Tty.ModeError {
