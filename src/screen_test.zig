@@ -93,3 +93,82 @@ test "screen and renderer geometry and allocation metadata have one owner" {
     try renderer.resize(screen.dimensions());
     try testing.expectEqual(screen.dimensions(), renderer.dimensions());
 }
+
+fn expectDiffAgreement(a: *const Screen, b: *const Screen) !void {
+    var changes = a.diff(b);
+    for (0..@max(a.dimensions().rows, b.dimensions().rows)) |y| {
+        const ar = a.rowAt(@intCast(y));
+        const br = b.rowAt(@intCast(y));
+        var columns = ar.diff(br);
+        var equal = ar.len() == br.len();
+        for (0..@max(ar.len(), br.len())) |x| {
+            const ac = ar.get(x);
+            const bc = br.get(x);
+            const same = if (ac != null and bc != null) ac.?.eql(bc.?) else false;
+            if (same) continue;
+            equal = false;
+            try testing.expectEqual(x, columns.next().?);
+            try testing.expectEqual(Point{ .col = @intCast(x), .row = @intCast(y) }, changes.next().?);
+        }
+        try testing.expect(columns.next() == null);
+        try testing.expectEqual(equal, ar.eql(br));
+    }
+    try testing.expect(changes.next() == null);
+    try testing.expect(changes.next() == null);
+}
+
+test "screen diff compares compact cells with checked pool identities" {
+    var a = try made(6, 2);
+    defer a.deinit();
+    var b = try made(6, 2);
+    defer b.deinit();
+    try testing.expect(a.rowAt(0).eql(b.rowAt(0)));
+    try a.write(0, 0, "x", .{ .bold = true }, .none);
+    try b.write(0, 0, "x", .{ .bold = true }, .none);
+    try testing.expect(a.rowAt(0).eql(b.rowAt(0)));
+    try b.write(1, 0, "y", .{}, .none);
+    try a.write(0, 1, "a\u{301}\u{302}\u{303}", .{}, .none);
+    try b.write(0, 1, "a\u{301}\u{302}\u{303}", .{}, .none);
+    try a.write(2, 1, "z", .{}, try a.link("https://same.invalid", ""));
+    try b.write(2, 1, "z", .{}, try b.link("https://same.invalid", ""));
+    try testing.expect(!a.rowAt(1).eql(b.rowAt(1)));
+    const foreign = a.readCell(0, 1).?;
+    try testing.expectError(error.InvalidHandle, b.writeOwnedCell(0, 1, foreign));
+    try testing.expectError(error.InvalidHandle, b.writeOwnedCell(2, 1, a.readCell(2, 1).?));
+    try expectDiffAgreement(&a, &b);
+    try expectDiffAgreement(&a, &a);
+    try a.compactPool();
+    try testing.expectError(error.InvalidHandle, a.writeOwnedCell(0, 1, foreign));
+    try expectDiffAgreement(&a, &b);
+    try expectDiffAgreement(&a, &a);
+    try a.resize(.{ .cols = 8, .rows = 3 });
+    try expectDiffAgreement(&a, &b);
+    try expectDiffAgreement(&b, &a);
+    try b.resize(a.dimensions());
+    try expectDiffAgreement(&a, &b);
+}
+
+test "screen diff agrees with checked reads on random screens" {
+    var a = try made(17, 5);
+    defer a.deinit();
+    var b = try made(17, 5);
+    defer b.deinit();
+    var prng: std.Random.DefaultPrng = .init(173);
+    const random = prng.random();
+    const glyphs = [_][]const u8{ " ", "x", "界", "a\u{301}\u{302}\u{303}" };
+    for (0..20) |round| {
+        for (0..100) |_| {
+            const x = random.uintLessThan(u16, 17);
+            const y = random.uintLessThan(u16, 5);
+            const glyph = glyphs[random.uintLessThan(usize, glyphs.len)];
+            const style: Style = .{ .bold = random.boolean(), .fg = .rgb(random.int(u8), 13, 41) };
+            const owner = if (random.boolean()) &a else &b;
+            const link_id = if (random.boolean()) try owner.link("https://random.invalid", "id=one") else .none;
+            try owner.write(x, y, glyph, style, link_id);
+        }
+        if (round % 4 == 0) try a.compactPool();
+        try expectDiffAgreement(&a, &b);
+        try expectDiffAgreement(&b, &a);
+        try expectDiffAgreement(&a, &a);
+    }
+}
