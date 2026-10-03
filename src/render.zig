@@ -1782,9 +1782,11 @@ const CostState = struct {
 
 /// Constructed SGR transitions. Formatting colour parameters is much more
 /// work than copying the result, and real interfaces draw from a small style
-/// vocabulary even when adjacent pairs are varied.
+/// vocabulary even when adjacent pairs are varied. Several transitions share
+/// each bucket so recurring RGB pairs do not evict one another on a collision.
 const StyleSequenceCache = struct {
-    const count = 512;
+    const count = 1024;
+    const ways = 16;
     const max_len = 128;
     const Entry = struct {
         from: Style = .{},
@@ -1798,12 +1800,34 @@ const StyleSequenceCache = struct {
 
     entries: [count]Entry = @splat(.{}),
 
-    fn entry(cache: *StyleSequenceCache, from: Style, to: Style) *Entry {
+    victims: [count / ways]u4 = @splat(0),
+
+    fn bucket(from: Style, to: Style) usize {
         var hash = styleHash(from) *% 0x9e3779b185ebca87 ^ styleHash(to) *% 0xc2b2ae3d27d4eb4f;
         hash ^= hash >> 33;
         hash *%= 0xff51afd7ed558ccd;
         hash ^= hash >> 33;
-        return &cache.entries[hash & (count - 1)];
+        return @intCast(hash & (count / ways - 1));
+    }
+
+    fn find(cache: *StyleSequenceCache, from: Style, to: Style) ?*Entry {
+        const start = bucket(from, to) * ways;
+        for (cache.entries[start..][0..ways]) |*found| {
+            if ((found.valid or found.cost_valid) and matches(found, from, to)) return found;
+        }
+        return null;
+    }
+
+    fn entry(cache: *StyleSequenceCache, from: Style, to: Style) *Entry {
+        if (cache.find(from, to)) |found| return found;
+        const slot = bucket(from, to);
+        const start = slot * ways;
+        for (cache.entries[start..][0..ways]) |*found| {
+            if (!found.valid and !found.cost_valid) return found;
+        }
+        const victim = cache.victims[slot];
+        cache.victims[slot] +%= 1;
+        return &cache.entries[start + victim];
     }
 
     /// A cheap index for the fixed-layout style. Equality is still checked
@@ -1818,14 +1842,14 @@ const StyleSequenceCache = struct {
     }
 
     fn get(cache: *StyleSequenceCache, from: Style, to: Style) ?[]const u8 {
-        const found = cache.entry(from, to);
-        if (!found.valid or !matches(found, from, to)) return null;
+        const found = cache.find(from, to) orelse return null;
+        if (!found.valid) return null;
         return found.bytes[0..found.len];
     }
 
     fn getCost(cache: *StyleSequenceCache, from: Style, to: Style) ?usize {
-        const found = cache.entry(from, to);
-        if (!found.cost_valid or !matches(found, from, to)) return null;
+        const found = cache.find(from, to) orelse return null;
+        if (!found.cost_valid) return null;
         return found.cost;
     }
 
@@ -4093,4 +4117,76 @@ test "picture frames keep cursor work and forced text rows" {
     const changed = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
     try testing.expectEqual(@as(u32, 1), changed.rows);
     try testing.expect(std.mem.indexOf(u8, f.out.written(), "new") != null);
+}
+
+fn testRgbStyle(i: usize, salt: usize) Style {
+    return .{
+        .fg = .rgb(@truncate(i *% 13 +% salt *% 17), @truncate(i *% 7 +% 31), @truncate(i *% 3 +% 53)),
+        .bold = (i +% salt) % 2 == 0,
+    };
+}
+
+// The two alternating frames repeat 512 adjacent style transitions.
+test "style cache retains recurring RGB transitions across frames" {
+    var cache: StyleSequenceCache = .{};
+    for (0..2) |salt| {
+        for (0..256) |i| {
+            const from = testRgbStyle(i -% 1, salt);
+            const to = testRgbStyle(i, salt);
+            var bytes: [128]u8 = undefined;
+            var out: Writer = .fixed(&bytes);
+            try morse.diffStyle(&out, from, to);
+            cache.put(from, to, out.buffered());
+        }
+    }
+    for (0..2) |salt| {
+        for (0..256) |i| {
+            const from = testRgbStyle(i -% 1, salt);
+            const to = testRgbStyle(i, salt);
+            var bytes: [128]u8 = undefined;
+            var out: Writer = .fixed(&bytes);
+            try morse.diffStyle(&out, from, to);
+            const cached = cache.get(from, to);
+            try testing.expect(cached != null);
+            try testing.expectEqualSlices(u8, out.buffered(), cached.?);
+            try testing.expectEqual(out.buffered().len, cache.getCost(from, to).?);
+        }
+    }
+}
+
+test "style cache collisions never substitute a different transition" {
+    var cache: StyleSequenceCache = .{};
+    var prng: std.Random.DefaultPrng = .init(1977);
+    const random = prng.random();
+    const styles = [_]Style{
+        .{},
+        .{ .bold = true, .dim = true },
+        .{ .italic = true, .underline = .curly },
+        .{ .fg = .palette(137), .bg = .ansi(.red) },
+        .{ .underline_color = .rgb(13, 41, 255), .overline = true, .script = .subscript },
+    };
+    for (0..4096) |_| {
+        var from = styles[random.uintLessThan(usize, styles.len)];
+        var to = styles[random.uintLessThan(usize, styles.len)];
+        from.fg = .rgb(random.int(u8), random.int(u8), random.int(u8));
+        to.fg = .rgb(random.int(u8), random.int(u8), random.int(u8));
+        var bytes: [128]u8 = undefined;
+        var out: Writer = .fixed(&bytes);
+        try morse.diffStyle(&out, from, to);
+        const sequence = out.buffered();
+        if (cache.get(from, to)) |hit| try testing.expectEqualSlices(u8, sequence, hit);
+        if (cache.getCost(from, to)) |hit| try testing.expectEqual(sequence.len, hit);
+        cache.putCost(from, to, styleCost(from, to));
+        try testing.expectEqual(sequence.len, cache.getCost(from, to).?);
+        try testing.expect(cache.get(from, to) == null);
+        cache.put(from, to, sequence);
+        try testing.expectEqualSlices(u8, sequence, cache.get(from, to).?);
+        try testing.expectEqual(sequence.len, cache.getCost(from, to).?);
+        if (cache.get(to, from)) |hit| {
+            var reverse_bytes: [128]u8 = undefined;
+            var reverse: Writer = .fixed(&reverse_bytes);
+            try morse.diffStyle(&reverse, to, from);
+            try testing.expectEqualSlices(u8, reverse.buffered(), hit);
+        }
+    }
 }

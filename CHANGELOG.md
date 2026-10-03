@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Keep recurring style transitions together in the SGR cache so RGB frames need less formatting.
+
 - Compare screens and rows through borrowed changed-position iterators without exporting checked cells.
 
 - Skip the text pass when a frame only updates pictures or the cursor.

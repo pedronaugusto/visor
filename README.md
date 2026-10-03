@@ -437,6 +437,10 @@ continues.
 counting their exact text, style, link, erase and cursor-move bytes, so the
 choice takes no extra emit pass.
 
+The renderer caches 1,024 SGR transitions in buckets of sixteen, checking
+both styles on every hit. Recurring RGB transitions can share a bucket
+without replacing one another; full buckets replace entries in turn.
+
 **A blank run is erased, not painted.** A row blank to its end is `EL`, four
 bytes whatever the width; a blank run longer than the sequence that erases it
 is `ECH`, which leaves the cursor where it was.
