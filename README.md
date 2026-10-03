@@ -831,7 +831,18 @@ pipe and read in pieces of every size, must come out of `Input` as the events
 the parser makes of the whole stream; and random text — wide and combined
 clusters, both kinds of line end, bytes that are not UTF-8 — must lay out in
 `TextInput` with every byte in exactly one row and every cluster boundary a
-place that leads back to itself.
+place that leads back to itself. Random edits to a `TextInput.Buffer` must undo
+back through texts it held, in order, to the first, and redo to the last; trees
+of random shape, opened at random, must walk as a slow reading of the same
+nodes says; random Markdown sources of pipes, delimiter cells, task marks and
+inline markup must keep every range in bounds and draw the rows they count.
+
+Rows printed above an inline screen are fuzzed against the emulator — any rows
+on any screen at any place in the terminal read back above it — and run once
+more against the second emulator with its scrollback on, where every row
+printed must be found, in order, above the screen. The reader's tables and task
+lists are held to the GFM spec's own examples, written back as the HTML
+cmark-gfm writes.
 
 Beside it: byte-exact tests on what each mechanism writes, a grid fuzz that
 checks the invariants and the damage map after every operation, a
