@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Term` reads sequences with morse: control sequences and strings are framed by `morse.parseCsi` and `morse.parseControlString`, style changes are applied by `morse.applySgr`, and modes and cursor shapes are matched by morse's numbers. Superscript and subscript (SGR 73, 74, 75) now survive the round trip, the round-trip generator draws them, and `dumpScreenStyles` names them; a cursor shape morse does not name leaves the cursor as it was.
+
 - Price style changes, cursor moves, repeats, erases, links, sized text and mode brackets with `morse.cost` instead of renderer copies of morse spellings, and price a rejoined cluster by its actual moves; the bytes written are unchanged.
 
 - Keep recurring style transitions together in the SGR cache so RGB frames need less formatting.
