@@ -1881,138 +1881,11 @@ const StyleSequenceCache = struct {
     }
 };
 
-/// One SGR parameter list, counted rather than written.
-const SgrCost = struct {
-    n: usize = 0,
-    any: bool = false,
-    turned_off: bool = false,
-
-    fn open(p: *SgrCost) void {
-        if (p.any) {
-            p.n += 1;
-        } else {
-            p.n += 2;
-            p.any = true;
-        }
-    }
-
-    fn code(p: *SgrCost, value: u8) void {
-        p.open();
-        p.n += digits(value);
-    }
-
-    fn offCode(p: *SgrCost, value: u8) void {
-        p.turned_off = true;
-        p.code(value);
-    }
-
-    fn compound(p: *SgrCost, len: usize) void {
-        p.open();
-        p.n += len;
-    }
-
-    fn field(p: *SgrCost, value: u8) void {
-        p.n += 1 + digits(value);
-    }
-
-    fn finish(p: *SgrCost) void {
-        if (p.any) p.n += 1;
-    }
-};
-
-/// Counts one foreground or background colour parameter.
-fn colorCost(p: *SgrCost, color: morse.Color, default_code: u8, base: u8, bright_base: u8, extended: u8) void {
-    switch (color.kind) {
-        .default => p.offCode(default_code),
-        .ansi => {
-            const slot = color.index();
-            p.code(if (slot < 8) base + slot else bright_base + (slot - 8));
-        },
-        .palette => {
-            p.code(extended);
-            p.n += 3 + digits(color.index());
-        },
-        .rgb => {
-            p.code(extended);
-            p.n += 3 + digits(color.r);
-            p.field(color.g);
-            p.field(color.b);
-        },
-    }
-}
-
-/// Counts one underline-colour parameter.
-fn underlineColorCost(p: *SgrCost, color: morse.Color) void {
-    switch (color.kind) {
-        .default => p.offCode(59),
-        .ansi, .palette => {
-            p.compound(5);
-            p.n += digits(color.index());
-        },
-        .rgb => {
-            p.compound(6);
-            p.n += digits(color.r);
-            p.n += 1 + digits(color.g);
-            p.n += 1 + digits(color.b);
-        },
-    }
-}
-
-/// Counts either spelling of one SGR transition.
-fn sgrCost(from: Style, to: Style, reset: bool) SgrCost {
-    var p: SgrCost = .{};
-    if (reset) p.code(0);
-    const base: Style = if (reset) .{} else from;
-
-    const off_bold_dim = (base.bold and !to.bold) or (base.dim and !to.dim);
-    if (off_bold_dim) p.offCode(22);
-    if (base.italic and !to.italic) p.offCode(23);
-    if (base.underline != .none and to.underline == .none) p.offCode(24);
-    if (base.blink and !to.blink) p.offCode(25);
-    if (base.reverse and !to.reverse) p.offCode(27);
-    if (base.hidden and !to.hidden) p.offCode(28);
-    if (base.strikethrough and !to.strikethrough) p.offCode(29);
-    if (base.overline and !to.overline) p.offCode(55);
-    if (base.script != to.script and to.script == .none) p.offCode(75);
-
-    if (to.bold and (!base.bold or off_bold_dim)) p.code(1);
-    if (to.dim and (!base.dim or off_bold_dim)) p.code(2);
-    if (to.italic and !base.italic) p.code(3);
-    if (to.underline != base.underline and to.underline != .none) {
-        if (to.underline == .single) {
-            p.code(4);
-        } else {
-            p.compound(2);
-            p.n += digits(@intFromEnum(to.underline));
-        }
-    }
-    if (to.blink and !base.blink) p.code(5);
-    if (to.reverse and !base.reverse) p.code(7);
-    if (to.hidden and !base.hidden) p.code(8);
-    if (to.strikethrough and !base.strikethrough) p.code(9);
-    if (to.overline and !base.overline) p.code(53);
-    if (to.script != base.script and to.script != .none) p.code(@intFromEnum(to.script));
-
-    if (!base.fg.eql(to.fg)) colorCost(&p, to.fg, 39, 30, 90, 38);
-    if (!base.bg.eql(to.bg)) colorCost(&p, to.bg, 49, 40, 100, 48);
-    if (!base.underline_color.eql(to.underline_color)) underlineColorCost(&p, to.underline_color);
-    p.finish();
-    return p;
-}
-
-/// The shortest SGR transition, by the same arithmetic as `morse.diffStyle`.
-fn styleCost(from: Style, to: Style) usize {
-    if (std.mem.eql(u8, std.mem.asBytes(&from), std.mem.asBytes(&to))) return 0;
-    const delta = sgrCost(from, to, false);
-    if (!delta.turned_off) return delta.n;
-    return @min(delta.n, sgrCost(from, to, true).n);
-}
-
 fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
     if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
     const from = state.style;
     const n = r._style_sequences.getCost(from, to) orelse cost: {
-        const computed = styleCost(from, to);
+        const computed = morse.diffStyleLen(from, to);
         r._style_sequences.putCost(from, to, computed);
         break :cost computed;
     };
@@ -3005,7 +2878,7 @@ test "arithmetic style prices match every emitted transition" {
             var bytes: [128]u8 = undefined;
             var out: Writer = .fixed(&bytes);
             try morse.diffStyle(&out, from, to);
-            try testing.expectEqual(out.buffered().len, styleCost(from, to));
+            try testing.expectEqual(out.buffered().len, morse.diffStyleLen(from, to));
         }
     }
 }
@@ -4176,7 +4049,7 @@ test "style cache collisions never substitute a different transition" {
         const sequence = out.buffered();
         if (cache.get(from, to)) |hit| try testing.expectEqualSlices(u8, sequence, hit);
         if (cache.getCost(from, to)) |hit| try testing.expectEqual(sequence.len, hit);
-        cache.putCost(from, to, styleCost(from, to));
+        cache.putCost(from, to, morse.diffStyleLen(from, to));
         try testing.expectEqual(sequence.len, cache.getCost(from, to).?);
         try testing.expect(cache.get(from, to) == null);
         cache.put(from, to, sequence);

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Price style transitions with morse `diffStyleLen` instead of a renderer copy of its SGR rules; the bytes written are unchanged.
+
 - Keep recurring style transitions together in the SGR cache so RGB frames need less formatting.
 
 - Compare screens and rows through borrowed changed-position iterators without exporting checked cells.
