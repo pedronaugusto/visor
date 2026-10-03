@@ -1065,7 +1065,10 @@ pub const Renderer = struct {
         if (@as(u32, last - first) + 1 <= cols / 2) return false;
         if (first == 0 and last == cols - 1) {
             if (r.allChanged(s, caps, row)) return true;
-            if (r.diffIsOneRun(s, caps, row)) return true;
+            if (r.firstRunEnd(s, caps, row)) |run_end| {
+                if (run_end == cols - 1) return true;
+                if (r.diffIsPaintWithoutErase(s, caps, row, run_end)) return false;
+            }
         }
         const floor = r.paintTextFloor(s, caps, row);
         if (r.isolatedDiffCost(s, caps, row, first, last, floor)) |diff| {
@@ -1099,10 +1102,35 @@ pub const Renderer = struct {
     /// needs pricing. The planning is `runEnd`'s, which writes nothing and
     /// prices only the cells either side of a gap.
     fn diffIsOneRun(r: *Renderer, s: *Screen, caps: Caps, row: u16) bool {
+        return r.firstRunEnd(s, caps, row) == r.dimensions().cols - 1;
+    }
+
+    /// Where the planner's first run ends when the row's first cell changed,
+    /// or null when it did not.
+    fn firstRunEnd(r: *Renderer, s: *Screen, caps: Caps, row: u16) ?u16 {
         const cols = r.dimensions().cols;
-        if (visible(stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return false;
+        if (visible(stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return null;
         const state: CostState = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
-        return r.runEndCost(state, s, caps, row, 0, cols - 1) == cols - 1;
+        return r.runEndCost(state, s, caps, row, 0, cols - 1);
+    }
+
+    /// Whether the diff, its first run ending at `run_end`, is the paint
+    /// without the paint's erase: the run reaches the row's trailing blanks
+    /// and the terminal already shows every cell after it.
+    ///
+    /// Both then move to the first column and write the same cells up to
+    /// the trailing blanks; the paint goes on to erase the rest of the row,
+    /// which the diff leaves as it is. So the diff is the cheaper by that
+    /// erase, without pricing either. A row repainted over blank rows, as
+    /// after `printAbove`, is this row.
+    fn diffIsPaintWithoutErase(r: *const Renderer, s: *const Screen, caps: Caps, row: u16, run_end: u16) bool {
+        const cells = stored.row(s, row);
+        const end = trailingBlank(cells, caps);
+        if (end == 0 or run_end != end - 1) return false;
+        for (cells[end..], r.prevRow(row)[end..]) |now, was| {
+            if (!visible(now, caps).eql(was)) return false;
+        }
+        return true;
     }
 
     /// A valid, deliberately unbridged diff. The real planner can only make
@@ -3138,6 +3166,64 @@ test "a row the diff writes as one run from the first column is the paint, byte 
     // The alphabet reaches the case, and the blank one, often.
     try testing.expect(hits > 500);
     try testing.expect(blank_hits > 10);
+}
+
+test "a diff that is the paint without its erase is written for fewer bytes, and priced so" {
+    // The shortcut in `paintIsCheaper` says the diff wins when its first run
+    // reaches the row's trailing blanks and the terminal shows every cell
+    // after them. Held against the exact prices and the bytes each way.
+    const glyphs = [_][]const u8{ "x", "y", " ", " ", "\u{e9}" };
+    const styles = [_]Style{ .{}, .{}, .{ .bold = true }, .{ .fg = .rgb(1, 22, 203) } };
+    var prng: std.Random.DefaultPrng = .init(0x0e7a_5e);
+    const random = prng.random();
+    var hits: usize = 0;
+    for (0..3000) |_| {
+        const cols: u16 = random.intRangeAtMost(u16, 2, 16);
+        var f: Fixture = try .init(testing.allocator, cols, 2);
+        defer f.deinit();
+        f.caps.rep = random.boolean();
+        for (0..2) |pass| {
+            // Rows blank from some column on, more often than not.
+            const blank_from = if (random.uintLessThan(u8, 4) != 0) random.uintAtMost(u16, cols) else cols;
+            for (0..cols) |c| {
+                const col: u16 = @intCast(c);
+                if (c >= blank_from or (pass == 1 and random.uintLessThan(u8, 4) == 0)) {
+                    if (c >= blank_from) try f.screen.fill(.{ .col = col, .row = 0, .cols = 1, .rows = 1 }, .blank(.{}));
+                } else {
+                    try f.screen.write(col, 0, glyphs[random.uintLessThan(usize, glyphs.len)], styles[random.uintLessThan(usize, styles.len)], .none);
+                }
+            }
+            if (pass == 0) {
+                _ = try f.draw();
+                // Half the time the terminal shows the row blank, as a row
+                // repainted over erased rows is.
+                if (random.boolean()) @memset(f.renderer._prev[0..cols], .blank(.{}));
+            }
+        }
+        const r = &f.renderer;
+        const run_end = r.firstRunEnd(&f.screen, f.caps, 0) orelse continue;
+        if (run_end == cols - 1 or !r.diffIsPaintWithoutErase(&f.screen, f.caps, 0, run_end)) continue;
+        hits += 1;
+        const diff = try r.price(&f.screen, f.caps, 0, 0, cols - 1, false);
+        const paint = try r.price(&f.screen, f.caps, 0, 0, cols - 1, true);
+        try testing.expect(diff < paint);
+        try testing.expect(!try r.paintIsCheaper(&f.screen, f.caps, 0, 0, cols - 1));
+        const saved = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        var lens: [2]usize = undefined;
+        for ([_]bool{ false, true }, 0..) |whole, i| {
+            var emitted: std.Io.Writer.Allocating = .init(testing.allocator);
+            defer emitted.deinit();
+            var ignored: Renderer.Stats = .{};
+            try r.emitRow(&emitted.writer, &f.screen, f.caps, 0, 0, cols - 1, whole, &ignored);
+            lens[i] = emitted.written().len;
+            r._style = saved.style;
+            r._link = saved.link;
+            r._cursor = saved.cursor;
+        }
+        try testing.expectEqual(diff, lens[0]);
+        try testing.expectEqual(paint, lens[1]);
+    }
+    try testing.expect(hits > 300);
 }
 
 test "a row with one cell changed is not written whole" {
