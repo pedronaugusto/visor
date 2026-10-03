@@ -46,7 +46,8 @@ test "the grid and renderer store compact cells while exported handles stay chec
     try testing.expect(@sizeOf(@TypeOf(renderer._prev[0])) <= 32);
     const glyph = "👩‍🚀";
     try s.write(0, 0, glyph, .{}, try s.link("https://checked.invalid", ""));
-    const exported = s.readCell(0, 0).?;
+    const read: *const fn (*const Screen, u16, u16) ?Cell = &Screen.readCell;
+    const exported = read(&s, 0, 0).?;
     const borrowed_row = s.rowAt(0);
     try testing.expectEqual(@as(usize, 3), borrowed_row.len());
     try testing.expect(exported.eql(borrowed_row.get(0).?));

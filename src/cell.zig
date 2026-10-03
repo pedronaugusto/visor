@@ -1,10 +1,10 @@
 //! What a grid holds: one cell, its grapheme, its style, its link.
 //!
 //! A checked cell is forty-eight bytes; its stored form is thirty-two. Both
-//! have no padding or indeterminate bytes, and are compared -- a cell,
-//! or a whole row -- with one
-//! `memcmp`. That is what `morse.Style` being an `extern` struct with a
-//! defined layout buys.
+//! have no padding or indeterminate bytes. Stored cells and rows compare
+//! with one `memcmp`; checked cells compare six words, including their
+//! handle identities. That is what `morse.Style` being an `extern` struct
+//! with a defined layout buys.
 //!
 //! The grapheme lives in the cell when it is six bytes or fewer, which
 //! covers every single-codepoint cluster and every base-and-mark pair up to
@@ -252,9 +252,19 @@ fn CellType(comptime checked: bool) type {
         /// Equality as the renderer means it: same glyph, same style, same link,
         /// same shape. Both graphemes and links are interned by the screen, so
         /// this is a comparison of indices and not of strings, and the cell has
-        /// no undefined byte in it, so it is a comparison of memory.
+        /// no undefined byte in it, so every byte participates in equality.
+        /// Checked values compare words without assembling a byte vector;
+        /// compact stored values keep the renderer's memory comparison.
         pub fn eql(a: Self, b: Self) bool {
-            return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            return equalValue(a, b);
+        }
+
+        inline fn equalValue(a: Self, b: Self) bool {
+            if (!checked) return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            const aw: [6]u64 = @bitCast(a);
+            const bw: [6]u64 = @bitCast(b);
+            inline for (aw, bw) |av, bv| if (av != bv) return false;
+            return true;
         }
 
         /// The columns the cell's grapheme takes before any scaling: one or two.
@@ -324,10 +334,32 @@ pub const internal = struct {
     pub fn store(c: Cell) StoredCell {
         return .{ .text = .{ .buf = c.text.buf, .len = c.text.len }, .link = @enumFromInt(@as(u16, @truncate(@intFromEnum(c.link)))), .style = canonical(c.style), .shape = c.shape };
     }
-    pub fn exportCell(c: StoredCell, generation: u64) Cell {
-        var text: Cell.Text = .{ .buf = c.text.buf, .len = c.text.len };
-        if (text.isPooled()) std.mem.writeInt(u48, &text.pool_generation, @intCast(generation), .little);
-        return .{ .text = text, .link = exportLink(c.link, generation), .style = c.style, .shape = c.shape };
+    pub inline fn exportCell(c: *const StoredCell, generation: u64) Cell {
+        // Copy the contiguous payload before adding checked handle identities.
+        // Keeping these as byte ranges avoids rebuilding each style byte in
+        // a vector when a caller immediately compares the exported value.
+        const checked_text = @offsetOf(Cell, "text");
+        const stored_text = @offsetOf(StoredCell, "text");
+        const checked_len = checked_text + @offsetOf(Cell.Text, "len");
+        const stored_len = stored_text + @offsetOf(StoredCell.Text, "len");
+        const payload_len = @sizeOf(StoredCell) - stored_len;
+        comptime {
+            std.debug.assert(@offsetOf(Cell, "style") == checked_len + 1);
+            std.debug.assert(@offsetOf(StoredCell, "style") == stored_len + 1);
+            std.debug.assert(@offsetOf(Cell, "shape") == checked_len + payload_len - 1);
+            std.debug.assert(@offsetOf(StoredCell, "shape") == @sizeOf(StoredCell) - 1);
+        }
+        var bytes: [@sizeOf(Cell)]u8 = @splat(0);
+        const raw = std.mem.asBytes(c);
+        const link = exportLink(c.link, generation);
+        @memcpy(bytes[@offsetOf(Cell, "link")..][0..@sizeOf(Link)], std.mem.asBytes(&link));
+        @memcpy(bytes[checked_text..][0..Cell.Text.max_inline], raw[stored_text..][0..Cell.Text.max_inline]);
+        @memcpy(bytes[checked_len..][0..payload_len], raw[stored_len..][0..payload_len]);
+        if (c.text.isPooled()) {
+            const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
+            std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation), .little);
+        }
+        return @bitCast(bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: u64) Link {
         return if (link == .none) .none else @enumFromInt((generation << 16) | @intFromEnum(link));
@@ -474,4 +506,18 @@ test "a row is compared with one memcmp" {
     b[5] = .init(.{ .text = .inlined("q") });
     try testing.expect(rowsEqual(&a, &b));
     try testing.expect(!rowsEqual(a[0..4], b[0..5]));
+}
+
+test "cell equality includes every checked and compact byte" {
+    inline for (.{ Cell, internal.StoredCell }) |Value| {
+        const a: Value = .blank(.{});
+        const eql: *const fn (Value, Value) bool = &Value.eql;
+        try testing.expect(eql(a, a));
+        for (0..@sizeOf(Value)) |i| {
+            var b = a;
+            std.mem.asBytes(&b)[i] ^= 1;
+            try testing.expect(!a.eql(b));
+            try testing.expect(!b.eql(a));
+        }
+    }
 }

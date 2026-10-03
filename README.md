@@ -341,6 +341,8 @@ field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
 
+A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
+
 Cells read from the screen carry checked text and link handles. The grid and
 renderer store compact cells; Screen owns their pool identity. Screen and
 Renderer geometry is read through `dimensions()` and changed through `resize`.

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
+
 - Reject undeclared dependencies, duplicate layer membership and imports of source executables.
 
 - Check named source layers, cycles, entry files and dependency owners during source CI.

@@ -275,8 +275,12 @@ pub const Screen = struct {
 
     /// The cell at a place, or null outside the grid.
     pub fn readCell(s: *const Screen, col: u16, row: u16) ?Cell {
+        return s.readCheckedCell(col, row);
+    }
+
+    inline fn readCheckedCell(s: *const Screen, col: u16, row: u16) ?Cell {
         if (col >= s.dimensions().cols or row >= s.dimensions().rows) return null;
-        return cellmod.internal.exportCell(s._cells[s.index(col, row)], s._pool_generation);
+        return cellmod.internal.exportCell(&s._cells[s.index(col, row)], s._pool_generation);
     }
 
     /// One cell checked against this screen, clipped and damage marked.
@@ -596,7 +600,7 @@ pub const Screen = struct {
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
     pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
         const t = try s._graphemes.intern(s._gpa, bytes);
-        return cellmod.internal.exportCell(.{ .text = t }, s._pool_generation).text;
+        return cellmod.internal.exportCell(&.{ .text = t }, s._pool_generation).text;
     }
 
     /// An OSC 8 target into the link table, deduplicated.
@@ -726,7 +730,7 @@ pub const Screen = struct {
         }
         pub fn get(row: Row, col: usize) ?Cell {
             if (col >= row._cells.len) return null;
-            return cellmod.internal.exportCell(row._cells[col], row._generation);
+            return cellmod.internal.exportCell(&row._cells[col], row._generation);
         }
     };
 
