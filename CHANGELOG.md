@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Winsize.locate` places a mouse report with `morse.toCellsAt` rather than its own division; the cell and fraction are unchanged.
+
 - `Input` waits under the escape timeout while `morse.KeyParser.undecided` says so, instead of restating the parser's rule for which pending bytes are a key.
 
 - `Term` reads sequences with morse: control sequences and strings are framed by `morse.parseCsi` and `morse.parseControlString`, style changes are applied by `morse.applySgr`, and modes and cursor shapes are matched by morse's numbers. Superscript and subscript (SGR 73, 74, 75) now survive the round trip, the round-trip generator draws them, and `dumpScreenStyles` names them; a cursor shape morse does not name leaves the cursor as it was.
