@@ -36,7 +36,7 @@ from quiet_support import capture
 info["cc"] = capture([os.environ.get("CC", "cc"), "--version"]).splitlines()[0]
 info["cmake"] = capture(["cmake", "--version"]).splitlines()[0]
 if sys.platform == "darwin": info["libunistring"] = capture(["brew", "list", "--versions", "libunistring"])
-TASKS = ['buffer_diff', 'full_repaint', 'unchanged_diff', 'style_heavy', 'unchanged_idle', 'picture_layers', 'picture_unchanged']
+TASKS = ['cell_reads', 'buffer_diff', 'full_repaint', 'unchanged_diff', 'style_heavy', 'unchanged_idle', 'picture_layers', 'picture_unchanged']
 
 def invoke(side, task, mode, cols, rows, iterations):
     binary = BUILD / ("notcurses-bench" if side == "notcurses" else 'cargo-target/release/visor-comparison' if side == 'ratatui' else
@@ -59,7 +59,7 @@ def invoke(side, task, mode, cols, rows, iterations):
 checks = []
 for cols, rows in [(8, 4), (120, 40), (200, 60)]:
     for task in TASKS:
-        sides = ['visor-before', 'visor'] + (['ratatui'] if task in TASKS[:4] else []) + (['notcurses'] if task in TASKS[1:4] else [])
+        sides = ['visor-before', 'visor'] + (['ratatui'] if task in ['buffer_diff', 'full_repaint', 'unchanged_diff', 'style_heavy'] else []) + (['notcurses'] if task in ['full_repaint', 'unchanged_diff', 'style_heavy'] else [])
         for side in sides:
             result, frames = invoke(side, task, 'check', cols, rows, 3)
             evidence = verify(task, cols, rows, frames, result)
@@ -71,14 +71,15 @@ samples = []
 for cols, rows in sizes:
     for task in TASKS:
         for rep in range(1, reps + 1):
-            for side in ['visor-before', 'visor'] + (['ratatui'] if task in TASKS[:4] else []) + (['notcurses'] if task in TASKS[1:4] else []):
+            for side in ['visor-before', 'visor'] + (['ratatui'] if task in ['buffer_diff', 'full_repaint', 'unchanged_diff', 'style_heavy'] else []) + (['notcurses'] if task in ['full_repaint', 'unchanged_diff', 'style_heavy'] else []):
                 result, frames = invoke(side, task, 'smoke' if args.smoke else 'full', cols, rows, iterations)
                 samples.append({'library':side, 'workload':task, 'cols':cols, 'rows':rows,
                                 'iteration':rep, 'status':'smoke' if args.smoke else 'measured', **result})
+samples.append({'library':'ratatui', 'workload':'cell_reads', 'iteration':0, 'status':'unavailable: visor checked-cell read diagnostic', 'ns':None})
 # Explicit unavailable rows keep capability exclusions visible in both artifacts.
-for task in TASKS[4:]:
+for task in TASKS[5:]:
     samples.append({'library':'ratatui', 'workload':task, 'iteration':0, 'status':'unavailable: no equivalent retained-screen or picture-layer API', 'ns':None})
-for task in ['buffer_diff', 'unchanged_idle', 'picture_layers', 'picture_unchanged']:
+for task in ['cell_reads', 'buffer_diff', 'unchanged_idle', 'picture_layers', 'picture_unchanged']:
     samples.append({'library':'notcurses', 'workload':task, 'iteration':0,
                     'status':'unavailable: no equivalent pure diff or retained-screen API; headless profile has no picture protocol negotiation', 'ns':None})
 correctness = {'checks':checks, 'count':len(checks), 'oracle':'Independent ASCII, SGR, cursor, erase and kitty placement decoder',

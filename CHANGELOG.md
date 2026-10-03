@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Benchmark owner screen diffs separately from checked cell reads and pin the after build to diff.
+
 - Reject undeclared dependencies, duplicate layer membership and imports of source executables.
 
 - Check named source layers, cycles, entry files and dependency owners during source CI.

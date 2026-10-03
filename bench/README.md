@@ -20,7 +20,7 @@ The harness lives on `bench`, created from current main; main has no harness.
 
 `revisions.json` fixes A at `4ef702d25f50b37906146582d6ee0ca3ae57934b`, the last
 first-parent main commit before **2026-09-30 00:00:00 +01:00**, and B at
-`9aeab8c214c87187e44cc67b6bab1e066bb6a81b` on `perf` (`after_ref`). The explicit midnight cutoff avoids Git's bare date
+`398c7449fff6fd4c3db8c77833a2e585eb4447f6` on `diff` (`after_ref`). The explicit midnight cutoff avoids Git's bare date
 inheriting the time of day. The runner extracts exact `git archive` snapshots into ignored
 `build/revisions/` directories. The after build consumes the remote archive
 and Zig hash in `build.zig.zon`, with its own pinned dependencies. Refresh the pins and `after_ref` when the target moves; a silently changed
@@ -34,8 +34,10 @@ changed cells and picture positions are identical at both package revisions.
 
 Minimal compatibility code adapts allocator arguments on Screen/Renderer/
 Layers cleanup and declaration/transmission, default Layers construction to
-`Layers.init`, and the new fallible `writeOwnedCell`. Both revisions use
-public `readCell`/`Cell.eql`, never a private storage layout. The old package
+`Layers.init`, and the new fallible `writeOwnedCell`. The after revision uses public `Screen.diff` for `buffer_diff`; the before
+revision uses `readCell`/`Cell.eql` because it has no owner comparison API.
+Both use `readCell`/`Cell.eql` for the separate `cell_reads` diagnostic.
+Neither workload reads a private storage layout. The old package
 does not re-export `Transmit`, so identical option literals are passed to the
 native public transmission calls. No package implementation is changed.
 
@@ -43,7 +45,8 @@ native public transmission calls. No package implementation is changed.
 
 | Workload | visor before/after | ratatui | notcurses |
 | --- | --- | --- | --- |
-| `buffer_diff` | Public cell equality over two prepared screens; every 97th cell changed | `Buffer.diff` over the same prepared cells | Unavailable: no equivalent pure diff API |
+| `buffer_diff` | Native owner diff after; public cell equality before; every 97th cell changed | `Buffer.diff` over the same prepared cells | Unavailable: no equivalent pure diff API |
+| `cell_reads` | Public checked cell reads and equality over the same prepared screens | Unavailable: visor read diagnostic | Unavailable: no equivalent pure diff API |
 | `full_repaint` | Force complete repaint of a prepared frame | Empty baseline diff + Crossterm backend | Render/rasterize after a different complete baseline |
 | `unchanged_diff` | Mark all rows damaged, then compare equal cells | Equal buffer diff + backend | Render/rasterize the unchanged plane |
 | `style_heavy` | Change every cell's RGB and bold; glyphs stay fixed | Same alternating styled buffers + backend | Same alternating styled plane + rasterizer |
@@ -53,8 +56,9 @@ native public transmission calls. No package implementation is changed.
 
 These are drawing-core jobs, excluding widgets, frame construction and terminal
 I/O. Native allocation/representation policies remain part of the measurement.
-The visor pure diff scans exported public cells and counts differences; ratatui's
-native diff allocates its update list. This is a public-API job comparison, not
+The visor after pure diff iterates changed positions inside the screen owners;
+its before fallback and the separate `cell_reads` diagnostic scan exported
+public cells. Ratatui's native diff allocates its update list. This is a public-API job comparison, not
 a claim that their internal algorithms or cell representations are identical.
 Ratatui's backend may emit style resets for an empty diff; output bytes expose
 that policy while the oracle verifies that no cell changes.

@@ -69,7 +69,8 @@ pub fn main(init: std.process.Init) !void {
     defer for (&screens) |*s| deinitScreen(s, gpa);
     for (&screens) |*s| s.method = .unicode;
     const heavy = std.mem.eql(u8, task, "style_heavy");
-    const diff = std.mem.eql(u8, task, "buffer_diff");
+    const cell_reads = std.mem.eql(u8, task, "cell_reads");
+    const diff = std.mem.eql(u8, task, "buffer_diff") or cell_reads;
     const picture = std.mem.startsWith(u8, task, "picture_");
     try paint(&screens[0], cols, rows, 0, heavy);
     try paint(&screens[1], cols, rows, if (heavy) 1 else 0, heavy);
@@ -108,7 +109,13 @@ pub fn main(init: std.process.Init) !void {
     for (0..iterations) |n| {
         if (diff) {
             var changed: usize = 0;
-            for (0..rows) |y| for (0..cols) |x| {
+            if (!before and !cell_reads) {
+                var changes = screens[0].diff(&screens[1]);
+                while (changes.next()) |point| {
+                    std.mem.doNotOptimizeAway(point);
+                    changed += 1;
+                }
+            } else for (0..rows) |y| for (0..cols) |x| {
                 const a = screens[0].readCell(@intCast(x), @intCast(y)).?;
                 const b = screens[1].readCell(@intCast(x), @intCast(y)).?;
                 if (!equal(a, b)) changed += 1;

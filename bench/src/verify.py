@@ -120,7 +120,7 @@ def expected(cols, rows, heavy, salt):
              (i+salt) % 2 == 0 if heavy else False) for i in range(cols * rows)]
 
 def verify(task, cols, rows, frames, result):
-    if task == 'buffer_diff':
+    if task in ('buffer_diff', 'cell_reads'):
         assert not frames
         assert result['native_count'] == 3 * ((cols * rows + 96) // 97), result
         return {'status':'passed', 'changed_cells_per_pass':(cols * rows + 96) // 97}
