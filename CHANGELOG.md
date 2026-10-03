@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
+
 - `Markdown.Quoted` reads a source line by line by the reader's own quote and fence rules: each line's body with its quote markers off, its depth, and whether it belongs to a fenced block. `Markdown.Document` reads its fences through it.
 
 - `Palette.resolve` takes the colour cube and grey ramp from `morse.paletteRgb`.

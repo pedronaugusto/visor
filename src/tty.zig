@@ -15,11 +15,12 @@
 //! `restoreGlobal` can put every terminal back from a panic handler, where
 //! there is nothing to pass and nothing that may fail.
 //!
-//! The terminal's own calls -- raw mode and the way back, the size, the
-//! device's name and its foreground group -- are conduit's (`conduit.tty`),
-//! which owns them for this package and for the programs that run a child on
-//! a pseudo-terminal alike. What is here is what a screen needs on top: the
-//! controlling terminal opened, the modes a renderer entered undone on every
+//! The terminal's own calls -- opening it, raw mode and the way back, the
+//! size, the device's name and its foreground group, and the console's
+//! entry points on Windows -- are conduit's (`conduit.tty`), which owns them
+//! for this package and for the programs that run a child on a
+//! pseudo-terminal alike. What is here is what a screen needs on top: a
+//! device the reader can poll, the modes a renderer entered undone on every
 //! way out, and a resize woken into the input.
 //!
 //! What this file will never hold: a parser, a screen, a frame, a clock, or
@@ -178,62 +179,35 @@ pub const Tty = struct {
     }
 
     /// Anything opening the terminal can fail with.
-    pub const OpenError = Io.File.OpenError || error{NotATerminal};
+    pub const OpenError = terminal.OpenControllingError;
     /// Anything changing its mode can fail with.
     pub const ModeError = error{ NotATerminal, Unexpected };
     /// Anything asking its size can fail with.
     pub const SizeError = error{ NotATerminal, Unexpected };
 
     /// The program's controlling terminal: `/dev/tty` on POSIX, the console
-    /// handles on Windows.
+    /// handles on Windows, opened by `conduit.tty.openControlling`.
     ///
     /// Not the standard streams: a program whose output is a pipe still has
     /// a terminal, and a program drawing a screen wants the terminal rather
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
-        if (is_windows) {
-            const input = CreateFileW(
-                std.unicode.utf8ToUtf16LeStringLiteral("CONIN$"),
-                GENERIC_READ | GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                null,
-                OPEN_EXISTING,
-                0,
-                null,
-            );
-            if (input == windows.INVALID_HANDLE_VALUE) return error.NotATerminal;
-            errdefer windows.CloseHandle(input);
-            const output = CreateFileW(
-                std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"),
-                GENERIC_READ | GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                null,
-                OPEN_EXISTING,
-                0,
-                null,
-            );
-            if (output == windows.INVALID_HANDLE_VALUE) return error.NotATerminal;
-            return .{
-                ._file = .{ .handle = output, .flags = .{ .nonblocking = false } },
-                ._io = io,
-                ._input = .{ .handle = input, .flags = .{ .nonblocking = false } },
-            };
-        }
-        const file = try Io.Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = .read_write });
+        const own = try terminal.openControlling(io);
+        if (is_windows) return .{ ._file = own.output, ._io = io, ._input = own.input };
         if (builtin.os.tag == .macos) {
             // The kernel's poll cannot wait on /dev/tty here -- it answers
             // POLLNVAL at once -- and the reader waits on the terminal and
             // the resize pipe together. The device the standard streams are
             // on is the same terminal under a name poll does work on.
             var path: [std.posix.PATH_MAX]u8 = undefined;
-            if (deviceOf(file.handle, &path)) |device| {
+            if (deviceOf(own.output.handle, &path)) |device| {
                 if (Io.Dir.openFileAbsolute(io, device, .{ .mode = .read_write })) |real| {
-                    file.close(io);
+                    own.close(io);
                     return .{ ._file = real, ._io = io, ._input = {} };
                 } else |_| {}
             }
         }
-        return .{ ._file = file, ._io = io, ._input = {} };
+        return .{ ._file = own.output, ._io = io, ._input = {} };
     }
 
     /// A terminal the program already has open: a descriptor it was handed,
@@ -574,7 +548,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
         if (is_windows) {
             var written: windows.DWORD = 0;
             const n: windows.DWORD = @intCast(@min(left.len, std.math.maxInt(windows.DWORD)));
-            if (WriteFile(handle, left.ptr, n, &written, null) == .FALSE or written == 0) return;
+            if (terminal.console.WriteFile(handle, left.ptr, n, &written, null) == .FALSE or written == 0) return;
             left = left[written..];
             continue;
         }
@@ -590,37 +564,6 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
         }
     }
 }
-
-//=========================================================================
-// The console, which `std.os.windows` carries the types for and not the
-// entry points. Everything here is an `extern` declaration against the
-// system import library, in the same style as `std.os.windows.kernel32`; no
-// C is involved. Nothing below is reached off Windows.
-//=========================================================================
-
-const GENERIC_READ: windows.DWORD = 0x80000000;
-const GENERIC_WRITE: windows.DWORD = 0x40000000;
-const FILE_SHARE_READ: windows.DWORD = 0x00000001;
-const FILE_SHARE_WRITE: windows.DWORD = 0x00000002;
-const OPEN_EXISTING: windows.DWORD = 3;
-
-extern "kernel32" fn CreateFileW(
-    lpFileName: windows.LPCWSTR,
-    dwDesiredAccess: windows.DWORD,
-    dwShareMode: windows.DWORD,
-    lpSecurityAttributes: ?*windows.SECURITY_ATTRIBUTES,
-    dwCreationDisposition: windows.DWORD,
-    dwFlagsAndAttributes: windows.DWORD,
-    hTemplateFile: ?windows.HANDLE,
-) callconv(.winapi) windows.HANDLE;
-
-extern "kernel32" fn WriteFile(
-    hFile: windows.HANDLE,
-    lpBuffer: [*]const u8,
-    nNumberOfBytesToWrite: windows.DWORD,
-    lpNumberOfBytesWritten: ?*windows.DWORD,
-    lpOverlapped: ?*anyopaque,
-) callconv(.winapi) windows.BOOL;
 
 const testing = std.testing;
 
