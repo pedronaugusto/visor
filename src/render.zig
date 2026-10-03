@@ -460,7 +460,8 @@ pub const Renderer = struct {
         r._method = caps.width_method;
 
         const pictures = if (layers) |l| l.hasFrameWork() else false;
-        const body = r._repaint_all or s._damage.any() or r.anyForced() or pictures;
+        const text = r._repaint_all or s._damage.any() or r.anyForced();
+        const body = text or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
             s._damage.clear();
@@ -475,7 +476,7 @@ pub const Renderer = struct {
             // The terminal's pictures are as unknown as its text.
             if (layers) |l| l.repaint();
         }
-        if (body) {
+        if (text) {
             if (caps.scroll_detection and r._region == null) {
                 if (try moved_rows.apply(r, out, s, caps)) |moved| stats.scrolled = moved;
             }
@@ -485,7 +486,7 @@ pub const Renderer = struct {
         // seven bytes that close one on the frame that opened it, and it
         // means a cell written next frame never pays for a link it has
         // nothing to do with.
-        if (body) {
+        if (text) {
             var ignored: Stats = .{};
             try r.setLink(out, s, .none, caps, &ignored);
         }
@@ -496,7 +497,7 @@ pub const Renderer = struct {
         try r.finishCursor(out, s);
 
         try frame.finish();
-        if (body) {
+        if (text) {
             s._damage.clear();
             @memset(r._force, false);
             r._repaint_all = false;
@@ -4057,4 +4058,39 @@ test "retrying input modes can cancel an uncertain change without repeating a po
     out.end = 0;
     try r.setModes(&out, .{});
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
+}
+
+test "picture frames keep cursor work and forced text rows" {
+    var f: Fixture = try .init(testing.allocator, 8, 3);
+    defer f.deinit();
+    var layers: Layers = .init(testing.allocator);
+    defer layers.deinit();
+    var caps = f.caps;
+    caps.kitty_graphics = true;
+    const picture: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    for ("text", 0..) |_, col| try f.screen.write(@intCast(col), 1, "text"[col..][0..1], .{}, .none);
+    try layers.declare(picture);
+    _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
+    f.out.clearRetainingCapacity();
+    try layers.declare(picture);
+    const still = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
+    try testing.expectEqual(@as(usize, 0), still.bytes);
+    try testing.expectEqual(@as(u32, 0), still.rows);
+    f.screen.cursor = .{ .col = 3, .row = 2, .visible = true };
+    try layers.declare(picture);
+    const cursor = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
+    try testing.expectEqual(@as(u32, 0), cursor.rows);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[3;4H") != null);
+    f.out.clearRetainingCapacity();
+    f.renderer.repaintRow(1);
+    try layers.declare(picture);
+    const forced = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
+    try testing.expectEqual(@as(u32, 1), forced.repainted);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "text") != null);
+    f.out.clearRetainingCapacity();
+    for ("new", 0..) |_, col| try f.screen.write(@intCast(col), 1, "new"[col..][0..1], .{}, .none);
+    try layers.declare(picture);
+    const changed = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
+    try testing.expectEqual(@as(u32, 1), changed.rows);
+    try testing.expect(std.mem.indexOf(u8, f.out.written(), "new") != null);
 }

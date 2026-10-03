@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Skip the text pass when a frame only updates pictures or the cursor.
+
 - Keep dirty row counts with their spans so clean frames need no damage scan or clear.
 
 - Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
