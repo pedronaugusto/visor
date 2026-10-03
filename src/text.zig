@@ -119,6 +119,17 @@ pub const Graphemes = struct {
         };
     }
 
+    /// The clusters from `at` on, which must be where one starts, counted
+    /// from `at`. Keeps the ASCII path without scanning the rest again.
+    fn restart(g: Graphemes, at: usize) Graphemes {
+        const rest = g._bytes[at..];
+        return .{
+            ._bytes = rest,
+            ._inner = .init(.init(rest)),
+            ._ascii_at = if (g._ascii_at != null) 0 else null,
+        };
+    }
+
     /// The next cluster, or null at the end.
     pub fn next(g: *Graphemes) ?[]const u8 {
         if (g._ascii_at) |at| {
@@ -313,6 +324,14 @@ pub const Row = struct {
 /// Stops when `rows_out` is full, so a caller that wants every row sizes the
 /// slice from `str.len`, which is the most rows there can be. A newline in
 /// `str` always ends a row, whatever the mode.
+///
+/// A row is never wider than `cols` unless it is one cluster wider than
+/// `cols` on its own, and every row starts at or after where the one before
+/// it ended. A break swallows the spaces it broke at, so they are in no row.
+/// Leading spaces are spaces like any others: under `.word` a line's
+/// indentation is where its first word may break, and an indentation wider
+/// than the row is a row of the spaces that fit, the rest swallowed by the
+/// break before the first word.
 pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []Row) usize {
     if (rows_out.len == 0 or cols == 0) return 0;
     var written: usize = 0;
@@ -320,11 +339,23 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
     // Where the row could be cut instead of here, and how wide it was there.
     var break_at: ?usize = null;
     var break_columns: u16 = 0;
+    // Whether the spaces ahead are the ones the last break swallowed.
+    var swallowing = false;
+    // Where in `str` the iterator's string starts: a break rewinds it to
+    // the start of the next row.
+    var base: usize = 0;
     var it: Graphemes = .init(str);
 
     while (it.nextAt()) |found| {
         const g = found.bytes;
-        const at = found.start;
+        const at = base + found.start;
+        if (swallowing) {
+            if (g.len == 1 and g[0] == ' ') {
+                row = .{ .start = at + 1, .end = at + 1, .columns = 0 };
+                continue;
+            }
+            swallowing = false;
+        }
         if (isLineBreak(g)) {
             rows_out[written] = .{ .start = row.start, .end = at, .columns = row.columns };
             written += 1;
@@ -340,10 +371,11 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
                 // newline still starts a row.
                 while (it.nextAt()) |skip| {
                     if (isLineBreak(skip.bytes)) {
+                        const after = base + skip.start + skip.bytes.len;
                         rows_out[written] = .{ .start = row.start, .end = at, .columns = row.columns };
                         written += 1;
                         if (written == rows_out.len) return written;
-                        row = .{ .start = skip.start + skip.bytes.len, .end = skip.start + skip.bytes.len, .columns = 0 };
+                        row = .{ .start = after, .end = after, .columns = 0 };
                         break;
                     }
                 } else {
@@ -371,17 +403,14 @@ pub fn wrap(str: []const u8, cols: u16, mode: Wrap, method: Method, rows_out: []
             rows_out[written] = .{ .start = row.start, .end = cut, .columns = cut_columns };
             written += 1;
             if (written == rows_out.len) return written;
-            // A word break swallows the spaces it broke at.
-            var resume_at = cut;
-            while (resume_at < str.len and str[resume_at] == ' ') resume_at += 1;
-            row = .{ .start = resume_at, .end = resume_at, .columns = 0 };
+            // The next row is read again from the cut: the word between an
+            // earlier break and this cluster may not fit beside it either,
+            // and the spaces at the cut, however many, are swallowed.
+            it = it.restart(cut - base);
+            base = cut;
+            row = .{ .start = cut, .end = cut, .columns = 0 };
             break_at = null;
-            if (resume_at > at) continue;
-            // The iterator has already consumed the word prefix between the
-            // earlier break and this overflowing cluster. It belongs to the
-            // new row and must be measured with the cluster.
-            row.columns = width(str[resume_at .. at + g.len], method);
-            row.end = at + g.len;
+            swallowing = true;
             continue;
         }
         if (mode == .word and g.len == 1 and g[0] == ' ') {

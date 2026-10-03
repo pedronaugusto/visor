@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `wrap`, and so `Paragraph.Rows`, no longer ends a row before it starts when a break swallows spaces the scan had not reached: indentation wider than the width is a row of the spaces that fit, and the first word starts the next. A word that does not fit beside a wide cluster after a break is broken again instead of overflowing its row; a space a mark combines with is no longer split by the spaces a break swallows.
+
 - `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
 
 - `Markdown.Quoted` reads a source line by line by the reader's own quote and fence rules: each line's body with its quote markers off, its depth, and whether it belongs to a fenced block. `Markdown.Document` reads its fences through it.
