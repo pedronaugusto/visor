@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Palette.resolve` takes the colour cube and grey ramp from `morse.paletteRgb`.
+
 - `Winsize.locate` places a mouse report with `morse.toCellsAt` rather than its own division; the cell and fraction are unchanged.
 
 - `Input` waits under the escape timeout while `morse.KeyParser.undecided` says so, instead of restating the parser's rule for which pending bytes are a key.
