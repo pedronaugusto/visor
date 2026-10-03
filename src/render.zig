@@ -1063,13 +1063,12 @@ pub const Renderer = struct {
                 continue;
             }
             const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
-            if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
-            cost += text.len;
+            cost += sizedTextCost(c, text, caps);
             col += c.width();
             if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, end - 1, visible(c, caps), caps);
-                if (@as(usize, same) > 3 + digits(same)) {
-                    cost += 3 + digits(same);
+                if (repeats(same)) {
+                    cost += morse.cost.repeatChar(same);
                     col += same;
                 }
             }
@@ -1158,7 +1157,7 @@ pub const Renderer = struct {
 
     /// The arithmetic counterpart of `eraseToEnd`.
     fn eraseToEndCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps) usize {
-        return setStyleCost(r, state, .{}) + setLinkCost(state, s, .none, caps) + clear_line_cost;
+        return setStyleCost(r, state, .{}) + setLinkCost(state, s, .none, caps) + morse.cost.clearLine(.to_end);
     }
 
     /// The arithmetic counterpart of `writeCells`.
@@ -1188,38 +1187,29 @@ pub const Renderer = struct {
             cost += r.moveCost(state, col, row);
             if (erase_tail and col == erase_from) {
                 const blanks = to - col + 1;
-                if (blanks > erase_cost) {
+                if (erases(blanks)) {
                     cost += setStyleCost(r, state, .{});
                     cost += setLinkCost(state, s, .none, caps);
-                    return cost + 3 + digits(blanks);
+                    return cost + morse.cost.eraseChars(blanks);
                 }
             }
             cost += setStyleCost(r, state, c.style);
             cost += setLinkCost(state, s, c.link, caps);
             const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
-            if (c.isScaled()) {
-                // OSC 66, two one-digit keys, their separator, the metadata
-                // terminator and ST.
-                cost += 15 + text.len;
-            } else if (toldWidth(c, caps)) {
-                // OSC 66, one one-digit width key, the metadata terminator
-                // and ST.
-                cost += 11 + text.len;
+            if (c.isScaled() or toldWidth(c, caps)) {
+                cost += sizedTextCost(c, text, caps);
             } else if (r.marksApart(c, text, caps) or joinsApart(s, row, col, c, text, caps)) {
-                // Mode 2027 off and on again around it.
-                cost += 16 + text.len;
+                cost += apartCost(text);
             } else if (joinsAcross(s, row, col, c, text, caps)) |left| {
-                // The left cell blank, the cluster, two moves and the left
-                // cell again in its own style (`writeApart`).
-                cost += (col - left) + text.len + stored.textOf(s, &cells[left]).len + 48;
+                cost += r.writeApartCost(state, s, caps, row, left, col, c, text);
             } else {
                 cost += text.len;
             }
             col += c.width();
             if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, to, visible(c, caps), caps);
-                if (@as(usize, same) > 3 + digits(same)) {
-                    cost += 3 + digits(same);
+                if (repeats(same)) {
+                    cost += morse.cost.repeatChar(same);
                     col += same;
                 }
             }
@@ -1262,8 +1252,7 @@ pub const Renderer = struct {
                 continue;
             }
             const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
-            cost += text.len;
-            if (c.isScaled()) cost += 15 else if (toldWidth(c, caps)) cost += 11;
+            cost += sizedTextCost(c, text, caps);
             if (cost > limit) return true;
             col += c.width();
         }
@@ -1449,7 +1438,7 @@ pub const Renderer = struct {
             try r.moveTo(out, col, row, stats);
             if (erase_tail and col == erase_from) {
                 const blanks = to - col + 1;
-                if (blanks > erase_cost) {
+                if (erases(blanks)) {
                     try r.setStyle(out, .{}, stats);
                     try r.setLink(out, s, .none, caps, stats);
                     try morse.eraseChars(out, blanks);
@@ -1467,7 +1456,7 @@ pub const Renderer = struct {
                 var bytes: [256]u8 = undefined;
                 var n: usize = 0;
                 while (col <= to and n < bytes.len) {
-                    if (erase_tail and col == erase_from and to - col + 1 > erase_cost) break;
+                    if (erase_tail and col == erase_from and erases(to - col + 1)) break;
                     const next = visible(cells[col], caps);
                     if (next.shape.kind != .narrow or next.isScaled() or !next.text.isAscii() or
                         next.link != c.link or !std.mem.eql(u8, std.mem.asBytes(&next.style), std.mem.asBytes(&c.style))) break;
@@ -1484,10 +1473,10 @@ pub const Renderer = struct {
             // it carried the text of.
             const text: []const u8 = if (cells[col].isTail()) " " else stored.textOf(s, &cells[col]);
             if (c.isScaled()) {
-                try morse.textSize(out, .{ .scale = c.shape.scale, .width = c.glyphWidth() }, text);
+                try morse.textSize(out, textSizeOf(c), text);
                 stats.scaled += 1;
             } else if (toldWidth(c, caps)) {
-                try morse.textSize(out, .{ .width = c.glyphWidth() }, text);
+                try morse.textSize(out, textSizeOf(c), text);
                 stats.told += 1;
             } else if (r.marksApart(c, text, caps) or joinsApart(s, row, col, c, text, caps)) {
                 try morse.unicodeCore.set(out, false);
@@ -1502,7 +1491,7 @@ pub const Renderer = struct {
             col += c.width();
             if (caps.rep and repeatable(c, text, caps)) {
                 const same = sameRunLen(cells, col, to, visible(c, caps), caps);
-                if (@as(usize, same) > 3 + digits(same)) {
+                if (repeats(same)) {
                     try morse.repeatChar(out, same);
                     stats.cells += same;
                     stats.repeated += same;
@@ -1544,6 +1533,31 @@ pub const Renderer = struct {
         r.advance(col, row);
         if (col + c.width() < r.dimensions().cols) try r.moveTo(out, col + c.width(), row, stats) else r._cursor = null;
         stats.rejoined += 1;
+    }
+
+    /// The counted twin of `writeApart`: the same moves, pens and text from
+    /// the same priced state, leaving that state where `writeApart` leaves
+    /// the renderer.
+    fn writeApartCost(r: *Renderer, state: *CostState, s: *Screen, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8) usize {
+        const cells = stored.row(s, row);
+        const lc = visible(cells[left], caps);
+        const held = stored.textOf(s, &cells[left]);
+        var cost = r.moveCost(state, left, row);
+        cost += setStyleCost(r, state, lc.style);
+        cost += setLinkCost(state, s, .none, caps);
+        cost += col - left;
+        r.advanceCost(state, col, row);
+        cost += setStyleCost(r, state, c.style);
+        cost += setLinkCost(state, s, c.link, caps);
+        cost += text.len;
+        r.advanceCost(state, col + c.width(), row);
+        cost += r.moveCost(state, left, row);
+        cost += setStyleCost(r, state, lc.style);
+        cost += setLinkCost(state, s, lc.link, caps);
+        cost += if (joinsApart(s, row, left, lc, held, caps)) apartCost(held) else held.len;
+        r.advanceCost(state, col, row);
+        if (col + c.width() < r.dimensions().cols) cost += r.moveCost(state, col + c.width(), row) else state.cursor = null;
+        return cost;
     }
 
     /// Whether a cluster goes out with mode 2027 off around it: a base and
@@ -1690,7 +1704,7 @@ pub const Renderer = struct {
         const cost: usize = if (r._region != null) region: {
             const origin: Point = .{ .col = 0, .row = 0 };
             const from_origin = plan(origin, there, .region);
-            const via_origin: usize = if (col == 0 and row == 0) 2 else 2 + from_origin.cost;
+            const via_origin = morse.cost.cursorRestore() + if (col == 0 and row == 0) 0 else from_origin.cost;
             if (state.cursor) |at| {
                 const direct = plan(at, there, .region);
                 if (direct.cost <= via_origin) break :region direct.cost;
@@ -1728,7 +1742,7 @@ pub const Renderer = struct {
     fn moveWithin(r: *Renderer, out: *Writer, to: Point) Error!void {
         const origin: Point = .{ .col = 0, .row = 0 };
         const from_origin = plan(origin, to, .region);
-        const via_origin: usize = if (to.col == 0 and to.row == 0) 2 else 2 + from_origin.cost;
+        const via_origin = morse.cost.cursorRestore() + if (to.col == 0 and to.row == 0) 0 else from_origin.cost;
         if (r._cursor) |at| {
             const direct = plan(at, to, .region);
             if (direct.cost <= via_origin) {
@@ -1885,7 +1899,7 @@ fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
     if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
     const from = state.style;
     const n = r._style_sequences.getCost(from, to) orelse cost: {
-        const computed = morse.diffStyleLen(from, to);
+        const computed = morse.cost.diffStyle(from, to);
         r._style_sequences.putCost(from, to, computed);
         break :cost computed;
     };
@@ -1898,23 +1912,54 @@ fn setLinkCost(state: *CostState, s: *const Screen, to: Link, caps: Caps) usize 
     if (!caps.osc8 or state.link == to) return 0;
     if (to == .none) {
         state.link = .none;
-        return hyperlink_end_cost;
+        return morse.cost.hyperlinkEnd();
     }
     const target = stored.target(s, to) orelse {
         state.link = .none;
-        return hyperlink_end_cost;
+        return morse.cost.hyperlinkEnd();
     };
     state.link = to;
-    return hyperlink_end_cost + target.uri.len + target.params.len;
+    return morse.cost.hyperlinkStart(target.uri, linkParams(target.params));
 }
 
-/// What `CSI n X` costs before it starts saving: the introducer, one digit
-/// and the final byte. A blank run longer than this is cheaper erased.
-const erase_cost = 4;
+/// The params an OSC 8 open is written with: none rather than an empty
+/// list.
+fn linkParams(params: []const u8) ?[]const u8 {
+    return if (params.len == 0) null else params;
+}
 
-/// `CSI 0 K` and `OSC 8 ; ; ST` respectively.
-const clear_line_cost = 4;
-const hyperlink_end_cost = 7;
+/// Whether a run of `blanks` default blanks is shorter erased, `CSI n X`,
+/// than written a byte a blank.
+fn erases(blanks: u32) bool {
+    return blanks > morse.cost.eraseChars(blanks);
+}
+
+/// Whether `same` more copies of a one-byte-or-more glyph are shorter as
+/// `CSI n b` than as the cells themselves, counted at a byte a cell.
+fn repeats(same: u16) bool {
+    return same > morse.cost.repeatChar(same);
+}
+
+/// The OSC 66 metadata a scaled or width-told cell is written with.
+fn textSizeOf(c: Cell) morse.TextSize {
+    return if (c.isScaled())
+        .{ .scale = c.shape.scale, .width = c.glyphWidth() }
+    else
+        .{ .width = c.glyphWidth() };
+}
+
+/// The bytes a cell's text goes out in: inside OSC 66 when it is scaled or
+/// its width is told, and as itself otherwise.
+fn sizedTextCost(c: Cell, text: []const u8, caps: Caps) usize {
+    if (c.isScaled() or toldWidth(c, caps)) return morse.cost.textSize(textSizeOf(c), text);
+    return text.len;
+}
+
+/// A cluster with mode 2027 off and on again around it.
+fn apartCost(text: []const u8) usize {
+    const core = morse.unicodeCore.number;
+    return morse.cost.setMode(core, false) + text.len + morse.cost.setMode(core, true);
+}
 
 /// What the scroll detection needs of a renderer, and
 /// nothing a program reaches: `Renderer` is re-exported, this file's own
@@ -2096,17 +2141,9 @@ fn sameRunLen(cells: []const Cell, col: u16, to: u16, same: Cell, caps: Caps) u1
     return n;
 }
 
-/// How many decimal digits a number takes as a parameter.
-fn digits(n: u32) usize {
-    var v = n;
-    var d: usize = 1;
-    while (v >= 10) : (v /= 10) d += 1;
-    return d;
-}
-
 /// The bytes an absolute move costs: `CSI row ; col H`.
 fn absoluteCost(to: Point) usize {
-    return 2 + digits(@as(u32, to.row) + 1) + 1 + digits(@as(u32, to.col) + 1) + 1;
+    return morse.cost.cursorTo(@as(u32, to.row) + 1, @as(u32, to.col) + 1);
 }
 
 /// Writes the cheapest sequence that moves the cursor from `at` to `to` on
@@ -2135,37 +2172,38 @@ fn plan(at: Point, to: Point, addressing: Addressing) struct { choice: Move, cos
 
     if (at.row == to.row) {
         if (to.col == 0) best = pick(&choice, .carriage_return, 1, best);
-        best = pick(&choice, .column, 2 + digits(@as(u32, to.col) + 1) + 1, best);
+        best = pick(&choice, .column, morse.cost.cursorColumn(@as(u32, to.col) + 1), best);
         if (to.col > at.col) {
-            best = pick(&choice, .right, 2 + digits(to.col - at.col) + 1, best);
+            best = pick(&choice, .right, morse.cost.cursorRight(to.col - at.col), best);
         } else if (to.col < at.col) {
-            best = pick(&choice, .left, 2 + digits(at.col - to.col) + 1, best);
+            best = pick(&choice, .left, morse.cost.cursorLeft(at.col - to.col), best);
             best = pick(&choice, .backspace, at.col - to.col, best);
         }
     } else if (at.col == to.col) {
         if (addressing == .screen) {
-            best = pick(&choice, .row, 2 + digits(@as(u32, to.row) + 1) + 1, best);
+            best = pick(&choice, .row, morse.cost.cursorRow(@as(u32, to.row) + 1), best);
         }
         if (to.row > at.row) {
-            best = pick(&choice, .down, 2 + digits(to.row - at.row) + 1, best);
+            best = pick(&choice, .down, morse.cost.cursorDown(to.row - at.row), best);
         } else {
-            best = pick(&choice, .up, 2 + digits(at.row - to.row) + 1, best);
+            best = pick(&choice, .up, morse.cost.cursorUp(at.row - to.row), best);
         }
     } else if (to.col == 0) {
         if (to.row > at.row) {
-            best = pick(&choice, .next_line, 2 + digits(to.row - at.row) + 1, best);
+            best = pick(&choice, .next_line, morse.cost.cursorNextLine(to.row - at.row), best);
         } else {
-            best = pick(&choice, .prev_line, 2 + digits(at.row - to.row) + 1, best);
+            best = pick(&choice, .prev_line, morse.cost.cursorPrevLine(at.row - to.row), best);
         }
     } else if (addressing == .region) {
         // No absolute move to fall back on, so the move is two: the row,
         // then the column, by whichever pair is shorter.
         const down = to.row > at.row;
-        const vertical = 2 + digits(if (down) to.row - at.row else at.row - to.row) + 1;
-        const column = 2 + digits(@as(u32, to.col) + 1) + 1;
-        const right = 2 + digits(to.col) + 1;
+        const vertical = if (down) morse.cost.cursorDown(to.row - at.row) else morse.cost.cursorUp(at.row - to.row);
+        const next = if (down) morse.cost.cursorNextLine(to.row - at.row) else morse.cost.cursorPrevLine(at.row - to.row);
+        const column = morse.cost.cursorColumn(@as(u32, to.col) + 1);
+        const right = morse.cost.cursorRight(to.col);
         best = pick(&choice, if (down) .down_then_column else .up_then_column, vertical + column, best);
-        best = pick(&choice, if (down) .next_line_then_right else .prev_line_then_right, vertical + right, best);
+        best = pick(&choice, if (down) .next_line_then_right else .prev_line_then_right, next + right, best);
     }
     return .{ .choice = choice, .cost = best };
 }
@@ -2264,7 +2302,7 @@ const Frame = struct {
         if (f.sync and !f.opened) {
             f.opened = true;
             try morse.syncOutput.set(f.out, true);
-            f.n += sync_sequence_cost;
+            f.n += morse.cost.setMode(morse.syncOutput.number, true);
         }
         const aux = w.buffered();
         const aux_n = try f.out.writeSplatHeader(aux, data, splat);
@@ -2294,12 +2332,9 @@ const Frame = struct {
         }
         try f.writer.flush();
         try morse.syncOutput.set(f.out, false);
-        f.n += sync_sequence_cost;
+        f.n += morse.cost.setMode(morse.syncOutput.number, false);
     }
 };
-
-/// `CSI ? 2026 h` or `CSI ? 2026 l`.
-const sync_sequence_cost = 4 + digits(morse.syncOutput.number);
 
 const testing = std.testing;
 
@@ -2878,7 +2913,7 @@ test "arithmetic style prices match every emitted transition" {
             var bytes: [128]u8 = undefined;
             var out: Writer = .fixed(&bytes);
             try morse.diffStyle(&out, from, to);
-            try testing.expectEqual(out.buffered().len, morse.diffStyleLen(from, to));
+            try testing.expectEqual(out.buffered().len, morse.cost.diffStyle(from, to));
         }
     }
 }
@@ -4049,7 +4084,7 @@ test "style cache collisions never substitute a different transition" {
         const sequence = out.buffered();
         if (cache.get(from, to)) |hit| try testing.expectEqualSlices(u8, sequence, hit);
         if (cache.getCost(from, to)) |hit| try testing.expectEqual(sequence.len, hit);
-        cache.putCost(from, to, morse.diffStyleLen(from, to));
+        cache.putCost(from, to, morse.cost.diffStyle(from, to));
         try testing.expectEqual(sequence.len, cache.getCost(from, to).?);
         try testing.expect(cache.get(from, to) == null);
         cache.put(from, to, sequence);
