@@ -4,10 +4,24 @@ const std = @import("std");
 pub const Flags = packed struct(u3) { strong: bool = false, emphasis: bool = false, code: bool = false };
 pub const Span = struct { start: usize, end: usize, flags: Flags, uri: []const u8 = "" };
 pub const Fence = struct { char: u8, count: usize, info: []const u8 };
+/// How a table column's cells sit in it, from the colons of its delimiter
+/// row: `none` when it has neither.
+pub const Align = enum { none, left, center, right };
+/// One cell of a table: its rendered text and inline spans, as ranges of the
+/// document's text and spans.
+pub const TableCell = struct { start: usize, end: usize, first_span: usize, end_span: usize };
+/// A table: `rows` rows of `columns` cells each, the header first, stored in
+/// reading order from `first_cell`, and one alignment a column from
+/// `first_align`.
+pub const Table = struct { columns: u16, rows: usize, first_cell: usize, first_align: usize };
 pub const Block = struct {
     /// Opening fence, or null for prose and indented code.
     fence: ?Fence = null,
-    kind: enum { prose, code, heading, rule, blank },
+    kind: enum { prose, code, heading, rule, blank, table },
+    /// The table, for a `table` block.
+    table: ?Table = null,
+    /// For a list item that is a task: whether it is done.
+    task: ?bool = null,
     depth: u16 = 0,
     indent: u16 = 0,
     marker: []const u8 = "",
@@ -21,6 +35,9 @@ pub const Block = struct {
 const documentBlock = Block;
 const documentSpan = Span;
 const documentFence = Fence;
+const documentAlign = Align;
+const documentTableCell = TableCell;
+const documentTable = Table;
 
 /// Parsed Markdown, independent of width, theme and screen. Owns all bytes.
 /// Do not copy an initialized Document; deinit it once after its widgets.
@@ -28,11 +45,19 @@ pub const Document = struct {
     pub const Block = documentBlock;
     pub const Span = documentSpan;
     pub const Fence = documentFence;
+    pub const Align = documentAlign;
+    pub const TableCell = documentTableCell;
+    pub const Table = documentTable;
     _allocator: std.mem.Allocator,
     _source: []u8,
     _text: std.ArrayList(u8) = .empty,
     _spans: std.ArrayList(Document.Span) = .empty,
     _blocks: std.ArrayList(Document.Block) = .empty,
+    _cells: std.ArrayList(Document.TableCell) = .empty,
+    _aligns: std.ArrayList(Document.Align) = .empty,
+    /// Cell sources with their escaped pipes taken out, which link targets
+    /// in them borrow.
+    _unescaped: std.ArrayList([]u8) = .empty,
 
     /// Source bytes, borrowed until deinit.
     pub fn source(d: *const Document) []const u8 {
@@ -50,6 +75,15 @@ pub const Document = struct {
     pub fn blocks(d: *const Document) []const Document.Block {
         return d._blocks.items;
     }
+    /// Every table's cells, row by row, borrowed until deinit. A table
+    /// block's `table` says where its own begin.
+    pub fn cells(d: *const Document) []const Document.TableCell {
+        return d._cells.items;
+    }
+    /// Every table's column alignments, borrowed until deinit.
+    pub fn alignments(d: *const Document) []const Document.Align {
+        return d._aligns.items;
+    }
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
         var d: Document = .{ ._allocator = allocator, ._source = try allocator.dupe(u8, input) };
@@ -62,6 +96,10 @@ pub const Document = struct {
         d._text.deinit(d._allocator);
         d._spans.deinit(d._allocator);
         d._blocks.deinit(d._allocator);
+        d._cells.deinit(d._allocator);
+        d._aligns.deinit(d._allocator);
+        for (d._unescaped.items) |bytes| d._allocator.free(bytes);
+        d._unescaped.deinit(d._allocator);
         d.* = undefined;
     }
 
@@ -117,9 +155,27 @@ pub const Document = struct {
             }
             const marker = listMarker(body);
             if (marker > 0) {
-                try d.block(.{ .kind = .prose, .depth = q.depth, .indent = @intCast(@min(indent, std.math.maxInt(u16))), .marker = body[0..marker] }, std.mem.trimStart(u8, body[marker..], " "), false);
+                var item = std.mem.trimStart(u8, body[marker..], " ");
+                const task = taskMark(item);
+                if (task != null) item = std.mem.trimStart(u8, item[4..], " \t");
+                try d.block(.{ .kind = .prose, .depth = q.depth, .indent = @intCast(@min(indent, std.math.maxInt(u16))), .marker = body[0..marker], .task = task }, item, false);
                 may_join = true;
                 continue;
+            }
+            // A row with a pipe in it, and under it a delimiter row of as
+            // many cells, begin a table, which takes every line after them
+            // up to a blank one or the start of another block.
+            if (piped(body)) {
+                var ahead = lines;
+                if (ahead.next()) |under| {
+                    const header_cells = cellCount(body);
+                    if (!under.code and under.depth == q.depth and delimiterRow(under.body) == header_cells) {
+                        lines = ahead;
+                        try d.table(q.depth, body, under.body, &lines);
+                        may_join = false;
+                        continue;
+                    }
+                }
             }
             if (may_join) {
                 const last = &d._blocks.items[d._blocks.items.len - 1];
@@ -133,6 +189,61 @@ pub const Document = struct {
             }
             try d.block(.{ .kind = .prose, .depth = q.depth }, body, false);
             may_join = true;
+        }
+    }
+
+    fn table(d: *Document, depth: u16, header: []const u8, delimiter: []const u8, lines: *Quoted) !void {
+        var b: Document.Block = .{ .kind = .table, .depth = depth, .start = d._text.items.len, .first_span = d._spans.items.len };
+        const columns: u16 = @intCast(@min(cellCount(header), std.math.maxInt(u16)));
+        const first_align = d._aligns.items.len;
+        var delimiters: Cells = .init(delimiter);
+        while (delimiters.next()) |cell| {
+            const c = std.mem.trim(u8, cell, " \t");
+            const left = c[0] == ':';
+            const right = c[c.len - 1] == ':';
+            try d._aligns.append(d._allocator, if (left and right) .center else if (left) .left else if (right) .right else .none);
+        }
+        const first_cell = d._cells.items.len;
+        try d.row(header, columns);
+        var rows: usize = 1;
+        while (true) {
+            var ahead = lines.*;
+            const next = ahead.next() orelse break;
+            if (next.code or next.depth != depth) break;
+            const body = std.mem.trim(u8, next.body, " \t");
+            if (body.len == 0 or interrupts(body)) break;
+            lines.* = ahead;
+            try d.row(body, columns);
+            rows += 1;
+        }
+        b.table = .{ .columns = columns, .rows = rows, .first_cell = first_cell, .first_align = first_align };
+        b.end = d._text.items.len;
+        b.end_span = d._spans.items.len;
+        try d._blocks.append(d._allocator, b);
+    }
+
+    /// One row of a table: exactly `columns` cells, the ones it lacks empty
+    /// and the ones past them dropped.
+    fn row(d: *Document, line: []const u8, columns: u16) !void {
+        var it: Cells = .init(line);
+        var n: u16 = 0;
+        while (n < columns) : (n += 1) {
+            const raw = std.mem.trim(u8, it.next() orelse "", " \t");
+            var cell_source = raw;
+            if (std.mem.find(u8, raw, "\\|") != null) {
+                // An escaped pipe is a pipe in the cell, in a code span too.
+                const owned = try d._allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
+                _ = std.mem.replace(u8, raw, "\\|", "|", owned);
+                d._unescaped.append(d._allocator, owned) catch |err| {
+                    d._allocator.free(owned);
+                    return err;
+                };
+                cell_source = owned;
+            }
+            const start = d._text.items.len;
+            const first_span = d._spans.items.len;
+            try d.inlineRead(cell_source, .{}, "", 0);
+            try d._cells.append(d._allocator, .{ .start = start, .end = d._text.items.len, .first_span = first_span, .end_span = d._spans.items.len });
         }
     }
 
@@ -292,6 +403,95 @@ pub const Quoted = struct {
         return .{ .text = text, .body = marked.rest, .depth = marked.depth, .code = true, .fence = opened, .opens = true };
     }
 };
+
+/// The cells of a table row: split at every pipe a backslash does not
+/// escape, one pipe at each end dropped.
+const Cells = struct {
+    rest: ?[]const u8,
+
+    fn init(line: []const u8) Cells {
+        var body = std.mem.trim(u8, line, " \t");
+        if (body.len > 0 and body[0] == '|') body = body[1..];
+        if (endsInPipe(body)) body = body[0 .. body.len - 1];
+        return .{ .rest = body };
+    }
+
+    fn next(c: *Cells) ?[]const u8 {
+        const body = c.rest orelse return null;
+        var i: usize = 0;
+        while (i < body.len) : (i += 1) {
+            if (body[i] == '\\') {
+                i += 1;
+            } else if (body[i] == '|') {
+                c.rest = body[i + 1 ..];
+                return body[0..i];
+            }
+        }
+        c.rest = null;
+        return body;
+    }
+};
+
+fn endsInPipe(body: []const u8) bool {
+    if (body.len == 0 or body[body.len - 1] != '|') return false;
+    var slashes: usize = 0;
+    while (slashes + 1 < body.len and body[body.len - 2 - slashes] == '\\') slashes += 1;
+    return slashes % 2 == 0;
+}
+
+/// Whether a line has a pipe a backslash does not escape.
+fn piped(body: []const u8) bool {
+    var i: usize = 0;
+    while (i < body.len) : (i += 1) {
+        if (body[i] == '\\') {
+            i += 1;
+        } else if (body[i] == '|') return true;
+    }
+    return false;
+}
+
+fn cellCount(line: []const u8) usize {
+    var it: Cells = .init(line);
+    var n: usize = 0;
+    while (it.next()) |_| n += 1;
+    return n;
+}
+
+/// How many cells a delimiter row has, or null when the line is not one:
+/// a pipe somewhere, and every cell hyphens with a colon at either end.
+fn delimiterRow(line: []const u8) ?usize {
+    const body = std.mem.trim(u8, line, " \t");
+    if (!piped(body)) return null;
+    var it: Cells = .init(body);
+    var n: usize = 0;
+    while (it.next()) |cell| : (n += 1) {
+        var c = std.mem.trim(u8, cell, " \t");
+        if (c.len > 0 and c[0] == ':') c = c[1..];
+        if (c.len > 0 and c[c.len - 1] == ':') c = c[0 .. c.len - 1];
+        if (c.len == 0) return null;
+        for (c) |ch| if (ch != '-') return null;
+    }
+    return n;
+}
+
+/// Whether a line begins a block that ends a table: a heading, a rule or a
+/// list item. Quotes and fences are told apart by `Quoted` before this.
+fn interrupts(body: []const u8) bool {
+    if (rule(body) or listMarker(body) > 0) return true;
+    var heading: usize = 0;
+    while (heading < body.len and body[heading] == '#') heading += 1;
+    return heading > 0 and heading <= 6 and (heading == body.len or body[heading] == ' ');
+}
+
+/// A list item's task mark: `[ ]` open, `[x]` or `[X]` done, then a space.
+fn taskMark(item: []const u8) ?bool {
+    if (item.len < 4 or item[0] != '[' or item[2] != ']' or (item[3] != ' ' and item[3] != '\t')) return null;
+    return switch (item[1]) {
+        ' ', '\t' => false,
+        'x', 'X' => true,
+        else => null,
+    };
+}
 
 fn targetEnd(body: []const u8, start: usize) ?usize {
     var level: usize = 0;

@@ -25,7 +25,8 @@ pub fn main() !void {
     var document = try widgets.Markdown.Document.init(
         gpa,
         "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n" ++
-            "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
+            "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```" ++
+            "\n\n- [x] parse\n- [ ] draw\n\n| op | ms |\n|:--|--:|\n| draw | 0.4 |",
     );
     defer document.deinit();
     const markdown: widgets.Markdown = .{
@@ -38,9 +39,12 @@ pub fn main() !void {
             .inline_code = .{ .reverse = true },
             .link = .{ .underline = .single },
             .quote = .{ .dim = true },
+            .task_done = .{ .dim = true },
+            .table_header = .{ .bold = true },
+            .table_border = .{ .dim = true },
         },
     };
-    var prose_screen = try visor.Screen.init(gpa, .{ .cols = 40, .rows = 12 });
+    var prose_screen = try visor.Screen.init(gpa, .{ .cols = 40, .rows = 18 });
     defer prose_screen.deinit();
     try markdown.draw(prose_screen.window());
     std.debug.assert(markdown.rowCount(40, prose_screen.method) > 0);
@@ -283,6 +287,20 @@ fn drawMeters(win: visor.Window) !void {
         .filled_style = .{ .fg = .ansi(.red) },
     }).draw(child(inside, rows[2]));
 
+    const below = (widgets.Layout.horizontal(&.{
+        .{ .fixed = 12 },
+        .{ .fill = 1 },
+    })).splitFixed(2, rows[3]);
+    var tree_state: widgets.Tree.State = .{};
+    try (widgets.Tree{
+        .nodes = &.{
+            .{ .depth = 0, .open = true, .text = "src" },
+            .{ .depth = 1, .open = false, .text = "widgets" },
+            .{ .depth = 1, .text = "visor.zig" },
+        },
+        .symbols = .{ .leaf = "" },
+    }).draw(child(inside, below[1]), &tree_state);
+
     var state: widgets.List.State = .{ .selected = 2 };
     try (widgets.List{
         .items = &.{
@@ -292,7 +310,7 @@ fn drawMeters(win: visor.Window) !void {
         },
         .marker = "\u{25b8} ",
         .selected_style = .{ .reverse = true },
-    }).draw(child(inside, rows[3]), &state);
+    }).draw(child(inside, below[0]), &state);
 }
 
 fn drawSpark(win: visor.Window) !void {

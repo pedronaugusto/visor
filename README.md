@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, `Quoted` line iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
@@ -252,8 +252,8 @@ and rasterizes pixels with these primitives.
 by drawing and `rowCount`. Each row carries `start`/`end` ranges into
 `document.text()`, borrowed `text` and overlapping `spans`, `block_index`,
 `first`, and a `block` value describing its kind, quote `depth`, list
-`marker`, `indent`, heading level and optional opening `fence` (character,
-count and info string). Borrows live until the Document is deinitialized;
+`marker`, `indent`, `task`, heading level, `table` and optional opening
+`fence` (character, count and info string). Borrows live until the Document is deinitialized;
 iteration allocates nothing. Code rows remain verbatim and unwrapped.
 
 `Markdown.Document` reads text once and owns its source and runs. Its
@@ -320,9 +320,31 @@ The reader accepts the following subset; it is not CommonMark:
   terminal control bytes remain unlinked text.
 - Three or more matching `-`, `*` or `_` characters, with optional spaces
   between them, draw a horizontal rule.
+- A list item whose text begins `[ ]`, `[x]` or `[X]` and a space is a task;
+  the block's `task` says whether it is done, and the mark draws as `[ ]` or
+  `[x]` in the `task` or `task_done` style, wrapped text hanging under the
+  item's text.
+- A row with a pipe in it and under it a delimiter row of as many cells (at
+  least one hyphen each, a colon at either end for the alignment) begin a GFM
+  table. Every line after them is a row up to a blank line or the start of a
+  heading, rule, list item, quote level or fence; a row with fewer cells gets
+  empty ones and one with more loses the extra. `\|` is a pipe in a cell,
+  inside a code span too. The reader keeps the cells in `Document.cells()`
+  and the alignments in `Document.alignments()`; a `table` block says where
+  its own begin. The spec's table and task list examples (GFM 0.29,
+  198–205 and 279–280) are part of the suite.
+- A table draws its columns side by side, `│` between them and a `─┼─` rule
+  under the header, in the `table_header` and `table_border` styles. Each
+  column is as wide as its widest cell when they all fit; otherwise columns
+  narrower than an even share keep their width and the rest share what is
+  left, their cells wrapped at words and every row as tall as its tallest
+  cell. Rows carry a `table` line saying which row and which of its lines
+  they are, and `Rows.columns()` the widths. The first `table_columns` (64)
+  columns are drawn.
 
-There are no tables, images, HTML, reference links, setext headings, task
-checkboxes, footnotes, syntax highlighting or filesystem link resolution.
+There are no images, HTML, reference links, setext headings, footnotes,
+strikethrough, autolinks without angle brackets, syntax highlighting or
+filesystem link resolution.
 Unsupported syntax stays text. The caller supplies every style; the default
 roles are neutral. Inline roles add enabled attributes to their block's
 style and replace colours they set. Quote, marker and rule roles style their

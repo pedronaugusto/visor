@@ -5,6 +5,7 @@ test {
     _ = @import("widgets/block.zig");
     _ = @import("widgets/paragraph.zig");
     _ = @import("widgets/markdown_test.zig");
+    _ = @import("widgets/markdown_gfm_test.zig");
     _ = @import("widgets/edges.zig");
     _ = @import("widgets/list.zig");
     _ = @import("widgets/table.zig");

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Markdown` reads GFM tables and task lists. A table draws its columns side by side with a rule under the header, each cell aligned by its delimiter row; a table wider than the window shares the room out and wraps its cells. A task item draws its `[ ]` or `[x]` mark in its own style. The GFM spec's table and task list examples are in the suite.
+
 - `Renderer.printAbove` prints the rows of a grid above an inline screen and draws the screen under them in one frame: rows that reach the bottom of the terminal scroll it into its scrollback, and the screen is drawn against the blank rows it moved to, priced as any frame. `Renderer.Stats.printed` counts the rows; outside inline mode it returns `NotInline`.
 
 - `Tree` draws nodes under nodes from a slice in reading order, each with its depth and whether it is open as the program keeps it: guides joining a node to its parent and siblings, a symbol for open, closed and leaf, each row drawn as a list item, and a `State` with the selection and the scroll that walks only the rows shown.
