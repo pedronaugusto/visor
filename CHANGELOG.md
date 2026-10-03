@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `TextInput.Buffer` owns text being edited, with no key bound: insertion, deletion by the motions the cursor moves by (a cluster, a word, to the line's ends, to the text's ends), up and down rows keeping their column, a selection that typing replaces, and undo and redo a word of typing or a run of deletions at a time, within a byte limit. `TextInput` draws a selection in `selected_style`. `TextInput.wordEnd` is new, and `wordStart` now lands on a cluster boundary where a mark on a space used to put it inside the cluster.
+
 - `Markdown` reads GFM tables and task lists. A table draws its columns side by side with a rule under the header, each cell aligned by its delimiter row; a table wider than the window shares the room out and wraps its cells. A task item draws its `[ ]` or `[x]` mark in its own style. The GFM spec's table and task list examples are in the suite.
 
 - `Renderer.printAbove` prints the rows of a grid above an inline screen and draws the screen under them in one frame: rows that reach the bottom of the terminal scroll it into its scrollback, and the screen is drawn against the blank rows it moved to, priced as any frame. `Renderer.Stats.printed` counts the rows; outside inline mode it returns `NotInline`.

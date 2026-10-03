@@ -126,6 +126,7 @@ fn drawInput(win: visor.Window) !void {
         .text = draft,
         .cursor = draft.len,
         .show_cursor = false,
+        .selection = .{ .start = draft.len - "in view".len, .end = draft.len },
     }).draw(child(inside, rows[0]), &state);
     try (widgets.Rule{ .glyph = widgets.Rule.dashed, .style = .{ .dim = true } }).draw(child(inside, rows[1]));
     try (widgets.Keys{
