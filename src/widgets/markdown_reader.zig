@@ -74,26 +74,17 @@ pub const Document = struct {
 
     fn read(d: *Document) !void {
         if (d._source.len == 0) return;
-        var lines = std.mem.splitScalar(u8, d._source, '\n');
-        var fenced: ?struct { char: u8, count: usize, depth: u16, indent: u16, info: []const u8 } = null;
+        // A final line break ends the last line rather than beginning one.
+        const lines_of = if (std.mem.endsWith(u8, d._source, "\n")) d._source[0 .. d._source.len - 1] else d._source;
+        var lines: Quoted = .init(lines_of);
         var may_join = false;
-        while (lines.next()) |raw| {
-            if (raw.len == 0 and lines.peek() == null) break;
-            const line = std.mem.trimEnd(u8, raw, "\r");
-            const q = quote(line);
-            if (fenced) |f| {
-                const body = stripQuote(line, f.depth);
-                const trimmed = std.mem.trimStart(u8, body, " ");
-                const closing = fence(trimmed);
-                if (q.depth == f.depth and closing != null and closing.?.char == f.char and closing.?.count >= f.count and std.mem.trim(u8, trimmed[closing.?.count..], " \t").len == 0) {
-                    fenced = null;
-                } else {
-                    try d.block(.{ .kind = .code, .depth = f.depth, .indent = f.indent, .fence = .{ .char = f.char, .count = f.count, .info = f.info } }, body, true);
-                }
+        while (lines.next()) |q| {
+            if (q.fence) |f| {
+                if (!q.opens and !q.closes) try d.block(.{ .kind = .code, .depth = q.depth, .fence = f }, q.body, true);
                 may_join = false;
                 continue;
             }
-            var body = q.rest;
+            var body = q.body;
             var indent: usize = 0;
             while (indent < body.len and body[indent] == ' ') indent += 1;
             if (indent >= 4 or std.mem.startsWith(u8, body, "\t")) {
@@ -111,13 +102,6 @@ pub const Document = struct {
                 try d.block(.{ .kind = .blank, .depth = q.depth }, "", true);
                 may_join = false;
                 continue;
-            }
-            if (fence(body)) |f| {
-                if (indent <= 3) {
-                    fenced = .{ .char = f.char, .count = f.count, .depth = q.depth, .indent = 0, .info = std.mem.trim(u8, body[f.count..], " \t") };
-                    may_join = false;
-                    continue;
-                }
             }
             if (rule(body)) {
                 try d.block(.{ .kind = .rule, .depth = q.depth }, "", true);
@@ -228,6 +212,84 @@ pub const Document = struct {
             i += 1;
         }
         try d.append(body[plain..], flags, uri);
+    }
+};
+
+/// The lines of a Markdown source one at a time, each with its quotation
+/// taken off and the fenced block it belongs to, if any: the reader's own
+/// rules for quotes and fences, for a program that shows a source line by
+/// line -- a transcript, say -- rather than as the blocks `Document` makes
+/// of it.
+///
+/// A fence opens on a line whose quotation is followed by at most three
+/// spaces and a run of three or more backticks or tildes, and closes on a
+/// line at the same quote depth with a run of the same character at least as
+/// long and nothing after it. Inside a fenced block a `>` is the code's own:
+/// the block's depth is the depth of the line that opened it, and only that
+/// many quote markers come off each line in it.
+///
+/// Indented code is not this iterator's to say: whether four spaces begin
+/// code or continue a list item depends on the blocks before, which only
+/// `Document` keeps. Borrows `source`; allocates nothing.
+pub const Quoted = struct {
+    _lines: std.mem.SplitIterator(u8, .scalar),
+    /// The block the lines are in, and the quote depth it opened at.
+    _fence: ?struct { fence: Fence, depth: u16 } = null,
+
+    /// One source line, read.
+    pub const Line = struct {
+        /// The whole line, without its line break or a carriage return at
+        /// its end.
+        text: []const u8,
+        /// The line with its quote markers taken off, and the spaces after
+        /// them kept but one. In a fenced block, only the block's own
+        /// markers come off.
+        body: []const u8,
+        /// How many quotes deep the line is: its own markers, or in a fenced
+        /// block the block's depth.
+        depth: u16,
+        /// Whether the line belongs to a fenced block: the fence that opens
+        /// it, a line of its code, or the fence that closes it.
+        code: bool,
+        /// The fence of the block the line belongs to, when `code`.
+        fence: ?Fence = null,
+        /// Whether this line is the fence that opens the block.
+        opens: bool = false,
+        /// Whether this line is the fence that closes the block.
+        closes: bool = false,
+    };
+
+    /// The lines of `source`, which is split at every `\n`: a source that
+    /// ends in one ends in an empty line.
+    pub fn init(source: []const u8) Quoted {
+        return .{ ._lines = std.mem.splitScalar(u8, source, '\n') };
+    }
+
+    /// The next line, or null after the last.
+    pub fn next(q: *Quoted) ?Line {
+        const raw = q._lines.next() orelse return null;
+        const text = std.mem.trimEnd(u8, raw, "\r");
+        const marked = quote(text);
+        if (q._fence) |open| {
+            const body = stripQuote(text, open.depth);
+            const trimmed = std.mem.trimStart(u8, body, " ");
+            const closes = if (fence(trimmed)) |run|
+                marked.depth == open.depth and run.char == open.fence.char and run.count >= open.fence.count and
+                    std.mem.trim(u8, trimmed[run.count..], " \t").len == 0
+            else
+                false;
+            if (closes) q._fence = null;
+            return .{ .text = text, .body = body, .depth = open.depth, .code = true, .fence = open.fence, .closes = closes };
+        }
+        const plain: Line = .{ .text = text, .body = marked.rest, .depth = marked.depth, .code = false };
+        var indent: usize = 0;
+        while (indent < marked.rest.len and marked.rest[indent] == ' ') indent += 1;
+        if (indent >= 4 or std.mem.startsWith(u8, marked.rest, "\t")) return plain;
+        const trimmed = std.mem.trim(u8, marked.rest, " \t");
+        const run = fence(trimmed) orelse return plain;
+        const opened: Fence = .{ .char = run.char, .count = run.count, .info = std.mem.trim(u8, trimmed[run.count..], " \t") };
+        q._fence = .{ .fence = opened, .depth = marked.depth };
+        return .{ .text = text, .body = marked.rest, .depth = marked.depth, .code = true, .fence = opened, .opens = true };
     }
 };
 

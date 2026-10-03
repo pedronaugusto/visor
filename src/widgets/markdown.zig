@@ -7,6 +7,9 @@ const Paragraph = @import("paragraph.zig").Paragraph;
 
 pub const Markdown = struct {
     pub const Document = reader.Document;
+    /// A source's lines one at a time, quotation off and fence known, by the
+    /// reader's own rules.
+    pub const Quoted = reader.Quoted;
     /// Allocation-free visual rows shared by rowCount and draw.
     pub const Rows = RowIterator;
     pub const Row = VisualRow;

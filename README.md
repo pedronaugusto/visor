@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, `Quoted` line iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
@@ -263,6 +263,12 @@ borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
 method)` uses the same rows as `draw`, without allocation. Keep the document
 until its widgets are finished, then call `deinit`. Drawing can allocate for
 screen links and long graphemes, but never for parsing or layout.
+
+`Markdown.Quoted.init(source)` reads a source line by line by the same quote
+and fence rules, for a program that shows it line by line: `next()` gives each
+line's `text`, its `body` with the quote markers off, its quote `depth`, and
+whether it is `code` in a fenced block (with the `fence`, and whether the line
+`opens` or `closes` it). It borrows the source and allocates nothing.
 
 ```zig
 var document = try widgets.Markdown.Document.init(gpa,
