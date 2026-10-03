@@ -13,12 +13,12 @@
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#00ebb5b989fa31193efa5d0c0d1ff17b81b1abbc",
-            .hash = "morse-0.7.0-OKnGoSpUDwBmV7CpXWMGjMf19-88wv1AlwcVT8ymSNMs",
+            .url = "git+https://github.com/pedronaugusto/morse#57fa814d46275eca81b7a17a4c70a7a22f1c2a18",
+            .hash = "morse-0.7.0-OKnGoZrbDwA_jfnfIYJPMtuK_6HNdLrT4yx5xlM-WmNo",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#aa667171193b84235d3b7b59c88c2b990e842b6b",
-            .hash = "conduit-0.5.1-4rIA734HEQD2Zi31NJeYsncrLFECALXiLdCh8FBxpySd",
+            .url = "git+https://github.com/pedronaugusto/conduit#73c0ef79d59934cd154aea227eb0243af8405186",
+            .hash = "conduit-0.5.1-4rIA7wUkEgAzUIb8D-_-fSsW8hBtI2E2cUyZnszBtjHM",
         },
     },
     .minimum_zig_version = "0.16.0",
