@@ -561,3 +561,26 @@ test "the reader releases every allocation when a table or a task fails to read"
         }
     }.parse, .{});
 }
+
+test "an escaped pipe in a cell is a pipe in its code, its link target and its text" {
+    var doc = try Document.init(t.allocator, "| a |\n|-|\n| `x\\|y` [l\\|m](https://e/a\\|b) <https://e/c\\|d> p\\|q |\n\n`x\\|y`");
+    defer doc.deinit();
+    const table = doc.blocks()[0].table.?;
+    const cell = doc.cells()[table.first_cell + 1];
+    try t.expectEqualStrings("x|y l|m https://e/c|d p|q", doc.text()[cell.start..cell.end]);
+    var uris: [2][]const u8 = undefined;
+    var n: usize = 0;
+    for (doc.spans()[cell.first_span..cell.end_span]) |span| {
+        if (span.uri.len == 0) continue;
+        if (n == 0 or !std.mem.eql(u8, uris[n - 1], span.uri)) {
+            uris[n] = span.uri;
+            n += 1;
+        }
+    }
+    try t.expectEqual(@as(usize, 2), n);
+    try t.expectEqualStrings("https://e/a|b", uris[0]);
+    try t.expectEqualStrings("https://e/c|d", uris[1]);
+    // Outside a table a code span keeps its backslash.
+    const after = doc.blocks()[doc.blocks().len - 1];
+    try t.expectEqualStrings("x\\|y", doc.text()[after.start..after.end]);
+}

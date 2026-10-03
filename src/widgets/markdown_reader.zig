@@ -55,9 +55,11 @@ pub const Document = struct {
     _blocks: std.ArrayList(Document.Block) = .empty,
     _cells: std.ArrayList(Document.TableCell) = .empty,
     _aligns: std.ArrayList(Document.Align) = .empty,
-    /// Cell sources with their escaped pipes taken out, which link targets
-    /// in them borrow.
+    /// Link targets in table cells with their escaped pipes taken out.
     _unescaped: std.ArrayList([]u8) = .empty,
+    /// Whether the inlines being read are a table cell's, where `\|` is a
+    /// pipe in code spans and link targets too.
+    _in_cell: bool = false,
 
     /// Source bytes, borrowed until deinit.
     pub fn source(d: *const Document) []const u8 {
@@ -88,6 +90,9 @@ pub const Document = struct {
     pub fn init(allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
         var d: Document = .{ ._allocator = allocator, ._source = try allocator.dupe(u8, input) };
         errdefer d.deinit();
+        // The text is the source with its markup taken out, so it is never
+        // longer: one allocation holds it.
+        try d._text.ensureTotalCapacity(allocator, input.len);
         try d.read();
         return d;
     }
@@ -229,20 +234,11 @@ pub const Document = struct {
         var n: u16 = 0;
         while (n < columns) : (n += 1) {
             const raw = std.mem.trim(u8, it.next() orelse "", " \t");
-            var cell_source = raw;
-            if (std.mem.find(u8, raw, "\\|") != null) {
-                // An escaped pipe is a pipe in the cell, in a code span too.
-                const owned = try d._allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
-                _ = std.mem.replace(u8, raw, "\\|", "|", owned);
-                d._unescaped.append(d._allocator, owned) catch |err| {
-                    d._allocator.free(owned);
-                    return err;
-                };
-                cell_source = owned;
-            }
             const start = d._text.items.len;
             const first_span = d._spans.items.len;
-            try d.inlineRead(cell_source, .{}, "", 0);
+            d._in_cell = true;
+            defer d._in_cell = false;
+            try d.inlineRead(raw, .{}, "", 0);
             try d._cells.append(d._allocator, .{ .start = start, .end = d._text.items.len, .first_span = first_span, .end_span = d._spans.items.len });
         }
     }
@@ -257,8 +253,34 @@ pub const Document = struct {
         try d._blocks.append(d._allocator, b);
     }
 
+    /// Bytes kept as they are, but for a table cell's escaped pipes, which
+    /// are pipes even here.
+    fn appendLiteral(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
+        if (!d._in_cell or std.mem.find(u8, bytes, "\\|") == null) return d.append(bytes, flags, uri);
+        const start = d._text.items.len;
+        try d._text.ensureUnusedCapacity(d._allocator, bytes.len);
+        var i: usize = 0;
+        while (i < bytes.len) : (i += 1) {
+            if (bytes[i] == '\\' and i + 1 < bytes.len and bytes[i + 1] == '|') continue;
+            d._text.appendAssumeCapacity(bytes[i]);
+        }
+        try d._spans.append(d._allocator, .{ .start = start, .end = d._text.items.len, .flags = flags, .uri = uri });
+    }
+
+    /// A link target, its escaped pipes taken out in a table cell.
+    fn cellTarget(d: *Document, raw: []const u8) ![]const u8 {
+        if (!d._in_cell or std.mem.find(u8, raw, "\\|") == null) return raw;
+        const owned = try d._allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
+        _ = std.mem.replace(u8, raw, "\\|", "|", owned);
+        d._unescaped.append(d._allocator, owned) catch |err| {
+            d._allocator.free(owned);
+            return err;
+        };
+        return owned;
+    }
+
     fn inlineRead(d: *Document, body: []const u8, flags: Flags, uri: []const u8, depth: u8) std.mem.Allocator.Error!void {
-        if (depth == 32) return d.append(body, flags, uri);
+        if (depth == 32) return d.appendLiteral(body, flags, uri);
         var i: usize = 0;
         var plain: usize = 0;
         while (i < body.len) {
@@ -280,7 +302,7 @@ pub const Document = struct {
                         var nested = flags;
                         if (ch == '`') {
                             nested.code = true;
-                            try d.append(body[i + n .. end], nested, uri);
+                            try d.appendLiteral(body[i + n .. end], nested, uri);
                         } else {
                             if (n == 2) nested.strong = true else nested.emphasis = true;
                             try d.inlineRead(body[i + n .. end], nested, uri, depth + 1);
@@ -299,7 +321,7 @@ pub const Document = struct {
                         const target = body[target_start..end];
                         if (target.len > 0 and std.mem.indexOfAny(u8, target, " \t\n") == null) {
                             try d.append(body[plain..i], flags, uri);
-                            try d.inlineRead(body[i + 1 .. label_end], flags, target, depth + 1);
+                            try d.inlineRead(body[i + 1 .. label_end], flags, try d.cellTarget(target), depth + 1);
                             i = end + 1;
                             plain = i;
                             continue;
@@ -313,7 +335,7 @@ pub const Document = struct {
                     const target = body[i + 1 .. end];
                     if ((std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "http://")) and std.mem.indexOfAny(u8, target, " \t") == null) {
                         try d.append(body[plain..i], flags, uri);
-                        try d.append(target, flags, target);
+                        try d.appendLiteral(target, flags, try d.cellTarget(target));
                         i = end + 1;
                         plain = i;
                         continue;
