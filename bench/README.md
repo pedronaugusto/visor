@@ -10,7 +10,7 @@ On an idle machine, `./bench/quiet.sh` runs the complete timed pass. On macOS
 the entry point prevents sleep during the pass.
 
 Allow **20 minutes** for this package in the quiet window; expected warm-cache
-execution is about **8–15 minutes** after smoke preparation, an estimate from
+execution is about **8–16 minutes** after smoke preparation, an estimate from
 one untimed 200×60 duration probe rather than a measured result. First source downloads/compilation can add several minutes. Builds
 and correctness finish before timed workloads begin. Results are plain
 Markdown plus JSON under `bench/results/<UTC-date>/smoke-<time>.*` or
@@ -20,8 +20,11 @@ The harness lives on `bench`, created from current main; main has no harness.
 ## Revisions and order
 
 `revisions.json` fixes A at `4ef702d25f50b37906146582d6ee0ca3ae57934b`, the last
-first-parent main commit before **2026-09-30 00:00:00 +01:00**, and B at
-`c3bd27b381fcfe86f23221b72a397cd6accdaca7`, the final main (`after_ref`). The explicit midnight cutoff avoids Git's bare date
+first-parent main commit before **2026-09-30 00:00:00 +01:00**, and B at the
+head of the `features` branch (`after_ref`), which carries the tree, the print
+above an inline view, Markdown tables and the editing buffer that the five
+newest workloads time. When that branch is merged, B moves to main and
+`after_ref` back to `main`. The explicit midnight cutoff avoids Git's bare date
 inheriting the time of day. The runner extracts exact `git archive` snapshots into ignored
 `build/revisions/` directories. The after build consumes the remote archive
 and Zig hash in `build.zig.zon`, with its own pinned dependencies. Refresh the pins and `after_ref` when the target moves; a silently changed
@@ -129,9 +132,30 @@ for every library that cannot. Fixtures and corpus reads sit before the clock.
 | `canvas_raster` | `Canvas.raster` shapes into pixels (after only) | unavailable | unavailable |
 | `text_input`, `keys`, `rule`, `edges`, `sextants` | the widget's `draw` | unavailable | `rule`: `ncplane_hline`; others unavailable |
 | `input_events` | `Input.next` over an adopted file (keys, kitty keys, SGR mouse, paste, focus) | unavailable | unavailable |
+| `tree` | `Tree.draw`, a file tree of `rows × 8` nodes, some folders closed, the selection mid-tree (after only) | tui-tree-widget **0.24.1** `Tree` render with the same items, open set and selection, kept across frames | unavailable: `nctree` draws each item through a callback into planes it makes |
+| `print_above` | `Renderer.printAbove`: two log rows a frame above an inline view a quarter of the grid tall, redrawn under them (after only) | `Terminal::insert_before` + `Terminal::draw` on an inline viewport, `CrosstermBackend` into memory | unavailable: no inline mode |
+| `markdown_table_parse` | `Markdown.Document.init` over GFM tables and task lists (after only) | pulldown-cmark with tables and task lists on | unavailable |
+| `markdown_table_draw` | `Markdown.draw` of the same document (after only) | unavailable: no markdown widget | unavailable |
+| `text_edit` | `TextInput.Buffer`: type `cols × 2` bytes of prose, four word erases, three word moves, five deletes forward, three back, every edit undone and redone (after only) | ratatui-textarea **0.9.2** `TextArea`, the same calls | unavailable: `ncreader` edits only through the input events it reads |
 | `term_feed` | `Term.feed` + `dumpScreen` | unavailable | unavailable |
 | `picture_transmit` | `Layers.transmit`, uncompressed | unavailable | unavailable |
 | `picture_replace` | `Replacement.send`/`declare` + `draw` (after only) | unavailable | unavailable |
+
+Checks for the five newest: `tree` grids are identical to tui-tree-widget's
+(indent two a level, its `▶`/`▼` symbols). `print_above` frames from both
+sides are replayed by the decoder, which must show, after every frame, the
+printed rows and the view where the rule puts them; the two screens are then
+compared exactly. `markdown_table_parse` reports tables, cells and tasks,
+identical to pulldown-cmark's. `text_edit` reports the final text's length and
+FNV-1a hash and the length after every undo, identical to ratatui-textarea's.
+
+Where visor is more than 1.5× faster than the alternative, what each side
+does: `markdown_table_parse` — pulldown-cmark reads CommonMark in full
+(reference definitions, HTML blocks, the delimiter stack, entities) where
+visor reads its subset, so the counts agree and the work does not; `text_edit`
+— ratatui-textarea rebuilds its screen map on every edit, undo and redo (most
+of its profile) and keeps one undo entry a character, where visor edits a byte
+buffer, lays out only when drawn and groups typing a word an undo.
 
 Checks: every side prints the grid as rows of text (covered columns skipped).
 Before and after must be identical. Ratatui/notcurses must reproduce visor's
@@ -167,7 +191,8 @@ make, pkg-config, tic and libunistring development files are required. On macOS,
 CMake/pkgconf/libunistring can be provided by Homebrew; the runner reads its
 prefix without installing packages. `ZIG`, `RUSTUP`, `PYTHON`, and `CC` may
 select tools. Ratatui **0.30.1** (crossterm, layout-cache, widget-calendar,
-unstable-rendered-line-info), Crossterm **0.29.0**, pulldown-cmark **0.13.0**,
+unstable-rendered-line-info, unstable-backend-writer), Crossterm **0.29.0**,
+pulldown-cmark **0.13.0**, tui-tree-widget **0.24.1**, ratatui-textarea **0.9.2**,
 direct and transitive Rust dependencies are pinned by the manifest and lockfile. Notcurses and
 ncurses **6.6** source archives are SHA-256 checked through `versions.json`.
 Rust toolchains, static ncurses/notcurses libraries and their caches are built

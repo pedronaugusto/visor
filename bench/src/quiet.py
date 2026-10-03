@@ -55,6 +55,7 @@ def invoke(side, task, mode, cols, rows, iterations):
     if task in PLAN:
         binary = BUILD / {'visor-before':'zig-out/bin/visor-ops-before', 'visor':'zig-out/bin/visor-ops-after',
                           'ratatui':'cargo-target/release/visor-ops', 'pulldown-cmark':'cargo-target/release/visor-ops',
+                          'tui-tree-widget':'cargo-target/release/visor-ops', 'ratatui-textarea':'cargo-target/release/visor-ops',
                           'notcurses':'notcurses-ops'}[side]
     else:
         binary = BUILD / ("notcurses-bench" if side == "notcurses" else 'cargo-target/release/visor-comparison' if side == 'ratatui' else
@@ -120,6 +121,6 @@ correctness = {'checks':checks, 'count':len(checks), 'oracle':'Independent ASCII
                'notcurses':'Public render+rasterize API, dedicated sink redirected to memory; fixed RGB terminfo; no terminal opened. Native profiling counters are not retrieved or recorded.',
                'operations':'Canonical grids/values: before == after exactly; comparison libraries identical to visor or a stated invariant (verify_ops.py); frame bytes replayed by the independent decoder'}
 finish('visor', args.smoke, info, samples, correctness, json.loads((ROOT / 'versions.json').read_text()),
-       '8–15 minutes quiet-only; see bench/QUIET-PREP.md for counts and assumptions')
+       '8–16 minutes quiet-only; see bench/QUIET-PREP.md for counts and assumptions')
 
 if args.smoke: prepared.write()

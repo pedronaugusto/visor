@@ -119,8 +119,9 @@ class Terminal:
                     elif final == 'D': self.x = max(0, self.x - n)
                     elif final == 'm': self.sgr(nums)
                     elif final == 'J':
-                        assert nums[0] == 2, nums
-                        self.grid = [(' ', self.fg, self.bold)] * len(self.grid)
+                        assert nums[0] in (0, 2), nums
+                        start = 0 if nums[0] == 2 else self.y * self.cols + self.x
+                        for k in range(start, len(self.grid)): self.grid[k] = (' ', self.fg, self.bold)
                     elif final == 'K':
                         end = self.cols if nums[0] == 0 else self.x + 1 if nums[0] == 1 else self.cols
                         start = self.x if nums[0] == 0 else 0

@@ -62,6 +62,15 @@ def generate(root, cols, rows):
                         f'- first item {s}\n- second item with _more_ words\n  - nested item\n1. numbered\n\n'
                         f'> quoted text {s}\n> > nested quote\n\n```zig\nconst x = {s};\nconst y = x + 1;\n```\n\n---\n')
     (d / 'doc.md').write_text('# Document\n\n' + '\n'.join(sections))
+    # GFM tables and task lists: one table a section, as many rows as the
+    # grid, every alignment, inline markup, a wide word and an escaped pipe.
+    tables = []
+    for s in range(max(1, rows // 4)):
+        body = '\n'.join(f'| row {r} **{WORDS[r % len(WORDS)]}** | {r * 7919 % 1000} | 漢字 `{r}` | a \\| pipe and [link](https://example.com/{r}) |'
+                         for r in range(rows))
+        tables.append(f'## Tables {s}\n\n- [x] done task {s}\n- [ ] open task with `code`\n\n'
+                      f'| name | size | kind | note |\n| :--- | ---: | :--: | ---- |\n{body}\n')
+    (d / 'tables.md').write_text('\n'.join(tables))
     tones = ['', '🏻', '🏼', '🏽', '🏾', '🏿']
     jobs = ['💻', '🔬', '🎨', '🚀', '🍳', '🌾', '🏫', '🏭', '🔧', '🎤']
     pool = [base + tone + '‍' + job for base in ('👩', '👨') for tone in tones for job in jobs]

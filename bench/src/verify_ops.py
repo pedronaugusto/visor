@@ -13,8 +13,10 @@ from pathlib import Path
 from verify import Terminal
 
 R, N = 'ratatui', 'notcurses'
+P, TT, TA = 'pulldown-cmark', 'tui-tree-widget', 'ratatui-textarea'
 # Evidence a comparison library must reproduce byte for byte.
 EXACT = {
+    'markdown_table_parse': [P], 'tree': [TT], 'text_edit': [TA], 'print_above': [R],
     'cell_writes': [R, N], 'print_rows': [R, N], 'wide_print': [R, N], 'wide_repaint': [R, N],
     'fill_clear': [R, N], 'scroll_rows': [N], 'scroll_repaint': [R, N], 'resize': [N],
     'copy_cells': [R, N], 'copy_text': [N], 'block': [R, N], 'list': [R], 'tabs': [R],
@@ -132,8 +134,31 @@ def invariant(task, side, ev, cols, rows, corpus):
         return {'blocks': int(ev['info'][0].split('=')[1])}
     raise AssertionError(('no invariant for', task, side))
 
+WORDS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta']
+
+def print_above_screen(cols, rows, frames):
+    """What the terminal shows after `frames` frames of two log lines printed
+    above an inline view a quarter of it tall, worked out from the rule."""
+    view_rows = max(2, rows // 4)
+    printed = [f'log {i:06} {WORDS[i % 8]} {WORDS[(i + 3) % 8]}'[:cols] for i in range(2 * frames)]
+    n = frames
+    view = [f'working {n:06}'[:cols]] + ['#' * ((n + y) % (cols + 1)) for y in range(1, view_rows)]
+    room = rows - view_rows
+    above = printed[-room:] if len(printed) > room else printed
+    screen = above + view
+    return '\n'.join(r.rstrip(' ') for r in screen + [''] * (rows - len(screen)))
+
 def own_wire(task, side, ev, cols, rows, corpus):
     """Frame bytes replayed by the independent decoder rebuild the side's grid."""
+    if task == 'print_above':
+        # The first frame enters and draws the view; each after prints two
+        # rows above it. The decoder's screen after each is worked out from
+        # the rule, and is then the side's grid for the exact comparison.
+        def each(k, t):
+            assert t.text() == print_above_screen(cols, rows, k), (side, k, t.text())
+        t = replay(cols, rows, ev['wire'], each)
+        ev['grid'] = [t.text().encode().hex()]
+        return {'frames': len(ev['wire']), 'replayed_bytes': sum(len(w) // 2 for w in ev['wire'])}
     if task == 'scroll_repaint':
         log = (corpus / 'log.txt').read_text().rstrip('\n').split('\n')
         def each(k, t):
@@ -160,7 +185,7 @@ def verify(task, cols, rows, corpus, outputs):
             assert before.get(tag) == ours.get(tag), (task, cols, rows, 'before/after differ', tag)
     for side, ev in parsed.items():
         e = {}
-        if task in ('wide_repaint', 'scroll_repaint', 'links') and 'wire' in ev:
+        if task in ('wide_repaint', 'scroll_repaint', 'links', 'print_above') and 'wire' in ev:
             e.update(own_wire(task, side, ev, cols, rows, corpus))
         if side in ('visor', 'visor-before'):
             e['status'] = 'passed'

@@ -586,7 +586,37 @@ const State = struct {
     var scatter: [][2]f64 = &.{};
     var pixels: []u8 = &.{};
     var document: if (before) void else w.Markdown.Document = undefined;
+    var tree_nodes: if (before) void else []w.Tree.Node = undefined;
+    var tree_state: if (before) void else w.Tree.State = undefined;
 };
+
+/// The shape of the file tree the `tree` workload draws, shared with the
+/// ratatui side: groups of ten, a folder (open), a folder (open in even
+/// groups) of four files, a folder (open) of three files.
+const tree_depths = [_]u16{ 0, 1, 2, 2, 2, 2, 1, 2, 2, 2 };
+fn treeOpen(i: usize) ?bool {
+    return switch (i % 10) {
+        0, 6 => true,
+        1 => (i / 10) % 2 == 0,
+        else => null,
+    };
+}
+
+fn tree(_: *Ctx, win: v.Window, _: usize) void {
+    if (before) @panic("unavailable before") else must((w.Tree{
+        .nodes = State.tree_nodes,
+        .guides = null,
+        .symbols = .{ .open = "\u{25bc} ", .closed = "\u{25b6} ", .leaf = "  " },
+    }).draw(win, &State.tree_state));
+}
+
+fn markdownTableDraw(_: *Ctx, win: v.Window, _: usize) void {
+    if (before) @panic("unavailable before") else must((w.Markdown{ .document = &State.document, .theme = .{
+        .strong = .{ .bold = true },
+        .inline_code = .{ .reverse = true },
+        .table_header = .{ .bold = true },
+    } }).draw(win));
+}
 
 fn blocks(_: *Ctx, win: v.Window, _: usize) void {
     var y: u16 = 0;
@@ -790,6 +820,20 @@ fn prepareWidgets(c: *Ctx, task: []const u8) void {
     }
     if (!before) {
         if (std.mem.eql(u8, task, "markdown_draw")) State.document = must(w.Markdown.Document.init(gpa, c.file("doc.md")));
+        if (std.mem.eql(u8, task, "markdown_table_draw")) State.document = must(w.Markdown.Document.init(gpa, c.file("tables.md")));
+        if (std.mem.eql(u8, task, "tree")) {
+            State.tree_nodes = gpa.alloc(w.Tree.Node, n_items) catch @panic("oom");
+            for (State.tree_nodes, 0..) |*node, i| node.* = .{
+                .depth = tree_depths[i % 10],
+                .open = treeOpen(i),
+                .text = std.fmt.allocPrint(gpa, "node {d:0>5} {s}", .{ i, words[i % words.len] }) catch @panic("oom"),
+            };
+            const tree_value: w.Tree = .{ .nodes = State.tree_nodes };
+            // The first node shown at or after the middle is selected.
+            var selected = tree_value.shownAncestor(n_items / 2);
+            if (selected < n_items / 2) selected = tree_value.nextShown(selected) orelse selected;
+            State.tree_state = .{ .selected = selected };
+        }
     }
 }
 
@@ -806,6 +850,119 @@ fn markdownParse(c: *Ctx) void {
         }
         c.clock.stop();
         if (c.check) emit("value\tblocks={d}\n", .{blocks_n});
+    }
+}
+
+fn markdownTableParse(c: *Ctx) void {
+    if (before) @panic("unavailable before") else {
+        const source = c.file("tables.md");
+        var tables: usize = 0;
+        var cells: usize = 0;
+        var tasks: usize = 0;
+        c.clock.start();
+        for (0..c.iterations) |_| {
+            var doc = must(w.Markdown.Document.init(c.gpa, source));
+            tables = 0;
+            cells = 0;
+            tasks = 0;
+            for (doc.blocks()) |b| {
+                if (b.table) |t| {
+                    tables += 1;
+                    cells += t.rows * t.columns;
+                }
+                if (b.task != null) tasks += 1;
+            }
+            c.count += doc.spans().len;
+            doc.deinit();
+        }
+        c.clock.stop();
+        if (c.check) emit("value\ttables={d} cells={d} tasks={d}\n", .{ tables, cells, tasks });
+    }
+}
+
+/// Two log lines a frame, printed above an inline view a quarter of the
+/// terminal tall that is redrawn under them: the bytes of each frame are
+/// the evidence, replayed by the independent decoder.
+fn printAbove(c: *Ctx) void {
+    if (before) @panic("unavailable before") else {
+        const gpa = c.gpa;
+        const view_rows: u16 = @max(2, c.rows / 4);
+        const size: v.Size = .{ .cols = c.cols, .rows = view_rows };
+        var view = must(v.Screen.init(gpa, size));
+        defer view.deinit();
+        view.method = .unicode;
+        var r = must(v.Renderer.init(gpa, size));
+        defer r.deinit();
+        var lines = must(v.Screen.init(gpa, .{ .cols = c.cols, .rows = 2 }));
+        defer lines.deinit();
+        lines.method = .unicode;
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        must(r.enter(&out.writer, caps, .@"inline", .{}));
+        drawView(&view, 0);
+        _ = must(r.draw(&out.writer, &view, null, caps));
+        if (c.check) line("wire", out.written());
+        c.clock.start();
+        for (0..c.iterations) |n| {
+            out.clearRetainingCapacity();
+            lines.clear();
+            var buf: [64]u8 = undefined;
+            for (0..2) |k| {
+                const text = std.fmt.bufPrint(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable;
+                _ = must(lines.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
+            }
+            drawView(&view, n + 1);
+            const stats = must(r.printAbove(&out.writer, &lines, &view, null, caps));
+            c.bytes += stats.bytes;
+            c.count += 2;
+            if (c.check) line("wire", out.written());
+        }
+        c.clock.stop();
+    }
+}
+
+/// The live view: a title row and bars of `#` under it.
+fn drawView(view: *v.Screen, n: usize) void {
+    view.clear();
+    const win = view.window();
+    var buf: [32]u8 = undefined;
+    _ = must(win.printSegment(.{ .text = std.fmt.bufPrint(&buf, "working {d:0>6}", .{n}) catch unreachable, .style = .{ .bold = true } }, .{ .wrap = .none }));
+    const bar = "#" ** 512;
+    var y: u16 = 1;
+    while (y < win.rows()) : (y += 1) {
+        const filled = (n + y) % (@as(usize, win.cols()) + 1);
+        _ = must(win.printSegment(.{ .text = bar[0..filled] }, .{ .row = y, .wrap = .none }));
+    }
+}
+
+/// Typing, word and character deletes, word motions, then every edit undone
+/// and redone, on the first `cols * 2` bytes of the prose.
+fn textEdit(c: *Ctx) void {
+    if (before) @panic("unavailable before") else {
+        const prose = c.file("prose.txt");
+        const typed = prose[0..@min(prose.len, @as(usize, c.cols) * 2)];
+        var final: u64 = 0;
+        var final_len: usize = 0;
+        var undone_len: usize = 0;
+        c.clock.start();
+        for (0..c.iterations) |_| {
+            var b: w.TextInput.Buffer = .init(c.gpa);
+            for (typed) |ch| must(b.insert(&.{ch}));
+            for (0..4) |_| must(b.delete(.word_left));
+            for (0..3) |_| b.move(.word_left, false);
+            for (0..5) |_| must(b.delete(.right));
+            b.move(.end, false);
+            for (0..3) |_| must(b.delete(.left));
+            while (must(b.undo())) {}
+            undone_len = b.text().len;
+            while (must(b.redo())) {}
+            final = std.hash.Fnv1a_64.hash(b.text());
+            final_len = b.text().len;
+            c.count += typed.len;
+            b.deinit();
+        }
+        c.clock.stop();
+        if (c.check) emit("value\tfinal={d}:{x} undone={d}\n", .{ final_len, final, undone_len });
     }
 }
 
@@ -1049,6 +1206,11 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "paragraph", .run = S.W(paragraph) },
         .{ .name = "markdown_parse", .run = markdownParse, .after_only = true },
         .{ .name = "markdown_draw", .run = S.W(markdownDraw), .after_only = true },
+        .{ .name = "markdown_table_parse", .run = markdownTableParse, .after_only = true },
+        .{ .name = "markdown_table_draw", .run = S.W(markdownTableDraw), .after_only = true },
+        .{ .name = "tree", .run = S.W(tree), .after_only = true },
+        .{ .name = "print_above", .run = printAbove, .after_only = true },
+        .{ .name = "text_edit", .run = textEdit, .after_only = true },
         .{ .name = "list", .run = S.W(list) },
         .{ .name = "table", .run = S.W(table) },
         .{ .name = "tabs", .run = S.W(tabs) },

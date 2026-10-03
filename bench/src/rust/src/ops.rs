@@ -2,7 +2,15 @@
 //! the visor ops program. Buffers, widgets' data and frames are built outside
 //! the timed interval; one clock pair per batch unless a frame needs
 //! preparation, which then sits outside a per-frame clock.
-use pulldown_cmark::{Event, Parser, Tag};
+use pulldown_cmark::{Event, Options, Parser, Tag};
+use ratatui::{
+    Frame, Terminal, TerminalOptions, Viewport,
+    backend::{ClearType, WindowSize},
+    buffer::Cell,
+    layout::{Position, Size},
+};
+use ratatui_textarea::{CursorMove, TextArea};
+use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     buffer::{Buffer, CellWidth},
@@ -462,6 +470,247 @@ fn markdown_parse(c: &mut Ctx) {
     }
 }
 
+fn markdown_table_parse(c: &mut Ctx) {
+    let source = c.file("tables.md");
+    let (mut tables, mut cells, mut tasks) = (0, 0, 0);
+    c.clock.start();
+    for _ in 0..c.iterations {
+        (tables, cells, tasks) = (0, 0, 0);
+        let mut events = 0;
+        for e in Parser::new_ext(&source, Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS) {
+            events += 1;
+            match e {
+                Event::Start(Tag::Table(_)) => tables += 1,
+                Event::Start(Tag::TableCell) => cells += 1,
+                Event::TaskListMarker(_) => tasks += 1,
+                _ => {}
+            }
+        }
+        black_box(events);
+        c.count += events;
+    }
+    c.clock.stop();
+    if c.check {
+        println!("value\ttables={tables} cells={cells} tasks={tasks}");
+    }
+}
+
+/// The same groups of ten as the visor side: folder (open), folder (open in
+/// even groups) of four files, folder (open) of three files.
+const TREE_DEPTHS: [usize; 10] = [0, 1, 2, 2, 2, 2, 1, 2, 2, 2];
+fn tree_open(i: usize) -> Option<bool> {
+    match i % 10 {
+        0 | 6 => Some(true),
+        1 => Some((i / 10) % 2 == 0),
+        _ => None,
+    }
+}
+
+/// tui-tree-widget's items nested from the flat list, its open set and its
+/// selection: the same tree, kept across frames as a program keeps it.
+fn tree_fixture(n: usize) -> (Vec<TreeItem<'static, usize>>, TreeState<usize>) {
+    let mut paths: Vec<Vec<usize>> = Vec::with_capacity(n);
+    let mut stack: Vec<usize> = Vec::new();
+    for i in 0..n {
+        stack.truncate(TREE_DEPTHS[i % 10]);
+        stack.push(i);
+        paths.push(stack.clone());
+    }
+    fn build(i: &mut usize, n: usize, depth: usize) -> Vec<TreeItem<'static, usize>> {
+        let mut out = Vec::new();
+        while *i < n && TREE_DEPTHS[*i % 10] == depth {
+            let at = *i;
+            *i += 1;
+            let children = build(i, n, depth + 1);
+            let text = format!("node {at:05} {}", WORDS[at % WORDS.len()]);
+            out.push(TreeItem::new(at, text, children).expect("unique identifiers"));
+        }
+        out
+    }
+    let mut at = 0;
+    let items = build(&mut at, n, 0);
+    let mut state = TreeState::default();
+    let mut shown = vec![true; n];
+    for i in 0..n {
+        let path = &paths[i];
+        if tree_open(i) == Some(true) {
+            state.open(path.clone());
+        }
+        shown[i] = path[..path.len() - 1].iter().all(|&p| tree_open(p) == Some(true));
+    }
+    let selected = (n / 2..n).find(|&i| shown[i]).unwrap_or(0);
+    state.select(paths[selected].clone());
+    (items, state)
+}
+
+fn tree(c: &mut Ctx) {
+    let (items, mut state) = tree_fixture(c.rows as usize * 8);
+    let mut buf = Buffer::empty(c.area());
+    let area = c.area();
+    c.clock.start();
+    for _ in 0..c.iterations {
+        let widget = TreeWidget::new(&items).expect("unique identifiers");
+        StatefulWidget::render(widget, area, &mut buf, &mut state);
+        c.count += 1;
+    }
+    c.clock.stop();
+    if c.check {
+        dump(&buf);
+    }
+}
+
+/// CrosstermBackend writing to memory, on a terminal of a fixed size with
+/// the cursor at its top-left when the inline viewport is placed.
+struct Inline {
+    inner: CrosstermBackend<Vec<u8>>,
+    size: Size,
+}
+impl Backend for Inline {
+    type Error = io::Error;
+    fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        self.inner.draw(content)
+    }
+    fn append_lines(&mut self, n: u16) -> io::Result<()> {
+        self.inner.append_lines(n)
+    }
+    fn hide_cursor(&mut self) -> io::Result<()> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> io::Result<()> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> io::Result<Position> {
+        Ok(Position::new(0, 0))
+    }
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> io::Result<()> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> io::Result<Size> {
+        Ok(self.size)
+    }
+    fn window_size(&mut self) -> io::Result<WindowSize> {
+        Ok(WindowSize {
+            columns_rows: self.size,
+            pixels: Size::new(0, 0),
+        })
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Backend::flush(&mut self.inner)
+    }
+}
+
+/// The live view: a title row and bars of `#` under it.
+fn draw_view(f: &mut Frame, n: usize) {
+    let area = f.area();
+    let buf = f.buffer_mut();
+    buf.set_string(
+        area.x,
+        area.y,
+        format!("working {n:06}"),
+        Style::new().add_modifier(Modifier::BOLD),
+    );
+    for y in 1..area.height {
+        let filled = (n + y as usize) % (area.width as usize + 1);
+        buf.set_string(area.x, area.y + y, "#".repeat(filled), Style::new());
+    }
+}
+
+fn print_above(c: &mut Ctx) -> io::Result<()> {
+    let view_rows = std::cmp::max(2, c.rows / 4);
+    let backend = Inline {
+        inner: CrosstermBackend::new(Vec::with_capacity(1 << 16)),
+        size: Size::new(c.cols, c.rows),
+    };
+    let mut term = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(view_rows),
+        },
+    )?;
+    term.draw(|f| draw_view(f, 0))?;
+    if c.check {
+        hex_line("wire", term.backend().inner.writer());
+    }
+    term.backend_mut().inner.writer_mut().clear();
+    c.clock.start();
+    for n in 0..c.iterations {
+        term.insert_before(2, |buf| {
+            for k in 0..2 {
+                let i = 2 * n + k;
+                let text = format!("log {i:06} {} {}", WORDS[i % WORDS.len()], WORDS[(i + 3) % WORDS.len()]);
+                buf.set_string(0, k as u16, text, Style::new());
+            }
+        })?;
+        term.draw(|f| draw_view(f, n + 1))?;
+        let out = term.backend_mut().inner.writer_mut();
+        c.bytes += out.len();
+        c.count += 2;
+        if c.check {
+            hex_line("wire", out);
+        }
+        out.clear();
+    }
+    c.clock.stop();
+    Ok(())
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn text_edit(c: &mut Ctx) {
+    let prose = c.file("prose.txt");
+    let typed = &prose[..prose.len().min(c.cols as usize * 2)];
+    let (mut final_hash, mut final_len, mut undone_len) = (0u64, 0usize, 0usize);
+    c.clock.start();
+    for _ in 0..c.iterations {
+        let mut t = TextArea::default();
+        t.set_max_histories(typed.len() + 64);
+        for ch in typed.chars() {
+            t.insert_char(ch);
+        }
+        for _ in 0..4 {
+            t.delete_word();
+        }
+        for _ in 0..3 {
+            t.move_cursor(CursorMove::WordBack);
+        }
+        for _ in 0..5 {
+            t.delete_next_char();
+        }
+        t.move_cursor(CursorMove::End);
+        for _ in 0..3 {
+            t.delete_char();
+        }
+        while t.undo() {}
+        undone_len = t.lines().join("\n").len();
+        while t.redo() {}
+        let text = t.lines().join("\n");
+        final_hash = fnv1a(text.as_bytes());
+        final_len = text.len();
+        c.count += typed.len();
+        black_box(&t);
+    }
+    c.clock.stop();
+    if c.check {
+        println!("value\tfinal={final_len}:{final_hash:x} undone={undone_len}");
+    }
+}
+
 struct Data {
     prose: String,
     items: Vec<String>,
@@ -778,6 +1027,10 @@ fn main() -> io::Result<()> {
         "text_wrap" => text_wrap(&mut c),
         "layout_split" => layout_split(&mut c),
         "markdown_parse" => markdown_parse(&mut c),
+        "markdown_table_parse" => markdown_table_parse(&mut c),
+        "tree" => tree(&mut c),
+        "print_above" => print_above(&mut c)?,
+        "text_edit" => text_edit(&mut c),
         "block" | "paragraph" | "list" | "table" | "tabs" | "gauge" | "line_gauge"
         | "sparkline" | "barchart" | "chart" | "scrollbar" | "canvas" | "calendar" => {
             widget(&mut c, task)

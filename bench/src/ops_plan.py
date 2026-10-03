@@ -35,6 +35,11 @@ PLAN = {
     'paragraph': (None, None, None),
     'markdown_parse': ('no markdown parser (pulldown-cmark runs instead)', 'no markdown parser', NEW),
     'markdown_draw': ('no markdown widget', 'no markdown widget', NEW),
+    'markdown_table_parse': ('no markdown parser (pulldown-cmark runs instead)', 'no markdown parser', NEW),
+    'markdown_table_draw': ('no markdown widget', 'no markdown widget', NEW),
+    'tree': ('no tree widget in ratatui (tui-tree-widget runs instead)', 'nctree draws each item through a caller callback into planes it makes; no draw-from-state tree', NEW),
+    'print_above': (None, 'no inline mode: notcurses takes the whole terminal or writes through ncdirect', NEW),
+    'text_edit': ('no text editing in ratatui (ratatui-textarea runs instead)', 'ncreader edits only through input events it reads', NEW),
     'list': (None, 'ncselector is an input-driven menu with its own frame; no draw-from-state list', None),
     'table': (None, 'no table widget', None),
     'tabs': (None, 'nctabbed is a tab container with its own content plane, not one header row', None),
@@ -57,7 +62,8 @@ PLAN = {
     'picture_transmit': (NO_PICTURES_R, NO_PICTURES_N, None),
     'picture_replace': (NO_PICTURES_R, NO_PICTURES_N, NEW),
 }
-EXTRA = {'markdown_parse': ['pulldown-cmark']}
+EXTRA = {'markdown_parse': ['pulldown-cmark'], 'markdown_table_parse': ['pulldown-cmark'],
+         'tree': ['tui-tree-widget'], 'text_edit': ['ratatui-textarea']}
 
 def sides(task):
     ratatui, notcurses, before = PLAN[task]
