@@ -74,7 +74,7 @@ fn main() -> io::Result<()> {
     if task != "buffer_diff" {
         {
             let mut backend = CrosstermBackend::new(&mut output);
-            backend.draw(blank.diff(&a).into_iter())?;
+            backend.draw(blank.diff_iter(&a))?;
             Backend::flush(&mut backend)?;
         }
         if check {
@@ -104,14 +104,19 @@ fn main() -> io::Result<()> {
         } else {
             None
         };
-        let updates = from.diff(to);
-        count += updates.len();
-        black_box(&updates);
-        if task != "buffer_diff" {
+        // The iterator ratatui's own Terminal::flush hands its backend: no
+        // update list is collected.
+        let mut changed = 0;
+        let updates = from.diff_iter(to).inspect(|_| changed += 1);
+        if task == "buffer_diff" {
+            for update in updates {
+                black_box(update);
+            }
+        } else {
             output.clear();
             {
                 let mut backend = CrosstermBackend::new(&mut output);
-                backend.draw(updates.into_iter())?;
+                backend.draw(updates)?;
                 Backend::flush(&mut backend)?;
             }
             bytes += output.len();
@@ -123,6 +128,7 @@ fn main() -> io::Result<()> {
                 hex(&output);
             }
         }
+        count += changed;
     }
     let ns = if heavy {
         style_elapsed
