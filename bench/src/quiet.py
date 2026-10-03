@@ -16,8 +16,8 @@ from prepared import Prepared
 prepared = Prepared(ROOT, BUILD)
 if not args.smoke:
     from quiet_support import capture
-    if capture(['git','rev-parse','main']) != PINS['after']:
-        raise SystemExit('main has moved: refresh revisions.json and merge main into bench before measuring')
+    if capture(['git','rev-parse',PINS.get('after_ref', 'main')]) != PINS['after']:
+        raise SystemExit('after ref has moved: refresh revisions.json before measuring')
     prepared.check()
 if args.check_prepared:
     raise SystemExit(0)

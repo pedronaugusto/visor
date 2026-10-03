@@ -20,11 +20,11 @@ The harness lives on `bench`, created from current main; main has no harness.
 
 `revisions.json` fixes A at `4ef702d25f50b37906146582d6ee0ca3ae57934b`, the last
 first-parent main commit before **2026-09-30 00:00:00 +01:00**, and B at
-`394bd42316214485781f5ef4f32ce693ecfdd3c2`. The explicit midnight cutoff avoids Git's bare date
+`9aeab8c214c87187e44cc67b6bab1e066bb6a81b` on `perf` (`after_ref`). The explicit midnight cutoff avoids Git's bare date
 inheriting the time of day. The runner extracts exact `git archive` snapshots into ignored
 `build/revisions/` directories. The after build consumes the remote archive
-and Zig hash in `build.zig.zon`, with its own pinned dependencies. Refresh the pins and merge main into bench if main
-moves; a silently changed local main fails the run.
+and Zig hash in `build.zig.zon`, with its own pinned dependencies. Refresh the pins and `after_ref` when the target moves; a silently changed
+local target ref fails the run. `after_ref` defaults to `main` for older pins.
 
 Every workload runs **A, B, applicable comparisons, A, B, applicable
 comparisons …**, seven rounds at **120×40** and **200×60**, with **1,000 frames

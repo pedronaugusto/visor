@@ -35,9 +35,9 @@ def snapshots():
             with tarfile.open(fileobj=io.BytesIO(data)) as archive:
                 archive.extractall(dest, filter='data')
             marker.write_text(commit + '\n')
-    # A moved main requires an intentional pin update, never a silent B change.
-    if capture(['git', 'rev-parse', 'main']) != PINS['after']:
-        raise SystemExit('main has moved: refresh revisions.json and merge main into bench before measuring')
+    # A moved target ref requires an intentional pin update, never a silent B change.
+    if capture(['git', 'rev-parse', PINS.get('after_ref', 'main')]) != PINS['after']:
+        raise SystemExit('after ref has moved: refresh revisions.json before measuring')
 
 def tools_setup():
     os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1', PYTHONDONTWRITEBYTECODE='1', HOMEBREW_NO_AUTO_UPDATE='1')
