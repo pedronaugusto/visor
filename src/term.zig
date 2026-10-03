@@ -13,8 +13,10 @@
 //!
 //! The bytes are morse's, and so is reading them: sequences are framed by
 //! `morse.parseCsi` and `morse.parseControlString`, a style change is
-//! applied by `morse.applySgr`, the inverse of what wrote it, and modes and
-//! cursor shapes are matched by the numbers morse writes them with.
+//! applied by `morse.applySgr`, a link and sized text are read by
+//! `morse.parseHyperlink` and `morse.parseTextSize`, each the inverse of
+//! what wrote it, and modes and cursor shapes are matched by the numbers
+//! morse writes them with.
 //!
 //! What this file will never be: a terminal emulator for general use. It has
 //! no character sets, no tabs stops, no margins, no mouse, no scrollback and
@@ -638,24 +640,19 @@ pub const Term = struct {
     //=====================================================================
 
     /// `ESC ] ... ST`: OSC 8 changes what a cell links to, and OSC 66 prints
-    /// text at a width it was told. Nothing else changes a cell.
+    /// text at a width it was told. Nothing else changes a cell. The bodies
+    /// are read by `morse.parseHyperlink` and `morse.parseTextSize`, the
+    /// inverses of what wrote them.
     fn operatingSystemCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const string = morse.parseControlString(bytes) orelse return 0;
         if (!string.terminated) return string.len;
-        const payload = string.body;
-        if (std.mem.startsWith(u8, payload, "66;")) {
-            try t.sizedText(payload[3..]);
-            return string.len;
-        }
-        if (std.mem.startsWith(u8, payload, "8;")) {
-            const rest = payload[2..];
-            const split = std.mem.indexOfScalar(u8, rest, ';') orelse return string.len;
-            const params = rest[0..split];
-            const uri = rest[split + 1 ..];
-            t._link = if (uri.len == 0)
+        if (morse.parseTextSize(string.body)) |sized| {
+            try t.sizedText(sized);
+        } else if (morse.parseHyperlink(string.body)) |found| {
+            t._link = if (found.uri.len == 0)
                 .none
             else
-                t._scr.link(uri, params) catch |err| switch (err) {
+                t._scr.link(found.uri, found.params) catch |err| switch (err) {
                     error.ControlInText => return string.len,
                     error.OutOfMemory => return error.OutOfMemory,
                 };
@@ -663,29 +660,18 @@ pub const Term = struct {
         return string.len;
     }
 
-    /// The body of an OSC 66: `key=value:key=value ; text`. The `w` key is
-    /// the width every cluster in the text takes and `s` the scale it is
-    /// drawn at; the others are read and not acted on, because the renderer
-    /// does not write them.
-    fn sizedText(t: *Term, body: []const u8) Allocator.Error!void {
-        const split = std.mem.indexOfScalar(u8, body, ';') orelse return;
-        var told: ?u2 = null;
-        var scale: u3 = 0;
-        var keys = std.mem.splitScalar(u8, body[0..split], ':');
-        while (keys.next()) |pair| {
-            if (pair.len < 3 or pair[1] != '=') continue;
-            const value = std.fmt.parseInt(u8, pair[2..], 10) catch continue;
-            switch (pair[0]) {
-                'w' => told = switch (value) {
-                    1 => 1,
-                    2 => 2,
-                    else => null,
-                },
-                's' => scale = @intCast(@min(value, 7)),
-                else => {},
-            }
-        }
-        var it: textmod.Graphemes = .init(body[split + 1 ..]);
+    /// The text of an OSC 66, drawn at the width it was told and the scale
+    /// it asks for. A width of one or two is acted on and any other is
+    /// measured here; the fraction and the alignments are read and not acted
+    /// on, because the renderer does not write them.
+    fn sizedText(t: *Term, sized: morse.SizedText) Allocator.Error!void {
+        const told: ?u2 = switch (sized.size.width) {
+            1 => 1,
+            2 => 2,
+            else => null,
+        };
+        const scale = sized.size.scale;
+        var it: textmod.Graphemes = .init(sized.text);
         while (it.next()) |g| {
             if (scale > 1) {
                 try t.putScaled(g, told, scale);
@@ -1517,6 +1503,14 @@ test "sized text without a width is printed as ordinary text" {
     try t.feed("\x1b]66;;ab\x1b\\");
     var buf: [32]u8 = undefined;
     try testing.expectEqualStrings("ab      ", rowText(&t, 0, &buf));
+}
+
+test "sized text morse does not read is dropped, not guessed at" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    try t.feed("\x1b]66;s=9;a\x1b\\\x1b]66;w=2:w=1;b\x1b\\\x1b]66;x\x1b\\c");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("c       ", rowText(&t, 0, &buf));
 }
 
 test "a saved cursor comes back where it was" {

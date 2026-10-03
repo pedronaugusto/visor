@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Term` reads the bodies of OSC 8 and OSC 66 with `morse.parseHyperlink` and `morse.parseTextSize`, and its own parsing of them is gone. Sized text whose metadata morse does not read (a key twice, a value out of its range, a pair outside the grammar) is now dropped like any other sequence `Term` does not recognise, instead of drawn with the pairs it could read.
+
 - `wrap`, and so `Paragraph.Rows`, no longer ends a row before it starts when a break swallows spaces the scan had not reached: indentation wider than the width is a row of the spaces that fit, and the first word starts the next. A word that does not fit beside a wide cluster after a break is broken again instead of overflowing its row; a space a mark combines with is no longer split by the spaces a break swallows.
 
 - `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
