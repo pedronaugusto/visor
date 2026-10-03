@@ -4,6 +4,7 @@ ASCII grids, RGB/bold SGR, cursor addressing, erase, and kitty image/placement
 commands only. Any unrecognized output fails rather than silently being ignored.
 """
 import base64
+import unicodedata
 import hashlib
 import json
 import re
@@ -21,6 +22,40 @@ class Terminal:
         self.upload = bytearray()
         self.upload_id = None
         self.saved = (0, 0)
+        self.top, self.bottom = 0, rows - 1
+        self.link = None
+        self.links = set()
+        self.last = None
+
+    def scroll(self, n):
+        span = list(range(self.top, self.bottom + 1))
+        rows = [self.grid[r*self.cols:(r+1)*self.cols] for r in span]
+        blank = [(' ', None, False)] * self.cols
+        rows = (rows[n:] + [blank] * n) if n > 0 else ([blank] * -n + rows[:n])
+        for r, content in zip(span, rows): self.grid[r*self.cols:(r+1)*self.cols] = content[:self.cols]
+
+    def linefeed(self):
+        # Line feed at the bottom margin scrolls the region, as a terminal does.
+        if self.y == self.bottom: self.scroll(1)
+        else: self.y += 1
+
+    def autowrap(self, width):
+        # Auto-margin with a pending wrap (am, xenl): a glyph that does not
+        # fit starts the next line.
+        if self.x + width > self.cols:
+            self.x = 0
+            self.linefeed()
+
+    def put(self, x, y, ch):
+        index = y * self.cols + x
+        self.grid[index] = (ch, self.fg, self.bold) if self.link is None else (ch, self.fg, self.bold, self.link)
+        if ch: self.last = index
+
+    def text(self):
+        rows = []
+        for y in range(self.rows):
+            rows.append(''.join(c[0] for c in self.grid[y*self.cols:(y+1)*self.cols]).rstrip(' '))
+        return '\n'.join(rows)
 
     def feed(self, data):
         i = 0
@@ -48,6 +83,18 @@ class Terminal:
                 else:
                     raise AssertionError(('unexpected graphics action', fields))
                 i = end + 2
+            elif data[i:i+2] == b'\x1b]':
+                # OSC 8 hyperlinks only; anything else fails.
+                end = min(j for j in (data.find(b'\x1b\\', i), data.find(b'\x07', i)) if j >= 0)
+                body = data[i+2:end].decode()
+                assert body.startswith('8;'), body
+                self.link = body.split(';', 2)[2] or None
+                self.links.add(self.link) if self.link else None
+                i = end + (2 if data[end] == 0x1b else 1)
+            elif data[i:i+2] in (b'\x1b7', b'\x1b8'):
+                if data[i+1] == ord('7'): self.saved = (self.x, self.y)
+                else: self.x, self.y = self.saved
+                i += 2
             elif data[i:i+2] == b'\x1b[':
                 match = re.match(rb'\x1b\[([0-9;:?>]*)([A-Za-z])', data[i:])
                 assert match, data[i:i+40]
@@ -59,10 +106,13 @@ class Terminal:
                     nums = [int(n or '0') for n in raw.replace(':', ';').split(';')] if raw else [0]
                     n = nums[0] or 1
                     if final in ('H', 'f'):
-                        self.y = (nums[0] or 1) - 1
-                        self.x = (nums[1] or 1) - 1 if len(nums) > 1 else 0
-                    elif final == 'G': self.x = n - 1
-                    elif final == 'd': self.y = n - 1
+                        # Terminals clamp an absolute position to the screen.
+                        self.y = min(self.rows, nums[0] or 1) - 1
+                        self.x = min(self.cols, (nums[1] or 1) if len(nums) > 1 else 1) - 1
+                    elif final == 'G': self.x = min(self.cols, n) - 1
+                    elif final == 'E': self.x, self.y = 0, min(self.rows - 1, self.y + n)
+                    elif final == 'F': self.x, self.y = 0, max(0, self.y - n)
+                    elif final == 'd': self.y = min(self.rows, n) - 1
                     elif final == 'A': self.y = max(0, self.y - n)
                     elif final == 'B': self.y = min(self.rows - 1, self.y + n)
                     elif final == 'C': self.x = min(self.cols - 1, self.x + n)
@@ -75,6 +125,13 @@ class Terminal:
                         end = self.cols if nums[0] == 0 else self.x + 1 if nums[0] == 1 else self.cols
                         start = self.x if nums[0] == 0 else 0
                         for x in range(start, end): self.grid[self.y * self.cols + x] = (' ', self.fg, self.bold)
+                    elif final == 'X':
+                        for x in range(self.x, min(self.cols, self.x + n)): self.put(x, self.y, ' ')
+                    elif final == 'r':
+                        self.top = (nums[0] or 1) - 1
+                        self.bottom = (nums[1] if len(nums) > 1 and nums[1] else self.rows) - 1
+                        self.x = self.y = 0
+                    elif final in ('S', 'T'): self.scroll(n if final == 'S' else -n)
                     elif final == 's': self.saved = (self.x, self.y)
                     elif final == 'u': self.x, self.y = self.saved
                     else: raise AssertionError(('unrecognized CSI', raw, final))
@@ -82,13 +139,32 @@ class Terminal:
             elif data[i] == 13:
                 self.x = 0; i += 1
             elif data[i] == 10:
-                self.y += 1; i += 1
+                self.linefeed(); i += 1
             elif 32 <= data[i] <= 126:
+                self.autowrap(1)
                 assert 0 <= self.x < self.cols and 0 <= self.y < self.rows, (self.x, self.y)
                 assert self.bg is None
-                self.grid[self.y * self.cols + self.x] = (chr(data[i]), self.fg, self.bold)
+                self.put(self.x, self.y, chr(data[i]))
                 self.x += 1
                 i += 1
+            elif data[i] >= 0xc0:
+                # One UTF-8 codepoint: a mark joins the cluster before it,
+                # East Asian Wide/Fullwidth takes two columns.
+                size = 2 if data[i] < 0xe0 else 3 if data[i] < 0xf0 else 4
+                ch = data[i:i+size].decode()
+                i += size
+                cp = ord(ch)
+                if unicodedata.combining(ch) or unicodedata.category(ch) in ('Mn', 'Me', 'Cf') or 0x1F3FB <= cp <= 0x1F3FF or cp in (0xFE0E, 0xFE0F):
+                    assert self.last is not None
+                    c = self.grid[self.last]
+                    self.grid[self.last] = (c[0] + ch,) + c[1:]
+                    continue
+                wide = unicodedata.east_asian_width(ch) in ('W', 'F')
+                self.autowrap(1 + wide)
+                assert 0 <= self.x + wide < self.cols and 0 <= self.y < self.rows, (self.x, self.y, ch)
+                self.put(self.x, self.y, ch)
+                if wide: self.put(self.x + 1, self.y, '')
+                self.x += 1 + wide
             else:
                 raise AssertionError(('unrecognized byte', data[i:i+40]))
 

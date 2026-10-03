@@ -4,5 +4,15 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[[bin]]
+name = "visor-comparison"
+path = "src/main.rs"
+
+[[bin]]
+name = "visor-ops"
+path = "src/ops.rs"
+
 [dependencies]
-ratatui = { version = "=0.30.1", default-features = false, features = ["crossterm"] }
+ratatui = { version = "=0.30.1", default-features = false, features = ["crossterm", "layout-cache", "widget-calendar", "unstable-rendered-line-info"] }
+time = { version = "=0.3.55", default-features = false }
+pulldown-cmark = { version = "=0.13.0", default-features = false }

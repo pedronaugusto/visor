@@ -20,5 +20,20 @@ pub fn build(b: *std.Build) void {
             }),
         });
         b.installArtifact(exe);
+        const ops = b.addExecutable(.{
+            .name = "visor-ops-" ++ side,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/ops.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+                .imports = &.{
+                    .{ .name = "visor", .module = package.module("visor") },
+                    .{ .name = "widgets", .module = package.module("visor.widgets") },
+                    .{ .name = "options", .module = options.createModule() },
+                },
+            }),
+        });
+        b.installArtifact(ops);
     }
 }

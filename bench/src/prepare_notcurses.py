@@ -64,7 +64,8 @@ with (BUILD / 'notcurses-build.log').open('w') as log:
 run(['tic', '-x', '-o', BUILD / 'terminfo', ROOT / 'src/notcurses.terminfo'], env=env)
 cc = shlex.split(os.environ.get('CC', 'cc'))
 link = ['-ldl'] if sys.platform.startswith('linux') else []
-run(cc + [os.environ.get('BENCH_C_OPTIMIZE', '-O3'), '-std=gnu17', '-UNDEBUG', '-I' + str(notcurses / 'include'), '-I' + str(cmake / 'include'),
-          '-I' + host_prefix + '/include', ROOT / 'src/notcurses.c', cmake / 'libnotcurses-core.a',
-          '-L' + str(prefix / 'lib'), '-L' + host_prefix + '/lib', '-ltinfow', '-lunistring', '-lz',
-          '-lpthread', '-lm'] + link + ['-o', BUILD / 'notcurses-bench'])
+for source, binary in (('notcurses.c', 'notcurses-bench'), ('notcurses_ops.c', 'notcurses-ops')):
+    run(cc + [os.environ.get('BENCH_C_OPTIMIZE', '-O3'), '-std=gnu17', '-UNDEBUG', '-I' + str(notcurses / 'include'), '-I' + str(cmake / 'include'),
+              '-I' + host_prefix + '/include', ROOT / 'src' / source, cmake / 'libnotcurses-core.a',
+              '-L' + str(prefix / 'lib'), '-L' + host_prefix + '/lib', '-ltinfow', '-lunistring', '-lz',
+              '-lpthread', '-lm'] + link + ['-o', BUILD / binary])
