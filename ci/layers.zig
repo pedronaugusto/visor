@@ -128,3 +128,17 @@ pub const required = blk: {
     };
     break :blk paths;
 };
+
+/// Tokens only their owners may spell. The console and the terminal's
+/// modes are conduit's: visor reaches them through `conduit.tty`.
+pub const owned: []const gantry.rules.TokenRule = &.{
+    .{ .name = "console owner", .token = "CreateFileW" },
+    .{ .name = "console owner", .token = "ReadConsoleInputW" },
+    .{ .name = "console owner", .token = "GetConsoleMode" },
+    .{ .name = "console owner", .token = "SetConsoleMode" },
+    .{ .name = "console owner", .kind = .string, .token = "CONIN$" },
+    .{ .name = "console owner", .kind = .string, .token = "CONOUT$" },
+    .{ .name = "console owner", .kind = .string, .token = "kernel32" },
+    .{ .name = "terminal mode owner", .token = "tcsetattr" },
+    .{ .name = "terminal mode owner", .token = "ioctl" },
+};
