@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Pictures choose kitty, iTerm2, sixel, then cells, with a caller override: the probe reads DA1, XTSMGRAPHICS and XTVERSION, and callers can supply TERM_PROGRAM. `Layers.storeSixel` and `storeIterm` retain pictures for redraw after damage, movement, scrolling and removal, clipped to their cell rectangle; morse writes the bytes. Canvas can retain its raster as sixel pixels with a caller palette.
+
 - `Markdown.Document` reserves its text once, at the source's length, which it never exceeds, and reads a table cell's escaped pipes in place instead of copying the cell.
 
 - A row whose diff is one run up to its trailing blanks, over a tail the terminal already shows, is written as the diff without pricing the paint: the paint would write the same run and erase the rest. The bytes are unchanged; a screen redrawn over blank rows, as after `printAbove`, takes about half the time.

@@ -11,7 +11,9 @@
 //! itself; this file will not do it behind them.
 //!
 //! What this file will never hold: a terminfo reader, a capability database,
-//! a table of terminal names, or a timeout.
+//! a table of terminal names, or a timeout. One name is read, and it is a
+//! protocol's: a terminal that calls itself iTerm2 draws iTerm2's inline
+//! images, which no question asks about.
 
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
@@ -65,6 +67,25 @@ pub const Caps = struct {
     kitty_keyboard: bool = false,
     /// The kitty graphics protocol.
     kitty_graphics: bool = false,
+    /// Sixel graphics: the device attributes claim attribute 4.
+    sixel: bool = false,
+    /// How many colour registers a sixel image may use, as the terminal
+    /// answered XTSMGRAPHICS. 256 until it says otherwise, which is what a
+    /// terminal drawing sixels has today; a VT340's 16 is said when asked.
+    sixel_registers: u16 = 256,
+    /// The widest sixel image the terminal draws, in pixels, as it answered
+    /// XTSMGRAPHICS; zero when it did not say.
+    sixel_max_width: u32 = 0,
+    /// The tallest, the same way.
+    sixel_max_height: u32 = 0,
+    /// iTerm2's inline images, `OSC 1337 ; File`. This probe uses XTVERSION
+    /// and sets this only for a terminal
+    /// that calls itself iTerm2 (XTVERSION); a caller that knows another
+    /// terminal draws them -- WezTerm, mintty, Konsole -- sets it itself.
+    iterm_images: bool = false,
+    /// The picture protocol frames use, chosen by the caller; null leaves
+    /// the choice to `pictures`.
+    picture_protocol: ?Pictures = null,
     /// Mouse reports in pixels, mode 1016.
     sgr_pixels: bool = false,
 
@@ -101,9 +122,47 @@ pub const Caps = struct {
     /// screen.
     scroll_detection: bool = false,
     /// Mode 8452: after a sixel, the cursor is left to the right of the
-    /// graphic rather than below it. The difference between knowing where
-    /// the cursor is and asking.
+    /// graphic rather than below it, so a picture can reach the bottom row
+    /// without the screen scrolling under it. `enter` turns it on when
+    /// frames draw sixels; without it a sixel picture stops a row short of
+    /// the bottom.
     sixel_cursor_right: bool = false,
+
+    /// How a picture reaches the screen.
+    pub const Pictures = enum {
+        /// As cells: sextants, half blocks, braille. No picture protocol.
+        cells,
+        /// Sixel: the pixels in the escape code, drawn into the cells under
+        /// them, sent again whenever they are drawn again.
+        sixel,
+        /// iTerm2's inline images: a PNG file, scaled by the terminal to the
+        /// cells it is drawn in, sent again whenever it is drawn again.
+        iterm,
+        /// The kitty protocol: pixels the terminal keeps under an id, placed
+        /// above or below the text.
+        kitty,
+    };
+
+    /// The picture protocol a frame uses: `picture_protocol` when the
+    /// caller chose one, else the best the terminal has -- kitty, then
+    /// iTerm2, then sixel, then cells.
+    ///
+    /// Kitty first because the terminal keeps the pixels and a picture
+    /// that moves or is covered costs a command, not the picture again;
+    /// iTerm2 before sixel because it is a file in full colour scaled by the
+    /// terminal, where a sixel is at most 256 colours scaled here.
+    pub fn pictures(c: Caps) Pictures {
+        if (c.picture_protocol) |chosen| return chosen;
+        if (c.kitty_graphics) return .kitty;
+        if (c.iterm_images) return .iterm;
+        if (c.sixel) return .sixel;
+        return .cells;
+    }
+
+    /// Apply a caller-supplied TERM_PROGRAM value; no environment is read.
+    pub fn termProgram(c: *Caps, name: []const u8) void {
+        if (std.mem.eql(u8, name, "iTerm.app")) c.iterm_images = true;
+    }
 
     /// What the terminal can do, asked: `morse.Probe`'s questions, and its
     /// answers folded into a `Caps`.
@@ -201,6 +260,18 @@ pub const Caps = struct {
                     // answers permanently set; one that can be asked will be,
                     // by `enter`.
                     if (m.mode == morse.unicodeCore.number) p._caps.width_method = if (has) .unicode else .wcwidth;
+                    if (m.mode == morse.sixelCursorRight.number) p._caps.sixel_cursor_right = has;
+                },
+                .device_attributes => |da| p._caps.sixel = da.has(4),
+                .version => |name| p._caps.iterm_images = std.mem.startsWith(u8, name, "iTerm2 ") or std.mem.eql(u8, name, "iTerm2"),
+                .sixel_graphics => |g| if (g.ok()) switch (g.item) {
+                    // At least two, or there is no picture to draw; and no
+                    // more than one image can define.
+                    .color_registers => p._caps.sixel_registers = @intCast(std.math.clamp(g.value, 2, morse.sixel_palette_max)),
+                    .geometry => {
+                        p._caps.sixel_max_width = g.value;
+                        p._caps.sixel_max_height = g.height;
+                    },
                 },
                 .kitty_keyboard => p._caps.kitty_keyboard = true,
                 .capability => |c| {
@@ -345,6 +416,9 @@ test "a probe answered in full is settled at once" {
         .text_area_cells = false,
         .cell_pixels = false,
         .secondary_device_attributes = false,
+        .sixel_cursor_right = false,
+        .sixel_registers = false,
+        .sixel_geometry = false,
     });
     p.feed(answer("\x1b[?62;4;22c"), 5);
     try testing.expect(!p.complete());
@@ -418,4 +492,80 @@ test "probe questions answers and learned state stay behind their owner" {
     inline for (.{ "questions", "caps", "answered", "last_ms" }) |field| {
         try testing.expect(!@hasField(Caps.Probe, field));
     }
+}
+
+test "the picture protocol is kitty, then iTerm2, then sixel, then cells, unless the caller chose" {
+    try testing.expectEqual(Caps.Pictures.cells, (Caps{}).pictures());
+    try testing.expectEqual(Caps.Pictures.sixel, (Caps{ .sixel = true }).pictures());
+    try testing.expectEqual(Caps.Pictures.iterm, (Caps{ .sixel = true, .iterm_images = true }).pictures());
+    try testing.expectEqual(Caps.Pictures.kitty, (Caps{ .sixel = true, .iterm_images = true, .kitty_graphics = true }).pictures());
+    // The caller's choice stands, even one the terminal never claimed.
+    try testing.expectEqual(Caps.Pictures.sixel, (Caps{ .kitty_graphics = true, .picture_protocol = .sixel }).pictures());
+    try testing.expectEqual(Caps.Pictures.cells, (Caps{ .kitty_graphics = true, .picture_protocol = .cells }).pictures());
+    try testing.expectEqual(Caps.Pictures.iterm, (Caps{ .picture_protocol = .iterm }).pictures());
+}
+
+test "sixels are the device attributes' attribute 4, and their registers and size are XTSMGRAPHICS's" {
+    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    p.feed(answer("\x1b[?62;22c"), 0);
+    try testing.expect(!p._caps.sixel);
+    p.feed(answer("\x1b[?65;4;6;22c"), 0);
+    try testing.expect(p._caps.sixel);
+    try testing.expectEqual(Caps.Pictures.sixel, p._caps.pictures());
+
+    try testing.expectEqual(@as(u16, 256), p._caps.sixel_registers);
+    p.feed(answer("\x1b[?1;0;16S"), 0);
+    try testing.expectEqual(@as(u16, 16), p._caps.sixel_registers);
+    // More than one image can define is as many as it can.
+    p.feed(answer("\x1b[?1;0;1024S"), 0);
+    try testing.expectEqual(@as(u16, 256), p._caps.sixel_registers);
+    // A refusal says nothing about the number.
+    p.feed(answer("\x1b[?1;3;0S"), 0);
+    try testing.expectEqual(@as(u16, 256), p._caps.sixel_registers);
+    p.feed(answer("\x1b[?2;0;1000;800S"), 0);
+    try testing.expectEqual(@as(u32, 1000), p._caps.sixel_max_width);
+    try testing.expectEqual(@as(u32, 800), p._caps.sixel_max_height);
+    try testing.expect(p.hasAnswered(.sixel_registers) and p.hasAnswered(.sixel_geometry));
+
+    p.feed(answer("\x1b[?8452;2$y"), 0);
+    try testing.expect(p._caps.sixel_cursor_right);
+    p.feed(answer("\x1b[?8452;0$y"), 0);
+    try testing.expect(!p._caps.sixel_cursor_right);
+}
+
+test "iTerm2's images are a terminal calling itself iTerm2, and nothing else" {
+    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    p.feed(answer("\x1bP>|WezTerm 20240203-110809-5046fc22\x1b\\"), 0);
+    try testing.expect(!p._caps.iterm_images);
+    p.feed(answer("\x1bP>|iTerm2X 1.0\x1b\\"), 0);
+    try testing.expect(!p._caps.iterm_images);
+    p.feed(answer("\x1bP>|iTerm2 3.5.4\x1b\\"), 0);
+    try testing.expect(p._caps.iterm_images);
+    try testing.expectEqual(Caps.Pictures.iterm, p._caps.pictures());
+}
+
+test "TERM_PROGRAM is supplied by the caller and recognizes iTerm.app exactly" {
+    var caps: Caps = .{};
+    caps.termProgram("WezTerm");
+    try testing.expect(!caps.iterm_images);
+    caps.termProgram("iTerm.app-extra");
+    try testing.expect(!caps.iterm_images);
+    caps.termProgram("iTerm.app");
+    try testing.expectEqual(Caps.Pictures.iterm, caps.pictures());
+}
+
+test "picture probe replies stay within the register bound under arbitrary input" {
+    try testing.fuzz(testing.allocator, struct {
+        fn one(_: std.mem.Allocator, smith: *testing.Smith) !void {
+            var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+            var bytes: [512]u8 = undefined;
+            const n = smith.slice(&bytes);
+            p.feed(answer(bytes[0..n]), 0);
+            const caps = p.capabilities();
+            try testing.expect(caps.sixel_registers >= 2 and caps.sixel_registers <= morse.sixel_palette_max);
+            // The reply parser and question ownership stay with morse;
+            // folding any unhandled input cannot make pictures available.
+            if (morse.Reply.parse(bytes[0..n]) == null) try testing.expectEqual(Caps.Pictures.cells, caps.pictures());
+        }
+    }.one, .{ .corpus = &.{ "\x1b[?65;4c", "\x1b[?1;0;16S", "\x1b[?2;0;1000;800S", "\x1bP>|iTerm2 3.5.4\x1b\\", "\x1b[?1;0;4294967295S", "\x1b[?1;0;-1S" } });
 }

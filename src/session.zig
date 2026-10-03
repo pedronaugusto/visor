@@ -66,6 +66,7 @@ pub const Session = struct {
 
     /// The picture owner borrowed for transmission and frame declarations.
     pub fn layers(s: *Session) *Layers {
+        s._layers.configureSize(s._ws);
         return &s._layers;
     }
 
@@ -230,6 +231,7 @@ pub const Session = struct {
 
     /// Writes one frame, after `resize` and application painting. No flush.
     pub fn draw(s: *Session, w: *Writer) render.Error!Renderer.Stats {
+        s._layers.configureSize(s._ws);
         return s._renderer.draw(w, &s._screen, &s._layers, s._caps);
     }
 };

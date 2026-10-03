@@ -1269,3 +1269,39 @@ fn expectAgreesAt(s: *const visor.Screen, o: *const Oracle, top: u16) !void {
         }
     }
 }
+
+test "inline picture corpus preserves text and cursor in the real emulator" {
+    // Ghostty's pinned terminal does not draw sixel or OSC 1337 images.
+    // Replay still proves their strings do not leak into text, damage and
+    // removal restore the grid, and the renderer restores the cursor.
+    const size: visor.Size = .{ .cols = 8, .rows = 4 };
+    inline for (.{ visor.Caps.Pictures.sixel, visor.Caps.Pictures.iterm }) |protocol| {
+        var screen = try visor.Screen.init(testing.allocator, size);
+        defer screen.deinit();
+        screen.method = .unicode;
+        var renderer = try visor.Renderer.init(testing.allocator, size);
+        defer renderer.deinit();
+        var layers: visor.Layers = .init(testing.allocator);
+        defer layers.deinit();
+        layers.configureSize(.{ .cells = size, .cell = .{ .width = 1, .height = 1 } });
+        const caps: visor.Caps = .{ .width_method = .unicode, .picture_protocol = protocol };
+        if (protocol == .sixel) {
+            try layers.storeSixel(7, .{ .width = 2, .height = 2, .pixels = .{ .indexed = &.{ 0, 0, 0, 0 } }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} });
+        } else try layers.storeIterm(7, "PNG", 3);
+        var out: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        const oracle = try Oracle.init(testing.allocator, size, .unicode);
+        defer oracle.deinit();
+        try renderer.enter(&out.writer, caps, .alt, .{});
+        oracle.feed(out.written());
+        for (0..5) |frame| {
+            out.clearRetainingCapacity();
+            if (frame != 3) try layers.declare(.{ .image = 7, .rect = .{ .col = @intCast(frame % 2), .row = 0, .cols = 2, .rows = 2 } });
+            if (frame == 2) _ = try screen.write(6, 2, "x", .{}, .none);
+            if (frame == 4) renderer.repaint();
+            _ = try renderer.draw(&out.writer, &screen, &layers, caps);
+            oracle.feed(out.written());
+            try expectAgrees(&screen, oracle);
+        }
+    }
+}

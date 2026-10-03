@@ -133,3 +133,22 @@ fn resizeSurface(gpa: std.mem.Allocator) !void {
     try t.expectEqual(@as(usize, 32), surface.pixels().len);
     for (surface.pixels()) |byte| try t.expectEqual(@as(u8, 0), byte);
 }
+
+test "canvas pictures follow the caller's sixel choice and retain the raster through Layers" {
+    var h = try Harness.init(t.allocator, 2, 2);
+    defer h.deinit();
+    var surface = try Canvas.Surface.init(t.allocator, 8, 8);
+    defer surface.deinit();
+    var layers: visor.Layers = .init(t.allocator);
+    defer layers.deinit();
+    var out: std.Io.Writer.Allocating = .init(t.allocator);
+    defer out.deinit();
+    const caps: visor.Caps = .{ .kitty_graphics = true, .picture_protocol = .sixel };
+    const shapes: []const Canvas.Shape = &.{.{ .geometry = .{ .line = .{ 0, 0.5, 1, 0.5 } } }};
+    try (Canvas{}).draw(h.window(), shapes, .{ .caps = caps, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = 7, .sixel_palette = &.{.{ .r = 255, .g = 255, .b = 255 }} } });
+    try t.expectEqual(visor.Caps.Pictures.sixel, layers.image(7).?.protocol);
+    try t.expectEqual(@as(usize, 0), out.written().len);
+    layers.configureSize(.{ .cells = .{ .cols = 2, .rows = 2 }, .cell = .{ .width = 4, .height = 8 } });
+    try t.expectEqual(@as(usize, 1), try layers.emit(&out.writer, caps));
+    try t.expect(std.mem.indexOf(u8, out.written(), "\x1bP0;1;0q") != null);
+}

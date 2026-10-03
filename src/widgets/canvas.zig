@@ -90,6 +90,8 @@ pub const Canvas = struct {
         image: u32,
         placement: u32 = 1,
         order: visor.Layer.Order = .{},
+        /// Palette for sixel output. The caller chooses the quantization.
+        sixel_palette: []const visor.morse.Rgb = &.{},
     };
     pub const DrawOptions = struct {
         caps: visor.Caps = .{},
@@ -101,12 +103,17 @@ pub const Canvas = struct {
     /// straight alpha; empty cell marks leave the window's contents alone.
     pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {
         if (win.rect().isEmpty()) return;
-        if (options.caps.kitty_graphics) {
+        const protocol = options.caps.pictures();
+        if (protocol == .kitty or protocol == .sixel) {
             if (options.picture) |pic| {
                 pic.surface.clear();
                 const p = c.raster(pic.surface);
                 for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
-                _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height });
+                if (protocol == .kitty) {
+                    _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height });
+                } else {
+                    try pic.layers.storeSixel(pic.image, .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height, .pixels = .{ .rgba = pic.surface.pixels() }, .palette = pic.sixel_palette });
+                }
                 try pic.layers.declare(.{ .image = pic.image, .placement = pic.placement, .rect = win.rect(), .order = pic.order });
                 return;
             }

@@ -960,3 +960,132 @@ test "image id bounds and allocation cursor stay behind their owner" {
         try testing.expect(!@hasField(ImageIds, field));
     }
 }
+
+const inline_palette = [_]morse.Rgb{ .{ .r = 0, .g = 0, .b = 0 }, .{ .r = 255, .g = 0, .b = 0 } };
+const inline_pixels = [_]u8{ 1, 1, 1, 1 };
+
+fn inlineFixture(protocol: Caps.Pictures) !Fixture {
+    var f = try Fixture.init(testing.allocator, 8, 4);
+    f.caps.picture_protocol = protocol;
+    f.layers.configureSize(.{ .cells = .{ .cols = 8, .rows = 4 }, .cell = .{ .width = 1, .height = 1 } });
+    if (protocol == .sixel) try f.layers.storeSixel(7, .{ .width = 2, .height = 2, .pixels = .{ .indexed = &inline_pixels }, .palette = &inline_palette }) else try f.layers.storeIterm(7, "PNG", 0);
+    return f;
+}
+
+test "inline pictures redraw after text damage, moves, removals and repaint, but an identical frame writes nothing" {
+    inline for (.{ Caps.Pictures.sixel, Caps.Pictures.iterm }) |protocol| {
+        var f = try inlineFixture(protocol);
+        defer f.deinit();
+        var picture: Layer = .{ .image = 7, .rect = .{ .col = 1, .row = 0, .cols = 2, .rows = 2 } };
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+        const marker = if (protocol == .sixel) "\x1bP0;1;0q" else "\x1b]1337;File=";
+        try testing.expect(std.mem.indexOf(u8, f.written(), marker) != null);
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+        _ = try f.screen.write(0, 0, "x", .{}, .none);
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+        picture.rect.col = 3;
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+        try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[1;4H") != null);
+        try testing.expect((try f.draw()).bytes > 0);
+        try testing.expect(std.mem.indexOf(u8, f.written(), marker) == null);
+        try testing.expectEqual(@as(usize, 0), f.layers.count());
+        try f.layers.declare(picture);
+        _ = try f.draw();
+        f.renderer.repaint();
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+        try f.layers.retire(7);
+        _ = try f.draw();
+        try testing.expectEqual(@as(usize, 0), f.layers.images().len);
+        try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b_G") == null);
+    }
+}
+
+test "inline pictures golden bytes use morse's single writers with clipped cells and pixels" {
+    var f = try inlineFixture(.sixel);
+    defer f.deinit();
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 7, .row = 2, .cols = 2, .rows = 2 } });
+    f.out.clearRetainingCapacity();
+    try testing.expectEqual(@as(usize, 1), try f.layers.emit(&f.out.writer, f.caps));
+    try testing.expectEqualStrings("\x1b[3;8H\x1bP0;1;0q\"1;1;1;1#0;2;0;0;0#1;2;100;0;0#1@\x1b\\", f.written());
+    _ = try f.layers.commitFrame(&f.out.writer, f.caps);
+    try f.layers.storeIterm(7, "PNG", 0);
+    f.caps.picture_protocol = .iterm;
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 7, .row = 2, .cols = 2, .rows = 2 } });
+    f.out.clearRetainingCapacity();
+    _ = try f.layers.emit(&f.out.writer, f.caps);
+    try testing.expectEqualStrings("\x1b[3;8H\x1b]1337;File=size=3;width=1;height=2;preserveAspectRatio=0;inline=1;doNotMoveCursor=1:UE5H\x1b\\", f.written());
+    try f.layers.storeIterm(7, "PNGmore", 3);
+    f.out.clearRetainingCapacity();
+    _ = try f.layers.emit(&f.out.writer, f.caps);
+    try testing.expectEqualStrings("\x1b[3;8H\x1b]1337;MultipartFile=size=7;width=1;height=2;preserveAspectRatio=0;inline=1;doNotMoveCursor=1\x1b\\\x1b]1337;FilePart=UE5H\x1b\\\x1b]1337;FilePart=bW9y\x1b\\\x1b]1337;FilePart=ZQ==\x1b\\\x1b]1337;FileEnd\x1b\\", f.written());
+}
+
+test "inline pictures reject malformed pixels before replacing a usable image" {
+    var f = try inlineFixture(.sixel);
+    defer f.deinit();
+    try testing.expectError(error.InvalidImage, f.layers.storeSixel(7, .{ .width = 3, .height = 2, .pixels = .{ .indexed = &inline_pixels }, .palette = &inline_palette }));
+    try testing.expectError(error.InvalidImage, f.layers.storeSixel(7, .{ .width = 1, .height = 1, .pixels = .{ .indexed = &.{2} }, .palette = &inline_palette }));
+    try testing.expectEqual(@as(u32, 2), f.layers.image(7).?.width);
+}
+
+test "inline pictures recover after a refused frame and restore the screen cursor" {
+    inline for (.{ Caps.Pictures.sixel, Caps.Pictures.iterm }) |protocol| {
+        var f = try inlineFixture(protocol);
+        defer f.deinit();
+        const picture: Layer = .{ .image = 7, .rect = .{ .col = 1, .row = 0, .cols = 2, .rows = 2 } };
+        try f.layers.declare(picture);
+        var blocked: Writer = .failing;
+        try testing.expectError(error.WriteFailed, f.renderer.draw(&blocked, &f.screen, &f.layers, f.caps));
+        try testing.expectEqual(@as(usize, 0), f.layers.count());
+        try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+        try f.layers.declare(picture);
+        try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
+        f.caps.picture_protocol = .cells;
+        try f.layers.declare(picture);
+        try testing.expect((try f.draw()).bytes > 0);
+        try testing.expectEqual(@as(usize, 0), f.layers.count());
+    }
+}
+
+test "inline pictures use source cropping, probe geometry and palette limits" {
+    var f = try inlineFixture(.sixel);
+    defer f.deinit();
+    f.caps.sixel_max_width = 1;
+    f.caps.sixel_max_height = 1;
+    f.caps.sixel_registers = 1;
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 }, .source = .{ .x = 1, .y = 1, .width = 1, .height = 1 } });
+    _ = try f.draw();
+    try testing.expect(std.mem.indexOf(u8, f.written(), "q\"1;1;1;1#0;2;0;0;0#0@") != null);
+    f.layers.configureSize(.{ .cells = .{ .cols = 8, .rows = 4 } });
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
+    try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
+}
+
+test "inline pictures cursor-right mode is enabled on entry and undone on leave" {
+    var f = try inlineFixture(.sixel);
+    defer f.deinit();
+    f.caps.sixel_cursor_right = true;
+    try f.renderer.enter(&f.out.writer, f.caps, .alt, .{});
+    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?8452h") != null);
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 3, .cols = 2, .rows = 1 } });
+    try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+    try f.renderer.leave(&f.out.writer);
+    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?8452l") != null);
+}
+
+fn retainInlineImages(gpa: Allocator) !void {
+    var layers: Layers = .init(gpa);
+    defer layers.deinit();
+    try layers.storeSixel(7, .{ .width = 2, .height = 2, .pixels = .{ .indexed = &inline_pixels }, .palette = &inline_palette });
+    try layers.storeIterm(7, "PNG", 3);
+    try layers.storeIterm(8, "PNG", 0);
+}
+
+test "inline pictures retain and replace transactionally at every allocation failure" {
+    try testing.checkAllAllocationFailures(testing.allocator, retainInlineImages, .{});
+}

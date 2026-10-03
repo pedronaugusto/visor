@@ -25,7 +25,9 @@
 //! answered is not waited for again. The time is always the caller's.
 //!
 //! What this file will never hold: an image decoder, a file format, or a
-//! clock.
+//! clock. Sixel pixels and iTerm2 file bytes are retained for redraws;
+//! their writers are morse's. The diff renderer owns their damage because
+//! neither protocol has a placement id.
 
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
@@ -33,6 +35,7 @@ const morse = @import("dependencies.zig").morse;
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
 const shm = @import("shm.zig");
+const Winsize = @import("winsize.zig").Winsize;
 
 const Allocator = std.mem.Allocator;
 const Rect = geom.Rect;
@@ -46,6 +49,8 @@ pub const Image = struct {
     /// about graphics (`Caps.Probe.graphics_id`) can use one it never sends
     /// a picture under.
     id: u32,
+    /// Storage protocol; inline images live here until retired.
+    protocol: Caps.Pictures = .kitty,
     /// How wide the image is, in pixels.
     width: u32 = 0,
     /// How tall it is, in pixels.
@@ -341,6 +346,21 @@ fn sharedSize(len: usize) error{PayloadTooLarge}!u32 {
 /// protocol takes.
 const under_base: i32 = -1_000_000;
 
+const InlineImage = struct {
+    id: u32,
+    data: []u8,
+    scratch: []u8 = &.{},
+    palette: []morse.Rgb = &.{},
+    sixel: ?morse.Sixel = null,
+    part_bytes: usize = 0,
+
+    fn deinit(image: InlineImage, gpa: Allocator) void {
+        gpa.free(image.data);
+        gpa.free(image.scratch);
+        gpa.free(image.palette);
+    }
+};
+
 /// The images this program has sent, and what this frame shows of them.
 pub const Layers = struct {
     _gpa: Allocator,
@@ -378,6 +398,73 @@ pub const Layers = struct {
     /// in the escape code.
     _shared_memory: ?SharedMemory = null,
     _shared_objects: std.ArrayList(SharedObject) = .empty,
+    _inline: std.ArrayList(InlineImage) = .empty,
+    _size: Winsize = .{},
+    _inline_dirty: bool = false,
+    _sixel_cursor_right: bool = false,
+    _protocol: ?Caps.Pictures = null,
+
+    /// Geometry for inline pictures, including the probe's cell size.
+    /// Renderer supplies the grid bounds; unknown pixel sizes suppress sixels.
+    pub fn configureSize(l: *Layers, size: Winsize) void {
+        if (!std.meta.eql(l._size, size)) l.repaint();
+        l._size = size;
+    }
+
+    /// Retains a copy of pixels and palette for a sixel picture. No bytes
+    /// are written until the frame places it. Indexed pixels must name a
+    /// palette entry (or the transparent index). Invalid input is rejected
+    /// before changing the image. The palette is the caller's, as in morse.
+    pub fn storeSixel(l: *Layers, id: u32, image_data: morse.Sixel) (Allocator.Error || error{InvalidImage})!void {
+        const pixel_count = std.math.mul(usize, image_data.width, image_data.height) catch return error.InvalidImage;
+        const channels: usize = if (image_data.pixels == .rgba) 4 else 1;
+        const len = std.math.mul(usize, pixel_count, channels) catch return error.InvalidImage;
+        const pixels = switch (image_data.pixels) {
+            .indexed => |v| v,
+            .rgba => |v| v,
+        };
+        if (pixel_count == 0 or pixels.len != len or image_data.palette.len == 0 or image_data.palette.len > morse.sixel_palette_max) return error.InvalidImage;
+        if (image_data.pixels == .indexed) for (pixels) |index| {
+            if (index >= image_data.palette.len and index != image_data.transparent) return error.InvalidImage;
+        };
+        var held: InlineImage = .{ .id = id, .data = try l._gpa.dupe(u8, pixels) };
+        errdefer held.deinit(l._gpa);
+        held.scratch = try l._gpa.alloc(u8, std.math.mul(usize, pixel_count, 4) catch return error.InvalidImage);
+        held.palette = try l._gpa.dupe(morse.Rgb, image_data.palette);
+        var copied = image_data;
+        copied.pixels = if (channels == 4) .{ .rgba = held.data } else .{ .indexed = held.data };
+        copied.palette = held.palette;
+        held.sixel = copied;
+        try l.storeInline(held, .{ .id = id, .width = copied.width, .height = copied.height, .protocol = .sixel });
+    }
+
+    /// Retains an already encoded image file (PNG, JPEG, etc.) for iTerm2.
+    /// Zero part_bytes uses File; otherwise morse's multipart writer is used.
+    /// Files are fitted to the placement's cell rectangle without preserving
+    /// aspect ratio. Source cropping belongs to the caller's image decoder.
+    pub fn storeIterm(l: *Layers, id: u32, file: []const u8, part_bytes: usize) Allocator.Error!void {
+        const held: InlineImage = .{ .id = id, .data = try l._gpa.dupe(u8, file), .part_bytes = part_bytes };
+        errdefer held.deinit(l._gpa);
+        try l.storeInline(held, .{ .id = id, .protocol = .iterm });
+    }
+
+    fn storeInline(l: *Layers, held: InlineImage, metadata: Image) Allocator.Error!void {
+        try l._inline.ensureUnusedCapacity(l._gpa, 1);
+        try l.record(metadata);
+        l._inline.appendAssumeCapacity(held);
+        l._inline_dirty = true;
+    }
+
+    /// Whether an inline picture changed since the last accepted frame.
+    /// The diff renderer erases the old footprint before drawing again.
+    pub fn inlineChanged(l: *const Layers) bool {
+        if (l._inline_dirty or l._replace_all or l._shown.items.len != l._declared.items.len) return true;
+        for (l._declared.items) |now| {
+            const i = findSameIndex(l._shown.items, now) orelse return true;
+            if (!now.eql(l._shown.items[i])) return true;
+        }
+        return false;
+    }
 
     /// Captures the allocator for every image, placement and scratch buffer.
     pub fn init(gpa: Allocator) Layers {
@@ -429,6 +516,8 @@ pub const Layers = struct {
         const gpa = l._gpa;
         for (l._shared_objects.items) |object| object.deinit();
         l._shared_objects.deinit(gpa);
+        for (l._inline.items) |held| held.deinit(gpa);
+        l._inline.deinit(gpa);
         l._images.deinit(gpa);
         l._declared.deinit(gpa);
         l._shown.deinit(gpa);
@@ -590,6 +679,12 @@ pub const Layers = struct {
 
     fn release(l: *Layers, held: *Image) void {
         held.shm = null;
+        for (l._inline.items, 0..) |inline_image, i| {
+            if (inline_image.id != held.id) continue;
+            l._inline.swapRemove(i).deinit(l._gpa);
+            l._inline_dirty = true;
+            break;
+        }
         for (l._shared_objects.items, 0..) |object, i| {
             if (object.id != held.id) continue;
             const owned = l._shared_objects.swapRemove(i);
@@ -670,7 +765,7 @@ pub const Layers = struct {
     /// with, so the terminal's memory and this list stay as small as what
     /// is alive.
     pub fn free(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
-        try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
+        if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
         var i: usize = 0;
         while (i < l._images.items.len) {
             if (l._images.items[i].id == id) {
@@ -774,13 +869,22 @@ pub const Layers = struct {
     /// Writes nothing when nothing moved, so a caller may call it twice and
     /// a renderer that calls it for them costs nothing.
     pub fn emit(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
-        if (!caps.kitty_graphics) return 0;
+        var removed: usize = 0;
+        if (l._protocol == .kitty and caps.pictures() != .kitty) {
+            for (l._shown.items) |was| {
+                try writeDelete(w, was);
+                removed += 1;
+            }
+        }
+        if (caps.pictures() == .cells) return removed;
+        if (caps.pictures() != .kitty) return removed + try l.emitInline(w, caps);
         std.mem.sort(Layer, l._declared.items, {}, lessThan);
         var written: usize = 0;
 
         // Here: a placement command, which replaces whatever was at the same
         // image and placement id without flicker.
         for (l._declared.items, 0..) |now, i| {
+            if (l.image(now.image)) |rec| if (rec.protocol != .kitty) continue;
             if (!l._replace_all) if (findSameIndex(l._shown.items, now)) |before_i| {
                 const before = l._shown.items[before_i];
                 if (before.eql(now) and zOf(now, i) == zOf(before, before_i)) continue;
@@ -805,10 +909,7 @@ pub const Layers = struct {
     /// A failed free keeps its record and retirement for the next attempt.
     /// No allocation and no flush. The renderer calls this for its frames.
     pub fn commitFrame(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
-        if (!caps.kitty_graphics) {
-            l._declared.clearRetainingCapacity();
-            return 0;
-        }
+        if (caps.pictures() == .cells) l._declared.clearRetainingCapacity();
         var freed: usize = 0;
         var i: usize = 0;
         while (i < l._retired.items.len) {
@@ -826,6 +927,8 @@ pub const Layers = struct {
             freed += 1;
         }
         l._replace_all = false;
+        l._inline_dirty = false;
+        l._protocol = caps.pictures();
         const was_shown = l._shown;
         l._shown = l._declared;
         l._declared = was_shown;
@@ -836,8 +939,22 @@ pub const Layers = struct {
     /// Takes every placement off the screen, keeping the images. What a
     /// program writes when it leaves a view it will come back to.
     pub fn clear(l: *Layers, w: *Writer, caps: Caps) Writer.Error!void {
-        if (!caps.kitty_graphics) return;
-        for (l._shown.items) |was| try writeDelete(w, was);
+        if (caps.pictures() == .kitty) {
+            for (l._shown.items) |was| try writeDelete(w, was);
+        } else {
+            for (l._shown.items) |was| {
+                if (was.rect.col >= l._size.cells.cols) continue;
+                const cols = @min(was.rect.cols, l._size.cells.cols - was.rect.col);
+                if (cols == 0) continue;
+                var row: u32 = was.rect.row;
+                const bottom = @min(@as(u32, was.rect.row) + was.rect.rows, l._size.cells.rows);
+                while (row < bottom) : (row += 1) {
+                    try morse.cursorTo(w, row + 1, @as(u32, was.rect.col) + 1);
+                    try morse.eraseChars(w, cols);
+                }
+            }
+            l._inline_dirty = true;
+        }
         l._shown.clearRetainingCapacity();
         l._declared.clearRetainingCapacity();
     }
@@ -845,6 +962,67 @@ pub const Layers = struct {
     /// How many layers the terminal is showing.
     pub fn count(l: *const Layers) usize {
         return l._shown.items.len;
+    }
+
+    fn emitInline(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
+        if (!l.inlineChanged()) return 0;
+        std.mem.sort(Layer, l._declared.items, {}, lessThan);
+        var written: usize = 0;
+        for (l._declared.items) |layer| {
+            const rec = l.image(layer.image) orelse continue;
+            if (rec.protocol != caps.pictures()) continue;
+            if (layer.rect.col >= l._size.cells.cols or layer.rect.row >= l._size.cells.rows) continue;
+            const cols = @min(layer.rect.cols, l._size.cells.cols - layer.rect.col);
+            // Without cursor-right support leave one row for the sixel cursor.
+            // iTerm images request doNotMoveCursor.
+            const bottom = l._size.cells.rows -| @as(u16, if (caps.pictures() == .sixel and !l._sixel_cursor_right) 1 else 0);
+            const rows = @min(layer.rect.rows, bottom -| layer.rect.row);
+            if (cols == 0 or rows == 0) continue;
+            for (l._inline.items) |*held| {
+                if (held.id != layer.image) continue;
+                if (held.sixel) |original| {
+                    const cell = l._size.cellSize() orelse continue;
+                    const max_width: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.width) * cols));
+                    const max_height: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.height) * rows));
+                    const x = @min(layer.source.x, original.width);
+                    const y = @min(layer.source.y, original.height);
+                    const width = @min(@min(original.width - x, if (layer.source.width == 0) original.width else layer.source.width), @min(max_width, if (caps.sixel_max_width == 0) max_width else caps.sixel_max_width));
+                    const height = @min(@min(original.height - y, if (layer.source.height == 0) original.height else layer.source.height), @min(max_height, if (caps.sixel_max_height == 0) max_height else caps.sixel_max_height));
+                    if (width == 0 or height == 0) continue;
+                    for (0..height) |row| {
+                        for (0..width) |col| {
+                            const from = (row + y) * original.width + x + col;
+                            const to = (row * width + col) * 4;
+                            switch (original.pixels) {
+                                .rgba => @memcpy(held.scratch[to..][0..4], held.data[from * 4 ..][0..4]),
+                                .indexed => {
+                                    const index = held.data[from];
+                                    const transparent = index == original.transparent;
+                                    const color = original.palette[if (transparent) 0 else index];
+                                    @memcpy(held.scratch[to..][0..4], &[_]u8{ color.r, color.g, color.b, if (transparent) 0 else 255 });
+                                },
+                            }
+                        }
+                    }
+                    var image_data = original;
+                    image_data.width = width;
+                    image_data.height = height;
+                    image_data.palette = original.palette[0..@min(original.palette.len, @max(1, caps.sixel_registers))];
+                    image_data.pixels = .{ .rgba = held.scratch[0 .. @as(usize, width) * height * 4] };
+                    try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
+                    try morse.sixel(w, image_data);
+                } else {
+                    // iTerm2 has no source rectangle: its caller supplies a
+                    // cropped file. Nonzero source/offsets are not representable.
+                    if (!std.meta.eql(layer.source, morse.GraphicsRect{}) or layer.x_offset != 0 or layer.y_offset != 0) continue;
+                    try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
+                    const file: morse.ItermFile = .{ .width = .{ .cells = cols }, .height = .{ .cells = rows }, .preserve_aspect_ratio = false, .do_not_move_cursor = true };
+                    if (held.part_bytes == 0) try morse.itermImage(w, file, held.data) else try morse.itermImageMultipart(w, file, held.data, held.part_bytes);
+                }
+                written += 1;
+            }
+        }
+        return written;
     }
 
     //=====================================================================

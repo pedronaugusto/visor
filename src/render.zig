@@ -119,6 +119,7 @@ const ModeCleanup = struct {
     color_scheme: bool = false,
     in_band_resize: bool = false,
     unicode_core: bool = false,
+    sixel_cursor_right: bool = false,
 
     fn init(caps: Caps, modes: Modes) ModeCleanup {
         var held: ModeCleanup = .{
@@ -128,6 +129,7 @@ const ModeCleanup = struct {
             .color_scheme = modes.color_scheme,
             .in_band_resize = caps.in_band_resize,
             .unicode_core = caps.width_method == .unicode,
+            .sixel_cursor_right = caps.pictures() == .sixel and caps.sixel_cursor_right,
         };
         if (modes.mouse) |m| {
             held.motion.insert(m.motion);
@@ -190,9 +192,10 @@ const ModeWrites = struct {
     modes: Modes = .{},
     in_band_resize: bool = false,
     unicode_core: bool = false,
+    sixel_cursor_right: bool = false,
     uncertain: std.EnumSet(Command) = .initEmpty(),
 
-    const Command = enum { keyboard, mouse, focus, paste, color_scheme, in_band_resize, unicode_core };
+    const Command = enum { keyboard, mouse, focus, paste, color_scheme, in_band_resize, unicode_core, sixel_cursor_right };
 };
 
 /// What the previous frame holds where the renderer does not know what the
@@ -501,6 +504,22 @@ pub const Renderer = struct {
         r._method = caps.width_method;
 
         const printing: ?*Screen = if (above) |lines| (if (lines.dimensions().rows != 0) lines else null) else null;
+        if (layers) |l| {
+            l._size.cells = s.dimensions();
+            l._sixel_cursor_right = r._written.sixel_cursor_right;
+            const protocol_changed = l._protocol != null and l._protocol != caps.pictures();
+            if (caps.pictures() == .sixel or caps.pictures() == .iterm or protocol_changed) {
+                if (protocol_changed or l.inlineChanged() or r._repaint_all or s._damage.any() or r.anyForced() or printing != null) {
+                    // Inline images have no ids. Repaint the old text before
+                    // their new placements; damage can erase any image pixel.
+                    if (l.hasFrameWork() or l._inline_dirty) {
+                        @memset(r._force, true);
+                        @memset(r._prev, unknown);
+                        l.repaint();
+                    }
+                }
+            }
+        }
         const pictures = if (layers) |l| l.hasFrameWork() else false;
         const text = printing != null or r._repaint_all or s._damage.any() or r.anyForced();
         const body = text or pictures;
@@ -639,10 +658,10 @@ pub const Renderer = struct {
     }
 
     fn writeCaps(r: *Renderer, w: *Writer, caps: Caps) Writer.Error!void {
-        inline for (.{ .{ "in_band_resize", morse.inBandResize.number }, .{ "unicode_core", morse.unicodeCore.number } }) |command| {
+        inline for (.{ .{ "in_band_resize", morse.inBandResize.number }, .{ "unicode_core", morse.unicodeCore.number }, .{ "sixel_cursor_right", morse.sixelCursorRight.number } }) |command| {
             const name = command[0];
             const which = @field(ModeWrites.Command, name);
-            const on = if (comptime std.mem.eql(u8, name, "in_band_resize")) caps.in_band_resize else caps.width_method == .unicode;
+            const on = if (comptime std.mem.eql(u8, name, "in_band_resize")) caps.in_band_resize else if (comptime std.mem.eql(u8, name, "unicode_core")) caps.width_method == .unicode else caps.pictures() == .sixel and caps.sixel_cursor_right;
             if (@field(r._written, name) != on or r._written.uncertain.contains(which)) {
                 r._written.uncertain.insert(which);
                 try ModeCleanup.set(w, &@field(r._cleanup, name), command[1], on);
@@ -721,6 +740,7 @@ pub const Renderer = struct {
         }
         try morse.cursorVisible.set(w, true);
         r._shown = true;
+        if (r._cleanup.sixel_cursor_right) try ModeCleanup.set(w, &r._cleanup.sixel_cursor_right, morse.sixelCursorRight.number, false);
         if (r._cleanup.unicode_core) try ModeCleanup.set(w, &r._cleanup.unicode_core, morse.unicodeCore.number, false);
         if (r._cleanup.in_band_resize) try ModeCleanup.set(w, &r._cleanup.in_band_resize, morse.inBandResize.number, false);
         if (r._cleanup.color_scheme) try ModeCleanup.set(w, &r._cleanup.color_scheme, morse.colorScheme.number, false);

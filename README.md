@@ -180,8 +180,8 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
-| What the terminal can do | `Caps`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
+| What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
@@ -225,7 +225,7 @@ try canvas.draw(window, shapes, .{
 });
 ```
 
-With kitty graphics and picture resources, `draw` clears the surface,
+With kitty or sixel graphics and picture resources, `draw` clears the surface,
 rasterizes antialiased shapes and transmits and declares a picture beneath
 text through `Layers`. Without them it draws the same shapes as cells.
 Paint width is in output pixels; cell marks remain binary and use paint's
@@ -578,8 +578,44 @@ half whether or not it wrote the opening one.
 and nothing else, and a program that shows pictures keeps its `Layers` next
 to it and hands both to `Renderer.draw`, which is the one that orders them.
 
+`Caps.pictures()` chooses kitty, iTerm2, sixel, then cells. Set
+`Caps.picture_protocol` to override that order, including forcing cells.
+The probe learns sixel from DA1 attribute 4, its register count and pixel
+limits from XTSMGRAPHICS, and iTerm2 from XTVERSION. A caller honoring the
+environment passes its `TERM_PROGRAM` value to `caps.termProgram(value)`;
+only `iTerm.app` enables iTerm2. Visor reads no environment itself.
+
+`Layers.storeSixel(id, image)` retains a copy of morse's pixels and palette;
+`Layers.storeIterm(id, file_bytes, part_bytes)` retains an encoded PNG, JPEG
+or another terminal-supported file. Zero `part_bytes` uses one OSC; a
+nonzero value uses morse's multipart writer. Declare and retire these ids
+through the same `Layer` and `Layers` methods as kitty pictures. Encoders
+and protocol byte counts remain morse's; visor adds no protocol encoder.
+Pass `Layers.configureSize(winsize)` the probe's geometry before drawing;
+`Session.layers()` supplies its current size. Sixels are clipped to the
+placement's explicit cell rectangle and terminal pixel limits, using
+`Winsize.cellSize()`; unknown pixel geometry suppresses sixels. Their
+source rectangle crops pixels before morse quantizes to the supported
+palette. iTerm2 files are fitted to the explicit cell rectangle, clipped
+to the grid, without preserving aspect ratio. Neither inline path supports
+pixel placement offsets; supply a prepared image and a nonzero rectangle.
+
+Inline pictures are stored here rather than in a terminal id. A changed
+placement or text damage invalidates the text baseline, restores the grid
+and sends every declared inline picture again after the text pass. This
+also handles removal, scroll, resize, repaint and failed output. An
+unchanged frame still writes nothing. These protocols paint over the
+cells they occupy; `under` orders inline pictures but cannot put them
+under independent text as kitty does. Sixels reserve the bottom row when
+cursor-right mode is unavailable. With reported mode 8452 support,
+`Renderer.enter` enables it and `leave` undoes it. Inline files request
+`doNotMoveCursor`; the renderer restores its own cursor after either path.
+`Canvas.Picture.sixel_palette` supplies the palette when a canvas chooses
+sixel. An iTerm2 canvas uses the cell fallback; an application with an image
+file places it through `storeIterm`.
+
 **The text pass never writes a graphics command and never deletes a
-placement.** A picture that moves is re-placed under the same image and
+kitty placement.** A picture that moves is re-placed under the same image and
 placement id, which the protocol replaces without flicker; one that leaves is
 deleted by name after the frame's placements, with its pixels kept, so a
 picture swapped for another is covered before it goes. `Layers` sends the
@@ -744,7 +780,7 @@ its own.
 - **No widget whose substance is handling keys, focus or a clock.** Those are three quarters event handling, and the program has the loop. `Keys` shows which keys work and handles none; `TextInput` says where the cursor lands, and `TextInput.Buffer` does the edit a key asks for (insert, delete by a motion, select, undo, redo, on whole clusters), but which key asks for which is the program's.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
-- **One graphics protocol.** The kitty protocol, as ordered layers; there is no second picture path.
+- **Pictures without decoding.** Kitty placements, sixel pixels and iTerm2 encoded image files share `Layers`; cell pictures use the widgets. Visor does not decode or encode image files. iTerm2 source cropping and pixel offsets must be applied by the caller before storage; inline protocols paint in declaration order and do not offer kitty's independent text-underlay placements.
 - **Two places for a screen.** The alternate screen, or inline at the prompt, with rows printed above it into the scrollback. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
 
 ## Platforms
