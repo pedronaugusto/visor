@@ -34,9 +34,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
 
-- Pin the benchmark after build to cost, where drawing sequences are priced by morse.
+- Pin the benchmark after build to the final main.
 
-- Benchmark owner screen diffs separately from checked cell reads and pin the after build to diff.
+- Benchmark owner screen diffs separately from checked cell reads.
 
 - Reject undeclared dependencies, duplicate layer membership and imports of source executables.
 
