@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Pin the benchmark after build to cost, where style transitions are priced by morse.
+- Pin the benchmark after build to cost, where drawing sequences are priced by morse.
 
 - Benchmark owner screen diffs separately from checked cell reads and pin the after build to diff.
 

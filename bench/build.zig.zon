@@ -6,8 +6,8 @@
     .dependencies = .{
         .before = .{ .path = "build/revisions/before" },
         .after = .{
-            .url = "https://github.com/pedronaugusto/visor/archive/dbe30f2a73caeccc330987a0cd35367507e4d17f.tar.gz",
-            .hash = "visor-0.4.0-kZcQUwYyEQDZnIvYFybXZzcjGR1MtrnWqYkKBBK-ER1S",
+            .url = "https://github.com/pedronaugusto/visor/archive/fa4c9d1b0bed6cfe8151ee39317aaf8efcaa10ce.tar.gz",
+            .hash = "visor-0.4.0-kZcQUwQ5EQB8QGhrYgtJy6QYtWGL_yoPKYecUS4Rp5z8",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src" },
