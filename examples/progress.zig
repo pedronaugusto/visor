@@ -4,8 +4,9 @@
 //! A program that reports on a job wants a few rows under the prompt, not
 //! the whole terminal: the rows scroll into the history with everything
 //! else when it is done. `Renderer.enter` with `Mode.inline` takes the rows
-//! at the cursor, `resize` takes more, and `leave` puts the cursor on the
-//! row below with the last frame still showing. Every frame goes through the
+//! at the cursor, `printAbove` puts finished lines above them, `resize`
+//! takes more, and `leave` puts the cursor on the row below with the last
+//! frame still showing. Every frame goes through the
 //! emulator, which starts with a prompt already on it, and the rows around
 //! the screen are printed so what the terminal shows is what is checked.
 
@@ -49,6 +50,22 @@ pub fn main() !void {
     job.done = 7;
     try job.draw(screen.window());
     try show(gpa, &term, "seven of twelve", try frame(&renderer, &screen, &term, caps, &out));
+
+    // Two steps that finished, printed above the screen in the same frame
+    // that draws it: they stay in the history like any other output, and
+    // the screen moves down under them.
+    var steps: visor.Screen = try .init(gpa, .{ .cols = cols, .rows = 2 });
+    defer steps.deinit();
+    steps.method = caps.width_method;
+    _ = try steps.window().printSegment(.{ .text = "compiled src/visor.zig", .style = .{ .dim = true } }, .{});
+    _ = try steps.window().printSegment(.{ .text = "compiled src/render.zig", .style = .{ .dim = true } }, .{ .row = 1 });
+    job.done = 9;
+    try job.draw(screen.window());
+    out.clearRetainingCapacity();
+    const printed = try renderer.printAbove(&out.writer, &steps, &screen, null, caps);
+    try term.feed(out.written());
+    std.debug.assert(std.mem.eql(u8, term.screen().textAt(0, term.savedCursor().?.row - 1), "c"));
+    try show(gpa, &term, "two steps printed above", printed);
 
     // A third row, for a line of log. The terminal scrolls to make room
     // when there is none below, and what was above stays above.

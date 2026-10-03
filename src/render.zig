@@ -352,6 +352,8 @@ pub const Renderer = struct {
         moves: u32 = 0,
         /// Graphics commands written, after the text pass.
         placements: u32 = 0,
+        /// Rows printed above an inline screen by `printAbove`.
+        printed: u32 = 0,
     };
 
     /// Allocates the previous frame.
@@ -435,6 +437,45 @@ pub const Renderer = struct {
     /// that orders them, the text pass whole before the first graphics
     /// command. A program that shows no pictures passes null.
     pub fn draw(r: *Renderer, w: *Writer, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {
+        return r.drawFrame(w, null, s, layers, caps);
+    }
+
+    /// Anything `printAbove` can fail with.
+    pub const PrintError = Error || error{
+        /// The renderer is not in inline mode, where there is a terminal
+        /// above the screen to print into.
+        NotInline,
+    };
+
+    /// In inline mode, prints the rows of `lines` above the screen and
+    /// draws the screen under them, in one frame: what a program that shows
+    /// a live view at the prompt does with a line of log, a finished task
+    /// or a message that is done changing.
+    ///
+    /// The rows go where the screen was, from its first row down, and the
+    /// screen moves down under them. Rows that reach the bottom of the
+    /// terminal scroll it, so what is printed goes up into the terminal's
+    /// scrollback like any other output and stays there after `leave`; on a
+    /// terminal with room below, the rows sit above the screen and the
+    /// screen takes the rows under them. `lines` is a grid as wide as the
+    /// screen and as tall as there are rows to print, drawn the way any
+    /// screen is drawn, with any window or widget; its trailing blanks are
+    /// not written.
+    ///
+    /// The screen is then drawn against the blank rows it now stands on,
+    /// priced cell by cell as any frame is, and pictures in `layers` are
+    /// placed again where the screen now is. Nothing in `lines` is kept: a
+    /// row printed is the terminal's.
+    ///
+    /// Outside inline mode there is nowhere above the screen, and this
+    /// returns `NotInline` before writing anything.
+    pub fn printAbove(r: *Renderer, w: *Writer, lines: *Screen, s: *Screen, layers: ?*Layers, caps: Caps) PrintError!Stats {
+        if (r._region == null) return error.NotInline;
+        if (lines.dimensions().cols != r.dimensions().cols) return error.SizeMismatch;
+        return r.drawFrame(w, lines, s, layers, caps);
+    }
+
+    fn drawFrame(r: *Renderer, w: *Writer, above: ?*Screen, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {
         if (!std.meta.eql(r.dimensions(), s.dimensions())) return error.SizeMismatch;
         // The emit path updates its model while it constructs the frame. If
         // any write fails, none of those updates describe what the terminal
@@ -459,8 +500,9 @@ pub const Renderer = struct {
         }
         r._method = caps.width_method;
 
+        const printing: ?*Screen = if (above) |lines| (if (lines.dimensions().rows != 0) lines else null) else null;
         const pictures = if (layers) |l| l.hasFrameWork() else false;
-        const text = r._repaint_all or s._damage.any() or r.anyForced();
+        const text = printing != null or r._repaint_all or s._damage.any() or r.anyForced();
         const body = text or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
@@ -471,7 +513,11 @@ pub const Renderer = struct {
         var frame: Frame = .init(w, r._buf, caps.sync and !caps.sync_unwanted);
         const out = &frame.writer;
 
-        if (r._repaint_all) {
+        if (printing) |lines| {
+            try r.printLines(out, lines, s, caps, &stats);
+            // The screen moved down; its pictures go with it.
+            if (layers) |l| l.repaint();
+        } else if (r._repaint_all) {
             try r.beginRepaint(out, caps);
             // The terminal's pictures are as unknown as its text.
             if (layers) |l| l.repaint();
@@ -728,6 +774,49 @@ pub const Renderer = struct {
         if (rows > 0) try morse.clearScreen(w, .to_end);
         r._region = rows;
         r._cursor = .{ .col = 0, .row = 0 };
+    }
+
+    /// The rows of `lines` written from the inline origin down, each ended
+    /// by a carriage return and a line feed, which scrolls the terminal when
+    /// the row was its last; then the screen's rows taken again under them.
+    ///
+    /// Everything from the origin down is erased first, so a row is written
+    /// only to its last cell that is not blank, and the screen is left
+    /// standing on blank rows that the previous frame then says it holds.
+    /// Every row of the screen is then damaged, so the text pass that follows
+    /// writes what differs from blank at the price it would pay anywhere.
+    fn printLines(r: *Renderer, out: *Writer, lines: *Screen, s: *Screen, caps: Caps, stats: *Stats) Error!void {
+        try r.hideForWrite(out);
+        // After a failed write the terminal may hold a link open; the origin
+        // restore resets the style but not that.
+        if (r._repaint_all and caps.osc8) try morse.hyperlinkEnd(out);
+        r._link = .none;
+        try r.home(out);
+        try morse.clearScreen(out, .to_end);
+        var row: u16 = 0;
+        while (row < lines.dimensions().rows) : (row += 1) {
+            // The cursor is at the start of a row of its own. Every move
+            // within the row is along it, which a relative move does without
+            // the origin.
+            r._cursor = .{ .col = 0, .row = row };
+            const end = trailingBlank(stored.row(lines, row), caps);
+            if (end != 0) {
+                stats.runs += 1;
+                try r.writeCells(out, lines, caps, row, 0, end - 1, stats, false);
+            }
+            // A row the line feed scrolls in is blanked in the current
+            // background, which has to be the default.
+            try r.setStyle(out, .{}, stats);
+            try r.setLink(out, lines, .none, caps, stats);
+            try out.writeAll("\r\n");
+            stats.printed += 1;
+        }
+        try r.reserve(out, r.dimensions().rows);
+        @memset(r._prev, .blank(.{}));
+        @memset(r._untrusted, false);
+        @memset(r._force, false);
+        r._repaint_all = false;
+        s.damageAll();
     }
 
     /// Back to the saved origin, which also puts the style back to the
@@ -3525,6 +3614,283 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     try testing.expectEqual(@as(u16, 2), u.position().row);
     try expectRowText(&u, 1, "y");
     try expectRowText(&u, 2, "");
+}
+
+const corpus = @import("corpus");
+const Window = @import("screen.zig").window_api.Window;
+
+/// A row of the terminal as text, each cluster once however many columns
+/// it covers, trailing blanks off.
+fn expectRowShown(t: *const Term, row: u16, want: []const u8) !void {
+    var buf: [256]u8 = undefined;
+    var n: usize = 0;
+    var col: u16 = 0;
+    while (col < t.screen().dimensions().cols) : (col += 1) {
+        if (t.screen().readCell(col, row).?.isTail()) continue;
+        const g = t.screen().textAt(col, row);
+        @memcpy(buf[n..][0..g.len], g);
+        n += g.len;
+    }
+    try testing.expectEqualStrings(want, std.mem.trimEnd(u8, buf[0..n], " "));
+}
+
+/// A grid of printed rows, one string a row.
+fn printedLines(cols: u16, rows: []const []const u8, style: Style) !Screen {
+    var lines: Screen = try .init(testing.allocator, .{ .cols = cols, .rows = @intCast(rows.len) });
+    errdefer lines.deinit();
+    lines.method = .unicode;
+    for (rows, 0..) |text, row| {
+        _ = try lines.window().printSegment(.{ .text = text, .style = style }, .{ .row = @intCast(row), .wrap = .none });
+    }
+    return lines;
+}
+
+test "rows printed above an inline screen sit where it was, and it moves down under them" {
+    var f: Fixture = try .init(testing.allocator, 10, 2);
+    defer f.deinit();
+    var t = try promptedTerm(10, 8, 1);
+    defer t.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
+    try t.feed(f.written());
+    try f.screen.write(0, 0, "v", .{}, .none);
+    try f.screen.write(3, 1, "w", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+
+    var lines = try printedLines(10, &.{ "done one", "done two" }, .{});
+    defer lines.deinit();
+    f.out.clearRetainingCapacity();
+    const stats = try f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps);
+    // Back to the origin, erased down, the two rows, the screen's rows
+    // taken under them, and the screen drawn on blank rows: only the cells
+    // that are not blank, and no erase of a row already blank.
+    try testing.expectEqualStrings("\x1b8\x1b[0Jdone one\r\ndone two\r\n\n\x1b[1A\x1b7\x1b[0Jv\x1b[1B\x1b[4Gw", f.written());
+    try testing.expectEqual(f.written().len, stats.bytes);
+    try testing.expectEqual(@as(u32, 2), stats.printed);
+    try t.feed(f.written());
+    try expectRowShown(&t, 0, "line 0");
+    try expectRowShown(&t, 1, "done one");
+    try expectRowShown(&t, 2, "done two");
+    try expectRowShown(&t, 3, "v");
+    try expectRowShown(&t, 4, "   w");
+    try testing.expectEqual(@as(u16, 3), t.savedCursor().?.row);
+    // The screen is where the renderer thinks it is: nothing to draw, and a
+    // change lands on the right row.
+    try f.expectBytes("");
+    try f.screen.write(5, 1, "z", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+    try expectRowShown(&t, 4, "   w z");
+
+    // Leaving puts the cursor under the screen, the printed rows above it.
+    f.out.clearRetainingCapacity();
+    try f.renderer.leave(&f.out.writer);
+    try t.feed(f.written());
+    try testing.expectEqual(@as(u16, 5), t.position().row);
+}
+
+test "rows printed at the bottom of the terminal scroll it, and the screen stays at the bottom" {
+    var f: Fixture = try .init(testing.allocator, 8, 2);
+    defer f.deinit();
+    var t = try promptedTerm(8, 4, 3);
+    defer t.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
+    try t.feed(f.written());
+    try f.screen.write(0, 1, "s", .{}, .none);
+    _ = try f.draw();
+    try t.feed(f.written());
+
+    // More rows than the terminal has: the first go up past its top.
+    var lines = try printedLines(8, &.{ "p0", "p1", "p2", "p3", "p4" }, .{});
+    defer lines.deinit();
+    f.out.clearRetainingCapacity();
+    _ = try f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps);
+    try t.feed(f.written());
+    try expectRowShown(&t, 0, "p3");
+    try expectRowShown(&t, 1, "p4");
+    try expectRowShown(&t, 2, "");
+    try expectRowShown(&t, 3, "s");
+    try testing.expectEqual(@as(u16, 2), t.savedCursor().?.row);
+    try f.expectBytes("");
+
+    // Printing again, one row: it goes up with the rest.
+    var one = try printedLines(8, &.{"p5"}, .{});
+    defer one.deinit();
+    f.out.clearRetainingCapacity();
+    _ = try f.renderer.printAbove(&f.out.writer, &one, &f.screen, null, f.caps);
+    try t.feed(f.written());
+    try expectRowShown(&t, 0, "p4");
+    try expectRowShown(&t, 1, "p5");
+    try expectRowShown(&t, 3, "s");
+}
+
+test "printed rows keep their styles and links, and the rows scrolled in under them are blank" {
+    var f: Fixture = try .init(testing.allocator, 12, 1);
+    defer f.deinit();
+    var t = try promptedTerm(12, 3, 2);
+    defer t.deinit();
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
+    try t.feed(f.written());
+
+    var lines: Screen = try .init(testing.allocator, .{ .cols = 12, .rows = 2 });
+    defer lines.deinit();
+    lines.method = .unicode;
+    const link = try lines.link("https://example.org/", "");
+    _ = try lines.window().print(&.{
+        .{ .text = "ok ", .style = .{ .bold = true } },
+        .{ .text = "\u{4e2d}\u{6587}", .style = .{ .bg = .ansi(.red) }, .link = link },
+    }, .{ .wrap = .none });
+    _ = try lines.window().printSegment(.{ .text = "e\u{301}", .style = .{ .italic = true } }, .{ .row = 1, .wrap = .none });
+    try f.screen.write(0, 0, "x", .{}, .none);
+    f.out.clearRetainingCapacity();
+    _ = try f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps);
+    try t.feed(f.written());
+    try expectRowShown(&t, 0, "ok \u{4e2d}\u{6587}");
+    try expectRowShown(&t, 1, "e\u{301}");
+    try expectRowShown(&t, 2, "x");
+    const s = t.screen();
+    try testing.expect(s.readCell(0, 0).?.style.bold);
+    try testing.expect(s.readCell(3, 0).?.style.bg.eql(.ansi(.red)));
+    try testing.expectEqualStrings("https://example.org/", s.target(s.readCell(3, 0).?.link).?.uri);
+    try testing.expect(s.readCell(7, 0).?.link == .none);
+    try testing.expect(s.readCell(7, 0).?.style.bg.eql(.default));
+    try testing.expect(s.readCell(0, 1).?.style.italic);
+    try testing.expect(std.meta.eql(s.readCell(5, 1).?.style, Style{}));
+    try testing.expect(std.meta.eql(s.readCell(5, 2).?.style, Style{}));
+    try f.expectBytes("");
+}
+
+test "printing above takes the rows a resized screen needs, and is refused outside inline mode" {
+    var f: Fixture = try .init(testing.allocator, 6, 1);
+    defer f.deinit();
+    var t = try promptedTerm(6, 6, 1);
+    defer t.deinit();
+    var lines = try printedLines(6, &.{"log"}, .{});
+    defer lines.deinit();
+    var narrow = try printedLines(5, &.{"log"}, .{});
+    defer narrow.deinit();
+
+    // Before entering, and on the alternate screen, there is no above.
+    try testing.expectError(error.NotInline, f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps));
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .alt, .{});
+    try testing.expectError(error.NotInline, f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps));
+    try f.renderer.leave(&f.out.writer);
+
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
+    try t.feed(f.written());
+    f.out.clearRetainingCapacity();
+    try testing.expectError(error.SizeMismatch, f.renderer.printAbove(&f.out.writer, &narrow, &f.screen, null, f.caps));
+    try testing.expectEqualStrings("", f.written());
+
+    // The screen grows by two rows in the same frame as the print.
+    try f.screen.resize(.{ .cols = 6, .rows = 3 });
+    try f.renderer.resize(.{ .cols = 6, .rows = 3 });
+    try f.screen.write(0, 2, "b", .{}, .none);
+    _ = try f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps);
+    try t.feed(f.written());
+    try expectRowShown(&t, 1, "log");
+    try expectRowShown(&t, 4, "b");
+    try testing.expectEqual(@as(u16, 2), t.savedCursor().?.row);
+    try f.expectBytes("");
+
+    // No rows to print is a frame like any other.
+    var empty: Screen = try .init(testing.allocator, .{ .cols = 6, .rows = 0 });
+    defer empty.deinit();
+    f.out.clearRetainingCapacity();
+    const stats = try f.renderer.printAbove(&f.out.writer, &empty, &f.screen, null, f.caps);
+    try testing.expectEqual(@as(usize, 0), stats.bytes);
+}
+
+/// The inline print, any rows on any screen at any place in the terminal,
+/// read back through the emulator.
+fn printAboveHolds(gpa: Allocator, smith: *std.testing.Smith) !void {
+    var dice: corpus.Dice = .init(smith);
+    const cols = dice.valueRangeAtMost(u16, 1, 12);
+    const term_rows = dice.valueRangeAtMost(u16, 2, 10);
+    const view_rows = dice.valueRangeAtMost(u16, 1, term_rows - 1);
+    const prompt = dice.valueRangeAtMost(u16, 0, term_rows);
+    const pieces = [_][]const u8{ "a", "bc", " ", "\u{4e2d}", "e\u{301}", "\u{1f469}\u{200d}\u{1f680}" };
+
+    var f: Fixture = try .init(gpa, cols, view_rows);
+    defer f.deinit();
+    var t: Term = try .init(gpa, .{ .cols = cols, .rows = term_rows });
+    defer t.deinit();
+    t.setMethod(.unicode);
+    for (0..prompt) |_| try t.feed("$\r\n");
+    f.out.clearRetainingCapacity();
+    try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
+    try t.feed(f.written());
+
+    // What the terminal shows from the top, the slow way: every row that
+    // went out, the screen's rows last.
+    var shown: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (shown.items) |row| gpa.free(row);
+        shown.deinit(gpa);
+    }
+
+    const rounds = dice.valueRangeAtMost(u8, 1, 4);
+    for (0..rounds) |_| {
+        f.screen.clear();
+        for (0..view_rows) |row| {
+            const piece = pieces[dice.index(pieces.len)];
+            _ = try f.screen.window().printSegment(.{ .text = piece, .style = .{ .bold = dice.value(bool) } }, .{ .row = @intCast(row), .wrap = .none });
+        }
+        const count = dice.valueRangeAtMost(u16, 0, 2 * term_rows);
+        var lines: Screen = try .init(gpa, .{ .cols = cols, .rows = count });
+        defer lines.deinit();
+        lines.method = .unicode;
+        for (0..count) |row| {
+            var at: Window.Print = .{ .row = @intCast(row) };
+            for (0..dice.valueRangeAtMost(u8, 0, 4)) |_| {
+                const piece = pieces[dice.index(pieces.len)];
+                at = try lines.window().printSegment(.{ .text = piece, .style = .{ .italic = dice.value(bool) } }, .{ .col = at.col, .row = at.row, .wrap = .none });
+                at.row = @intCast(row);
+            }
+            var buf: std.Io.Writer.Allocating = .init(gpa);
+            defer buf.deinit();
+            try lines.window().copyText(&buf.writer, @intCast(row), 0, cols);
+            try shown.append(gpa, try gpa.dupe(u8, std.mem.trimEnd(u8, buf.written(), " ")));
+        }
+        f.out.clearRetainingCapacity();
+        const stats = try f.renderer.printAbove(&f.out.writer, &lines, &f.screen, null, f.caps);
+        try testing.expectEqual(f.written().len, stats.bytes);
+        try t.feed(f.written());
+
+        // The screen's rows are at the bottom of what was written, and match.
+        const origin = t.savedCursor().?.row;
+        try testing.expect(origin + view_rows <= term_rows);
+        for (0..view_rows) |row| {
+            for (0..cols) |col| {
+                const want = f.screen.readCell(@intCast(col), @intCast(row)).?;
+                const got = t.screen().readCell(@intCast(col), @intCast(origin + row)).?;
+                try testing.expectEqualStrings(f.screen.textAt(@intCast(col), @intCast(row)), t.screen().textAt(@intCast(col), @intCast(origin + row)));
+                try testing.expectEqual(want.style.bold, got.style.bold);
+            }
+        }
+        // The printed rows are the rows just above it, the latest last.
+        var above = origin;
+        var k = shown.items.len;
+        while (above > 0 and k > 0) {
+            above -= 1;
+            k -= 1;
+            try expectRowShown(&t, above, shown.items[k]);
+        }
+        try f.expectBytes("");
+    }
+}
+
+test "rows printed above any inline screen anywhere in the terminal read back above it" {
+    try std.testing.fuzz(testing.allocator, struct {
+        fn one(gpa: Allocator, smith: *std.testing.Smith) anyerror!void {
+            try printAboveHolds(gpa, smith);
+        }
+    }.one, .{ .corpus = &corpus.entries });
 }
 
 test "the shortest cursor move is the one written" {

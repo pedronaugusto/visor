@@ -119,8 +119,8 @@ Three more examples are built and run by the same command.
 a sidebar, a scrollbar, a status line and a resize —
 [`examples/gallery.zig`](examples/gallery.zig) draws every widget once, and
 [`examples/progress.zig`](examples/progress.zig) is a screen of two rows at
-the prompt, in inline mode, that grows to three and leaves its last frame in
-the history.
+the prompt, in inline mode, that prints finished steps above itself, grows
+to three and leaves its last frame in the history.
 
 ## Install
 
@@ -179,7 +179,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
-| The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
+| The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
 | Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
@@ -517,6 +517,16 @@ takes more rows the same way, shrinking gives them back blank, and `leave`
 puts the cursor on the row below with the last frame still showing. A
 scrolling region is an absolute thing, so scroll detection is off.
 
+`Renderer.printAbove(writer, lines, screen, layers, caps)` prints rows above
+an inline screen in the same frame that draws it: a line of log, a task that
+finished, a message done changing, above a view that is still live. The rows
+of `lines`, a grid as wide as the screen drawn with any window or widget, are
+written from the origin down, each ended by a carriage return and a line feed,
+so rows that reach the bottom of the terminal scroll it and go up into its
+scrollback like any other output; the screen's rows are then taken again under
+them and the screen drawn against the blank rows it stands on, priced as any
+frame is. Outside inline mode it returns `NotInline` and writes nothing.
+
 **The way out undoes the way in, and nothing else.** `enter` takes the
 screen and the input modes the program asked for; `leave` turns off exactly
 those, in reverse. The kitty keyboard flags are a stack per screen, so they
@@ -713,7 +723,7 @@ its own.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
 - **One graphics protocol.** The kitty protocol, as ordered layers; there is no second picture path.
-- **Two places for a screen.** The alternate screen, or inline at the prompt. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
+- **Two places for a screen.** The alternate screen, or inline at the prompt, with rows printed above it into the scrollback. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
 
 ## Platforms
 

@@ -124,6 +124,11 @@ const Oracle = struct {
     };
 
     fn init(gpa: Allocator, size: visor.Size, method: visor.Method) !*Oracle {
+        return initKeeping(gpa, size, method, 0);
+    }
+
+    /// A terminal that keeps `scrollback` rows that went up past its top.
+    fn initKeeping(gpa: Allocator, size: visor.Size, method: visor.Method, scrollback: usize) !*Oracle {
         // Boxed: `Terminal` keeps a `std.Io` that points at the `TinyIo`
         // beside it, so neither may move after this.
         const o = try gpa.create(Oracle);
@@ -132,7 +137,7 @@ const Oracle = struct {
         o.term = try .init(o.tiny.io(), gpa, .{
             .cols = size.cols,
             .rows = size.rows,
-            .max_scrollback_lines = 0,
+            .max_scrollback_lines = scrollback,
         });
         // The width model, asked for the way a program asks for it. The
         // renderer's own `enter` writes exactly this sequence.
@@ -157,6 +162,31 @@ const Oracle = struct {
         var stream = o.term.vtStream();
         defer stream.deinit();
         stream.nextSlice(bytes);
+    }
+
+    /// How many rows the terminal has, the ones in its scrollback included.
+    fn totalRows(o: *const Oracle) usize {
+        return o.term.screens.active.pages.total_rows;
+    }
+
+    /// One row counted from the top of the scrollback, as text: each
+    /// cluster once, trailing blanks off.
+    fn historyRow(o: *const Oracle, row: usize, buf: []u8) ![]const u8 {
+        var n: usize = 0;
+        var col: u16 = 0;
+        while (col < o.term.cols) : (col += 1) {
+            const found = o.term.screens.active.pages.getCell(.{ .screen = .{ .x = col, .y = @intCast(row) } }) orelse
+                return error.ColumnMissing;
+            if (found.cell.wide == .spacer_tail) continue;
+            const first = found.cell.codepoint();
+            n += std.unicode.utf8Encode(if (first == 0) ' ' else first, buf[n..]) catch return error.BadCodepoint;
+            if (found.cell.hasGrapheme()) {
+                if (found.node.page().lookupGrapheme(found.cell)) |rest| {
+                    for (rest) |cp| n += std.unicode.utf8Encode(cp, buf[n..]) catch return error.BadCodepoint;
+                }
+            }
+        }
+        return std.mem.trimEnd(u8, buf[0..n], " ");
     }
 
     /// One column, into the caller's buffer.
@@ -1153,5 +1183,89 @@ test "an ASCII batch stays apart from a prepend on the second emulator" {
         _ = try h.frame(o);
         try h.screen.write(1, 0, "c", .{}, .none);
         _ = try h.frame(o);
+    }
+}
+
+test "rows printed above an inline screen go up into the second emulator's scrollback" {
+    const gpa = testing.allocator;
+    for ([_]visor.Method{ .unicode, .wcwidth }) |method| {
+        const view: visor.Size = .{ .cols = 12, .rows = 2 };
+        const o = try Oracle.initKeeping(gpa, .{ .cols = 12, .rows = 5 }, method, 1000);
+        defer o.deinit();
+        if (method == .unicode) o.feed("\x1b[?2027h");
+        o.feed("$ run\r\n");
+        var screen: visor.Screen = try .init(gpa, view);
+        defer screen.deinit();
+        screen.method = method;
+        var renderer: visor.Renderer = try .init(gpa, view);
+        defer renderer.deinit();
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        const caps: visor.Caps = .{ .width_method = method, .truecolor = true, .osc8 = true };
+        try renderer.enter(&out.writer, caps, .@"inline", .{});
+        o.feed(out.written());
+
+        var want: std.ArrayList([]const u8) = .empty;
+        defer {
+            for (want.items) |line| gpa.free(line);
+            want.deinit(gpa);
+        }
+        try want.append(gpa, try gpa.dupe(u8, "$ run"));
+        for (0..9) |round| {
+            screen.clear();
+            var buf: [32]u8 = undefined;
+            _ = try screen.window().printSegment(.{ .text = try std.fmt.bufPrint(&buf, "working {d}", .{round}) }, .{ .wrap = .none });
+            _ = try screen.window().printSegment(.{ .text = "\u{2588}\u{2588}\u{2591}", .style = .{ .fg = .ansi(.green) } }, .{ .row = 1, .wrap = .none });
+
+            const count: u16 = @intCast(round % 3);
+            var lines: visor.Screen = try .init(gpa, .{ .cols = 12, .rows = count });
+            defer lines.deinit();
+            lines.method = method;
+            for (0..count) |k| {
+                const text = try std.fmt.bufPrint(&buf, "done {d}.{d} \u{4e2d}", .{ round, k });
+                _ = try lines.window().printSegment(.{ .text = text, .style = .{ .bold = k == 0 } }, .{ .row = @intCast(k), .wrap = .none });
+                try want.append(gpa, try gpa.dupe(u8, text));
+            }
+            out.clearRetainingCapacity();
+            const stats = try renderer.printAbove(&out.writer, &lines, &screen, null, caps);
+            try testing.expectEqual(out.written().len, stats.bytes);
+            o.feed(out.written());
+            // The screen reads back where the emulator now has it.
+            try expectAgreesAt(&screen, o, o.term.screens.active.saved_cursor.?.y);
+        }
+
+        // Everything printed is above the screen, the oldest in scrollback,
+        // in the order it went out, and nothing else between.
+        var buf: [128]u8 = undefined;
+        const total = o.totalRows();
+        const first_view = total - view.rows;
+        try testing.expect(first_view >= want.items.len);
+        var row = first_view - want.items.len;
+        for (want.items) |line| {
+            try testing.expectEqualStrings(line, try o.historyRow(row, &buf));
+            row += 1;
+        }
+        try testing.expectEqualStrings("working 8", try o.historyRow(first_view, &buf));
+
+        // Leaving keeps the last frame under the printed rows.
+        out.clearRetainingCapacity();
+        try renderer.leave(&out.writer);
+        o.feed(out.written());
+        try testing.expectEqualStrings("working 8", try o.historyRow(o.totalRows() - 3, &buf));
+    }
+}
+
+/// Every column of the screen against the emulator's rows from `top`.
+fn expectAgreesAt(s: *const visor.Screen, o: *const Oracle, top: u16) !void {
+    var buf: [64]u8 = undefined;
+    for (0..s.dimensions().rows) |row| {
+        for (0..s.dimensions().cols) |col| {
+            const want = s.readCell(@intCast(col), @intCast(row)).?;
+            const got = try o.read(@intCast(col), @intCast(top + row), &buf);
+            try testing.expectEqual(wideOf(want.shape.kind), got.wide);
+            if (want.isTail()) continue;
+            try testing.expectEqualStrings(s.textAt(@intCast(col), @intCast(row)), got.text);
+            try testing.expect(styleAgrees(want.style, got.style));
+        }
     }
 }
