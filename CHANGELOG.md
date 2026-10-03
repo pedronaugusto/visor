@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Term` reads the bodies of OSC 8 and OSC 66 with `morse.parseHyperlink` and `morse.parseTextSize`, and its own parsing of them is gone. Sized text whose metadata morse does not read (a key twice, a value out of its range, a pair outside the grammar) is now dropped like any other sequence `Term` does not recognise, instead of drawn with the pairs it could read.
+
+- `wrap`, and so `Paragraph.Rows`, no longer ends a row before it starts when a break swallows spaces the scan had not reached: indentation wider than the width is a row of the spaces that fit, and the first word starts the next. A word that does not fit beside a wide cluster after a break is broken again instead of overflowing its row; a space a mark combines with is no longer split by the spaces a break swallows.
+
+- `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
+
+- `Markdown.Quoted` reads a source line by line by the reader's own quote and fence rules: each line's body with its quote markers off, its depth, and whether it belongs to a fenced block. `Markdown.Document` reads its fences through it.
+
+- `Palette.resolve` takes the colour cube and grey ramp from `morse.paletteRgb`.
+
+- `Winsize.locate` places a mouse report with `morse.toCellsAt` rather than its own division; the cell and fraction are unchanged.
+
+- `Input` waits under the escape timeout while `morse.KeyParser.undecided` says so, instead of restating the parser's rule for which pending bytes are a key.
+
+- `Term` reads sequences with morse: control sequences and strings are framed by `morse.parseCsi` and `morse.parseControlString`, style changes are applied by `morse.applySgr`, and modes and cursor shapes are matched by morse's numbers. Superscript and subscript (SGR 73, 74, 75) now survive the round trip, the round-trip generator draws them, and `dumpScreenStyles` names them; a cursor shape morse does not name leaves the cursor as it was.
+
+- Price style changes, cursor moves, repeats, erases, links, sized text and mode brackets with `morse.cost` instead of renderer copies of morse spellings, and price a rejoined cluster by its actual moves; the bytes written are unchanged.
+
+- Keep recurring style transitions together in the SGR cache so RGB frames need less formatting.
+
+- Compare screens and rows through borrowed changed-position iterators without exporting checked cells.
+
+- Skip the text pass when a frame only updates pictures or the cursor.
+
+- Keep dirty row counts with their spans so clean frames need no damage scan or clear.
+
+- Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
+
 - Pin the benchmark after build to cost, where drawing sequences are priced by morse.
 
 - Benchmark owner screen diffs separately from checked cell reads and pin the after build to diff.

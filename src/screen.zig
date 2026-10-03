@@ -275,9 +275,47 @@ pub const Screen = struct {
 
     /// The cell at a place, or null outside the grid.
     pub fn readCell(s: *const Screen, col: u16, row: u16) ?Cell {
-        if (col >= s.dimensions().cols or row >= s.dimensions().rows) return null;
-        return cellmod.internal.exportCell(s._cells[s.index(col, row)], s._pool_generation);
+        return s.readCheckedCell(col, row);
     }
+
+    inline fn readCheckedCell(s: *const Screen, col: u16, row: u16) ?Cell {
+        if (col >= s.dimensions().cols or row >= s.dimensions().rows) return null;
+        return cellmod.internal.exportCell(&s._cells[s.index(col, row)], s._pool_generation);
+    }
+
+    /// Changed positions between two screens, in row order, without exporting
+    /// cells. Equality is Cell.eql: inline text compares by value; pooled text
+    /// and links compare handles and issuing pool generations, even when their
+    /// contents match across pools. A position present in only one screen is
+    /// changed. Cursor, damage and width method are not compared.
+    /// The iterator borrows both screens; do not change, compact, resize or
+    /// destroy either screen until iteration ends. Returned points are copies.
+    pub fn diff(s: *const Screen, other: *const Screen) Diff {
+        return .{ ._a = s, ._b = other };
+    }
+
+    pub const Diff = struct {
+        _a: *const Screen,
+        _b: *const Screen,
+        _row: u16 = 0,
+        _col: u16 = 0,
+
+        pub fn next(d: *Diff) ?Point {
+            const rows = @max(d._a.dimensions().rows, d._b.dimensions().rows);
+            while (d._row < rows) {
+                const a = d._a.rowAt(d._row);
+                const b = d._b.rowAt(d._row);
+                var columns: Row.Diff = .{ ._a = a, ._b = b, ._col = d._col };
+                if (columns.next()) |col| {
+                    d._col = @intCast(col + 1);
+                    return .{ .col = @intCast(col), .row = d._row };
+                }
+                d._col = 0;
+                d._row += 1;
+            }
+            return null;
+        }
+    };
 
     /// One cell checked against this screen, clipped and damage marked.
     /// Stale or foreign text and link handles return `InvalidHandle` before any change.
@@ -596,7 +634,7 @@ pub const Screen = struct {
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
     pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
         const t = try s._graphemes.intern(s._gpa, bytes);
-        return cellmod.internal.exportCell(.{ .text = t }, s._pool_generation).text;
+        return cellmod.internal.exportCell(&.{ .text = t }, s._pool_generation).text;
     }
 
     /// An OSC 8 target into the link table, deduplicated.
@@ -721,12 +759,48 @@ pub const Screen = struct {
         _cells: []const StoredCell,
         _generation: u64,
 
+        /// Cell.eql over the row, including its length and checked pool
+        /// identities. Equal pooled contents in different generations differ.
+        /// Both rows borrow their screens and must still be current.
+        pub fn eql(row: Row, other: Row) bool {
+            if (row.len() != other.len()) return false;
+            var changes = row.diff(other);
+            return changes.next() == null;
+        }
+
+        /// Changed columns, including columns present in only one row.
+        /// Uses the same checked identity semantics as Screen.diff. The view
+        /// borrows both rows: no cell changes, compaction, resize or destruction
+        /// of either screen until iteration ends. Returned columns are copies.
+        pub fn diff(row: Row, other: Row) Row.Diff {
+            return .{ ._a = row, ._b = other };
+        }
+
+        pub const Diff = struct {
+            _a: Row,
+            _b: Row,
+            _col: usize = 0,
+
+            pub fn next(d: *Row.Diff) ?usize {
+                while (d._col < @max(d._a.len(), d._b.len())) {
+                    const col = d._col;
+                    d._col += 1;
+                    if (col >= @min(d._a.len(), d._b.len())) return col;
+                    const a = &d._a._cells[col];
+                    const b = &d._b._cells[col];
+                    if (!std.mem.eql(u8, std.mem.asBytes(a), std.mem.asBytes(b)) or (d._a._generation != d._b._generation and
+                        (a.text.isPooled() or a.link != .none))) return col;
+                }
+                return null;
+            }
+        };
+
         pub fn len(row: Row) usize {
             return row._cells.len;
         }
         pub fn get(row: Row, col: usize) ?Cell {
             if (col >= row._cells.len) return null;
-            return cellmod.internal.exportCell(row._cells[col], row._generation);
+            return cellmod.internal.exportCell(&row._cells[col], row._generation);
         }
     };
 

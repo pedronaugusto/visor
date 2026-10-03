@@ -183,3 +183,82 @@ test "markdown borrowed rows match drawing and preserve block structure" {
         }
     }
 }
+
+/// Every line `Quoted` reads off `source`, as `depth|body|code`.
+fn quotedLines(source: []const u8) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(t.allocator);
+    errdefer out.deinit();
+    var lines: widgets.Markdown.Quoted = .init(source);
+    while (lines.next()) |line| try out.writer.print("{d}|{s}|{}\n", .{ line.depth, line.body, line.code });
+    return out.toOwnedSlice();
+}
+
+test "quoted lines take the quotation off and keep a fence's own markers" {
+    const got = try quotedLines("say\n> one\n  > >  two\n> ```\n> > prompt\n> ```\n>\n    > code\r\nend\n");
+    defer t.allocator.free(got);
+    try t.expectEqualStrings(
+        \\0|say|false
+        \\1|one|false
+        \\2| two|false
+        \\1|```|true
+        \\1|> prompt|true
+        \\1|```|true
+        \\1||false
+        \\0|    > code|false
+        \\0|end|false
+        \\0||false
+        \\
+    , got);
+}
+
+test "quoted lines close a fence only with its own character, at least as long, at its depth" {
+    const got = try quotedLines("````\n```\n~~~~\n```` x\n> ````\n`````\n    ```\n```\n~~~\n");
+    defer t.allocator.free(got);
+    try t.expectEqualStrings(
+        \\0|````|true
+        \\0|```|true
+        \\0|~~~~|true
+        \\0|```` x|true
+        \\0|> ````|true
+        \\0|`````|true
+        \\0|    ```|false
+        \\0|```|true
+        \\0|~~~|true
+        \\0||true
+        \\
+    , got);
+}
+
+test "quoted lines say which line opens and which closes, and the fence's info" {
+    var lines: widgets.Markdown.Quoted = .init("   ~~~ zig \nx\n~~~");
+    const open = lines.next().?;
+    try t.expect(open.opens and !open.closes);
+    try t.expectEqualStrings("zig", open.fence.?.info);
+    try t.expectEqual(@as(u8, '~'), open.fence.?.char);
+    const inside = lines.next().?;
+    try t.expect(inside.code and !inside.opens and !inside.closes);
+    try t.expectEqualStrings("x", inside.text);
+    const close = lines.next().?;
+    try t.expect(close.closes);
+    try t.expect(lines.next() == null);
+}
+
+test "a document's fenced blocks are the ones quoted lines find" {
+    const source = "> ```\n> > prompt\n> ```\n    ```\n> x\n~~~\n```\n> y\n~~~\nz";
+    var doc = try widgets.Markdown.Document.init(t.allocator, source);
+    defer doc.deinit();
+    var at: usize = 0;
+    var matched: usize = 0;
+    var lines: widgets.Markdown.Quoted = .init(source);
+    while (lines.next()) |line| {
+        if (!line.code or line.opens or line.closes) continue;
+        while (doc.blocks()[at].fence == null) at += 1;
+        const block = doc.blocks()[at];
+        try t.expectEqual(line.depth, block.depth);
+        try t.expectEqualStrings(line.body, doc.text()[block.start..block.end]);
+        at += 1;
+        matched += 1;
+    }
+    try t.expectEqual(@as(usize, 3), matched);
+    for (doc.blocks()[at..]) |block| try t.expect(block.fence == null);
+}

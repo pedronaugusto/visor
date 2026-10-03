@@ -36,6 +36,11 @@ pub const Paragraph = struct {
     /// The lines, in order.
     lines: []const Line,
     /// How a line that does not fit is broken.
+    ///
+    /// A break swallows the spaces it broke at. Indentation is spaces like
+    /// any others: wider than the window, it is a row of the spaces that
+    /// fit, and the line's first word starts the row after. A cluster
+    /// wider than the window is a row on its own, clipped where it is drawn.
     wrap: visor.Wrap = .none,
     /// Where each row sits in the window's width.
     where: Align = .left,
@@ -351,5 +356,69 @@ test "paragraph rows and clipping treat CRLF as one line break" {
 test "paragraph row iterator source and refill state stay behind next" {
     inline for (.{ "text", "cols", "mode", "method", "base", "buf", "have", "at", "last" }) |field| {
         try testing.expect(!@hasField(Paragraph.Rows, field));
+    }
+}
+
+test "indentation wider than the window is a row of the spaces that fit" {
+    const text = "    indented words";
+    const want = [_][]const u8{ "  ", "in", "de", "nt", "ed", "wo", "rd", "s" };
+    var it: Paragraph.Rows = .init(text, 2, .word, .unicode);
+    for (want) |row| {
+        const r = it.next().?;
+        try testing.expectEqualStrings(row, text[r.start..r.end]);
+    }
+    try testing.expect(it.next() == null);
+
+    var narrow: Paragraph.Rows = .init("   indented words", 1, .word, .unicode);
+    const first = narrow.next().?;
+    try testing.expectEqual(@as(usize, 0), first.start);
+    try testing.expectEqual(@as(usize, 1), first.end);
+    try testing.expectEqual(@as(usize, 3), narrow.next().?.start);
+}
+
+test "leading spaces of any length wrap into ordered rows at every width" {
+    // Spaces a break swallowed past the cluster that overflowed used to be
+    // measured again into the next row, which then ended before it started.
+    const bodies = [_][]const u8{ "indented words", "x", "a b", "中文 字", "word\nnext", "" };
+    var buf: [64]u8 = undefined;
+    for ([_]visor.Wrap{ .none, .word, .grapheme }) |mode| {
+        for (bodies) |body| {
+            for (0..9) |lead| {
+                @memset(buf[0..lead], ' ');
+                @memcpy(buf[lead..][0..body.len], body);
+                const text = buf[0 .. lead + body.len];
+                var cols: u16 = 1;
+                while (cols <= text.len + 2) : (cols += 1) {
+                    var it: Paragraph.Rows = .init(text, cols, mode, .unicode);
+                    var last_end: usize = 0;
+                    var count: usize = 0;
+                    while (it.next()) |r| {
+                        try testing.expect(r.start <= r.end);
+                        try testing.expect(r.start >= last_end);
+                        try testing.expect(r.end <= text.len);
+                        // What lies between two rows is what a break ate:
+                        // spaces, a line break, or what `.none` dropped.
+                        if (mode != .none) {
+                            for (text[last_end..r.start]) |c| try testing.expect(c == ' ' or c == '\n');
+                        }
+                        const slice = text[r.start..r.end];
+                        try testing.expectEqual(visor.width(slice, .unicode), r.columns);
+                        // Only a lone cluster wider than the row overflows it.
+                        if (r.columns > cols) {
+                            var clusters: visor.Graphemes = .init(slice);
+                            _ = clusters.next();
+                            try testing.expect(clusters.next() == null);
+                        }
+                        last_end = r.end;
+                        count += 1;
+                    }
+                    if (mode != .none) {
+                        for (text[last_end..]) |c| try testing.expect(c == ' ' or c == '\n');
+                    }
+                    try testing.expect(count >= 1);
+                    try testing.expectEqual(count, (Paragraph{ .lines = &.{.{ .text = text }}, .wrap = mode }).rowCount(cols, .unicode));
+                }
+            }
+        }
     }
 }

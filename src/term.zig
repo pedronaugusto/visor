@@ -11,6 +11,13 @@
 //! cluster is told through OSC 66, and the modes this package writes. A graphics command is recorded rather than drawn, which is what
 //! lets the rule that the text pass never deletes a placement be a test.
 //!
+//! The bytes are morse's, and so is reading them: sequences are framed by
+//! `morse.parseCsi` and `morse.parseControlString`, a style change is
+//! applied by `morse.applySgr`, a link and sized text are read by
+//! `morse.parseHyperlink` and `morse.parseTextSize`, each the inverse of
+//! what wrote it, and modes and cursor shapes are matched by the numbers
+//! morse writes them with.
+//!
 //! What this file will never be: a terminal emulator for general use. It has
 //! no character sets, no tabs stops, no margins, no mouse, no scrollback and
 //! no bell. Anything it does not recognise is dropped rather than guessed at.
@@ -407,7 +414,7 @@ pub const Term = struct {
         if (bytes.len < 2) return 0;
         return switch (bytes[1]) {
             '[' => try t.controlSequence(bytes),
-            ']' => t.operatingSystemCommand(bytes),
+            ']' => try t.operatingSystemCommand(bytes),
             '_' => try t.applicationCommand(bytes),
             '7' => blk: {
                 t._saved = .{ .col = t._col, .row = t._row, .style = t._style };
@@ -427,91 +434,82 @@ pub const Term = struct {
         };
     }
 
-    /// `CSI ... final`.
+    /// `CSI ... final`, framed by morse.
     fn controlSequence(t: *Term, bytes: []const u8) Allocator.Error!usize {
-        var i: usize = 2;
-        var private: u8 = 0;
-        if (i < bytes.len and bytes[i] >= 0x3c and bytes[i] <= 0x3f) {
-            private = bytes[i];
-            i += 1;
-        }
-        const params_start = i;
-        while (i < bytes.len and ((bytes[i] >= 0x30 and bytes[i] <= 0x3b) or bytes[i] == ':')) i += 1;
-        const params = bytes[params_start..i];
-        const intermediate_start = i;
-        while (i < bytes.len and bytes[i] >= 0x20 and bytes[i] <= 0x2f) i += 1;
-        const intermediates = bytes[intermediate_start..i];
-        if (i >= bytes.len) return 0;
-        const final = bytes[i];
-        try t.dispatch(private, params, intermediates, final);
-        return i + 1;
+        const csi = morse.parseCsi(bytes) orelse return 0;
+        if (csi.final != 0) try t.dispatch(csi);
+        return csi.len;
     }
 
     /// One complete control sequence, acted on.
-    fn dispatch(t: *Term, private: u8, params: []const u8, intermediates: []const u8, final: u8) Allocator.Error!void {
-        if (private == '?') {
-            t.privateMode(params, final);
+    fn dispatch(t: *Term, csi: morse.Csi) Allocator.Error!void {
+        if (csi.marker == '?') {
+            t.privateMode(csi);
             return;
         }
-        if (private != 0) return;
-        if (intermediates.len == 1 and intermediates[0] == ' ' and final == 'q') {
-            t._scr.cursor.shape = @enumFromInt(@as(u8, @intCast(@min(param(params, 0, 0), 6))));
+        if (csi.marker != 0) return;
+        if (std.mem.eql(u8, csi.intermediates, " ") and csi.final == 'q') {
+            // A shape this package does not name is not one a renderer
+            // wrote, and leaves the cursor as it was.
+            const shape = std.math.cast(u8, csi.param(0) orelse 0) orelse return;
+            t._scr.cursor.shape = std.enums.fromInt(morse.CursorShape, shape) orelse return;
             return;
         }
-        if (intermediates.len != 0) return;
-        switch (final) {
-            'm' => t.selectGraphicRendition(params),
-            'H', 'f' => t.moveTo(coordinate(params, 1), coordinate(params, 0)),
-            'A' => t.moveTo(t._col, t._row -| clamp(atLeastOne(params))),
-            'B' => t.moveTo(t._col, t._row +| clamp(atLeastOne(params))),
-            'C' => t.moveTo(t._col +| clamp(atLeastOne(params)), t._row),
-            'D' => t.moveTo(t._col -| clamp(atLeastOne(params)), t._row),
-            'E' => t.moveTo(0, t._row +| clamp(atLeastOne(params))),
-            'F' => t.moveTo(0, t._row -| clamp(atLeastOne(params))),
-            'G', '`' => t.moveTo(coordinate(params, 0), t._row),
-            'd' => t.moveTo(t._col, coordinate(params, 0)),
-            'J' => t.eraseScreen(param(params, 0, 0)),
-            'K' => t.eraseLine(param(params, 0, 0)),
-            'L' => t.insertLines(atLeastOne(params)),
-            'M' => t.deleteLines(atLeastOne(params)),
-            '@' => t.insertChars(atLeastOne(params)),
-            'P' => t.deleteChars(atLeastOne(params)),
-            'X' => t.eraseChars(atLeastOne(params)),
-            'S' => t.scrollRegion(t.scrollCount(params)),
-            'T' => t.scrollRegion(-t.scrollCount(params)),
-            'r' => t.setScrollRegion(params),
-            'b' => try t.repeat(atLeastOne(params)),
+        if (csi.intermediates.len != 0) return;
+        switch (csi.final) {
+            'm' => morse.applySgr(&t._style, csi.params),
+            'H', 'f' => t.moveTo(coordinate(csi, 1), coordinate(csi, 0)),
+            'A' => t.moveTo(t._col, t._row -| clamp(atLeastOne(csi))),
+            'B' => t.moveTo(t._col, t._row +| clamp(atLeastOne(csi))),
+            'C' => t.moveTo(t._col +| clamp(atLeastOne(csi)), t._row),
+            'D' => t.moveTo(t._col -| clamp(atLeastOne(csi)), t._row),
+            'E' => t.moveTo(0, t._row +| clamp(atLeastOne(csi))),
+            'F' => t.moveTo(0, t._row -| clamp(atLeastOne(csi))),
+            'G', '`' => t.moveTo(coordinate(csi, 0), t._row),
+            'd' => t.moveTo(t._col, coordinate(csi, 0)),
+            'J' => t.eraseScreen(csi.param(0) orelse 0),
+            'K' => t.eraseLine(csi.param(0) orelse 0),
+            'L' => t.insertLines(atLeastOne(csi)),
+            'M' => t.deleteLines(atLeastOne(csi)),
+            '@' => t.insertChars(atLeastOne(csi)),
+            'P' => t.deleteChars(atLeastOne(csi)),
+            'X' => t.eraseChars(atLeastOne(csi)),
+            'S' => t.scrollRegion(t.scrollCount(csi)),
+            'T' => t.scrollRegion(-t.scrollCount(csi)),
+            'r' => t.setScrollRegion(csi),
+            'b' => try t.repeat(atLeastOne(csi)),
             else => {},
         }
     }
 
-    fn scrollCount(t: *const Term, params: []const u8) i32 {
+    fn scrollCount(t: *const Term, csi: morse.Csi) i32 {
         const rows: u32 = t._scroll_bottom - t._scroll_top + 1;
-        return @intCast(@min(atLeastOne(params), rows));
+        return @intCast(@min(atLeastOne(csi), rows));
     }
 
-    /// `CSI ? n h` and `CSI ? n l`: the modes this package switches.
-    fn privateMode(t: *Term, params: []const u8, final: u8) void {
-        if (final != 'h' and final != 'l') return;
-        const on = final == 'h';
-        var it = std.mem.splitScalar(u8, params, ';');
-        while (it.next()) |one| {
-            const n = std.fmt.parseInt(u32, one, 10) catch continue;
-            switch (n) {
-                25 => t._scr.cursor.visible = on,
-                7 => t._autowrap = on,
-                2027 => t._clusters_off = !on,
+    /// `CSI ? n h` and `CSI ? n l`: the modes this package switches, by
+    /// the numbers morse writes them with.
+    fn privateMode(t: *Term, csi: morse.Csi) void {
+        if (csi.final != 'h' and csi.final != 'l') return;
+        const on = csi.final == 'h';
+        var index: usize = 0;
+        var fields = std.mem.splitScalar(u8, csi.params, ';');
+        while (fields.next()) |_| : (index += 1) {
+            switch (csi.param(index) orelse continue) {
+                morse.cursorVisible.number => t._scr.cursor.visible = on,
+                morse.autoWrap.number => t._autowrap = on,
+                morse.unicodeCore.number => t._clusters_off = !on,
                 else => {},
             }
         }
     }
 
     /// `CSI top ; bottom r`, DECSTBM, which also homes the cursor.
-    fn setScrollRegion(t: *Term, params: []const u8) void {
+    fn setScrollRegion(t: *Term, csi: morse.Csi) void {
         const rows = t._scr.dimensions().rows;
         if (rows == 0) return;
-        const top = @min(nonzeroParam(params, 0, 1), rows) - 1;
-        const bottom = @min(nonzeroParam(params, 1, rows), rows) - 1;
+        const top = @min(nonzeroParam(csi, 0, 1), rows) - 1;
+        const bottom = @min(nonzeroParam(csi, 1, rows), rows) - 1;
         if (bottom <= top) return;
         t._scroll_top = @intCast(top);
         t._scroll_bottom = @intCast(bottom);
@@ -641,162 +639,39 @@ pub const Term = struct {
     // Styles and links.
     //=====================================================================
 
-    /// `CSI ... m`.
-    ///
-    /// The parameters are taken as fields separated by semicolons, each of
-    /// which may itself carry sub-parameters separated by colons. Both
-    /// spellings of an extended colour are read, because both are written:
-    /// the foreground and background in semicolons, which every terminal
-    /// takes, and the underline colour in colons, which is the only spelling
-    /// the terminals that implement it document.
-    fn selectGraphicRendition(t: *Term, params: []const u8) void {
-        if (params.len == 0) {
-            t._style = .{};
-            return;
-        }
-        var fields: [64][]const u8 = undefined;
-        var count: usize = 0;
-        var it = std.mem.splitScalar(u8, params, ';');
-        while (it.next()) |field| : (count += 1) {
-            if (count == fields.len) break;
-            fields[count] = field;
-        }
-
-        var i: usize = 0;
-        while (i < count) : (i += 1) {
-            var subs: [8][]const u8 = undefined;
-            var sub_count: usize = 0;
-            var sub_it = std.mem.splitScalar(u8, fields[i], ':');
-            while (sub_it.next()) |sub| : (sub_count += 1) {
-                if (sub_count == subs.len) break;
-                subs[sub_count] = sub;
-            }
-            const code = number(subs[0]) orelse continue;
-            switch (code) {
-                38 => t._style.fg = t.readColor(subs[0..sub_count], fields[0..count], &i) orelse t._style.fg,
-                48 => t._style.bg = t.readColor(subs[0..sub_count], fields[0..count], &i) orelse t._style.bg,
-                58 => t._style.underline_color =
-                    t.readColor(subs[0..sub_count], fields[0..count], &i) orelse t._style.underline_color,
-                4 => t._style.underline = if (sub_count >= 2)
-                    underlineOf(subs[1])
-                else
-                    .single,
-                else => t.applyAttribute(code),
-            }
-        }
-    }
-
-    /// Every SGR code that is a single attribute or a named colour.
-    fn applyAttribute(t: *Term, code: u32) void {
-        switch (code) {
-            0 => t._style = .{},
-            1 => t._style.bold = true,
-            2 => t._style.dim = true,
-            3 => t._style.italic = true,
-            5 => t._style.blink = true,
-            7 => t._style.reverse = true,
-            8 => t._style.hidden = true,
-            9 => t._style.strikethrough = true,
-            53 => t._style.overline = true,
-            22 => {
-                t._style.bold = false;
-                t._style.dim = false;
-            },
-            23 => t._style.italic = false,
-            24 => t._style.underline = .none,
-            25 => t._style.blink = false,
-            27 => t._style.reverse = false,
-            28 => t._style.hidden = false,
-            29 => t._style.strikethrough = false,
-            55 => t._style.overline = false,
-            30...37 => t._style.fg = .ansi(@enumFromInt(code - 30)),
-            90...97 => t._style.fg = .ansi(@enumFromInt(code - 90 + 8)),
-            39 => t._style.fg = .default,
-            40...47 => t._style.bg = .ansi(@enumFromInt(code - 40)),
-            100...107 => t._style.bg = .ansi(@enumFromInt(code - 100 + 8)),
-            49 => t._style.bg = .default,
-            59 => t._style.underline_color = .default,
-            else => {},
-        }
-    }
-
-    /// The colour a `38`, `48` or `58` introduces, from its own
-    /// sub-parameters when it has them and from the fields after it when it
-    /// does not. Advances `i` past whatever it consumed.
-    fn readColor(
-        _: *Term,
-        subs: []const []const u8,
-        fields: []const []const u8,
-        i: *usize,
-    ) ?cellmod.Color {
-        if (subs.len >= 2) return colonColor(subs[1..]);
-        var at = i.*;
-        const kind = number(nextField(fields, &at) orelse return null) orelse return null;
-        switch (kind) {
-            5 => {
-                const n = byte(nextField(fields, &at) orelse return null) orelse return null;
-                i.* = at;
-                return .palette(n);
-            },
-            2 => {
-                const r = byte(nextField(fields, &at) orelse return null) orelse return null;
-                const g = byte(nextField(fields, &at) orelse return null) orelse return null;
-                const b = byte(nextField(fields, &at) orelse return null) orelse return null;
-                i.* = at;
-                return .rgb(r, g, b);
-            },
-            else => return null,
-        }
-    }
-
     /// `ESC ] ... ST`: OSC 8 changes what a cell links to, and OSC 66 prints
-    /// text at a width it was told. Nothing else changes a cell.
+    /// text at a width it was told. Nothing else changes a cell. The bodies
+    /// are read by `morse.parseHyperlink` and `morse.parseTextSize`, the
+    /// inverses of what wrote them.
     fn operatingSystemCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
-        const body = stringBody(bytes, 2) orelse return 0;
-        const payload = bytes[2..body.end];
-        if (std.mem.startsWith(u8, payload, "66;")) {
-            try t.sizedText(payload[3..]);
-            return body.len;
-        }
-        if (std.mem.startsWith(u8, payload, "8;")) {
-            const rest = payload[2..];
-            const split = std.mem.indexOfScalar(u8, rest, ';') orelse return body.len;
-            const params = rest[0..split];
-            const uri = rest[split + 1 ..];
-            t._link = if (uri.len == 0)
+        const string = morse.parseControlString(bytes) orelse return 0;
+        if (!string.terminated) return string.len;
+        if (morse.parseTextSize(string.body)) |sized| {
+            try t.sizedText(sized);
+        } else if (morse.parseHyperlink(string.body)) |found| {
+            t._link = if (found.uri.len == 0)
                 .none
             else
-                t._scr.link(uri, params) catch |err| switch (err) {
-                    error.ControlInText => return body.len,
+                t._scr.link(found.uri, found.params) catch |err| switch (err) {
+                    error.ControlInText => return string.len,
                     error.OutOfMemory => return error.OutOfMemory,
                 };
         }
-        return body.len;
+        return string.len;
     }
 
-    /// The body of an OSC 66: `key=value:key=value ; text`. The `w` key is
-    /// the width every cluster in the text takes and `s` the scale it is
-    /// drawn at; the others are read and not acted on, because the renderer
-    /// does not write them.
-    fn sizedText(t: *Term, body: []const u8) Allocator.Error!void {
-        const split = std.mem.indexOfScalar(u8, body, ';') orelse return;
-        var told: ?u2 = null;
-        var scale: u3 = 0;
-        var keys = std.mem.splitScalar(u8, body[0..split], ':');
-        while (keys.next()) |pair| {
-            if (pair.len < 3 or pair[1] != '=') continue;
-            const value = std.fmt.parseInt(u8, pair[2..], 10) catch continue;
-            switch (pair[0]) {
-                'w' => told = switch (value) {
-                    1 => 1,
-                    2 => 2,
-                    else => null,
-                },
-                's' => scale = @intCast(@min(value, 7)),
-                else => {},
-            }
-        }
-        var it: textmod.Graphemes = .init(body[split + 1 ..]);
+    /// The text of an OSC 66, drawn at the width it was told and the scale
+    /// it asks for. A width of one or two is acted on and any other is
+    /// measured here; the fraction and the alignments are read and not acted
+    /// on, because the renderer does not write them.
+    fn sizedText(t: *Term, sized: morse.SizedText) Allocator.Error!void {
+        const told: ?u2 = switch (sized.size.width) {
+            1 => 1,
+            2 => 2,
+            else => null,
+        };
+        const scale = sized.size.scale;
+        var it: textmod.Graphemes = .init(sized.text);
         while (it.next()) |g| {
             if (scale > 1) {
                 try t.putScaled(g, told, scale);
@@ -845,11 +720,12 @@ pub const Term = struct {
     /// recorded and never drawn: the text pass must be able to be asserted
     /// not to have written one.
     fn applicationCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
-        const body = stringBody(bytes, 2) orelse return 0;
-        const payload = try t._gpa.dupe(u8, bytes[2..body.end]);
+        const string = morse.parseControlString(bytes) orelse return 0;
+        if (!string.terminated) return string.len;
+        const payload = try t._gpa.dupe(u8, string.body);
         errdefer t._gpa.free(payload);
         try t._graphics.append(t._gpa, payload);
-        return body.len;
+        return string.len;
     }
 
     //=====================================================================
@@ -913,7 +789,8 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
 /// - The legend first, one line per distinct style in the order it first
 ///   appears reading row by row: `# <id> fg=<c> bg=<c>` and then, where they
 ///   are on, ` ul=<u>`, ` ulc=<c>`, ` bold`, ` dim`, ` italic`, ` blink`,
-///   ` reverse`, ` hidden`, ` strike`, ` overline`, and last ` link=<uri>`
+///   ` reverse`, ` hidden`, ` strike`, ` overline`, ` superscript` or
+///   ` subscript`, and last ` link=<uri>`
 ///   for a cell carrying an OSC 8 link. The link is part of what makes a
 ///   style distinct; its parameters are not printed.
 /// - A colour is `default`, one of the sixteen names, `palette:<n>`, or
@@ -1007,6 +884,7 @@ fn writeStyleName(w: *Writer, style: Style) Writer.Error!void {
     }) |flag| {
         if (flag[1]) try w.print(" {s}", .{flag[0]});
     }
+    if (style.script != .none) try w.print(" {t}", .{style.script});
 }
 
 /// A colour as a name.
@@ -1140,35 +1018,9 @@ fn runEnd(bytes: []const u8, from: usize) usize {
     return i;
 }
 
-/// The end of an `ST`- or `BEL`-terminated string, or null when it has not
-/// arrived.
-fn stringBody(bytes: []const u8, from: usize) ?struct { end: usize, len: usize } {
-    var i = from;
-    while (i < bytes.len) : (i += 1) {
-        if (bytes[i] == 0x07) return .{ .end = i, .len = i + 1 };
-        if (bytes[i] == 0x1b and i + 1 < bytes.len and bytes[i + 1] == '\\') {
-            return .{ .end = i, .len = i + 2 };
-        }
-    }
-    return null;
-}
-
-/// The `n`th parameter, or `fallback` when it is missing or empty.
-fn param(params: []const u8, n: usize, fallback: u32) u32 {
-    var it = std.mem.splitScalar(u8, params, ';');
-    var i: usize = 0;
-    while (it.next()) |one| : (i += 1) {
-        if (i != n) continue;
-        const head = std.mem.sliceTo(one, ':');
-        if (head.len == 0) return fallback;
-        return std.fmt.parseInt(u32, head, 10) catch fallback;
-    }
-    return fallback;
-}
-
 // Position and count parameters treat zero as their default. SGR does not.
-fn nonzeroParam(params: []const u8, n: usize, fallback: u32) u32 {
-    const value = param(params, n, fallback);
+fn nonzeroParam(csi: morse.Csi, n: usize, fallback: u32) u32 {
+    const value = csi.param(n) orelse fallback;
     return if (value == 0) fallback else value;
 }
 
@@ -1179,62 +1031,14 @@ fn clamp(n: u32) u16 {
 }
 
 /// A one-based coordinate, with zero and a missing field both meaning one.
-fn coordinate(params: []const u8, n: usize) u16 {
-    return clamp(nonzeroParam(params, n, 1) - 1);
+fn coordinate(csi: morse.Csi, n: usize) u16 {
+    return clamp(nonzeroParam(csi, n, 1) - 1);
 }
 
 /// The first parameter, never zero: the movement sequences all treat a
 /// missing or zero count as one.
-fn atLeastOne(params: []const u8) u32 {
-    return nonzeroParam(params, 0, 1);
-}
-
-/// The underline style a `4:n` names.
-fn underlineOf(sub: []const u8) cellmod.Underline {
-    const n = number(sub) orelse return .single;
-    return if (n <= 5) @enumFromInt(@as(u8, @intCast(n))) else .single;
-}
-
-/// A decimal field, with an empty one meaning zero, as SGR spells it.
-fn number(field: []const u8) ?u32 {
-    if (field.len == 0) return 0;
-    return std.fmt.parseInt(u32, field, 10) catch null;
-}
-
-/// A decimal field that has to fit in a byte.
-fn byte(field: []const u8) ?u8 {
-    const n = number(field) orelse return null;
-    return std.math.cast(u8, n);
-}
-
-/// The field after `at`, advancing it.
-fn nextField(fields: []const []const u8, at: *usize) ?[]const u8 {
-    if (at.* + 1 >= fields.len) return null;
-    at.* += 1;
-    return fields[at.*];
-}
-
-/// The colon spelling of an extended colour: `5:n`, or `2:<space>:r:g:b`
-/// with the colour space identifier usually left empty.
-fn colonColor(subs: []const []const u8) ?cellmod.Color {
-    if (subs.len == 0) return null;
-    const kind = number(subs[0]) orelse return null;
-    switch (kind) {
-        5 => {
-            if (subs.len < 2) return null;
-            return .palette(byte(subs[1]) orelse return null);
-        },
-        2 => {
-            const rest = if (subs.len >= 5) subs[2..] else subs[1..];
-            if (rest.len < 3) return null;
-            return .rgb(
-                byte(rest[0]) orelse return null,
-                byte(rest[1]) orelse return null,
-                byte(rest[2]) orelse return null,
-            );
-        },
-        else => return null,
-    }
+fn atLeastOne(csi: morse.Csi) u32 {
+    return nonzeroParam(csi, 0, 1);
 }
 
 const testing = std.testing;
@@ -1336,6 +1140,9 @@ test "every SGR this package writes comes back as the style it was" {
         .{ .bytes = "\x1b[8m", .style = .{ .hidden = true } },
         .{ .bytes = "\x1b[9m", .style = .{ .strikethrough = true } },
         .{ .bytes = "\x1b[53m", .style = .{ .overline = true } },
+        .{ .bytes = "\x1b[73m", .style = .{ .script = .superscript } },
+        .{ .bytes = "\x1b[74m", .style = .{ .script = .subscript } },
+        .{ .bytes = "\x1b[73;75m", .style = .{} },
         .{ .bytes = "\x1b[31m", .style = .{ .fg = .ansi(.red) } },
         .{ .bytes = "\x1b[96m", .style = .{ .fg = .ansi(.bright_cyan) } },
         .{ .bytes = "\x1b[44m", .style = .{ .bg = .ansi(.blue) } },
@@ -1526,6 +1333,39 @@ test "the cursor's visibility and shape are read off the wire" {
     try testing.expect(!t.screen().cursor.visible);
     try t.feed("\x1b[6 q");
     try testing.expectEqual(morse.CursorShape.bar, t.screen().cursor.shape);
+    // Every shape morse writes, by the number it writes it with.
+    for (std.enums.values(morse.CursorShape)) |shape| {
+        var bytes: [16]u8 = undefined;
+        var w: Writer = .fixed(&bytes);
+        try morse.cursorShape(&w, shape);
+        try t.feed(w.buffered());
+        try testing.expectEqual(shape, t.screen().cursor.shape);
+    }
+    // A shape morse has no name for is not one a renderer wrote.
+    try t.feed("\x1b[5 q\x1b[9 q");
+    try testing.expectEqual(morse.CursorShape.bar_blink, t.screen().cursor.shape);
+}
+
+test "the modes are read by the numbers morse writes them with" {
+    var t = try made(4, 1);
+    defer t.deinit();
+    var bytes: [64]u8 = undefined;
+    var w: Writer = .fixed(&bytes);
+    try morse.autoWrap.set(&w, false);
+    try morse.cursorVisible.set(&w, false);
+    try morse.unicodeCore.set(&w, false);
+    try t.feed(w.buffered());
+    try testing.expect(!t._autowrap);
+    try testing.expect(!t.screen().cursor.visible);
+    try testing.expect(t._clusters_off);
+    w = .fixed(&bytes);
+    try morse.autoWrap.set(&w, true);
+    try morse.cursorVisible.set(&w, true);
+    try morse.unicodeCore.set(&w, true);
+    try t.feed(w.buffered());
+    try testing.expect(t._autowrap);
+    try testing.expect(t.screen().cursor.visible);
+    try testing.expect(!t._clusters_off);
 }
 
 test "a graphics command is recorded and draws nothing" {
@@ -1665,6 +1505,14 @@ test "sized text without a width is printed as ordinary text" {
     try testing.expectEqualStrings("ab      ", rowText(&t, 0, &buf));
 }
 
+test "sized text morse does not read is dropped, not guessed at" {
+    var t = try made(8, 1);
+    defer t.deinit();
+    try t.feed("\x1b]66;s=9;a\x1b\\\x1b]66;w=2:w=1;b\x1b\\\x1b]66;x\x1b\\c");
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings("c       ", rowText(&t, 0, &buf));
+}
+
 test "a saved cursor comes back where it was" {
     var t = try made(8, 2);
     defer t.deinit();
@@ -1714,6 +1562,7 @@ test "the style dump spells every attribute in one order, and a link is part of 
         .hidden = true,
         .strikethrough = true,
         .overline = true,
+        .script = .superscript,
     };
     try sc.write(0, 0, "a", everything, .none);
     const zig = try sc.link("https://ziglang.org", "id=1");
@@ -1729,7 +1578,7 @@ test "the style dump spells every attribute in one order, and a link is part of 
     defer out.deinit();
     try dumpScreenStyles(&sc, &out.writer);
     try testing.expectEqualStrings(
-        \\# 0 fg=palette:208 bg=#1e1e2e ul=curly ulc=bright_red bold dim italic blink reverse hidden strike overline
+        \\# 0 fg=palette:208 bg=#1e1e2e ul=curly ulc=bright_red bold dim italic blink reverse hidden strike overline superscript
         \\# 1 fg=default bg=default link=https://ziglang.org
         \\# 2 fg=default bg=default
         \\# 3 fg=cyan bg=default

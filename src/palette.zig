@@ -108,11 +108,7 @@ pub const Palette = struct {
                 .bg => p.bg,
             },
             .ansi => p.entries[@intFromEnum(color.toAnsi())],
-            .palette => {
-                const n = color.index();
-                if (n < 16) return p.entries[n];
-                return standard(n);
-            },
+            .palette => morse.paletteRgb(color.index()) orelse p.entries[color.index()],
             .rgb => color.toRgb(),
         };
     }
@@ -123,18 +119,6 @@ pub const Palette = struct {
         return p.fg != null and p.bg != null;
     }
 };
-
-/// Entry `n` of the 256-colour palette above the sixteen slots, as terminals
-/// define it.
-fn standard(n: u8) Rgb {
-    if (n >= 232) {
-        const v: u8 = 8 + 10 * (n - 232);
-        return .{ .r = v, .g = v, .b = v };
-    }
-    const i = n - 16;
-    const steps = [6]u8{ 0, 95, 135, 175, 215, 255 };
-    return .{ .r = steps[i / 36], .g = steps[(i / 6) % 6], .b = steps[i % 6] };
-}
 
 const testing = std.testing;
 

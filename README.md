@@ -176,7 +176,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
-| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`. |
+| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`. |
 | The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Mode`, `Modes`. |
@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, `Quoted` line iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 
@@ -263,6 +263,12 @@ borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
 method)` uses the same rows as `draw`, without allocation. Keep the document
 until its widgets are finished, then call `deinit`. Drawing can allocate for
 screen links and long graphemes, but never for parsing or layout.
+
+`Markdown.Quoted.init(source)` reads a source line by line by the same quote
+and fence rules, for a program that shows it line by line: `next()` gives each
+line's `text`, its `body` with the quote markers off, its quote `depth`, and
+whether it is `code` in a fenced block (with the `fence`, and whether the line
+`opens` or `closes` it). It borrows the source and allocates nothing.
 
 ```zig
 var document = try widgets.Markdown.Document.init(gpa,
@@ -340,6 +346,9 @@ defined layout and no padding, so a whole row is one `memcmp` rather than a
 field comparison per cell. Nothing in a cell is undefined, and a colour's
 unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
+
+A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
+`Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
 
 Cells read from the screen carry checked text and link handles. The grid and
 renderer store compact cells; Screen owns their pool identity. Screen and
@@ -433,6 +442,10 @@ continues.
 **A row is written whole when the diff would cost more.** Both are priced by
 counting their exact text, style, link, erase and cursor-move bytes, so the
 choice takes no extra emit pass.
+
+The renderer caches 1,024 SGR transitions in buckets of sixteen, checking
+both styles on every hit. Recurring RGB transitions can share a bucket
+without replacing one another; full buckets replace entries in turn.
 
 **A blank run is erased, not painted.** A row blank to its end is `EL`, four
 bytes whatever the width; a blank run longer than the sequence that erases it

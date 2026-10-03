@@ -165,26 +165,20 @@ pub const Input = struct {
         resized,
     };
 
-    /// Whether what the parser holds is a key as well as the start of a
-    /// sequence, which is the one case the timeout settles.
-    fn ambiguous(in: *const Input) bool {
-        const held = in._parser.pending();
-        if (held.len == 0 or held.len > 2 or held[0] != 0x1b) return false;
-        return held.len == 1 or held[1] == '[' or held[1] == 'O';
-    }
-
     /// Waits for the terminal, the resize pipe, the escape timeout or the
     /// caller's deadline, whichever comes first.
     const wait = if (is_windows) waitWindows else waitPosix;
 
     /// Which timeout a wait runs under: the escape's, while what the parser
-    /// holds is ambiguous, or the caller's, whichever ends first. `expires`
+    /// holds is undecided, or the caller's, whichever ends first. `expires`
     /// says a timeout is the caller's deadline, not the escape's.
     const Limit = struct { timeout: Io.Timeout, expires: bool };
 
     fn limit(in: *const Input, until: Io.Timeout) Limit {
         const left = until.toDurationFromNow(in._tty.ioContext());
-        if (in.ambiguous()) {
+        // What the parser holds is a key as well as the start of a
+        // sequence: the one case the escape timeout settles, by `flush`.
+        if (in._parser.undecided()) {
             const escape: Io.Clock.Duration = .{ .raw = in._escape, .clock = .awake };
             if (left) |l| if (l.raw.nanoseconds < in._escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
             return .{ .timeout = .{ .duration = escape }, .expires = false };

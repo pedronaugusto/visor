@@ -29,6 +29,8 @@ pub const Span = struct {
 pub const Damage = struct {
     /// One entry a row. `first > last` means the row is clean.
     _rows: []Entry,
+    /// Dirty rows, kept by the same operations that widen their spans.
+    _dirty: usize = 0,
 
     /// A row's span in the form it is stored in, so that a clean row is
     /// representable without a second field.
@@ -62,6 +64,7 @@ pub const Damage = struct {
         @memset(entries, .{});
         gpa.free(d._rows);
         d._rows = entries;
+        d._dirty = 0;
     }
 
     /// The span of a row, or null when nothing in it changed.
@@ -77,6 +80,7 @@ pub const Damage = struct {
         if (r >= d._rows.len) return;
         const e = &d._rows[r];
         if (e.first > e.last) {
+            d._dirty += 1;
             e.* = .{ .first = col, .last = col };
             return;
         }
@@ -88,6 +92,7 @@ pub const Damage = struct {
     pub fn markSpan(d: *Damage, first: u16, last: u16, r: u16) void {
         if (r >= d._rows.len or first > last) return;
         const e = &d._rows[r];
+        if (e.first > e.last) d._dirty += 1;
         if (first < e.first) e.first = first;
         if (last > e.last) e.last = last;
     }
@@ -99,26 +104,24 @@ pub const Damage = struct {
             return;
         }
         @memset(d._rows, .{ .first = 0, .last = cols - 1 });
+        d._dirty = d._rows.len;
     }
 
     /// Everything clean, which is what `draw` leaves behind.
     pub fn clear(d: *Damage) void {
+        if (d._dirty == 0) return;
         @memset(d._rows, .{});
+        d._dirty = 0;
     }
 
     /// Whether any row is dirty.
     pub fn any(d: *const Damage) bool {
-        for (d._rows) |e| if (e.first <= e.last) return true;
-        return false;
+        return d._dirty != 0;
     }
 
     /// How many rows are dirty.
     pub fn count(d: *const Damage) usize {
-        var n: usize = 0;
-        for (d._rows) |e| {
-            if (e.first <= e.last) n += 1;
-        }
-        return n;
+        return d._dirty;
     }
 };
 
@@ -193,4 +196,35 @@ test "a resized map is clean and the right length" {
 
 test "damage storage stays behind its allocation owner" {
     try testing.expect(!@hasField(Damage, "rows"));
+}
+
+test "dirty counts follow repeated marks, clears and resizes" {
+    var d: Damage = try .init(testing.allocator, 4);
+    defer d.deinit(testing.allocator);
+    d.mark(std.math.maxInt(u16), 3);
+    d.mark(1, 3);
+    d.markSpan(2, 7, 3);
+    d.markSpan(3, 2, 0);
+    d.mark(0, 4);
+    try testing.expectEqual(@as(usize, 1), d.count());
+    d.markSpan(4, 4, 1);
+    try testing.expectEqual(@as(usize, 2), d.count());
+    d.markAll(8);
+    try testing.expectEqual(@as(usize, 4), d.count());
+    d.mark(0, 0);
+    d.markSpan(0, 7, 1);
+    try testing.expectEqual(@as(usize, 4), d.count());
+    d.clear();
+    d.clear();
+    try testing.expect(!d.any());
+    for (0..4) |row_n| try testing.expect(d.row(@intCast(row_n)) == null);
+    d.mark(0, 0);
+    try d.resize(testing.allocator, 0);
+    d.markAll(8);
+    try testing.expectEqual(@as(usize, 0), d.count());
+    try d.resize(testing.allocator, 2);
+    d.markAll(8);
+    d.markAll(0);
+    try testing.expect(!d.any());
+    try testing.expectEqual(@as(usize, 0), d.count());
 }

@@ -93,26 +93,16 @@ pub const Winsize = struct {
     }
 
     /// Finds a mouse report's cell and fraction using the fractional
-    /// `CellSize`. Null for pixels when the cell size is unknown. Reports
-    /// count from one; zero is treated as the first cell or pixel.
+    /// `CellSize`, through `morse.toCellsAt`. Null for pixels when the cell
+    /// size is unknown. Reports count from one; zero is treated as the first
+    /// cell or pixel.
     pub fn locate(ws: Winsize, event: morse.MouseEvent) ?MouseLocation {
-        if (!event.pixels) return .{
-            .col = event.x -| 1,
-            .row = event.y -| 1,
-            .x = 0.5,
-            .y = 0.5,
-        };
-        const cell = ws.cellSize() orelse return null;
-        const x = @as(f64, @floatFromInt(event.x -| 1)) / cell.width;
-        const y = @as(f64, @floatFromInt(event.y -| 1)) / cell.height;
-        const col = @floor(x);
-        const row = @floor(y);
-        return .{
-            .col = @intFromFloat(@min(col, std.math.maxInt(u32))),
-            .row = @intFromFloat(@min(row, std.math.maxInt(u32))),
-            .x = @floatCast(x - col),
-            .y = @floatCast(y - row),
-        };
+        const cell: CellSize = if (event.pixels)
+            ws.cellSize() orelse return null
+        else
+            .{ .width = 1, .height = 1, .reported = false };
+        const at = morse.toCellsAt(event, cell.width, cell.height);
+        return .{ .col = at.col, .row = at.row, .x = at.x, .y = at.y };
     }
 
     /// Folds one input event in: a resize, however it arrived, and the

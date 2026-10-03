@@ -94,7 +94,8 @@ const alphabet = [_][]const u8{
 };
 
 /// The styles it draws from: enough to exercise every arm of the colour
-/// union and both halves of the bold-and-dim off code.
+/// union, both halves of the bold-and-dim off code, and both scripts and the
+/// way back from each.
 const styles = [_]cellmod.Style{
     .{},
     .{ .bold = true },
@@ -109,6 +110,8 @@ const styles = [_]cellmod.Style{
     .{ .reverse = true },
     .{ .strikethrough = true, .overline = true, .blink = true },
     .{ .hidden = true },
+    .{ .script = .superscript },
+    .{ .script = .subscript, .overline = true, .fg = .palette(201) },
 };
 
 /// The links it draws from, including two that differ only in their
@@ -983,6 +986,28 @@ test "every cluster written to the last row reaches the terminal" {
             t.screen().textAt(col, size.rows - 1),
         );
     }
+}
+
+test "a raised or lowered cell reaches the terminal raised or lowered" {
+    const gpa = testing.allocator;
+    const size: geom.Size = .{ .cols = 6, .rows = 2 };
+    var h: Harness = try .init(gpa, size, .unicode);
+    defer h.deinit();
+    var t: Term = try .init(gpa, size);
+    defer t.deinit();
+    t.setMethod(.unicode);
+
+    try h.screen.write(0, 0, "x", .{ .script = .superscript }, .none);
+    try h.screen.write(1, 0, "2", .{ .script = .subscript, .bold = true }, .none);
+    try h.screen.write(2, 0, "y", .{}, .none);
+    try h.screen.write(0, 1, "z", .{ .script = .subscript, .overline = true }, .none);
+    _ = try h.frame(&t);
+    try testing.expect(t.screen().readCell(0, 0).?.style.script == .superscript);
+
+    // And back to the baseline on the next frame.
+    try h.screen.write(0, 0, "x", .{}, .none);
+    try h.screen.write(1, 0, "2", .{ .bold = true }, .none);
+    _ = try h.frame(&t);
 }
 
 test "a frame the damage map named but nothing changed in writes nothing at all" {
