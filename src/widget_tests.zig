@@ -8,6 +8,7 @@ test {
     _ = @import("widgets/edges.zig");
     _ = @import("widgets/list.zig");
     _ = @import("widgets/table.zig");
+    _ = @import("widgets/tree.zig");
     _ = @import("widgets/tabs.zig");
     _ = @import("widgets/gauge.zig");
     _ = @import("widgets/sparkline.zig");

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Tree` draws nodes under nodes from a slice in reading order, each with its depth and whether it is open as the program keeps it: guides joining a node to its parent and siblings, a symbol for open, closed and leaf, each row drawn as a list item, and a `State` with the selection and the scroll that walks only the rows shown.
+
 - `Tty.open` takes the pollable macOS terminal from conduit's `openControlling` instead of finding the device itself.
 
 - `Term` reads the bodies of OSC 8 and OSC 66 with `morse.parseHyperlink` and `morse.parseTextSize`, and its own parsing of them is gone. Sized text whose metadata morse does not read (a key twice, a value out of its range, a pair outside the grammar) is now dropped like any other sequence `Term` does not recognise, instead of drawn with the pairs it could read.

@@ -61,6 +61,8 @@ pub const Paragraph = @import("widgets/paragraph.zig").Paragraph;
 pub const Edges = @import("widgets/edges.zig").Edges;
 /// Items in a column, with a selection that scrolls itself into view.
 pub const List = @import("widgets/list.zig").List;
+/// Nodes under nodes, opened and closed by the program, with a selection.
+pub const Tree = @import("widgets/tree.zig").Tree;
 /// Rows in columns, with a header and a selection.
 pub const Table = @import("widgets/table.zig").Table;
 /// Titles in a row, one of them chosen.

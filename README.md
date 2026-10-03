@@ -5,7 +5,7 @@
 visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
 the terminal from the frame it is showing to the one it should be showing. A
-second module, `visor.widgets`, holds a layout solver and eighteen widgets
+second module, `visor.widgets`, holds a layout solver and nineteen widgets
 drawn on that grid, and the base never imports it.
 
 ## Usage
@@ -191,7 +191,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, `Quoted` line iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document`, caller `Theme`, `Rows` iterator, `Quoted` line iterator, wrap, scroll, code scrolling), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` and `TextInput.State`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
 

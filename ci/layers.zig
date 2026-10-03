@@ -78,6 +78,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/widgets/canvas.zig",
         "src/widgets/markdown.zig",
         "src/widgets/scroll.zig",
+        "src/widgets/tree.zig",
     } },
     .{ .name = "widget scenarios", .patterns = &.{
         "src/widgets/canvas_test.zig",
