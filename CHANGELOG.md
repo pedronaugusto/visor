@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Share the Zig CI gate through preflight, with requested fast runs and full merge checks.
+
 - `Caps.Probe` learns `colors` from morse's `Co` question, counting answers and refusals in the same waiting window as the other capabilities.
 
 - Pictures choose kitty, iTerm2, sixel, then cells, with a caller override: the probe reads DA1, XTSMGRAPHICS and XTVERSION, and callers can supply TERM_PROGRAM. `Layers.storeSixel` and `storeIterm` retain pictures for redraw after damage, movement, scrolling and removal, clipped to their cell rectangle; morse writes the bytes. Canvas can retain its raster as sixel pixels with a caller palette.

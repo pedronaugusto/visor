@@ -1,148 +1,43 @@
 name: CI
-
 on:
   push:
-    branches: [main, layers]
-  pull_request:
+    branches: [main]
   workflow_dispatch:
-
+    inputs:
+      full:
+        description: Run the full merge gate
+        type: boolean
+        default: false
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '17 4 * * 1'
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
-
-env:
-  ZIG_VERSION: 0.16.0
-
+  actions: read
 jobs:
-  # Debug catches safety faults; ReleaseSafe checks optimized code and timing on each host.
-  # The byte budgets and arithmetic assertions expect the same answers in every mode.
-  # The full test target already builds and runs the examples.
-  test:
-    name: test (${{ matrix.os }}, ${{ matrix.optimize }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        optimize: [Debug, ReleaseSafe]
-        include:
-          # One unchecked run catches optimizer-dependent behaviour; the other hosts have ReleaseSafe.
-          - os: ubuntu-latest
-            optimize: ReleaseFast
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - name: Test — ${{ matrix.optimize }}
-        run: zig build test -Doptimize=${{ matrix.optimize }}
-
-  # ReleaseSmall must build; its unchecked tests add no distinct assertion to ReleaseFast.
-  small:
-    name: compile (ReleaseSmall)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - run: zig build check -Doptimize=ReleaseSmall
-
-  # The input task and caller exchange data through a queue; ThreadSanitizer checks that crossing.
-  # Linux has a working runtime here; Debug is the detector's most complete instrumentation.
-  sanitizer:
-    name: ThreadSanitizer (Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - run: zig build test -Dthread-sanitizer -Doptimize=Debug --test-timeout 120s
-
-  # Formatting and source-policy checks read the same files on every host; once is enough.
-  source:
-    name: source checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - name: Formatting
-        run: zig fmt --check build.zig build.zig.zon src examples ci
-      - name: Casts out of the type system carry their reason
-        run: python3 ci/casts.py
-      - name: Source import boundaries
-        run: zig build check-imports
-      - name: Import gate regression checks
-        run: python3 ci/test_imports.py
-
-  # The round trip again, against a terminal emulator that is not ours.
-  # `Term` ships with this package, so a property that compares the renderer
-  # with it compares two readings of the same specifications by the same
-  # hand. This job compares the renderer with the terminal inside a shipping
-  # emulator, read through its own grid, over the same committed corpus.
-  # Where the two disagree, the emulator is right.
-  #
-  # Its own build under conformance/, with its own manifest, so nothing that
-  # builds a program on visor ever fetches a terminal emulator. Not on
-  # Windows: the emulator's own build is not tested there.
+  gate:
+    uses: pedronaugusto/preflight/.github/workflows/zig.yml@9cdff538384c14e7f268cbb4942c5075caf0ed42
+    with:
+      preflight-ref: 9cdff538384c14e7f268cbb4942c5075caf0ed42
+      full: ${{ github.event_name != 'workflow_dispatch' || inputs.full }}
+      attest: ${{ github.event_name == 'push' }}
   conformance:
-    name: conformance (${{ matrix.os }})
+    if: github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || inputs.full)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
+      - uses: actions/checkout@v4
         with:
-          version: ${{ env.ZIG_VERSION }}
+          repository: pedronaugusto/preflight
+          ref: 9cdff538384c14e7f268cbb4942c5075caf0ed42
+          path: .preflight
+      - uses: ./.preflight/.github/actions/setup
       - run: zig build conformance
-
-  # Every target the package claims, compiled from one host. A package with
-  # no operating system calls outside `tty` still has to prove that `tty`
-  # builds where it says it does — and most of `tty`'s Windows half is
-  # reached from a test and from nowhere else, so the step is `check`, which
-  # compiles both test binaries and every example and runs none of them.
-  cross:
-    name: cross (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - x86_64-linux-gnu
-          - aarch64-linux-gnu
-          - x86_64-linux-musl
-          - x86_64-windows-gnu
-          - aarch64-windows-gnu
-          - x86_64-macos
-          - aarch64-macos
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - run: zig build check -Dtarget=${{ matrix.target }}
-
-  # README.md's Usage block is a region of examples/usage.zig, which the job
-  # above runs. This is what keeps the two the same thing. No Zig needed.
-  readme:
-    name: README usage block
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - run: ci/check-readme.sh

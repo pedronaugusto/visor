@@ -13,7 +13,7 @@ drawn on that grid, and the base never imports it.
 The block below is a region of [`examples/usage.zig`](examples/usage.zig),
 which `zig build examples` builds and runs. CI compares the two.
 
-<!-- BEGIN GENERATED ci/readme_usage.sh -->
+<!-- BEGIN GENERATED zig build docs -- usage -->
 ```zig
 const std = @import("std");
 const visor = @import("visor");
@@ -803,7 +803,7 @@ wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
 the examples without running them, and CI does that for `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
 `aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
-[`ci/linux.sh`](ci/linux.sh) runs the suite in Docker from any machine; it is
+[`zig build ci-linux --`](zig build ci-linux --) runs the suite in Docker from any machine; it is
 a local script and no CI job calls it.
 
 `Tty` is the one file that reaches the operating system, through
@@ -816,7 +816,7 @@ compiled and not run.
 
 ## Testing
 
-Local build scripts clear `.zig-cache/{o,h,z,tmp}` above the measured cap in `ci/cache.sh`; run `sh ci/cache.sh` before direct Zig builds (only a rebuild is lost).
+Local build scripts clear `.zig-cache/{o,h,z,tmp}` above the measured cap through preflight; run `zig build cache` before direct Zig builds (only a rebuild is lost).
 
 `zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather

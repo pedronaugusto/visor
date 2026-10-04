@@ -4,6 +4,7 @@ test {
     _ = @import("widgets/layout.zig");
     _ = @import("widgets/block.zig");
     _ = @import("widgets/paragraph.zig");
+    _ = @import("widgets/markdown.zig");
     _ = @import("widgets/markdown_test.zig");
     _ = @import("widgets/markdown/gfm_test.zig");
     _ = @import("widgets/edges.zig");

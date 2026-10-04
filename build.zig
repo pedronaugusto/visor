@@ -1,9 +1,8 @@
 const std = @import("std");
+const preflight = @import("preflight");
 const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
-    importChecks(b);
-
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -162,7 +161,7 @@ pub fn build(b: *std.Build) void {
     // Built AND run, against the module a consumer gets. An example that is
     // only compiled proves the names still resolve; running it is what
     // proves the bytes are still the bytes. examples/usage.zig is also
-    // where README.md's Usage block comes from -- see ci/readme_usage.sh --
+    // where README.md's Usage block comes from -- see zig build docs -- usage --
     // so the snippet a reader copies cannot drift from code CI executes.
     //=====================================================================
 
@@ -220,6 +219,7 @@ pub fn build(b: *std.Build) void {
     if (test_filter) |f| conformance.addArg(b.fmt("-Dtest-filter={s}", .{f}));
     conformance.has_side_effects = true;
     conformance_step.dependOn(&conformance.step);
+    preflight.addCi(b, .{ .tests = test_step, .portable_tests = true });
 }
 
 /// Whether to hand this compilation to LLVM rather than to Zig's own
@@ -271,21 +271,3 @@ const uucode_fields = [_][]const u8{
 };
 
 // Build-only tooling belongs to a root invocation, never a consumer's dependency graph.
-fn importChecks(b: *std.Build) void {
-    const step = b.step("check-imports", "Check source layers and import boundaries");
-    if (b.pkg_hash.len != 0) return;
-    const dependency = if (b.lazyDependency("gantry", .{ .target = b.graph.host, .optimize = .Debug })) |dep| dep.module("gantry") else return;
-    const checker = b.addExecutable(.{
-        .name = "check-imports",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("ci/imports.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-            .imports = &.{.{ .name = "gantry", .module = dependency }},
-        }),
-    });
-    const run = b.addRunArtifact(checker);
-    run.setCwd(b.path("."));
-    if (b.args) |args| run.addArgs(args);
-    step.dependOn(&run.step);
-}
