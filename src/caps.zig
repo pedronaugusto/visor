@@ -8,7 +8,8 @@
 //! No environment variable is read here, ever — not `TERM`, not `COLORTERM`,
 //! not `TERM_PROGRAM`. Every one of those is a guess about a terminal that
 //! could have been asked. A caller that would rather guess sets the field
-//! itself; this file will not do it behind them.
+//! itself, or reads `COLORTERM` and `NO_COLOR` and hands them to
+//! `guessColor`; this file will not do it behind them.
 //!
 //! What this file will never hold: a terminfo reader, a capability database,
 //! a table of terminal names, or a timeout. One name is read, and it is a
@@ -24,13 +25,28 @@ pub const Caps = struct {
     /// How the terminal measures text. `wcwidth` until it says otherwise,
     /// and the one value both the measuring code and the drift rule read.
     width_method: textmod.Method = .wcwidth,
-    /// Whether the terminal takes `38;2;r;g;b`. A terminal without it
-    /// approximates the colour from its palette rather than losing it, so
-    /// this only decides whether asking is worth the bytes.
+    /// Whether the terminal takes `38;2;r;g;b`. Without it the renderer
+    /// writes each direct colour as the nearest one the terminal has, which
+    /// is a better approximation than most terminals make of their own.
     truecolor: bool = false,
+    /// How many colours the terminal says it has, its `Co` capability, or
+    /// null until it says. 256 is the palette and not direct colour; 8 and
+    /// 16 are the theme slots.
+    colors: ?u32 = null,
     /// Whether the user asked for no colour at all. Nothing here reads
-    /// `NO_COLOR`; a caller that honours it sets this.
+    /// `NO_COLOR`; a caller that honours it sets this, or has `guessColor`
+    /// set it.
     no_color: bool = false,
+    /// The colours to draw in, chosen by the caller, over whatever
+    /// `colorProfile` would have worked out from the fields above.
+    color_profile: ?morse.Color.Profile = null,
+    /// What the terminal's sixteen theme slots look like, which is what a
+    /// colour is matched against on a 16-colour terminal; xterm's when null.
+    /// `Palette.slots` gives them from the terminal's answers. Borrowed, so
+    /// a `Caps` stays small enough to hand down by value: the caller keeps
+    /// them alive, and a frame drawn after they change redraws what they
+    /// change.
+    slot_colors: ?*const morse.Color.Slots = null,
     /// Whether the terminal needs the semicolon spelling of the underline
     /// sub-parameters rather than the colon one.
     legacy_sgr: bool = false,
@@ -164,6 +180,45 @@ pub const Caps = struct {
         if (std.mem.eql(u8, name, "iTerm.app")) c.iterm_images = true;
     }
 
+    /// The colours the renderer draws in: `color_profile` when the caller
+    /// chose, no colour under `no_color`, direct colour with `truecolor`, and
+    /// otherwise what `colors` says -- the palette from 256, the sixteen slots
+    /// from 8. With none of them known, the 256-colour palette: every
+    /// terminal in use for a decade has it, while direct colour needs
+    /// evidence -- `Tc` or `RGB`, a `Co` of 2^24, or `COLORTERM` through
+    /// `guessColor`.
+    ///
+    /// Every colour of every cell is fitted to this before it is compared
+    /// with the last frame or written (`morse.Color.fit`), so two colours a
+    /// terminal shows the same are no difference worth a byte. A colour
+    /// already in the form the profile shows is left as it is, which is how
+    /// a theme gives its own colours for a poorer terminal: pick them by
+    /// this profile.
+    pub fn colorProfile(c: Caps) morse.Color.Profile {
+        if (c.color_profile) |profile| return profile;
+        if (c.no_color) return .none;
+        if (c.truecolor) return .rgb;
+        const n = c.colors orelse return .palette;
+        if (n >= 1 << 24) return .rgb;
+        if (n >= 256) return .palette;
+        if (n >= 8) return .ansi;
+        return .none;
+    }
+
+    /// Folds in the two environment variables colour is conventionally
+    /// given by, read by the caller: `COLORTERM` of `truecolor` or `24bit`
+    /// says direct colour, and a `NO_COLOR` that is set and not empty asks
+    /// for none (no-color.org). Pass null for a variable that is not set.
+    /// Learns only what they say and unlearns nothing.
+    pub fn guessColor(c: *Caps, colorterm: ?[]const u8, no_color: ?[]const u8) void {
+        if (colorterm) |v| {
+            if (std.mem.eql(u8, v, "truecolor") or std.mem.eql(u8, v, "24bit")) c.truecolor = true;
+        }
+        if (no_color) |v| {
+            if (v.len > 0) c.no_color = true;
+        }
+    }
+
     /// What the terminal can do, asked: `morse.Probe`'s questions, and its
     /// answers folded into a `Caps`.
     ///
@@ -227,6 +282,7 @@ pub const Caps = struct {
         /// read. Anything else is ignored, because a terminal answering a
         /// question nobody asked is not this package's problem to diagnose.
         pub fn feed(p: *Probe, event: morse.Event, now_ms: i64) void {
+            p.feedColors(event);
             const question = morse.probeAnswered(event) orelse return;
             if (!p._questions.asks(question)) return;
             // A graphics answer about one of the program's pictures answers
@@ -291,6 +347,30 @@ pub const Caps = struct {
                 // other image is not an answer to it.
                 .graphics => p._caps.kitty_graphics = true,
                 else => {},
+            }
+        }
+
+        /// The colour count, `Co`, which morse's questions do not ask: it
+        /// arrives when the program asked for it itself, and answers none of
+        /// the probe's questions.
+        fn feedColors(p: *Probe, event: morse.Event) void {
+            const reply = switch (event) {
+                .reply => |r| r,
+                else => return,
+            };
+            const c = switch (reply) {
+                .capability => |c| c,
+                else => return,
+            };
+            if (!c.known) return;
+            var it = c.iterator();
+            while (it.next()) |capability| {
+                var name: [8]u8 = undefined;
+                const n = capability.decodeName(&name) catch continue;
+                if (!std.mem.eql(u8, n, "Co")) continue;
+                var value: [10]u8 = undefined;
+                const v = capability.decodeValue(&value) catch continue;
+                p._caps.colors = std.fmt.parseInt(u32, v, 10) catch continue;
             }
         }
 
@@ -442,6 +522,42 @@ test "a 256-colour count is not evidence of truecolor" {
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
     p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
     try testing.expect(!p._caps.truecolor);
+}
+
+test "a colour count is folded in, and picks the profile" {
+    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
+    try testing.expectEqual(@as(?u32, 256), p._caps.colors);
+    try testing.expectEqual(morse.Color.Profile.palette, p._caps.colorProfile());
+}
+
+test "the colour profile, from what is known" {
+    const Profile = morse.Color.Profile;
+    try testing.expectEqual(Profile.palette, (Caps{}).colorProfile());
+    try testing.expectEqual(Profile.rgb, (Caps{ .truecolor = true }).colorProfile());
+    try testing.expectEqual(Profile.rgb, (Caps{ .colors = 1 << 24 }).colorProfile());
+    try testing.expectEqual(Profile.palette, (Caps{ .colors = 256 }).colorProfile());
+    try testing.expectEqual(Profile.ansi, (Caps{ .colors = 88 }).colorProfile());
+    try testing.expectEqual(Profile.ansi, (Caps{ .colors = 8 }).colorProfile());
+    try testing.expectEqual(Profile.none, (Caps{ .colors = 2 }).colorProfile());
+    try testing.expectEqual(Profile.none, (Caps{ .truecolor = true, .no_color = true }).colorProfile());
+    // The caller's choice is the answer, whatever else is known.
+    try testing.expectEqual(Profile.palette, (Caps{ .truecolor = true, .color_profile = .palette }).colorProfile());
+    try testing.expectEqual(Profile.rgb, (Caps{ .no_color = true, .color_profile = .rgb }).colorProfile());
+}
+
+test "COLORTERM and NO_COLOR say what they say and no more" {
+    var c: Caps = .{};
+    c.guessColor(null, null);
+    try testing.expectEqual(Caps{}, c);
+    c.guessColor("256color", "");
+    try testing.expectEqual(Caps{}, c);
+    c.guessColor("truecolor", null);
+    try testing.expect(c.truecolor and !c.no_color);
+    c = .{};
+    c.guessColor("24bit", "1");
+    try testing.expect(c.truecolor and c.no_color);
+    try testing.expectEqual(morse.Color.Profile.none, c.colorProfile());
 }
 
 test "a truecolor-specific capability enables truecolor" {

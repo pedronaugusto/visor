@@ -113,6 +113,19 @@ pub const Palette = struct {
         };
     }
 
+    /// The sixteen slots for `Caps.slot_colors`, which a colour is matched
+    /// against on a 16-colour terminal: each as the terminal answered, and
+    /// xterm's for any it has not. Null until it has answered one.
+    pub fn slots(p: *const Palette) ?morse.Color.Slots {
+        var out = morse.Color.xterm_slots;
+        var any = false;
+        for (p.entries, &out) |entry, *slot| if (entry) |rgb| {
+            slot.* = rgb;
+            any = true;
+        };
+        return if (any) out else null;
+    }
+
     /// Whether the terminal has said what its foreground and background are,
     /// which is what a colour mixed toward either needs.
     pub fn known(p: *const Palette) bool {
@@ -165,6 +178,16 @@ test "above the sixteen slots the palette is the cube and the ramp" {
     try testing.expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, p.resolve(.palette(231), .fg).?);
     try testing.expectEqual(Rgb{ .r = 8, .g = 8, .b = 8 }, p.resolve(.palette(232), .fg).?);
     try testing.expectEqual(Rgb{ .r = 238, .g = 238, .b = 238 }, p.resolve(.palette(255), .fg).?);
+}
+
+test "the slots are the terminal's where it answered and xterm's where it did not" {
+    var p: Palette = .{};
+    try testing.expectEqual(@as(?morse.Color.Slots, null), p.slots());
+    try testing.expect(p.update(answer("\x1b]4;1;rgb:f3/8b/a8\x1b\\")));
+    const slots = p.slots().?;
+    try testing.expectEqual(Rgb{ .r = 0xf3, .g = 0x8b, .b = 0xa8 }, slots[1]);
+    try testing.expectEqual(morse.Color.xterm_slots[0], slots[0]);
+    try testing.expectEqual(morse.Color.xterm_slots[15], slots[15]);
 }
 
 test "asking is one write of eighteen questions" {

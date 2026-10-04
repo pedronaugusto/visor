@@ -22,6 +22,7 @@ pub fn Rows(comptime render: type) type {
 
         const cellmod = @import("cell.zig");
         const Caps = @import("caps.zig").Caps;
+        const Profile = @import("dependencies.zig").morse.Color.Profile;
         const Screen = @import("screen.zig").Screen;
 
         const Cell = cellmod.internal.StoredCell;
@@ -37,8 +38,8 @@ pub fn Rows(comptime render: type) type {
         /// Writes this frame's rows as a scroll if they are one, and tells the
         /// previous frame that they moved. Returns how many rows the terminal moved,
         /// or null when the frame is not a scroll.
-        pub fn apply(r: *Renderer, out: *Writer, s: *Screen, caps: Caps) render.Error!?u32 {
-            const found = detect(r, s, caps) orelse return null;
+        pub fn apply(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps) render.Error!?u32 {
+            const found = detect(r, s, fit, caps) orelse return null;
             const rows = r.dimensions().rows;
 
             // The vacated rows are filled with the terminal's current background, so
@@ -77,7 +78,7 @@ pub fn Rows(comptime render: type) type {
 
         /// Looks for the offset that explains the most rows, then for the longest
         /// band of rows it explains, then checks that band cell by cell.
-        fn detect(r: *Renderer, s: *const Screen, caps: Caps) ?Found {
+        fn detect(r: *Renderer, s: *const Screen, comptime fit: Profile, caps: Caps) ?Found {
             const rows = r.dimensions().rows;
             if (rows < 3 or r._repaint_all) return null;
             if (s._damage.count() < min_dirty_rows) return null;
@@ -86,8 +87,8 @@ pub fn Rows(comptime render: type) type {
             const now = r._hashes[0..rows];
             const was = r._hashes[rows..][0..rows];
             for (0..rows) |i| {
-                now[i] = hashRow(@import("screen.zig").internal.row(s, @intCast(i)), caps);
-                was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), caps);
+                now[i] = hashRow(@import("screen.zig").internal.row(s, @intCast(i)), fit, caps);
+                was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), fit, caps);
             }
 
             const offset = bestOffset(now, was) orelse return null;
@@ -105,7 +106,7 @@ pub fn Rows(comptime render: type) type {
             var i = band.first;
             while (i <= band.last) : (i += 1) {
                 const source: u16 = if (up) i + distance else i - distance;
-                if (!rowsEqual(@import("screen.zig").internal.row(s, i), render.internal.prevRow(r, source), caps)) return null;
+                if (!rowsEqual(@import("screen.zig").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;
             }
 
             // A region whose edge runs through text drawn more than one row tall
@@ -196,8 +197,8 @@ pub fn Rows(comptime render: type) type {
 
         /// A row's contents as one number, so two frames can be compared row by row
         /// before they are compared cell by cell.
-        fn hashRow(cells: []const Cell, caps: Caps) u64 {
-            if (render.shownAsHeld(caps)) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
+        fn hashRow(cells: []const Cell, comptime fit: Profile, caps: Caps) u64 {
+            if (render.heldAs(fit, caps)) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
             // What the terminal shows, a stretch of cells at a time: fed to the hash
             // one cell at a time, the streaming state costs more than the hashing.
             // The value is the same however the input is cut.
@@ -206,7 +207,7 @@ pub fn Rows(comptime render: type) type {
             var i: usize = 0;
             while (i < cells.len) {
                 const n = @min(seen.len, cells.len - i);
-                for (seen[0..n], cells[i..][0..n]) |*to, c| to.* = render.visible(c, caps);
+                for (seen[0..n], cells[i..][0..n]) |*to, c| to.* = render.visibleAs(fit, c, caps);
                 h.update(std.mem.sliceAsBytes(seen[0..n]));
                 i += n;
             }
@@ -215,10 +216,10 @@ pub fn Rows(comptime render: type) type {
 
         /// Whether two rows hold the same thing, which is what a hash match is
         /// checked against.
-        fn rowsEqual(a: []const Cell, b: []const Cell, caps: Caps) bool {
+        fn rowsEqual(a: []const Cell, b: []const Cell, comptime fit: Profile, caps: Caps) bool {
             if (a.len != b.len) return false;
-            if (render.shownAsHeld(caps)) return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
-            for (a, b) |x, y| if (!render.visible(x, caps).eql(y)) return false;
+            if (render.heldAs(fit, caps)) return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
+            for (a, b) |x, y| if (!render.visibleAs(fit, x, caps).eql(y)) return false;
             return true;
         }
     };

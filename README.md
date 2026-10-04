@@ -705,7 +705,13 @@ environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
 `Caps.Probe` writes morse's probe and folds the answers in, and is settled
 when every question is answered or, after the device attributes, when the
 terminal has been quiet for the caller's quiet period; a caller who would
-rather trust the environment configures a separate `Caps` value. Probe
+rather trust the environment configures a separate `Caps` value, or hands
+`COLORTERM` and `NO_COLOR` to `Caps.guessColor`. Colours are drawn in what
+`Caps.colorProfile` says the terminal shows: direct colour, the 256-colour
+palette, the sixteen theme slots, or none. Every colour is fitted to it with
+`morse.Color.fit` before it is compared or written, matched against the
+terminal's own slots when `Palette.slots` has them. With nothing known it is
+the 256-colour palette; direct colour needs evidence. Probe
 questions and learned progress are internal; construct it with `init`, feed
 answers, and read copied capabilities and `hasAnswered` / `lastAnswerMs`. A mode the terminal
 answers set or reset is one it has: nothing has turned synchronised output or

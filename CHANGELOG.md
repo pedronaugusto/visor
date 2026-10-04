@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Pictures choose kitty, iTerm2, sixel, then cells, with a caller override: the probe reads DA1, XTSMGRAPHICS and XTVERSION, and callers can supply TERM_PROGRAM. `Layers.storeSixel` and `storeIterm` retain pictures for redraw after damage, movement, scrolling and removal, clipped to their cell rectangle; morse writes the bytes. Canvas can retain its raster as sixel pixels with a caller palette.
 
+- The renderer draws every colour in what the terminal shows, `Caps.colorProfile`: direct colour with `truecolor`, the 256-colour palette or the sixteen slots by the `Co` count, none under `no_color`, or the caller's `color_profile`; with nothing known, the 256-colour palette, where it drew direct colour before. Each colour is fitted with `morse.Color.fit` before the diff, so colours the terminal shows alike are no change, and against the slots `slot_colors` points at, which `Palette.slots` gives from the terminal's answers. `Caps.guessColor` reads `COLORTERM` and `NO_COLOR` values the caller passes in, and a `Co` answer the program asked for is folded in.
+
 - `Markdown.Document` reserves its text once, at the source's length, which it never exceeds, and reads a table cell's escaped pipes in place instead of copying the cell.
 
 - A row whose diff is one run up to its trailing blanks, over a tail the terminal already shows, is written as the diff without pricing the paint: the paint would write the same run and erase the rest. The bytes are unchanged; a screen redrawn over blank rows, as after `printAbove`, takes about half the time.
