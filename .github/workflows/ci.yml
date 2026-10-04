@@ -18,12 +18,23 @@ permissions:
   contents: read
   actions: read
 jobs:
-  gate:
-    uses: pedronaugusto/preflight/.github/workflows/zig.yml@709e5c312f5f9d86b3bbdd577ad3b0a6db0c8f44
+  skip:
+    if: github.event_name != 'push'
+    uses: pedronaugusto/preflight/.github/workflows/skip.yml@c9402c40326a17daaeb579293960b44c8eb2132b
     with:
-      preflight-ref: 709e5c312f5f9d86b3bbdd577ad3b0a6db0c8f44
+      full: ${{ github.event_name != 'workflow_dispatch' || inputs.full }}
+      preflight-ref: c9402c40326a17daaeb579293960b44c8eb2132b
+  gate:
+    needs: skip
+    if: always() && (github.event_name == 'push' || (needs.skip.result == 'success' && needs.skip.outputs.docs-only != 'true'))
+    uses: pedronaugusto/preflight/.github/workflows/zig.yml@c9402c40326a17daaeb579293960b44c8eb2132b
+    with:
+      preflight-ref: c9402c40326a17daaeb579293960b44c8eb2132b
       full: ${{ github.event_name != 'workflow_dispatch' || inputs.full }}
       attest: ${{ github.event_name == 'push' }}
+      # Generated from ci/workflow.json with zig build plan -- --full false.
+      fast-matrix: >-
+        {"include":[{"os":"ubuntu-latest","name":"Linux Debug","step":"preflight-fast","args":"-Doptimize=Debug","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"fast-linux-debug-0","artifact":""}]}
       # Generated from ci/workflow.json with zig build plan -- --full true.
       full-matrix: >-
         {"include":[{"os":"ubuntu-latest","name":"test (ubuntu-latest, Debug)","step":"ci","args":"-Doptimize=Debug -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"0dc96c7aa5b8dbd7","artifact":""},{"os":"ubuntu-latest","name":"test (ubuntu-latest, ReleaseSafe)","step":"ci","args":"-Doptimize=ReleaseSafe -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"2d572e8719d44f39","artifact":""},{"os":"ubuntu-latest","name":"test (ubuntu-latest, ReleaseFast)","step":"ci","args":"-Doptimize=ReleaseFast -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"8206d5a705df8f65","artifact":""},{"os":"ubuntu-latest","name":"source checks and documented snippets","step":"lint","args":"","cases":"","timeout":"","setup":false,"job_timeout":20,"cache_key":"10bdf2590c7a0117","artifact":""},{"os":"ubuntu-latest","name":"compile (ReleaseSmall)","step":"check","args":"-Doptimize=ReleaseSmall","cases":"","timeout":"","setup":false,"job_timeout":20,"cache_key":"2d9a4fde819ce492","artifact":""},{"os":"ubuntu-latest","name":"cross (all configured targets)","step":"preflight-cross","args":"","cases":"","timeout":"","setup":false,"job_timeout":20,"cache_key":"0abaad5bfb3ff7f9","artifact":""},{"os":"ubuntu-latest","name":"ThreadSanitizer (Linux)","step":"test","args":"-Dthread-sanitizer -Doptimize=Debug","cases":"","timeout":"--test-timeout 120s","setup":true,"job_timeout":20,"cache_key":"4ec6aa8d1272e7e4","artifact":""}]}
@@ -33,7 +44,8 @@ jobs:
         {"include":[{"os":"macos-latest","name":"test (macos-latest, Debug)","step":"ci-run","args":"-Doptimize=Debug -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"856b401ed5dfdcc7","artifact":"preflight-856b401ed5dfdcc7"},{"os":"macos-latest","name":"test (macos-latest, ReleaseSafe)","step":"ci-run","args":"-Doptimize=ReleaseSafe -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"2379a1e7a1df7841","artifact":"preflight-2379a1e7a1df7841"},{"os":"windows-latest","name":"test (windows-latest, Debug)","step":"ci-run","args":"-Doptimize=Debug -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"fdf46551155f42b8","artifact":"preflight-fdf46551155f42b8"},{"os":"windows-latest","name":"test (windows-latest, ReleaseSafe)","step":"ci-run","args":"-Doptimize=ReleaseSafe -Dci-lint=false -Dci-timings=true","cases":"","timeout":"","setup":true,"job_timeout":20,"cache_key":"0894f776de4f698d","artifact":"preflight-0894f776de4f698d"}]}
       compile-once: true
   conformance:
-    if: github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || inputs.full)
+    needs: skip
+    if: needs.skip.outputs.docs-only != 'true' && github.event_name != 'push' && (github.event_name != 'workflow_dispatch' || inputs.full)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,7 +56,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pedronaugusto/preflight
-          ref: 709e5c312f5f9d86b3bbdd577ad3b0a6db0c8f44
+          ref: c9402c40326a17daaeb579293960b44c8eb2132b
           path: .preflight
       - uses: ./.preflight/.github/actions/setup
       - run: zig build conformance
