@@ -1,0 +1,1507 @@
+[
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn hash(ctx: Context, e: Entry) u64 {",
+    "detail": "public function exposes private type 'Context'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn hash(ctx: Context, e: Entry) u64 {",
+    "detail": "public function exposes private type 'Entry'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
+    "detail": "public function exposes private type 'Context'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
+    "detail": "public function exposes private type 'Entry'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
+    "detail": "public function exposes private type 'Entry'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn hash(_: Adapted, key: []const u8) u64 {",
+    "detail": "public function exposes private type 'Adapted'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Adapted, key: []const u8, e: Entry) bool {",
+    "detail": "public function exposes private type 'Adapted'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Adapted, key: []const u8, e: Entry) bool {",
+    "detail": "public function exposes private type 'Entry'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/pool.zig",
+    "source": "pub fn deinit(p: *Graphemes, gpa: Allocator) void {",
+    "detail": "deinit should set p.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn hash(ctx: Context, i: u16) u64 {",
+    "detail": "public function exposes private type 'Context'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Context, a: u16, b: u16) bool {",
+    "detail": "public function exposes private type 'Context'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn hash(_: Adapted, key: Target) u64 {",
+    "detail": "public function exposes private type 'Adapted'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/pool.zig",
+    "source": "pub fn eql(ctx: Adapted, key: Target, i: u16) bool {",
+    "detail": "public function exposes private type 'Adapted'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/pool.zig",
+    "source": "pub fn deinit(l: *Links, gpa: Allocator) void {",
+    "detail": "deinit should set l.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/session.zig",
+    "source": "const layer: @import(\"layer.zig\").Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/session.zig",
+    "source": "try testing.expectEqual(@import(\"winsize.zig\").Pixels{ .width = 40, .height = 60 }, s.windowSize().area);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/session.zig",
+    "source": ".text_area_pixels => try testing.expectEqual(@import(\"winsize.zig\").Pixels{ .width = 40, .height = 60 }, s.windowSize().area),",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/session.zig",
+    "source": ".cell_pixels => try testing.expectEqual(@import(\"winsize.zig\").Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/session.zig",
+    "source": ".graphics => try testing.expectEqual(@import(\"layer.zig\").Image.State.ready, s.layers().image(2).?.state),",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/term.zig",
+    "source": "var seen: std.StringArrayHashMapUnmanaged(void) = .empty;",
+    "detail": "'StringArrayHashMapUnmanaged' is deprecated: Deprecated; use `array_hash_map.String`.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "try @import(\"screen.zig\").internal.resizeKeepingLink(&t._scr, size, &t._link);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "try w.writeAll(if (c.isTail()) opts.tail else @import(\"screen.zig\").internal.textOf(s, c));",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "if (@import(\"screen.zig\").internal.target(s, source.link)) |target| {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "want.textAt(col, row), a.style, @import(\"screen.zig\").internal.target(want, a.link), a.shape,",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "got.textAt(col, row), b.style, @import(\"screen.zig\").internal.target(got, b.link), b.shape,",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "fn linksEqual(want: *const Screen, got: *const Screen, a: @TypeOf(@as(@import(\"cell.zig\").internal.StoredCell, .{}).link), b: @TypeOf(@as(@import(\"cell.zig\").internal.StoredCell, .{}).link)) bool {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "fn linksEqual(want: *const Screen, got: *const Screen, a: @TypeOf(@as(@import(\"cell.zig\").internal.StoredCell, .{}).link), b: @TypeOf(@as(@import(\"cell.zig\").internal.StoredCell, .{}).link)) bool {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "const ta = @import(\"screen.zig\").internal.target(want, a);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/term.zig",
+    "source": "const tb = @import(\"screen.zig\").internal.target(got, b);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/moved_rows.zig",
+    "source": "fn deinit(f: *Fixture) void {",
+    "detail": "deinit should set f.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows.zig",
+    "source": "var t: @import(\"term.zig\").Term = try .init(gpa, f.screen.dimensions());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/screen_test.zig",
+    "source": "const pool = @import(\"pool.zig\");",
+    "detail": "unused import 'pool'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/screen_test.zig",
+    "source": "const textmod = @import(\"text.zig\");",
+    "detail": "unused import 'textmod'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/screen_test.zig",
+    "source": "var r = try @import(\"render.zig\").Renderer.init(gpa, s.dimensions());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/screen_test.zig",
+    "source": "var renderer = try @import(\"render.zig\").Renderer.init(testing.allocator, s.dimensions());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/bench.zig",
+    "source": "fn deinit(b: *Bench) void {",
+    "detail": "deinit should set b.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/layer_test.zig",
+    "source": "fn deinit(f: *Fixture) void {",
+    "detail": "deinit should set f.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/layer_test.zig",
+    "source": "while (std.mem.indexOf(u8, rest, \"\\x1b_G\")) |at| {",
+    "detail": "'indexOf' is deprecated: Deprecated in favor of `find`.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/layer_test.zig",
+    "source": "try @import(\"layer.zig\").test_access.record(&l, .{ .id = id });",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/layer_test.zig",
+    "source": "try @import(\"layer.zig\").test_access.record(&l, .{ .id = next });",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/layer_test.zig",
+    "source": "try testing.expectEqual(std.math.maxInt(u32), try @import(\"layer.zig\").test_access.sharedSize(std.math.maxInt(u32)));",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/layer_test.zig",
+    "source": "try testing.expectError(error.PayloadTooLarge, @import(\"layer.zig\").test_access.sharedSize(oversized));",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/widgets.zig",
+    "source": "const std = @import(\"std\");",
+    "detail": "unused import 'std'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z016",
+    "path": "src/corpus.zig",
+    "source": "std.debug.assert(lo >= s.base and hi - s.base < 64 and lo <= hi);",
+    "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const std = @import(\"std\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const morse = @import(\"dependencies.zig\").morse;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const cellmod = @import(\"cell.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const Caps = @import(\"caps.zig\").Caps;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const Profile = @import(\"dependencies.zig\").morse.Color.Profile;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "const Screen = @import(\"screen.zig\").Screen;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "now[i] = hashRow(@import(\"screen.zig\").internal.row(s, @intCast(i)), fit, caps);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "if (!rowsEqual(@import(\"screen.zig\").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"screen.zig\").internal.row(s, top - 1), @import(\"screen.zig\").internal.row(s, top)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"screen.zig\").internal.row(s, top - 1), @import(\"screen.zig\").internal.row(s, top)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"screen.zig\").internal.row(s, bottom), @import(\"screen.zig\").internal.row(s, bottom + 1)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/moved_rows_impl.zig",
+    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"screen.zig\").internal.row(s, bottom), @import(\"screen.zig\").internal.row(s, bottom + 1)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/input.zig",
+    "source": "fn deinit(p: *Piped) void {",
+    "detail": "deinit should set p.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z001",
+    "path": "src/input.zig",
+    "source": "fn type_(p: *Piped, bytes: []const u8) void {",
+    "detail": "function 'type_' should be camelCase",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/input.zig",
+    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/input.zig",
+    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/input.zig",
+    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/input.zig",
+    "source": "std.Io.sleep(testing.io, .fromMilliseconds(30), .awake) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/caps.zig",
+    "source": "pub fn init(asked: morse.Probe) Probe {",
+    "detail": "public function exposes private type 'Probe'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z016",
+    "path": "src/render.zig",
+    "source": "std.debug.assert(r._gpa.ptr == prepared._gpa.ptr and r._gpa.vtable == prepared._gpa.vtable);",
+    "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn draw(r: *Renderer, w: *Writer, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn leave(r: *Renderer, w: *Writer) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn printLines(r: *Renderer, out: *Writer, lines: *Screen, s: *Screen, comptime fit: Profile, caps: Caps, stats: *Stats) Error!void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/render.zig",
+    "source": "std.mem.copyForwards(Cell, region[0 .. region.len - moved], region[moved..]);",
+    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/render.zig",
+    "source": "std.mem.copyForwards(bool, untrusted[0 .. untrusted.len - distance], untrusted[distance..]);",
+    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/render.zig",
+    "source": "std.mem.copyBackwards(Cell, region[moved..], region[0 .. region.len - moved]);",
+    "detail": "'copyBackwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be >= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/render.zig",
+    "source": "std.mem.copyBackwards(bool, untrusted[distance..], untrusted[0 .. untrusted.len - distance]);",
+    "detail": "'copyBackwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be >= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn drawRows(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps, stats: *Stats) Error!void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn rowUnchanged(r: *const Renderer, s: *const Screen, comptime fit: Profile, caps: Caps, row: u16, first: u16, last: u16) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn rowDrifts(s: *const Screen, comptime fit: Profile, caps: Caps, row: u16, first: u16, last: u16) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn allChanged(r: *const Renderer, s: *const Screen, comptime fit: Profile, caps: Caps, row: u16) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn diffIsOneRun(r: *Renderer, s: *Screen, comptime fit: Profile, caps: Caps, row: u16) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn firstRunEnd(r: *Renderer, s: *Screen, comptime fit: Profile, caps: Caps, row: u16) ?u16 {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn diffIsPaintWithoutErase(r: *const Renderer, s: *const Screen, comptime fit: Profile, caps: Caps, row: u16, run_end: u16) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn paintTextFloor(_: *Renderer, s: *Screen, comptime fit: Profile, caps: Caps, row: u16) usize {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn paintRowCost(r: *Renderer, state: *CostState, s: *Screen, comptime fit: Profile, caps: Caps, row: u16) usize {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn writeCellsState(r: *Renderer, state: *CostState, s: *Screen, comptime fit: Profile, caps: Caps, row: u16, from: u16, to: u16) void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn textCostExceeds(s: *Screen, comptime fit: Profile, caps: Caps, row: u16, from: u16, to: u16, limit: usize) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn paintRow(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps, row: u16, stats: *Stats) Error!void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn writeApart(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8, stats: *Stats) Error!void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn writeApartCost(r: *Renderer, state: *CostState, s: *Screen, comptime fit: Profile, caps: Caps, row: u16, left: u16, col: u16, c: Cell, text: []const u8) usize {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "comptime fit: Profile,",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn commitRow(r: *Renderer, s: *const Screen, comptime fit: Profile, caps: Caps, row: u16, first: u16, last: u16) void {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn leaveFlushed(r: *Renderer, out: *Writer) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Renderer.Stats) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z015",
+    "path": "src/render.zig",
+    "source": "pub fn setLink(r: *Renderer, out: *Writer, s: *Screen, to: Link, caps: Caps, stats: *Renderer.Stats) Error!void {",
+    "detail": "public function exposes private error set 'Error'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn trailingBlank(cells: []const Cell, comptime fit: Profile, caps: Caps) u16 {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn joinsApart(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, comptime fit: Profile, caps: Caps) bool {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn joinedTo(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, comptime fit: Profile, caps: Caps) ?u16 {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn joinsAcross(s: *Screen, row: u16, col: u16, c: Cell, text: []const u8, comptime fit: Profile, caps: Caps) ?u16 {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/render.zig",
+    "source": "fn sameRunLen(cells: []const Cell, col: u16, to: u16, same: Cell, comptime fit: Profile, caps: Caps) u16 {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/render.zig",
+    "source": "fn deinit(f: *Fixture) void {",
+    "detail": "deinit should set f.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "const moved_rows = @import(\"moved_rows_impl.zig\").Rows(@This());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "const picture: @import(\"layer.zig\").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, term.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, term.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render.zig",
+    "source": "const picture: @import(\"layer.zig\").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/roundtrip.zig",
+    "source": "fn deinit(h: *Harness) void {",
+    "detail": "deinit should set h.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/roundtrip.zig",
+    "source": "fn checkDamage(s: *const Screen, before: []const @import(\"cell.zig\").internal.StoredCell) !void {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/roundtrip.zig",
+    "source": "const before = try gpa.alloc(@import(\"cell.zig\").internal.StoredCell, h.screen._cells.len);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_test.zig",
+    "source": "for (@import(\"screen.zig\").internal.rowMut(&plain, @intCast(r))) |*c| {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/cell.zig",
+    "source": "pub fn index(l: @This()) ?u16 {",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/cell.zig",
+    "source": "pub fn generation(l: @This()) u64 {",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/cell.zig",
+    "source": "pub fn fits(c: Cell, col: u16, row: u16, size: @import(\"geom.zig\").Size) bool {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/damage.zig",
+    "source": "pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {",
+    "detail": "deinit should set d.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/layer.zig",
+    "source": "pub fn before(a: Order, b: Order) bool {",
+    "detail": "public function exposes private type 'Order'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/layer.zig",
+    "source": "pub fn before(a: Order, b: Order) bool {",
+    "detail": "public function exposes private type 'Order'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/layer.zig",
+    "source": "pub const test_access = if (@import(\"builtin\").is_test) struct {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/sextants.zig",
+    "source": "pub fn draw(s: Sextants, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/raster.zig",
+    "source": "pub fn dimensions(s: *const Surface) Pixels {",
+    "detail": "public function exposes private type 'Pixels'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/chart.zig",
+    "source": "pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/list.zig",
+    "source": "pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z020",
+    "path": "src/widgets/list.zig",
+    "source": "fn height(h: *@This(), at: usize) usize {",
+    "detail": "inline @This(); assign it to `const Self = @This();`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/keys.zig",
+    "source": "pub fn draw(k: Keys, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/selection.zig",
+    "source": "pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {",
+    "detail": "public function exposes private type 'Direction'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z023",
+    "path": "src/widgets/selection.zig",
+    "source": "pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {",
+    "detail": "'comptime' parameter should come before 'other'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/rule.zig",
+    "source": "pub fn draw(r: Rule, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/tabs.zig",
+    "source": "pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/markdown.zig",
+    "source": "pub fn init(document: *const reader.Document, cols: u16, method: visor.Method) RowIterator {",
+    "detail": "public function exposes private type 'RowIterator'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/markdown.zig",
+    "source": "pub fn next(it: *RowIterator) ?VisualRow {",
+    "detail": "public function exposes private type 'VisualRow'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/widgets/harness.zig",
+    "source": "pub fn deinit(h: *Harness) void {",
+    "detail": "deinit should set h.* = undefined",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/paragraph.zig",
+    "source": "pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/paragraph.zig",
+    "source": "pub fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) RowIterator {",
+    "detail": "public function exposes private type 'RowIterator'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/widgets/scroll.zig",
+    "source": "const visor = @import(\"visor\");",
+    "detail": "unused import 'visor'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/widgets/scroll.zig",
+    "source": "pub fn bar(v: View, total: usize) @import(\"scrollbar.zig\").Scrollbar.State {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/table.zig",
+    "source": "pub fn draw(t: Table, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn painter(c: Canvas, win: Window) Painter {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn point(p: Painter, x: f64, y: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn rect(",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn polyline(p: Painter, coords: []const [2]f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn points(p: Painter, coords: []const [2]f64, style: Style) !void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn map(p: Painter, contours: []const []const [2]f64, style: Style) !void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {",
+    "detail": "public function exposes private type 'Style'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/widgets/canvas.zig",
+    "source": "const cp = try std.unicode.utf8Decode(drawn);",
+    "detail": "'utf8Decode' is deprecated: Deprecated. This function has an awkward API that is too easy to use incorrectly.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub const Surface = @import(\"raster.zig\").Surface;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub const Paint = @import(\"raster.zig\").Paint;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/widgets/canvas.zig",
+    "source": "pub const Blend = @import(\"raster.zig\").Blend;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/scrollbar.zig",
+    "source": "pub fn thumbIn(s: State, len: u16) struct { start: u16, len: u16 } {",
+    "detail": "public function exposes private type 'State'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/scrollbar.zig",
+    "source": "pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/widgets/markdown_gfm_test.zig",
+    "source": "const visor = @import(\"visor\");",
+    "detail": "unused import 'visor'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/gauge.zig",
+    "source": "pub fn draw(g: Gauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/gauge.zig",
+    "source": "pub fn draw(g: LineGauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/barchart.zig",
+    "source": "pub fn draw(c: BarChart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/tree.zig",
+    "source": "pub fn draw(t: Tree, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/sparkline.zig",
+    "source": "pub fn draw(s: Sparkline, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/calendar.zig",
+    "source": "pub fn draw(c: Calendar, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn apply(p: Padding, area: Rect) Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn apply(p: Padding, area: Rect) Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn split(l: Layout, area: Rect, out: []Rect) []Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn splitFixed(l: Layout, comptime n: usize, area: Rect) [n]Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn repeat(direction: Direction, requested: Rect, spacing: u16, out: []Rect) []Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/layout.zig",
+    "source": "pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {",
+    "detail": "public function exposes private type 'Rect'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn next(r: *Rows) ?Row {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn rows(text: []const u8, cols: u16, method: Method) Rows {",
+    "detail": "public function exposes private type 'Method'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn rowCount(text: []const u8, cols: u16, method: Method) usize {",
+    "detail": "public function exposes private type 'Method'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn place(text: []const u8, cols: u16, method: Method, cursor: usize) Place {",
+    "detail": "public function exposes private type 'Method'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn at(text: []const u8, cols: u16, method: Method, row: usize, col: usize) usize {",
+    "detail": "public function exposes private type 'Method'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn draw(t: TextInput, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn init(gpa: std.mem.Allocator) Buffer {",
+    "detail": "public function exposes private type 'Buffer'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn initText(gpa: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error!Buffer {",
+    "detail": "public function exposes private type 'Buffer'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn selection(b: *const Buffer) ?Range {",
+    "detail": "public function exposes private type 'Range'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/text_input.zig",
+    "source": "pub fn moveRows(b: *Buffer, by: isize, cols: u16, method: Method, extend: bool) void {",
+    "detail": "public function exposes private type 'Method'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/widgets/text_input.zig",
+    "source": "std.mem.copyForwards(u8, b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);",
+    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z011",
+    "path": "src/widgets/text_input.zig",
+    "source": "std.mem.copyForwards(Edit, b._edits.items[0..left], b._edits.items[drop..]);",
+    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/block.zig",
+    "source": "pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/block.zig",
+    "source": "pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {",
+    "detail": "public function exposes private type 'Window'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const std = @import(\"std\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const morse = @import(\"dependencies.zig\").morse;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const cellmod = @import(\"cell.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const geom = @import(\"geom.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const textmod = @import(\"text.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window_impl.zig",
+    "source": "const Target = @import(\"pool.zig\").Target;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z017",
+    "path": "src/screen.zig",
+    "source": "return try pool.OwnedTarget.init(gpa, t);",
+    "detail": "avoid try in return; hoist it to preserve payload coercion: `const value = try pool.OwnedTarget.init(gpa, t); return value;`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn eql(row: Row, other: Row) bool {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn eql(row: Row, other: Row) bool {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn diff(row: Row, other: Row) Row.Diff {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn diff(row: Row, other: Row) Row.Diff {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn len(row: Row) usize {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/screen.zig",
+    "source": "pub fn get(row: Row, col: usize) ?Cell {",
+    "detail": "public function exposes private type 'Row'",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z004",
+    "path": "src/screen.zig",
+    "source": "const multi = Cell{ .text = try s.intern(\"pooled-multiple-clusters\") };",
+    "detail": "prefer type annotation 'Cell' with an anonymous initializer for 'multi'; preserve the declaration kind, modifiers, and fields",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z004",
+    "path": "src/screen.zig",
+    "source": "const foreign = Cell{ .text = .inlined(\"x\"), .shape = .{ .kind = .wide }, .link = try s.link(\"https://bridge.invalid\", \"\") };",
+    "detail": "prefer type annotation 'Cell' with an anonymous initializer for 'foreign'; preserve the declaration kind, modifiers, and fields",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/screen.zig",
+    "source": "pub const window_api = @import(\"window_impl.zig\").WindowApi(@This());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/screen.zig",
+    "source": "try testing.expectEqual(@import(\"damage.zig\").Span{ .first = 2, .last = 2 }, s._damage.row(1).?);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/screen.zig",
+    "source": "pub const test_access = if (@import(\"builtin\").is_test) struct {",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z029",
+    "path": "src/tty.zig",
+    "source": "try fcntlSet(fd, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));",
+    "detail": "redundant @as(u32, ...): type u32 already known from context",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z029",
+    "path": "src/tty.zig",
+    "source": "try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));",
+    "detail": "redundant @as(u32, ...): type u32 already known from context",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/tty.zig",
+    "source": "terminal.restore(t._input.handle, input_mode) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/tty.zig",
+    "source": "if (!is_windows) terminal.restore(was.handle, was.mode) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/tty.zig",
+    "source": "r.leave(&out) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/tty.zig",
+    "source": "terminal.restore(was.input, was.input_mode) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z026",
+    "path": "src/tty.zig",
+    "source": "terminal.restore(was.output, was.output_mode) catch {};",
+    "detail": "empty catch block suppresses errors: `catch {}`",
+    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  }
+]
