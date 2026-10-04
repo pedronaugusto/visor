@@ -112,7 +112,7 @@ pub const Sextants = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "the three patterns with older glyphs, and the order of the rest" {
     try testing.expectEqualStrings(" ", sextant(0));

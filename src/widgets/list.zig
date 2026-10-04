@@ -324,7 +324,7 @@ fn selectedStart(heights: anytype, from: usize, selected: usize, room: u16) usiz
 const Run = List.Segment;
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 const three = [_]Item{ .{ .text = "alpha" }, .{ .text = "beta" }, .{ .text = "gamma" } };
 

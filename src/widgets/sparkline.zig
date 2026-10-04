@@ -93,7 +93,7 @@ pub const Sparkline = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a sparkline scales its points against the largest of them" {
     var h: Harness = try .init(testing.allocator, 5, 1);

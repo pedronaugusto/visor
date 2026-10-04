@@ -209,7 +209,7 @@ pub const Chart = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a chart draws its axes and its labels around the plot" {
     var h: Harness = try .init(testing.allocator, 12, 5);

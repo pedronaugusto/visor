@@ -112,7 +112,7 @@ pub const Block = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a block draws its frame and gives back the inside" {
     var h: Harness = try .init(testing.allocator, 10, 4);

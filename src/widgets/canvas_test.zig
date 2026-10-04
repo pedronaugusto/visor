@@ -1,7 +1,7 @@
 const std = @import("std");
 const visor = @import("visor");
 const Canvas = @import("canvas.zig").Canvas;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 const t = std.testing;
 
 test "canvas pixels blend straight alpha and additive light" {

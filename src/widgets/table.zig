@@ -194,7 +194,7 @@ pub const Table = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 const rows = [_]Table.Row{
     .{ .cells = &.{ "one", "1" } },

@@ -892,7 +892,7 @@ checks the invariants and the damage map after every operation, a
 `checkAllAllocationFailures` pass on `init`, `resize`, `intern` and
 `compactPool`, and budgets — a full repaint at 120×40 writes fewer than 8 100
 bytes, a frame in which one cell changed fewer than 64, and a frame in which
-nothing changed writes nothing. The generated corpus in `src/corpus.zig` runs
+nothing changed writes nothing. The generated corpus in `src/testing/corpus.zig` runs
 on every push, and both builds replay the same bytes; `zig build test --fuzz`
 keeps searching beyond it. Every property reads its input through
 `corpus.Dice`: under the fuzzer each answer is the fuzzer's, and on a replayed

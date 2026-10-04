@@ -15,13 +15,13 @@
 pub fn WindowApi(comptime screen_module: type) type {
     return struct {
         const std = @import("std");
-        const morse = @import("dependencies.zig").morse;
+        const morse = @import("../dependencies.zig").morse;
 
-        const cellmod = @import("cell.zig");
-        const geom = @import("geom.zig");
-        const textmod = @import("text.zig");
+        const cellmod = @import("../cell.zig");
+        const geom = @import("../geom.zig");
+        const textmod = @import("../text.zig");
         const Screen = screen_module.Screen;
-        const Target = @import("pool.zig").Target;
+        const Target = @import("../pool.zig").Target;
 
         const Cell = cellmod.Cell;
         const Link = cellmod.Link;

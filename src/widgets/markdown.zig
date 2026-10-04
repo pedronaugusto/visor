@@ -2,7 +2,7 @@
 //! A Document owns parsing; rowCount and draw share the same row iterator.
 const std = @import("std");
 const visor = @import("visor");
-const reader = @import("markdown_reader.zig");
+const reader = @import("markdown/markdown_reader.zig");
 const Paragraph = @import("paragraph.zig").Paragraph;
 const layout = @import("layout.zig");
 

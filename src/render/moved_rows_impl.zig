@@ -18,12 +18,12 @@
 pub fn Rows(comptime render: type) type {
     return struct {
         const std = @import("std");
-        const morse = @import("dependencies.zig").morse;
+        const morse = @import("../dependencies.zig").morse;
 
-        const cellmod = @import("cell.zig");
-        const Caps = @import("caps.zig").Caps;
-        const Profile = @import("dependencies.zig").morse.Color.Profile;
-        const Screen = @import("screen.zig").Screen;
+        const cellmod = @import("../cell.zig");
+        const Caps = @import("../caps.zig").Caps;
+        const Profile = @import("../dependencies.zig").morse.Color.Profile;
+        const Screen = @import("../screen.zig").Screen;
 
         const Cell = cellmod.internal.StoredCell;
         const Renderer = render.Renderer;
@@ -87,7 +87,7 @@ pub fn Rows(comptime render: type) type {
             const now = r._hashes[0..rows];
             const was = r._hashes[rows..][0..rows];
             for (0..rows) |i| {
-                now[i] = hashRow(@import("screen.zig").internal.row(s, @intCast(i)), fit, caps);
+                now[i] = hashRow(@import("../screen.zig").internal.row(s, @intCast(i)), fit, caps);
                 was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), fit, caps);
             }
 
@@ -106,7 +106,7 @@ pub fn Rows(comptime render: type) type {
             var i = band.first;
             while (i <= band.last) : (i += 1) {
                 const source: u16 = if (up) i + distance else i - distance;
-                if (!rowsEqual(@import("screen.zig").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;
+                if (!rowsEqual(@import("../screen.zig").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;
             }
 
             // A region whose edge runs through text drawn more than one row tall
@@ -114,8 +114,8 @@ pub fn Rows(comptime render: type) type {
             // and a terminal clears a block it no longer holds whole. Either frame
             // is enough to refuse, because the terminal holds the one and is about
             // to be given the other.
-            if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import("screen.zig").internal.row(s, top - 1), @import("screen.zig").internal.row(s, top)))) return null;
-            if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import("screen.zig").internal.row(s, bottom), @import("screen.zig").internal.row(s, bottom + 1)))) return null;
+            if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import("../screen.zig").internal.row(s, top - 1), @import("../screen.zig").internal.row(s, top)))) return null;
+            if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import("../screen.zig").internal.row(s, bottom), @import("../screen.zig").internal.row(s, bottom + 1)))) return null;
             return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
         }
 

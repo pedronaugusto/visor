@@ -167,7 +167,7 @@ fn skipColumns(text: []const u8, n: u16, method: visor.Method) []const u8 {
 }
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a paragraph wraps by word and stops at the last row" {
     var h: Harness = try .init(testing.allocator, 12, 3);

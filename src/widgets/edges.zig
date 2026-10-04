@@ -42,7 +42,7 @@ pub const Edges = struct {
     }
 };
 
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "edges keep both sides and clips the left before the right" {
     var h: Harness = try .init(std.testing.allocator, 12, 1);

@@ -59,9 +59,9 @@ const braille_base: u21 = 0x2800;
 
 /// A plane to draw shapes on, in the caller's own coordinates.
 pub const Canvas = struct {
-    pub const Surface = @import("raster.zig").Surface;
-    pub const Paint = @import("raster.zig").Paint;
-    pub const Blend = @import("raster.zig").Blend;
+    pub const Surface = @import("canvas/raster.zig").Surface;
+    pub const Paint = @import("canvas/raster.zig").Paint;
+    pub const Blend = @import("canvas/raster.zig").Blend;
 
     /// One terminal plotting shape. Maps borrow separate contours in plot
     /// coordinates; longitude and latitude fit bounds [-180,180], [-90,90].
@@ -460,7 +460,7 @@ fn place(value: f64, bounds: [2]f64, marks: u32) ?u32 {
 }
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a braille cell gathers every dot that lands in it" {
     var h: Harness = try .init(testing.allocator, 1, 1);

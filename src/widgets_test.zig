@@ -19,7 +19,7 @@ test {
     _ = @import("widgets/canvas.zig");
     _ = @import("widgets/canvas_test.zig");
     _ = @import("widgets/calendar.zig");
-    _ = @import("widgets/harness.zig");
+    _ = @import("testing/widget_harness.zig");
     _ = @import("widgets/text_input.zig");
     _ = @import("widgets/scroll.zig");
     _ = @import("widgets/keys.zig");

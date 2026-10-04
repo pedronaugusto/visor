@@ -782,7 +782,7 @@ checks them with, and a second module of widgets drawn on the grid.
   that builds a program on this package ever fetches a terminal emulator. CI
   runs it on Linux and macOS.
 
-- **`src/corpus.zig`**, the generated inputs both round trips replay, as a
+- **`src/testing/corpus.zig`**, the generated inputs both round trips replay, as a
   module of its own so the suite inside the package and the conformance build
   outside it are given the same bytes.
 

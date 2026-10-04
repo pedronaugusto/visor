@@ -416,7 +416,7 @@ pub const Tree = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 const corpus = @import("corpus");
 
 // src

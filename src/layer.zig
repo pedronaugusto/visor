@@ -34,7 +34,7 @@ const morse = @import("dependencies.zig").morse;
 
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
-const shm = @import("shm.zig");
+const shm = @import("layer/shm.zig");
 const Winsize = @import("winsize.zig").Winsize;
 
 const Allocator = std.mem.Allocator;

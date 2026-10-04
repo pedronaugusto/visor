@@ -104,7 +104,7 @@ pub const Scrollbar = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a scrollbar's thumb is as long as the viewport is of the content" {
     var h: Harness = try .init(testing.allocator, 1, 8);

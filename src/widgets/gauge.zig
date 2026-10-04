@@ -114,7 +114,7 @@ pub const LineGauge = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "a gauge fills whole cells and draws the eighth that is left over" {
     var h: Harness = try .init(testing.allocator, 8, 1);

@@ -71,7 +71,7 @@ pub const Keys = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "the strip sits against the right edge, a margin in, gaps undrawn" {
     var h: Harness = try .init(testing.allocator, 24, 1);

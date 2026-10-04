@@ -1,7 +1,7 @@
 const std = @import("std");
 const widgets = @import("../widgets.zig");
 const visor = @import("visor");
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 const t = std.testing;
 
 test "markdown wrapping keeps nested quote bars and list hanging indents" {

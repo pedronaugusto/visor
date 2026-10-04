@@ -700,7 +700,7 @@ pub const TextInput = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 const corpus = @import("corpus");
 
 fn allRows(text: []const u8, cols: u16) ![]TextInput.Row {

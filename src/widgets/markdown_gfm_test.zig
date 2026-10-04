@@ -12,7 +12,7 @@
 const std = @import("std");
 const widgets = @import("../widgets.zig");
 const visor = @import("visor");
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 const corpus = @import("corpus");
 const t = std.testing;
 

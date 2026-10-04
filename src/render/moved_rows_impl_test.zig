@@ -16,11 +16,11 @@
 //! cells is not a match.
 
 const std = @import("std");
-const morse = @import("dependencies.zig").morse;
-const cellmod = @import("cell.zig");
-const render = @import("render.zig");
-const Caps = @import("caps.zig").Caps;
-const Screen = @import("screen.zig").Screen;
+const morse = @import("../dependencies.zig").morse;
+const cellmod = @import("../cell.zig");
+const render = @import("../render.zig");
+const Caps = @import("../caps.zig").Caps;
+const Screen = @import("../screen.zig").Screen;
 const Renderer = render.Renderer;
 const Cell = cellmod.internal.StoredCell;
 const testing = std.testing;
@@ -73,7 +73,7 @@ const Fixture = struct {
     }
 };
 
-const geomSize = @import("geom.zig").Size;
+const geomSize = @import("../geom.zig").Size;
 
 test "a whole screen scrolled up is one sequence and not a repaint" {
     var f: Fixture = try .init(testing.allocator, 10, 12);
@@ -166,7 +166,7 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     var f: Fixture = try .init(gpa, 10, 9);
     defer f.deinit();
     f.caps.scaled_text = true;
-    var t: @import("term.zig").Term = try .init(gpa, f.screen.dimensions());
+    var t: @import("../term.zig").Term = try .init(gpa, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
     f.renderer._shown = null;
@@ -187,5 +187,5 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     const stats = try f.draw();
     try t.feed(f.out.written());
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
-    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+    try @import("../term.zig").expectScreensEqual(&f.screen, t.screen());
 }

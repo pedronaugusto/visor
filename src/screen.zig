@@ -86,7 +86,7 @@ pub const internal = struct {
 };
 
 /// The grid.
-pub const window_api = @import("window_impl.zig").WindowApi(@This());
+pub const window_api = @import("window/window_impl.zig").WindowApi(@This());
 
 pub const Screen = struct {
     // Fields prefixed _ belong to the owner; change geometry through resize.

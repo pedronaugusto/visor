@@ -73,7 +73,7 @@ pub fn build(b: *std.Build) void {
     // The inputs the round-trip properties replay. Its own module because
     // the suite inside the package and the conformance build outside it
     // have to replay the same bytes, and a file belongs to one module.
-    const corpus = b.addModule("corpus", .{ .root_source_file = b.path("src/corpus.zig") });
+    const corpus = b.addModule("corpus", .{ .root_source_file = b.path("src/testing/corpus.zig") });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -142,7 +142,7 @@ pub fn build(b: *std.Build) void {
         .filters = filters,
         .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/widget_tests.zig"),
+            .root_source_file = b.path("src/widgets_test.zig"),
             .target = target,
             .optimize = optimize,
             .error_tracing = fuzzable,

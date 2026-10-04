@@ -222,11 +222,11 @@ test {
     _ = palette_mod;
     _ = pool_mod;
     _ = render_mod;
-    _ = @import("moved_rows.zig");
+    _ = @import("render/moved_rows_impl_test.zig");
     _ = @import("screen_test.zig");
     _ = @import("window_test.zig");
     _ = @import("layer_test.zig");
-    _ = @import("shm.zig");
+    _ = @import("layer/shm.zig");
     _ = screen_mod;
     _ = session_mod;
     _ = term_mod;
@@ -234,9 +234,9 @@ test {
     _ = tty_mod;
     _ = window_mod;
     _ = winsize_mod;
-    _ = @import("roundtrip.zig");
+    _ = @import("roundtrip_test.zig");
     _ = @import("corpus");
-    _ = @import("bench.zig");
+    _ = @import("render_budget_test.zig");
 }
 
 test "the exported version is a semantic version" {

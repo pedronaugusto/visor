@@ -218,7 +218,7 @@ pub const Calendar = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "weekday calculation covers the extreme i32 years" {
     const cases = [_]Date{

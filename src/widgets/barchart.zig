@@ -169,7 +169,7 @@ pub const BarChart = struct {
 };
 
 const testing = std.testing;
-const Harness = @import("harness.zig").Harness;
+const Harness = @import("../testing/widget_harness.zig").Harness;
 
 test "standing bars grow from the bottom row with their labels under them" {
     var h: Harness = try .init(testing.allocator, 8, 4);

@@ -3,12 +3,12 @@ const gantry = @import("gantry");
 
 pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "primitives", .patterns = &.{
-        "src/corpus.zig",
+        "src/testing/corpus.zig",
         "src/damage.zig",
         "src/dependencies.zig",
         "src/geom.zig",
-        "src/shm.zig",
-        "src/widgets/markdown_reader.zig",
+        "src/layer/**",
+        "src/widgets/markdown/**",
         "src/widgets/selection.zig",
     } },
     .{ .name = "text and geometry", .patterns = &.{
@@ -23,13 +23,13 @@ pub const layers: []const gantry.rules.Layer = &.{
     } },
     .{ .name = "drawing policy", .patterns = &.{
         "src/layer.zig",
-        "src/window_impl.zig",
+        "src/window/**",
     } },
     .{ .name = "screen", .patterns = &.{
         "src/screen.zig",
     } },
     .{ .name = "views and terminal", .patterns = &.{
-        "src/moved_rows_impl.zig",
+        "src/render/moved_rows_impl.zig",
         "src/term.zig",
         "src/window.zig",
     } },
@@ -38,10 +38,10 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/window_test.zig",
     } },
     .{ .name = "session and scenarios", .patterns = &.{
-        "src/bench.zig",
+        "src/render_budget_test.zig",
         "src/layer_test.zig",
-        "src/moved_rows.zig",
-        "src/roundtrip.zig",
+        "src/render/moved_rows_impl_test.zig",
+        "src/roundtrip_test.zig",
         "src/screen_test.zig",
         "src/session.zig",
         "src/tty.zig",
@@ -53,9 +53,9 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/visor.zig",
     } },
     .{ .name = "widget geometry", .patterns = &.{
-        "src/widgets/harness.zig",
+        "src/testing/widget_harness.zig",
         "src/widgets/layout.zig",
-        "src/widgets/raster.zig",
+        "src/widgets/canvas/**",
     } },
     .{ .name = "widget views", .patterns = &.{
         "src/widgets/barchart.zig",
@@ -92,7 +92,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/widgets/markdown_test.zig",
     } },
     .{ .name = "widget tests", .patterns = &.{
-        "src/widget_tests.zig",
+        "src/widgets_test.zig",
     } },
 };
 
@@ -100,7 +100,7 @@ pub const entries: []const []const u8 = &.{};
 
 pub const modules: []const gantry.NamedModule = &.{
     .{ .name = "visor", .path = "src/visor.zig", .from = "src/**" },
-    .{ .name = "corpus", .path = "src/corpus.zig" },
+    .{ .name = "corpus", .path = "src/testing/corpus.zig" },
 };
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
@@ -119,16 +119,65 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "uucode owner", .target = "uucode", .except_from = &.{"src/dependencies.zig"} },
 };
 
-pub const required = blk: {
-    var count: usize = 0;
-    for (layers) |layer| count += layer.patterns.len;
-    var paths: [count][]const u8 = undefined;
-    var i: usize = 0;
-    for (layers) |layer| for (layer.patterns) |path| {
-        paths[i] = path;
-        i += 1;
-    };
-    break :blk paths;
+pub const required = [_][]const u8{
+    "src/testing/corpus.zig",
+    "src/damage.zig",
+    "src/dependencies.zig",
+    "src/geom.zig",
+    "src/layer/shm.zig",
+    "src/widgets/markdown/markdown_reader.zig",
+    "src/widgets/selection.zig",
+    "src/cell.zig",
+    "src/palette.zig",
+    "src/text.zig",
+    "src/winsize.zig",
+    "src/caps.zig",
+    "src/pool.zig",
+    "src/layer.zig",
+    "src/window/window_impl.zig",
+    "src/screen.zig",
+    "src/render/moved_rows_impl.zig",
+    "src/term.zig",
+    "src/window.zig",
+    "src/render.zig",
+    "src/window_test.zig",
+    "src/render_budget_test.zig",
+    "src/layer_test.zig",
+    "src/render/moved_rows_impl_test.zig",
+    "src/roundtrip_test.zig",
+    "src/screen_test.zig",
+    "src/session.zig",
+    "src/tty.zig",
+    "src/input.zig",
+    "src/visor.zig",
+    "src/testing/widget_harness.zig",
+    "src/widgets/layout.zig",
+    "src/widgets/canvas/raster.zig",
+    "src/widgets/barchart.zig",
+    "src/widgets/block.zig",
+    "src/widgets/calendar.zig",
+    "src/widgets/edges.zig",
+    "src/widgets/gauge.zig",
+    "src/widgets/keys.zig",
+    "src/widgets/list.zig",
+    "src/widgets/paragraph.zig",
+    "src/widgets/rule.zig",
+    "src/widgets/scrollbar.zig",
+    "src/widgets/sextants.zig",
+    "src/widgets/sparkline.zig",
+    "src/widgets/table.zig",
+    "src/widgets/tabs.zig",
+    "src/widgets/text_input.zig",
+    "src/widgets/canvas.zig",
+    "src/widgets/markdown.zig",
+    "src/widgets/scroll.zig",
+    "src/widgets/tree.zig",
+    "src/widgets/canvas_test.zig",
+    "src/widgets/chart.zig",
+    "src/widgets.zig",
+    "src/widgets/markdown_gfm_test.zig",
+    "src/widgets/markdown_test.zig",
+    "src/widgets_test.zig",
 };
 
 /// Tokens only their owners may spell. The console and the terminal's
