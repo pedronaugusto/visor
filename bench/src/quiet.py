@@ -12,7 +12,7 @@ from verify_ops import verify as verify_ops
 CHECK_SIZES = [(8, 4), (80, 24), (120, 40), (200, 60)]
 # A full-window pixel raster (8x16 pixels a cell) is ~10 ms a frame at
 # 200x60; fewer frames a sample keep the pass short. Units stay per frame.
-FEWER = {'canvas_raster': 100}
+FEWER = {'canvas_raster': 100, 'picture_frame_sixel': 100}
 
 p = argparse.ArgumentParser(description='Complete visor quiet pass; --smoke never samples benchmark clocks')
 p.add_argument('--smoke', action='store_true')
@@ -121,6 +121,6 @@ correctness = {'checks':checks, 'count':len(checks), 'oracle':'Independent ASCII
                'notcurses':'Public render+rasterize API, dedicated sink redirected to memory; fixed RGB terminfo; no terminal opened. Native profiling counters are not retrieved or recorded.',
                'operations':'Canonical grids/values: before == after exactly; comparison libraries identical to visor or a stated invariant (verify_ops.py); frame bytes replayed by the independent decoder'}
 finish('visor', args.smoke, info, samples, correctness, json.loads((ROOT / 'versions.json').read_text()),
-       '8–16 minutes quiet-only; see bench/QUIET-PREP.md for counts and assumptions')
+       '9–18 minutes quiet-only; see bench/QUIET-PREP.md for counts and assumptions')
 
 if args.smoke: prepared.write()

@@ -7,6 +7,8 @@ and `ascii` corpora hold only clusters every library measures alike; `emoji`
 holds ZWJ sequences, flags, skin tones, keycaps and VS16 where they differ.
 """
 import unicodedata
+import struct
+import zlib
 from pathlib import Path
 
 WORDS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda',
@@ -79,6 +81,13 @@ def generate(root, cols, rows):
     events = [b'a', b'Z', b'\x1b[A', b'\x1b[97;5u', b'\x1b[<0;10;5M', b'\x1b[<0;10;5m', b'\x1b[I', b'\x1b[O',
               b'\x1b[200~hello world\x1b[201~', b'\x1b[15~', 'é'.encode(), b'\x1b[1;5C']
     (d / 'input.bin').write_bytes(b''.join(events[i % len(events)] for i in range(cols * rows // 4)) + b'.')
+    # One opaque red image; generation/PNG compression are outside samples.
+    width, height = (cols - 1) * 8, (rows - 1) * 16
+    def chunk(tag, data):
+        return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data))
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+    png += chunk(b'IDAT', zlib.compress((b'\0' + bytes((255, 0, 0, 255)) * width) * height)) + chunk(b'IEND', b'')
+    (d / 'picture.png').write_bytes(png)
     return d
 
 def generate_all(root, sizes):

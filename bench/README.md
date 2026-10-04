@@ -10,7 +10,7 @@ On an idle machine, `./bench/quiet.sh` runs the complete timed pass. On macOS
 the entry point prevents sleep during the pass.
 
 Allow **20 minutes** for this package in the quiet window; expected warm-cache
-execution is about **8–16 minutes** after smoke preparation, an estimate from
+execution is about **9–18 minutes** after smoke preparation, an estimate from
 one untimed 200×60 duration probe rather than a measured result. First source downloads/compilation can add several minutes. Builds
 and correctness finish before timed workloads begin. Results are plain
 Markdown plus JSON under `bench/results/<UTC-date>/smoke-<time>.*` or
@@ -139,6 +139,7 @@ for every library that cannot. Fixtures and corpus reads sit before the clock.
 | `text_edit` | `TextInput.Buffer`: type `cols × 2` bytes of prose, four word erases, three word moves, five deletes forward, three back, every edit undone and redone (after only) | ratatui-textarea **0.9.2** `TextArea`, the same calls | unavailable: `ncreader` edits only through the input events it reads |
 | `term_feed` | `Term.feed` + `dumpScreen` | unavailable | unavailable |
 | `picture_transmit` | `Layers.transmit`, uncompressed | unavailable | unavailable |
+| `picture_frame_kitty`, `picture_frame_sixel`, `picture_frame_iterm`, `picture_frame_cells` | Move a common opaque-red picture between two cell rectangles; fixture upload/storage is outside the sample | unavailable: no graphics API or pixel blitter | unavailable: fixed headless profile has no negotiated graphics or sextants |
 | `picture_replace` | `Replacement.send`/`declare` + `draw` (after only) | unavailable | unavailable |
 
 Checks for the five newest: `tree` grids are identical to tui-tree-widget's
@@ -219,3 +220,22 @@ committed. Earlier measurements from a busy machine are not reproduced or
 claimed here; the prepared quiet pass will provide fresh evidence.
 
 See [QUIET-PREP.md](QUIET-PREP.md) for the preparation contract and duration estimate.
+
+The four picture-frame workloads use the same RGBA dimensions (8×16 pixels
+per cell, one column and one bottom row left free) on every grid. PNG creation,
+kitty uploads and inline storage precede the sample. The measured frame moves
+the placement; sixel quantization/encoding, iTerm2 base64 and cell fallback
+painting belong inside it, matching what each frame must do. Kitty and cells
+run on both pins; sixel and iTerm2 are unavailable before their introduction.
+`verify_pictures.py` decodes sixel bands and palettes, checks the PNG's CRCs and
+red RGBA scanlines, validates kitty's RGBA upload and placement, and replays
+the cell fallback to prove the same red rectangle. All four sizes are checked
+untimed. Sixel takes 100 frames per sample; the other paths retain 1,000.
+
+Notcurses 3.0.17's sixel code (`src/lib/sixel.c`) was reviewed: it keeps bands
+for wipe/rebuild and its visual blitter requires negotiated pixel geometry.
+The existing fixed headless profile has no graphics negotiation, so its
+picture rows remain unavailable, with that reason in every result.
+`ratatui-image` is not present in the pinned Rust comparison manifest/lock;
+its rows are also explicitly unavailable. No speed comparison is claimed.
+The after reference is `graphics` while this feature branch is under test.

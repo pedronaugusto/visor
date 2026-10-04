@@ -59,6 +59,10 @@ PLAN = {
     'sextants': ('no pixel blitter', 'the headless profile does not advertise sextants; NCBLIT_3x2 with NODEGRADE refuses', None),
     'input_events': ("crossterm's parser is private and event::read needs a terminal", 'input is read by its own thread from the terminal it opened', None),
     'term_feed': ('TestBackend is not a terminal emulator', 'no terminal emulator', None),
+    'picture_frame_kitty': (NO_PICTURES_R, NO_PICTURES_N, None),
+    'picture_frame_sixel': (NO_PICTURES_R, NO_PICTURES_N, NEW),
+    'picture_frame_iterm': (NO_PICTURES_R, NO_PICTURES_N, NEW),
+    'picture_frame_cells': ('no pixel blitter', 'headless profile does not advertise sextants', None),
     'picture_transmit': (NO_PICTURES_R, NO_PICTURES_N, None),
     'picture_replace': (NO_PICTURES_R, NO_PICTURES_N, NEW),
 }
@@ -77,4 +81,6 @@ def unavailable(task):
     if before: rows.append(('visor-before', before))
     if ratatui: rows.append(('ratatui', ratatui))
     if notcurses: rows.append(('notcurses', notcurses))
+    if task.startswith('picture_frame_'):
+        rows.append(('ratatui-image', 'not installed in the pinned Rust comparison manifest/lock'))
     return rows

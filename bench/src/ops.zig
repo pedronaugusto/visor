@@ -1065,6 +1065,54 @@ fn digestOf(bytes: []const u8) [32]u8 {
     return d;
 }
 
+fn pictureFrame(c: *Ctx, comptime protocol: enum { kitty, sixel, iterm, cells }) void {
+    if (before and (protocol == .sixel or protocol == .iterm)) @panic("new picture frame workload") else {
+        var screen = c.screen();
+        defer deinitScreen(&screen, c.gpa);
+        var renderer = must(v.Renderer.init(c.gpa, c.size()));
+        defer deinitRenderer(&renderer, c.gpa);
+        var layers: v.Layers = if (before) .{} else .init(c.gpa);
+        defer deinitLayers(&layers, c.gpa);
+        if (!before) layers.configureSize(.{ .cells = c.size(), .cell = .{ .width = 8, .height = 16 } });
+        var out: std.Io.Writer.Allocating = .init(c.gpa);
+        defer out.deinit();
+        const width: u32 = (@as(u32, c.cols) - 1) * 8;
+        const height: u32 = (@as(u32, c.rows) - 1) * 16;
+        const pixels = c.gpa.alloc(u8, @as(usize, width) * height * 4) catch @panic("oom");
+        for (0..@as(usize, width) * height) |i| @memcpy(pixels[i * 4 ..][0..4], &[_]u8{ 255, 0, 0, 255 });
+        const policy: v.Caps = if (before) .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = protocol == .kitty } else .{ .width_method = .unicode, .truecolor = true, .picture_protocol = switch (protocol) {
+            .kitty => .kitty,
+            .sixel => .sixel,
+            .iterm => .iterm,
+            .cells => .cells,
+        } };
+        switch (protocol) {
+            .kitty => _ = if (before) must(layers.transmit(c.gpa, &out.writer, 7, pixels, .{ .width = width, .height = height, .compress = false })) else must(layers.transmit(&out.writer, 7, pixels, .{ .width = width, .height = height, .compress = false })),
+            .sixel => must(layers.storeSixel(7, .{ .width = width, .height = height, .pixels = .{ .rgba = pixels }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} })),
+            .iterm => must(layers.storeIterm(7, c.file("picture.png"), 0)),
+            .cells => {},
+        }
+        if (c.check and protocol == .kitty) line("setup", out.written());
+        must(out.ensureTotalCapacity(pixels.len * 2 + 8192));
+        _ = must(renderer.draw(&out.writer, &screen, null, policy));
+        c.clock.start();
+        for (0..c.iterations) |n| {
+            out.clearRetainingCapacity();
+            const col: u16 = @intCast(n % 2);
+            if (protocol == .cells) {
+                screen.clear();
+                must((w.Sextants{ .width = width, .height = height, .pixels = pixels }).draw(screen.window().sub(.{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 })));
+            } else if (before) must(layers.declare(c.gpa, .{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } })) else must(layers.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
+            const stats = must(renderer.draw(&out.writer, &screen, if (protocol == .cells) null else &layers, policy));
+            c.count += stats.placements;
+            c.bytes += stats.bytes;
+            if (c.check) line("wire", out.written());
+        }
+        c.clock.stop();
+        if (c.check) emit("value\twidth={d} height={d} frames={d}\n", .{ width, height, c.iterations });
+    }
+}
+
 fn pictureReplace(c: *Ctx) void {
     if (before) @panic("unavailable before") else {
         var s = c.screen();
@@ -1231,6 +1279,26 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "input_events", .run = inputEvents },
         .{ .name = "term_feed", .run = termFeed },
         .{ .name = "picture_transmit", .run = pictureTransmit },
+        .{ .name = "picture_frame_kitty", .run = struct {
+            fn run(x: *Ctx) void {
+                pictureFrame(x, .kitty);
+            }
+        }.run },
+        .{ .name = "picture_frame_sixel", .run = struct {
+            fn run(x: *Ctx) void {
+                pictureFrame(x, .sixel);
+            }
+        }.run, .after_only = true },
+        .{ .name = "picture_frame_iterm", .run = struct {
+            fn run(x: *Ctx) void {
+                pictureFrame(x, .iterm);
+            }
+        }.run, .after_only = true },
+        .{ .name = "picture_frame_cells", .run = struct {
+            fn run(x: *Ctx) void {
+                pictureFrame(x, .cells);
+            }
+        }.run },
         .{ .name = "picture_replace", .run = pictureReplace, .after_only = true },
     };
     if (std.mem.eql(u8, task, "list-tasks")) {

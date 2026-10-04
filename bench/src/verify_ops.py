@@ -185,6 +185,10 @@ def verify(task, cols, rows, corpus, outputs):
             assert before.get(tag) == ours.get(tag), (task, cols, rows, 'before/after differ', tag)
     for side, ev in parsed.items():
         e = {}
+        if task.startswith('picture_frame_'):
+            from verify_pictures import verify as verify_picture
+            evidence[side] = verify_picture(task, cols, rows, ev, corpus)
+            continue
         if task in ('wide_repaint', 'scroll_repaint', 'links', 'print_above') and 'wire' in ev:
             e.update(own_wire(task, side, ev, cols, rows, corpus))
         if side in ('visor', 'visor-before'):
