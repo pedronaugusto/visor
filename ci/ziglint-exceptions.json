@@ -203,27 +203,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/moved_rows.zig",
-    "source": "fn deinit(f: *Fixture) void {",
-    "detail": "deinit should set f.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows.zig",
-    "source": "var t: @import(\"term.zig\").Term = try .init(gpa, f.screen.dimensions());",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows.zig",
-    "source": "try @import(\"term.zig\").expectScreensEqual(&f.screen, t.screen());",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z013",
     "path": "src/screen_test.zig",
     "source": "const pool = @import(\"pool.zig\");",
@@ -249,13 +228,6 @@
     "path": "src/screen_test.zig",
     "source": "var renderer = try @import(\"render.zig\").Renderer.init(testing.allocator, s.dimensions());",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/bench.zig",
-    "source": "fn deinit(b: *Bench) void {",
-    "detail": "deinit should set b.* = undefined",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -301,6 +273,111 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
+    "rule": "Z030",
+    "path": "src/render/moved_rows_test.zig",
+    "source": "fn deinit(f: *Fixture) void {",
+    "detail": "deinit should set f.* = undefined",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows_test.zig",
+    "source": "var t: @import(\"../term.zig\").Term = try .init(gpa, f.screen.dimensions());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows_test.zig",
+    "source": "try @import(\"../term.zig\").expectScreensEqual(&f.screen, t.screen());",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const std = @import(\"std\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const morse = @import(\"../dependencies.zig\").morse;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const cellmod = @import(\"../cell.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const Caps = @import(\"../caps.zig\").Caps;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const Profile = @import(\"../dependencies.zig\").morse.Color.Profile;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "const Screen = @import(\"../screen.zig\").Screen;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "now[i] = hashRow(@import(\"../screen.zig\").internal.row(s, @intCast(i)), fit, caps);",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "if (!rowsEqual(@import(\"../screen.zig\").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"../screen.zig\").internal.row(s, top - 1), @import(\"../screen.zig\").internal.row(s, top)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"../screen.zig\").internal.row(s, top - 1), @import(\"../screen.zig\").internal.row(s, top)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"../screen.zig\").internal.row(s, bottom), @import(\"../screen.zig\").internal.row(s, bottom + 1)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/render/moved_rows.zig",
+    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"../screen.zig\").internal.row(s, bottom), @import(\"../screen.zig\").internal.row(s, bottom + 1)))) return null;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
     "rule": "Z013",
     "path": "src/widgets.zig",
     "source": "const std = @import(\"std\");",
@@ -308,95 +385,46 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
+    "rule": "Z030",
+    "path": "src/testing/render_budget_test.zig",
+    "source": "fn deinit(b: *Bench) void {",
+    "detail": "deinit should set b.* = undefined",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
     "rule": "Z016",
-    "path": "src/corpus.zig",
+    "path": "src/testing/corpus.zig",
     "source": "std.debug.assert(lo >= s.base and hi - s.base < 64 and lo <= hi);",
     "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z030",
+    "path": "src/testing/roundtrip_test.zig",
+    "source": "fn deinit(h: *Harness) void {",
+    "detail": "deinit should set h.* = undefined",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const std = @import(\"std\");",
+    "path": "src/testing/roundtrip_test.zig",
+    "source": "fn checkDamage(s: *const Screen, before: []const @import(\"../cell.zig\").internal.StoredCell) !void {",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const morse = @import(\"dependencies.zig\").morse;",
+    "path": "src/testing/roundtrip_test.zig",
+    "source": "const before = try gpa.alloc(@import(\"../cell.zig\").internal.StoredCell, h.screen._cells.len);",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const cellmod = @import(\"cell.zig\");",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const Caps = @import(\"caps.zig\").Caps;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const Profile = @import(\"dependencies.zig\").morse.Color.Profile;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "const Screen = @import(\"screen.zig\").Screen;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "now[i] = hashRow(@import(\"screen.zig\").internal.row(s, @intCast(i)), fit, caps);",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "if (!rowsEqual(@import(\"screen.zig\").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"screen.zig\").internal.row(s, top - 1), @import(\"screen.zig\").internal.row(s, top)))) return null;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import(\"screen.zig\").internal.row(s, top - 1), @import(\"screen.zig\").internal.row(s, top)))) return null;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"screen.zig\").internal.row(s, bottom), @import(\"screen.zig\").internal.row(s, bottom + 1)))) return null;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/moved_rows_impl.zig",
-    "source": "if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import(\"screen.zig\").internal.row(s, bottom), @import(\"screen.zig\").internal.row(s, bottom + 1)))) return null;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "rule": "Z030",
+    "path": "src/testing/widget_harness.zig",
+    "source": "pub fn deinit(h: *Harness) void {",
+    "detail": "deinit should set h.* = undefined",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z030",
@@ -758,9 +786,9 @@
   {
     "rule": "Z028",
     "path": "src/render.zig",
-    "source": "const moved_rows = @import(\"moved_rows_impl.zig\").Rows(@This());",
+    "source": "const moved_rows = @import(\"render/moved_rows.zig\").Rows(@This());",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
@@ -815,27 +843,6 @@
     "rule": "Z028",
     "path": "src/render.zig",
     "source": "const picture: @import(\"layer.zig\").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/roundtrip.zig",
-    "source": "fn deinit(h: *Harness) void {",
-    "detail": "deinit should set h.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/roundtrip.zig",
-    "source": "fn checkDamage(s: *const Screen, before: []const @import(\"cell.zig\").internal.StoredCell) !void {",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/roundtrip.zig",
-    "source": "const before = try gpa.alloc(@import(\"cell.zig\").internal.StoredCell, h.screen._cells.len);",
     "detail": "inline @import; assign to a top-level const",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
@@ -904,13 +911,6 @@
   },
   {
     "rule": "Z012",
-    "path": "src/widgets/raster.zig",
-    "source": "pub fn dimensions(s: *const Surface) Pixels {",
-    "detail": "public function exposes private type 'Pixels'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
     "path": "src/widgets/chart.zig",
     "source": "pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
     "detail": "public function exposes private type 'Window'",
@@ -936,6 +936,13 @@
     "source": "pub fn draw(k: Keys, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
     "detail": "public function exposes private type 'Window'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z013",
+    "path": "src/widgets/markdown/gfm_test.zig",
+    "source": "const visor = @import(\"visor\");",
+    "detail": "unused import 'visor'",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z012",
@@ -980,13 +987,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/widgets/harness.zig",
-    "source": "pub fn deinit(h: *Harness) void {",
-    "detail": "deinit should set h.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z012",
     "path": "src/widgets/paragraph.zig",
     "source": "pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
@@ -1013,6 +1013,13 @@
     "source": "pub fn bar(v: View, total: usize) @import(\"scrollbar.zig\").Scrollbar.State {",
     "detail": "inline @import; assign to a top-level const",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z012",
+    "path": "src/widgets/canvas/raster.zig",
+    "source": "pub fn dimensions(s: *const Surface) Pixels {",
+    "detail": "public function exposes private type 'Pixels'",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z012",
@@ -1101,23 +1108,23 @@
   {
     "rule": "Z028",
     "path": "src/widgets/canvas.zig",
-    "source": "pub const Surface = @import(\"raster.zig\").Surface;",
+    "source": "pub const Surface = @import(\"canvas/raster.zig\").Surface;",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
     "path": "src/widgets/canvas.zig",
-    "source": "pub const Paint = @import(\"raster.zig\").Paint;",
+    "source": "pub const Paint = @import(\"canvas/raster.zig\").Paint;",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
     "path": "src/widgets/canvas.zig",
-    "source": "pub const Blend = @import(\"raster.zig\").Blend;",
+    "source": "pub const Blend = @import(\"canvas/raster.zig\").Blend;",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z012",
@@ -1131,13 +1138,6 @@
     "path": "src/widgets/scrollbar.zig",
     "source": "pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
     "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z013",
-    "path": "src/widgets/markdown_gfm_test.zig",
-    "source": "const visor = @import(\"visor\");",
-    "detail": "unused import 'visor'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -1330,48 +1330,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const std = @import(\"std\");",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const morse = @import(\"dependencies.zig\").morse;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const cellmod = @import(\"cell.zig\");",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const geom = @import(\"geom.zig\");",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const textmod = @import(\"text.zig\");",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z028",
-    "path": "src/window_impl.zig",
-    "source": "const Target = @import(\"pool.zig\").Target;",
-    "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z017",
     "path": "src/screen.zig",
     "source": "return try pool.OwnedTarget.init(gpa, t);",
@@ -1437,9 +1395,9 @@
   {
     "rule": "Z028",
     "path": "src/screen.zig",
-    "source": "pub const window_api = @import(\"window_impl.zig\").WindowApi(@This());",
+    "source": "pub const window_api = @import(\"window.zig\").WindowApi(@This());",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
@@ -1503,5 +1461,47 @@
     "source": "terminal.restore(was.output, was.output_mode) catch {};",
     "detail": "empty catch block suppresses errors: `catch {}`",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const std = @import(\"std\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const morse = @import(\"dependencies.zig\").morse;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const cellmod = @import(\"cell.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const geom = @import(\"geom.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const textmod = @import(\"text.zig\");",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
+  },
+  {
+    "rule": "Z028",
+    "path": "src/window.zig",
+    "source": "const Target = @import(\"pool.zig\").Target;",
+    "detail": "inline @import; assign to a top-level const",
+    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   }
 ]

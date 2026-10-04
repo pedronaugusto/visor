@@ -3,9 +3,9 @@
     "src"
   ],
   "test_roots": [
-    "src/visor.zig",
-    "src/widget_tests.zig",
-    "src/corpus.zig"
+    "src/tests.zig",
+    "src/widgets_test.zig",
+    "src/testing/corpus.zig"
   ],
   "test_support": [
     "src/testing/*"
@@ -15,42 +15,20 @@
       "lines": 203,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
     },
-    "src/moved_rows_impl.zig:Rows": {
+    "src/render/moved_rows.zig:Rows": {
       "lines": 209,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
     },
-    "src/roundtrip.zig:imageRoundTrip": {
+    "src/testing/roundtrip_test.zig:imageRoundTrip": {
       "lines": 182,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
     },
-    "src/window_impl.zig:WindowApi": {
+    "src/window.zig:WindowApi": {
       "lines": 641,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
     }
   },
-  "layout_exceptions": {
-    "src/window": {
-      "files": [
-        "src/window.zig",
-        "src/window_impl.zig"
-      ],
-      "reason": "Existing namespace at adoption; these exact members are retained until its layout branch lands."
-    },
-    "src/moved": {
-      "files": [
-        "src/moved_rows.zig",
-        "src/moved_rows_impl.zig"
-      ],
-      "reason": "Existing namespace at adoption; these exact members are retained until its layout branch lands."
-    },
-    "src/widgets/markdown": {
-      "files": [
-        "src/widgets/markdown.zig",
-        "src/widgets/markdown_reader.zig"
-      ],
-      "reason": "Existing namespace at adoption; these exact members are retained until its layout branch lands."
-    }
-  },
+  "layout_exceptions": {},
   "docs": {
     "zig build docs -- usage": {
       "source": "examples/usage.zig",
