@@ -39,7 +39,7 @@ const screen_mod = @import("screen.zig");
 const term_mod = @import("term.zig");
 const text_mod = @import("text.zig");
 const tty_mod = @import("tty.zig");
-const window_mod = @import("window.zig");
+const window_mod = @import("screen.zig").window_api;
 const winsize_mod = @import("winsize.zig");
 
 /// The writers and parsers this package stands on, re-exported whole.
@@ -222,7 +222,7 @@ test {
     _ = palette_mod;
     _ = pool_mod;
     _ = render_mod;
-    _ = @import("render/moved_rows_impl_test.zig");
+    _ = @import("render/moved_rows_test.zig");
     _ = @import("screen_test.zig");
     _ = @import("window_test.zig");
     _ = @import("layer_test.zig");
@@ -234,9 +234,9 @@ test {
     _ = tty_mod;
     _ = window_mod;
     _ = winsize_mod;
-    _ = @import("roundtrip_test.zig");
+    _ = @import("testing/roundtrip_test.zig");
     _ = @import("corpus");
-    _ = @import("render_budget_test.zig");
+    _ = @import("testing/render_budget_test.zig");
 }
 
 test "the exported version is a semantic version" {

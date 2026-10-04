@@ -108,7 +108,7 @@ pub fn build(b: *std.Build) void {
         .filters = filters,
         .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/visor.zig"),
+            .root_source_file = b.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
             .error_tracing = fuzzable,

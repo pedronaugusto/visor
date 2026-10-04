@@ -14,11 +14,11 @@
 
 const std = @import("std");
 
-const geom = @import("geom.zig");
-const render = @import("render.zig");
-const Caps = @import("caps.zig").Caps;
+const geom = @import("../geom.zig");
+const render = @import("../render.zig");
+const Caps = @import("../caps.zig").Caps;
 const Renderer = render.Renderer;
-const Screen = @import("screen.zig").Screen;
+const Screen = @import("../screen.zig").Screen;
 
 const Allocator = std.mem.Allocator;
 const testing = std.testing;

@@ -48,15 +48,15 @@
 
 const std = @import("std");
 
-const cellmod = @import("cell.zig");
-const geom = @import("geom.zig");
-const render = @import("render.zig");
-const textmod = @import("text.zig");
-const term = @import("term.zig");
-const Caps = @import("caps.zig").Caps;
+const cellmod = @import("../cell.zig");
+const geom = @import("../geom.zig");
+const render = @import("../render.zig");
+const textmod = @import("../text.zig");
+const term = @import("../term.zig");
+const Caps = @import("../caps.zig").Caps;
 const Cell = cellmod.Cell;
 const Renderer = render.Renderer;
-const Screen = @import("screen.zig").Screen;
+const Screen = @import("../screen.zig").Screen;
 const Term = term.Term;
 
 /// The inputs replayed on every run, shared with the conformance build.
@@ -217,7 +217,7 @@ fn checkGrid(s: *const Screen) !void {
 
 /// That the conservative damage map names every cell that changed, checked
 /// against a copy taken before the operations.
-fn checkDamage(s: *const Screen, before: []const @import("cell.zig").internal.StoredCell) !void {
+fn checkDamage(s: *const Screen, before: []const @import("../cell.zig").internal.StoredCell) !void {
     for (0..s.dimensions().rows) |r| {
         const span = s._damage.row(@intCast(r));
         var col: u16 = 0;
@@ -340,7 +340,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer t.deinit();
     t.setMethod(terminalMethod(method));
 
-    const before = try gpa.alloc(@import("cell.zig").internal.StoredCell, h.screen._cells.len);
+    const before = try gpa.alloc(@import("../cell.zig").internal.StoredCell, h.screen._cells.len);
     defer gpa.free(before);
 
     var frames: usize = 0;
@@ -685,7 +685,7 @@ test "the round trip holds for an inline screen measuring by cluster" {
 // writes a graphics command.
 //=========================================================================
 
-const layer = @import("layer.zig");
+const layer = @import("../layer.zig");
 
 /// A picture the program is showing, as the program keeps it between
 /// frames; declared again every frame, because that is how the layers work.

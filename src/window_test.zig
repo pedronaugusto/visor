@@ -14,7 +14,7 @@ const Style = cellmod.Style;
 const Rect = geom.Rect;
 const Point = geom.Point;
 const Size = geom.Size;
-const Window = @import("window.zig").Window;
+const Window = @import("screen.zig").window_api.Window;
 const testing = std.testing;
 
 fn made(cols: u16, rows: u16) !Screen {
