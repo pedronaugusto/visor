@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Caps.Probe` learns `colors` from morse's `Co` question, counting answers and refusals in the same waiting window as the other capabilities.
+
 - Pictures choose kitty, iTerm2, sixel, then cells, with a caller override: the probe reads DA1, XTSMGRAPHICS and XTVERSION, and callers can supply TERM_PROGRAM. `Layers.storeSixel` and `storeIterm` retain pictures for redraw after damage, movement, scrolling and removal, clipped to their cell rectangle; morse writes the bytes. Canvas can retain its raster as sixel pixels with a caller palette.
 
 - The renderer draws every colour in what the terminal shows, `Caps.colorProfile`: direct colour with `truecolor`, the 256-colour palette or the sixteen slots by the `Co` count, none under `no_color`, or the caller's `color_profile`; with nothing known, the 256-colour palette, where it drew direct colour before. Each colour is fitted with `morse.Color.fit` before the diff, so colours the terminal shows alike are no change, and against the slots `slot_colors` points at, which `Palette.slots` gives from the terminal's answers. `Caps.guessColor` reads `COLORTERM` and `NO_COLOR` values the caller passes in, and a `Co` answer the program asked for is folded in.

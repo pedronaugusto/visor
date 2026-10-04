@@ -282,7 +282,6 @@ pub const Caps = struct {
         /// read. Anything else is ignored, because a terminal answering a
         /// question nobody asked is not this package's problem to diagnose.
         pub fn feed(p: *Probe, event: morse.Event, now_ms: i64) void {
-            p.feedColors(event);
             const question = morse.probeAnswered(event) orelse return;
             if (!p._questions.asks(question)) return;
             // A graphics answer about one of the program's pictures answers
@@ -340,6 +339,11 @@ pub const Caps = struct {
                         {
                             p._caps.truecolor = true;
                         }
+                        if (c.known and p._questions.color_count and std.mem.eql(u8, n, "Co")) {
+                            var value: [10]u8 = undefined;
+                            const v = capability.decodeValue(&value) catch continue;
+                            p._caps.colors = std.fmt.parseInt(u32, v, 10) catch continue;
+                        }
                     }
                 },
                 // Any answer to the question, `OK` or an error, is a
@@ -347,30 +351,6 @@ pub const Caps = struct {
                 // other image is not an answer to it.
                 .graphics => p._caps.kitty_graphics = true,
                 else => {},
-            }
-        }
-
-        /// The colour count, `Co`, which morse's questions do not ask: it
-        /// arrives when the program asked for it itself, and answers none of
-        /// the probe's questions.
-        fn feedColors(p: *Probe, event: morse.Event) void {
-            const reply = switch (event) {
-                .reply => |r| r,
-                else => return,
-            };
-            const c = switch (reply) {
-                .capability => |c| c,
-                else => return,
-            };
-            if (!c.known) return;
-            var it = c.iterator();
-            while (it.next()) |capability| {
-                var name: [8]u8 = undefined;
-                const n = capability.decodeName(&name) catch continue;
-                if (!std.mem.eql(u8, n, "Co")) continue;
-                var value: [10]u8 = undefined;
-                const v = capability.decodeValue(&value) catch continue;
-                p._caps.colors = std.fmt.parseInt(u32, v, 10) catch continue;
             }
         }
 
@@ -419,7 +399,7 @@ test "the probe asks morse's questions, in morse's order, and nothing of its own
     // Among them the ones a `Caps` is made of, and the one always answered
     // last.
     const asked = out.buffered();
-    for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1b[?1016$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
+    for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1b[?1016$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1bP+q436f\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
         try testing.expect(std.mem.indexOf(u8, asked, q) != null);
     }
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
@@ -492,6 +472,7 @@ test "a probe answered in full is settled at once" {
         .graphics = false,
         .extra_cursors = false,
         .truecolor = false,
+        .color_count = false,
         .version = false,
         .text_area_cells = false,
         .cell_pixels = false,
@@ -527,6 +508,8 @@ test "a 256-colour count is not evidence of truecolor" {
 test "a colour count is folded in, and picks the profile" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
     p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
+    try testing.expect(p.hasAnswered(.color_count));
+    try testing.expectEqual(@as(?i64, 0), p.lastAnswerMs());
     try testing.expectEqual(@as(?u32, 256), p._caps.colors);
     try testing.expectEqual(morse.Color.Profile.palette, p._caps.colorProfile());
 }
@@ -684,4 +667,40 @@ test "picture probe replies stay within the register bound under arbitrary input
             if (morse.Reply.parse(bytes[0..n]) == null) try testing.expectEqual(Caps.Pictures.cells, caps.pictures());
         }
     }.one, .{ .corpus = &.{ "\x1b[?65;4c", "\x1b[?1;0;16S", "\x1b[?2;0;1000;800S", "\x1bP>|iTerm2 3.5.4\x1b\\", "\x1b[?1;0;4294967295S", "\x1b[?1;0;-1S" } });
+}
+
+test "a colour count arriving after DA1 extends the quiet period" {
+    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    p.feed(answer("\x1b[?62;4;22c"), 100);
+    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), 140);
+    try testing.expect(p.hasAnswered(.color_count));
+    try testing.expectEqual(@as(?u32, 16), p.capabilities().colors);
+    try testing.expectEqual(morse.Color.Profile.ansi, p.capabilities().colorProfile());
+    try testing.expect(!p.settled(150, 50));
+    try testing.expect(p.settled(190, 50));
+}
+
+test "a refused or invalid colour count leaves the count unknown" {
+    for ([_][]const u8{
+        "\x1bP0+r436f\x1b\\",
+        "\x1bP1+r436f\x1b\\",
+        "\x1bP1+r436f=6e6f\x1b\\",
+        "\x1bP1+r436f=34323934393637323936\x1b\\",
+    }) |bytes| {
+        var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+        p.feed(answer(bytes), 10);
+        try testing.expect(p.hasAnswered(.color_count));
+        try testing.expectEqual(@as(?u32, null), p.capabilities().colors);
+        try testing.expectEqual(@as(?i64, 10), p.lastAnswerMs());
+    }
+}
+
+test "a disabled colour count changes neither caps nor quiet time" {
+    var p: Caps.Probe = .init(.{ .graphics_id = 1, .color_count = false });
+    p.feed(answer("\x1b[?62;4;22c"), 100);
+    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), 140);
+    try testing.expect(!p.hasAnswered(.color_count));
+    try testing.expectEqual(@as(?u32, null), p.capabilities().colors);
+    try testing.expectEqual(@as(?i64, 100), p.lastAnswerMs());
+    try testing.expect(p.settled(150, 50));
 }

@@ -702,7 +702,8 @@ at least one. Both buffers and the `Tty` must outlive the reader.
 
 **Nothing is guessed.** No terminfo, no capability database, and no
 environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
-`Caps.Probe` writes morse's probe and folds the answers in, and is settled
+`Caps.Probe` writes morse's probe and folds the answers in, including the
+colour count `Co` into `Caps.colors`, and is settled
 when every question is answered or, after the device attributes, when the
 terminal has been quiet for the caller's quiet period; a caller who would
 rather trust the environment configures a separate `Caps` value, or hands
