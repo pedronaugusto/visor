@@ -62,6 +62,7 @@ pub const Harness = struct {
         h.term.deinit();
         h.out.deinit();
         h.text.deinit();
+        h.* = undefined;
     }
 
     /// The whole grid as a window, which is what a widget draws into.

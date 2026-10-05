@@ -1,19 +1,5 @@
 [
   {
-    "rule": "Z030",
-    "path": "src/pool.zig",
-    "source": "pub fn deinit(p: *Graphemes, gpa: Allocator) void {",
-    "detail": "deinit should set p.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/pool.zig",
-    "source": "pub fn deinit(l: *Links, gpa: Allocator) void {",
-    "detail": "deinit should set l.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/session.zig",
     "source": "const layer: @import(\"layer.zig\").Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };",
@@ -147,13 +133,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/layer_test.zig",
-    "source": "fn deinit(f: *Fixture) void {",
-    "detail": "deinit should set f.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z011",
     "path": "src/layer_test.zig",
     "source": "while (std.mem.indexOf(u8, rest, \"\\x1b_G\")) |at| {",
@@ -187,13 +166,6 @@
     "source": "try testing.expectError(error.PayloadTooLarge, @import(\"layer.zig\").test_access.sharedSize(oversized));",
     "detail": "inline @import; assign to a top-level const",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/render/moved_rows_test.zig",
-    "source": "fn deinit(f: *Fixture) void {",
-    "detail": "deinit should set f.* = undefined",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
     "rule": "Z028",
@@ -301,24 +273,10 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/testing/render_budget_test.zig",
-    "source": "fn deinit(b: *Bench) void {",
-    "detail": "deinit should set b.* = undefined",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
     "rule": "Z016",
     "path": "src/testing/corpus.zig",
     "source": "std.debug.assert(lo >= s.base and hi - s.base < 64 and lo <= hi);",
     "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/testing/roundtrip_test.zig",
-    "source": "fn deinit(h: *Harness) void {",
-    "detail": "deinit should set h.* = undefined",
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
@@ -334,20 +292,6 @@
     "source": "const before = try gpa.alloc(@import(\"../cell.zig\").internal.StoredCell, h.screen._cells.len);",
     "detail": "inline @import; assign to a top-level const",
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/testing/widget_harness.zig",
-    "source": "pub fn deinit(h: *Harness) void {",
-    "detail": "deinit should set h.* = undefined",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
-    "rule": "Z030",
-    "path": "src/input.zig",
-    "source": "fn deinit(p: *Piped) void {",
-    "detail": "deinit should set p.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
     "rule": "Z001",
@@ -630,13 +574,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/render.zig",
-    "source": "fn deinit(f: *Fixture) void {",
-    "detail": "deinit should set f.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/render.zig",
     "source": "const moved_rows = @import(\"render/moved_rows.zig\").Rows(@This());",
@@ -728,13 +665,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z030",
-    "path": "src/damage.zig",
-    "source": "pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {",
-    "detail": "deinit should set d.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/layer.zig",
     "source": "pub const test_access = if (@import(\"builtin\").is_test) struct {",
@@ -816,13 +746,6 @@
     "path": "src/widgets/text_input.zig",
     "source": "std.mem.copyForwards(Edit, b._edits.items[0..left], b._edits.items[drop..]);",
     "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z017",
-    "path": "src/screen.zig",
-    "source": "return try pool.OwnedTarget.init(gpa, t);",
-    "detail": "avoid try in return; hoist it to preserve payload coercion: `const value = try pool.OwnedTarget.init(gpa, t); return value;`",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {

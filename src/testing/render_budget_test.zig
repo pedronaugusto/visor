@@ -53,6 +53,7 @@ const Bench = struct {
         b.screen.deinit();
         b.renderer.deinit();
         b.out.deinit();
+        b.* = undefined;
     }
 
     fn draw(b: *Bench) !Renderer.Stats {

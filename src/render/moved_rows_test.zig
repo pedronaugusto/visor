@@ -55,6 +55,7 @@ const Fixture = struct {
         f.screen.deinit();
         f.renderer.deinit();
         f.out.deinit();
+        f.* = undefined;
     }
 
     fn draw(f: *Fixture) !Renderer.Stats {

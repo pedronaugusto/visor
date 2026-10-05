@@ -87,7 +87,7 @@ pub const Graphemes = struct {
     pub fn deinit(p: *Graphemes, gpa: Allocator) void {
         p.bytes.deinit(gpa);
         p.index.deinit(gpa);
-        p.* = .{};
+        p.* = undefined;
     }
 
     /// A grapheme as a `Cell.Text`: in the cell when it fits, in the pool
@@ -238,7 +238,7 @@ pub const Links = struct {
         l.index.deinit(gpa);
         l.bytes.deinit(gpa);
         l.entries.deinit(gpa);
-        l.* = .{};
+        l.* = undefined;
     }
 
     /// The link for a target, interned: the same URI and parameters always

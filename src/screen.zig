@@ -706,7 +706,8 @@ pub const Screen = struct {
     /// owner keeps the copy's allocator `gpa`; call its `deinit` to free it.
     pub fn dupeTarget(s: *const Screen, gpa: Allocator, l: Link) Allocator.Error!?pool.OwnedTarget {
         const t = s.target(l) orelse return null;
-        return try pool.OwnedTarget.init(gpa, t);
+        const owned = try pool.OwnedTarget.init(gpa, t);
+        return owned;
     }
 
     /// The head whose grapheme covers a tail: the wide grapheme to its left,

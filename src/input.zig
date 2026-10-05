@@ -313,6 +313,7 @@ const Piped = struct {
     fn deinit(p: *Piped) void {
         p.hangUp();
         p.tty.close();
+        p.* = undefined;
     }
 
     fn type_(p: *Piped, bytes: []const u8) void {

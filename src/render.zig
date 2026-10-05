@@ -2577,6 +2577,7 @@ const Fixture = struct {
         f.screen.deinit();
         f.renderer.deinit();
         f.out.deinit();
+        f.* = undefined;
     }
 
     /// Draws and gives back what was written.

@@ -54,7 +54,7 @@ pub const Damage = struct {
     /// Gives the map back.
     pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {
         gpa.free(d._rows);
-        d.* = .{ ._rows = &.{} };
+        d.* = undefined;
     }
 
     /// A map for a new number of rows. Everything becomes clean; the caller

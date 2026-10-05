@@ -162,6 +162,7 @@ const Harness = struct {
         h.layers.deinit();
         h.renderer.deinit();
         h.out.deinit();
+        h.* = undefined;
     }
 
     /// One frame: draw, feed the bytes to a terminal that started blank and
