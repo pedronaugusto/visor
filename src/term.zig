@@ -37,6 +37,7 @@ const Size = geom.Size;
 const Color = cellmod.Color;
 const Style = cellmod.Style;
 const Writer = std.Io.Writer;
+const log = std.log.scoped(.visor);
 
 /// The terminal.
 pub const Term = struct {
@@ -917,17 +918,18 @@ fn stylesEqual(a: Style, b: Style) bool {
 }
 
 /// Two screens compared cell by cell, naming the first that differs and
-/// printing both grids.
+/// logging both grids as errors under the `visor` scope, which the program's
+/// `std.log` handler writes or drops.
 pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
     if (!std.meta.eql(want.dimensions(), got.dimensions())) {
-        std.debug.print(
-            "screen size: want {d}x{d}, have {d}x{d}\n",
+        log.err(
+            "screen size: want {d}x{d}, have {d}x{d}",
             .{ want.dimensions().cols, want.dimensions().rows, got.dimensions().cols, got.dimensions().rows },
         );
         return error.TestExpectedEqual;
     }
     const where = firstDifference(want, got) orelse return;
-    try reportCell(want, got, where.col, where.row);
+    reportCell(want, got, where.col, where.row);
     return error.TestExpectedEqual;
 }
 
@@ -955,36 +957,40 @@ pub fn firstDifference(want: *const Screen, got: *const Screen) ?geom.Point {
     return null;
 }
 
-/// Says what differs at one cell, then prints both grids whole.
-fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) !void {
+/// Says what differs at one cell, then logs both grids whole.
+fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) void {
     const a = want._cells[want.index(col, row)];
     const b = got._cells[got.index(col, row)];
-    std.debug.print("cell {d},{d} differs\n", .{ col, row });
-    std.debug.print("  want: \"{s}\" {any} link={any} shape={any}\n", .{
+    log.err("cell {d},{d} differs", .{ col, row });
+    log.err("  want: \"{s}\" {any} link={any} shape={any}", .{
         want.textAt(col, row), a.style, @import("screen.zig").internal.target(want, a.link), a.shape,
     });
-    std.debug.print("  have: \"{s}\" {any} link={any} shape={any}\n", .{
+    log.err("  have: \"{s}\" {any} link={any} shape={any}", .{
         got.textAt(col, row), b.style, @import("screen.zig").internal.target(got, b.link), b.shape,
     });
-    std.debug.print("--- want ---\n", .{});
-    printGrid(want);
-    std.debug.print("--- have ---\n", .{});
-    printGrid(got);
+    log.err("--- want ---\n{f}", .{Grid{ .screen = want }});
+    log.err("--- have ---\n{f}", .{Grid{ .screen = got }});
 }
 
-/// The grid on stderr, one row a line, for a failing test to be read from.
-fn printGrid(s: *const Screen) void {
-    var row: u16 = 0;
-    while (row < s.dimensions().rows) : (row += 1) {
-        std.debug.print("|", .{});
-        var col: u16 = 0;
-        while (col < s.dimensions().cols) : (col += 1) {
-            if (s._cells[s.index(col, row)].isTail()) continue;
-            std.debug.print("{s}", .{s.textAt(col, row)});
+/// A grid as text for a failing test to be read from: one row a line
+/// between bars, each cluster once.
+pub const Grid = struct {
+    screen: *const Screen,
+
+    pub fn format(g: Grid, w: *Writer) Writer.Error!void {
+        const s = g.screen;
+        var row: u16 = 0;
+        while (row < s.dimensions().rows) : (row += 1) {
+            try w.writeByte('|');
+            var col: u16 = 0;
+            while (col < s.dimensions().cols) : (col += 1) {
+                if (s._cells[s.index(col, row)].isTail()) continue;
+                try w.writeAll(s.textAt(col, row));
+            }
+            try w.writeAll("|\n");
         }
-        std.debug.print("|\n", .{});
     }
-}
+};
 
 /// Whether two cells' links name the same target, which is not the same as
 /// holding the same index: the two screens interned in different orders.

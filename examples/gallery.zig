@@ -9,10 +9,13 @@ const std = @import("std");
 const visor = @import("visor");
 const widgets = @import("visor.widgets");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const report = &stdout.interface;
 
     const size: visor.Size = .{ .cols = 80, .rows = 33 };
     var screen: visor.Screen = try .init(gpa, size);
@@ -65,15 +68,9 @@ pub fn main() !void {
     try term.feed(out.written());
     try visor.expectScreensEqual(&screen, term.screen());
 
-    var text: std.Io.Writer.Allocating = .init(gpa);
-    defer text.deinit();
-    try visor.dumpScreen(term.screen(), &text.writer);
-    std.debug.print("{s}\nthe page: {d} bytes, {d} cells in {d} runs\n", .{
-        text.written(),
-        stats.bytes,
-        stats.cells,
-        stats.runs,
-    });
+    try visor.dumpScreen(term.screen(), report);
+    try report.print("\nthe page: {d} bytes, {d} cells in {d} runs\n", .{ stats.bytes, stats.cells, stats.runs });
+    try report.flush();
 }
 
 /// The page: rows of panels, each one widget, and a key strip at the foot.

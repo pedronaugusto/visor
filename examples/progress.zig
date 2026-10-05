@@ -13,10 +13,13 @@
 const std = @import("std");
 const visor = @import("visor");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const report = &stdout.interface;
 
     const caps: visor.Caps = .{ .width_method = .unicode, .truecolor = true, .rep = true };
     const cols: u16 = 44;
@@ -41,15 +44,15 @@ pub fn main() !void {
     // what was typed there is erased with the rest of the rows.
     try renderer.enter(&out.writer, caps, .@"inline", .{});
     try term.feed(out.written());
-    try show(gpa, &term, "entered: two rows at the prompt", null);
+    try show(gpa, report, &term, "entered: two rows at the prompt", null);
 
     var job: Job = .{ .done = 0, .of = 12 };
     try job.draw(screen.window());
-    try show(gpa, &term, "the first frame", try frame(&renderer, &screen, &term, caps, &out));
+    try show(gpa, report, &term, "the first frame", try frame(&renderer, &screen, &term, caps, &out));
 
     job.done = 7;
     try job.draw(screen.window());
-    try show(gpa, &term, "seven of twelve", try frame(&renderer, &screen, &term, caps, &out));
+    try show(gpa, report, &term, "seven of twelve", try frame(&renderer, &screen, &term, caps, &out));
 
     // Two steps that finished, printed above the screen in the same frame
     // that draws it: they stay in the history like any other output, and
@@ -65,7 +68,7 @@ pub fn main() !void {
     const printed = try renderer.printAbove(&out.writer, &steps, &screen, null, caps);
     try term.feed(out.written());
     std.debug.assert(std.mem.eql(u8, term.screen().textAt(0, term.savedCursor().?.row - 1), "c"));
-    try show(gpa, &term, "two steps printed above", printed);
+    try show(gpa, report, &term, "two steps printed above", printed);
 
     // A third row, for a line of log. The terminal scrolls to make room
     // when there is none below, and what was above stays above.
@@ -75,13 +78,14 @@ pub fn main() !void {
     job.done = 12;
     job.note = "linked zig-out/bin/build";
     try job.draw(screen.window());
-    try show(gpa, &term, "grown to three rows", try frame(&renderer, &screen, &term, caps, &out));
+    try show(gpa, report, &term, "grown to three rows", try frame(&renderer, &screen, &term, caps, &out));
 
     // Out, with the frame left where it is and the cursor below it.
     out.clearRetainingCapacity();
     try renderer.leave(&out.writer);
     try term.feed(out.written());
-    try show(gpa, &term, "left: the cursor is on the row below", null);
+    try show(gpa, report, &term, "left: the cursor is on the row below", null);
+    try report.flush();
 }
 
 /// What the program is reporting on.
@@ -133,21 +137,21 @@ fn frame(
 
 /// The whole terminal, with the cursor's row marked, so the rows around the
 /// screen can be seen to survive.
-fn show(gpa: std.mem.Allocator, term: *const visor.Term, what: []const u8, stats: ?visor.Renderer.Stats) !void {
+fn show(gpa: std.mem.Allocator, report: *std.Io.Writer, term: *const visor.Term, what: []const u8, stats: ?visor.Renderer.Stats) !void {
     var text: std.Io.Writer.Allocating = .init(gpa);
     defer text.deinit();
     try visor.dumpScreen(term.screen(), &text.writer);
     if (stats) |s| {
-        std.debug.print("\n{s} — {d} bytes, {d} cells in {d} runs, {d} repeated\n", .{
+        try report.print("\n{s} — {d} bytes, {d} cells in {d} runs, {d} repeated\n", .{
             what, s.bytes, s.cells, s.runs, s.repeated,
         });
     } else {
-        std.debug.print("\n{s}\n", .{what});
+        try report.print("\n{s}\n", .{what});
     }
     var lines = std.mem.splitScalar(u8, text.written(), '\n');
     var row: u16 = 0;
     while (lines.next()) |line| : (row += 1) {
         if (row >= term.screen().dimensions().rows) break;
-        std.debug.print("{c}|{s}|\n", .{ @as(u8, if (row == term.position().row) '>' else ' '), line });
+        try report.print("{c}|{s}|\n", .{ @as(u8, if (row == term.position().row) '>' else ' '), line });
     }
 }

@@ -188,10 +188,13 @@ const Viewer = struct {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const report = &stdout.interface;
 
     // The files. A viewer with a terminal reads these; one without shows
     // its own source, which is the nearest thing to a real file that runs
@@ -234,18 +237,18 @@ pub fn main() !void {
 
     // The frame.
     try viewer.draw(screen.window());
-    try show(gpa, &renderer, &screen, &term, caps, &out, "the first frame");
+    try show(report, &renderer, &screen, &term, caps, &out, "the first frame");
 
     // Two pages down, which is what a key would have done.
     viewer.pageDown();
     viewer.pageDown();
     try viewer.draw(screen.window());
-    try show(gpa, &renderer, &screen, &term, caps, &out, "two pages down");
+    try show(report, &renderer, &screen, &term, caps, &out, "two pages down");
 
     // A different file, from the top.
     viewer.choose(1);
     try viewer.draw(screen.window());
-    try show(gpa, &renderer, &screen, &term, caps, &out, "a different file");
+    try show(report, &renderer, &screen, &term, caps, &out, "a different file");
 
     // And the terminal made smaller. Everything that has to be resized is
     // resized in one place, and the next frame is drawn from the same
@@ -256,12 +259,13 @@ pub fn main() !void {
     try term.resize(size);
     renderer.repaint();
     try viewer.draw(screen.window());
-    try show(gpa, &renderer, &screen, &term, caps, &out, "resized to 54x12");
+    try show(report, &renderer, &screen, &term, caps, &out, "resized to 54x12");
+    try report.flush();
 }
 
 /// One frame: drawn, read back through the emulator, and printed.
 fn show(
-    gpa: std.mem.Allocator,
+    report: *std.Io.Writer,
     renderer: *visor.Renderer,
     screen: *visor.Screen,
     term: *visor.Term,
@@ -274,14 +278,6 @@ fn show(
     try term.feed(out.written());
     try visor.expectScreensEqual(screen, term.screen());
 
-    var text: std.Io.Writer.Allocating = .init(gpa);
-    defer text.deinit();
-    try visor.dumpScreen(term.screen(), &text.writer);
-    std.debug.print("\n{s} — {d} bytes, {d} cells in {d} runs\n{s}", .{
-        what,
-        stats.bytes,
-        stats.cells,
-        stats.runs,
-        text.written(),
-    });
+    try report.print("\n{s} — {d} bytes, {d} cells in {d} runs\n", .{ what, stats.bytes, stats.cells, stats.runs });
+    try visor.dumpScreen(term.screen(), report);
 }

@@ -9,10 +9,13 @@
 const std = @import("std");
 const visor = @import("visor");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const report = &stdout.interface;
 
     // --- README:usage ---
     // What the terminal can do. Nothing here reads an environment
@@ -75,8 +78,9 @@ pub fn main() !void {
     const stats = try renderer.draw(&buffer.writer, &screen, null, caps);
 
     // `Stats` is what makes a budget a test rather than a comment, and
-    // what tells a caller how big a write buffer a frame wants.
-    std.debug.print("frame: {d} bytes, {d} cells in {d} runs, {d} moves\n", .{
+    // what tells a caller how big a write buffer a frame wants. `report`
+    // is the program's own output, here standard output.
+    try report.print("frame: {d} bytes, {d} cells in {d} runs, {d} moves\n", .{
         stats.bytes, stats.cells, stats.runs, stats.moves,
     });
 
@@ -98,10 +102,7 @@ pub fn main() !void {
 
     // The grid as text, one row a line, for a golden file or a failing
     // test to be read from.
-    var out: std.Io.Writer.Allocating = .init(gpa);
-    defer out.deinit();
-    try visor.dumpScreen(term.screen(), &out.writer);
-    std.debug.print("{s}", .{out.written()});
+    try visor.dumpScreen(term.screen(), report);
 
     // Every sequence visor writes comes from morse, which it re-exports
     // whole: one fetch, and everything under the grid is reachable.
@@ -109,4 +110,5 @@ pub fn main() !void {
     var w: std.Io.Writer = .fixed(&control);
     try visor.morse.mouse(&w, .{ .motion = .press });
     // --- README:usage ---
+    try report.flush();
 }
