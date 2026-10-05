@@ -13,7 +13,6 @@
 //! on one of them opens is `Window.linkAt`, because a cell carries its link.
 
 const std = @import("std");
-const visor = @import("visor");
 
 /// Which rows of something longer a view shows.
 pub const Scroll = struct {

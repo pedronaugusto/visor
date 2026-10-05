@@ -34,14 +34,16 @@ fn LinkType(comptime checked: bool) type {
         none = 0,
         _,
 
+        const Self = @This();
+
         /// The table position, or null for `.none`.
-        pub fn index(l: @This()) ?u16 {
+        pub fn index(l: Self) ?u16 {
             const payload: u16 = @truncate(@intFromEnum(l));
             return if (payload == 0) null else payload - 1;
         }
 
         /// The identity of the pool that issued this handle.
-        pub fn generation(l: @This()) u64 {
+        pub fn generation(l: Self) u64 {
             return if (checked) @intFromEnum(l) >> 16 else 0;
         }
     };

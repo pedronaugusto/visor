@@ -85,9 +85,9 @@ test "a whole screen scrolled up is one sequence and not a repaint" {
     f.screen.scroll(.fromSize(f.screen.dimensions()), 1);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 12), stats.scrolled);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[1S") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "\x1b[1S") != null);
     // No scrolling region: the band is the whole screen.
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), ";12r") == null);
+    try testing.expect(std.mem.find(u8, f.out.written(), ";12r") == null);
     try testing.expect(stats.bytes < 24);
 }
 
@@ -100,7 +100,7 @@ test "a whole screen scrolled down is the mirror" {
     f.screen.scroll(.fromSize(f.screen.dimensions()), -2);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 12), stats.scrolled);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[2T") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "\x1b[2T") != null);
     try testing.expect(stats.bytes < 24);
 }
 
@@ -113,10 +113,10 @@ test "a band of rows scrolled inside the screen sets a region and puts it back" 
     f.screen.scroll(.{ .col = 0, .row = 2, .cols = 10, .rows = 8 }, 1);
     const stats = try f.draw();
     try testing.expect(stats.scrolled > 0);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[3;10r") != null);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[1S") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "\x1b[3;10r") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "\x1b[1S") != null);
     try testing.expect(std.mem.endsWith(u8, f.out.written(), "\x1b[r") or
-        std.mem.indexOf(u8, f.out.written(), "\x1b[r") != null);
+        std.mem.find(u8, f.out.written(), "\x1b[r") != null);
 }
 
 test "a frame that is not a scroll is not written as one" {
@@ -130,7 +130,7 @@ test "a frame that is not a scroll is not written as one" {
     try f.screen.write(7, 9, "z", .{}, .none);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "S") == null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "S") == null);
 }
 
 test "the detector is off unless the caller asks for it" {

@@ -808,7 +808,10 @@ test "a list with no viewport still returns a bounded visible range" {
 test "a distant list selection reads each item height at most once" {
     const Heights = struct {
         reads: usize = 0,
-        fn height(h: *@This(), at: usize) usize {
+
+        const Self = @This();
+
+        fn height(h: *Self, at: usize) usize {
             h.reads += 1;
             return 1 + at % 3;
         }

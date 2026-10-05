@@ -383,7 +383,7 @@ pub const Tty = struct {
             _ = std.posix.system.close(fd);
         };
         for (fds) |fd| {
-            try fcntlSet(fd, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+            try fcntlSet(fd, std.posix.F.SETFL, @bitCast(std.posix.O{ .NONBLOCK = true }));
             try fcntlSet(fd, std.posix.F.SETFD, std.posix.FD_CLOEXEC);
         }
         for (&watchers) |*w| {
@@ -575,7 +575,7 @@ fn readAtLeast(io: Io, file: Io.File, buf: []u8, want: usize) ![]const u8 {
 /// write may arrive in more than one read.
 fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
     var got: usize = 0;
-    while (std.mem.indexOf(u8, buf[0..got], part) == null) {
+    while (std.mem.find(u8, buf[0..got], part) == null) {
         if (got == buf.len) return error.NoSpaceLeft;
         const n = try file.readStreaming(io, &.{buf[got..]});
         if (n == 0) break;
@@ -645,14 +645,14 @@ test "leaving through the terminal releases its renderer before destruction" {
     try t.enter(&r, .{}, .alt, .{ .paste = true });
     var seen: [256]u8 = undefined;
     const bytes = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?2004h");
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2004h") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?2004h") != null);
 
     // left with nothing reading the master: the way out must not wait on it
     try t.leave();
     try testing.expect(t._renderer == null);
     try testing.expect(t._saved == null);
     const undone = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?1049l");
-    try testing.expect(std.mem.indexOf(u8, undone, "\x1b[?2004l") != null);
+    try testing.expect(std.mem.find(u8, undone, "\x1b[?2004l") != null);
 
     r.deinit();
     t.restore();
@@ -747,13 +747,13 @@ test "restoring one entered terminal leaves the other renderer armed" {
     try testing.expect(ra._entered == null);
     try testing.expect(rb._entered != null);
     const left = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?1049l");
-    try testing.expect(std.mem.indexOf(u8, left, "\x1b[?2004l") != null);
-    try testing.expect(std.mem.indexOf(u8, left, "\x1b[?1004l") == null);
+    try testing.expect(std.mem.find(u8, left, "\x1b[?2004l") != null);
+    try testing.expect(std.mem.find(u8, left, "\x1b[?1004l") == null);
     restoreGlobal();
     try testing.expect(rb._entered == null);
     try testing.expect(b._saved == null);
     const restored = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1049l");
-    try testing.expect(std.mem.indexOf(u8, restored, "\x1b[?1004l") != null);
+    try testing.expect(std.mem.find(u8, restored, "\x1b[?1004l") != null);
 }
 
 test "panic restoration restores every raw terminal and clears its registration" {
@@ -807,12 +807,12 @@ test "a failed leave flush still restores the entered modes on the saved termina
     try testing.expect(t._saved == null);
     try testing.expect(r._entered == null);
     const master = pair.readFile().handle;
-    try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
+    try fcntlSet(master, std.posix.F.SETFL, @bitCast(std.posix.O{ .NONBLOCK = true }));
     const n = std.posix.system.read(master, &seen, seen.len);
     try testing.expect(std.posix.errno(n) == .SUCCESS);
     const count: usize = @intCast(n);
-    try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?2004l") != null);
-    try testing.expect(std.mem.indexOf(u8, seen[0..count], "\x1b[?1049l") != null);
+    try testing.expect(std.mem.find(u8, seen[0..count], "\x1b[?2004l") != null);
+    try testing.expect(std.mem.find(u8, seen[0..count], "\x1b[?1049l") != null);
 }
 
 test "primitive restoration output does not wait for a full descriptor" {

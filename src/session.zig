@@ -327,8 +327,8 @@ test "a second session entry preserves pixel mouse parsing" {
         var events = parser.feed("\x1b[<0;36;51M");
         try testing.expect(events.next().?.mouse.pixels);
         try s.leave(&out.writer);
-        try testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[?1016l") != null);
-        try testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[?2004l") != null);
+        try testing.expect(std.mem.find(u8, out.written(), "\x1b[?1016l") != null);
+        try testing.expect(std.mem.find(u8, out.written(), "\x1b[?2004l") != null);
     }
 }
 

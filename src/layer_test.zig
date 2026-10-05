@@ -86,13 +86,13 @@ test "a layer is placed by the id the program chose, with no round trip" {
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 1), stats.placements);
     const bytes = f.written();
-    try testing.expect(std.mem.indexOf(u8, bytes, "i=13") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "a=p") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "q=2") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "C=1") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "z=-1000000") != null);
+    try testing.expect(std.mem.find(u8, bytes, "i=13") != null);
+    try testing.expect(std.mem.find(u8, bytes, "a=p") != null);
+    try testing.expect(std.mem.find(u8, bytes, "q=2") != null);
+    try testing.expect(std.mem.find(u8, bytes, "C=1") != null);
+    try testing.expect(std.mem.find(u8, bytes, "z=-1000000") != null);
     // Placed from the cell it belongs at.
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[2;3H") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[2;3H") != null);
 }
 
 test "the same layer declared again writes nothing" {
@@ -122,8 +122,8 @@ test "a layer that moved is replaced rather than deleted and placed again" {
     });
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 1), stats.placements);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "a=d") == null);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "a=p") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "a=d") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "a=p") != null);
 }
 
 test "a layer that left is deleted by name and its bytes are kept" {
@@ -139,14 +139,14 @@ test "a layer that left is deleted by name and its bytes are kept" {
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 1), stats.placements);
     const bytes = f.written();
-    try testing.expect(std.mem.indexOf(u8, bytes, "a=d") != null);
+    try testing.expect(std.mem.find(u8, bytes, "a=d") != null);
     // The narrow form: this image, this placement, lowercase so the pixels
     // stay on the terminal.
-    try testing.expect(std.mem.indexOf(u8, bytes, "d=i") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "i=5") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "p=3") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "d=I") == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "d=a") == null);
+    try testing.expect(std.mem.find(u8, bytes, "d=i") != null);
+    try testing.expect(std.mem.find(u8, bytes, "i=5") != null);
+    try testing.expect(std.mem.find(u8, bytes, "p=3") != null);
+    try testing.expect(std.mem.find(u8, bytes, "d=I") == null);
+    try testing.expect(std.mem.find(u8, bytes, "d=a") == null);
 }
 
 test "after a resize every picture is placed again, and one that left is still deleted" {
@@ -167,10 +167,10 @@ test "after a resize every picture is placed again, and one that left is still d
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 2), stats.placements);
     const bytes = f.written();
-    try testing.expect(std.mem.indexOf(u8, bytes, "a=p") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "i=1") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "a=d") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "i=2") != null);
+    try testing.expect(std.mem.find(u8, bytes, "a=p") != null);
+    try testing.expect(std.mem.find(u8, bytes, "i=1") != null);
+    try testing.expect(std.mem.find(u8, bytes, "a=d") != null);
+    try testing.expect(std.mem.find(u8, bytes, "i=2") != null);
 
     // And once placed, it is known where it is again.
     try f.layers.declare(stays);
@@ -186,8 +186,8 @@ test "a picture swapped for another is placed before the old one goes" {
     try f.layers.declare(.{ .image = 7, .rect = at });
     _ = try f.draw();
     const bytes = f.written();
-    const placed = std.mem.indexOf(u8, bytes, "a=p,q=2,i=7").?;
-    const dropped = std.mem.indexOf(u8, bytes, "a=d,q=2,d=i,i=6").?;
+    const placed = std.mem.find(u8, bytes, "a=p,q=2,i=7").?;
+    const dropped = std.mem.find(u8, bytes, "a=d,q=2,d=i,i=6").?;
     try testing.expect(placed < dropped);
 }
 
@@ -203,7 +203,7 @@ test "an image sent quietly is ready at once, compressed when that is smaller" {
     try testing.expect(sent < pixels.len / 10);
     const bytes = out.written();
     try testing.expect(std.mem.startsWith(u8, bytes, "\x1b_Gq=2,i=9,"));
-    try testing.expect(std.mem.indexOf(u8, bytes, "o=z") != null);
+    try testing.expect(std.mem.find(u8, bytes, "o=z") != null);
     try testing.expect(l.ready(9, 0, 250));
     try testing.expectEqual(Image.State.ready, l.image(9).?.state);
 
@@ -219,7 +219,7 @@ test "an image sent quietly is ready at once, compressed when that is smaller" {
     }
     const raw = try l.transmit(&out.writer, 10, &noise, .{ .width = 8, .height = 8 });
     try testing.expectEqual(noise.len, raw);
-    try testing.expect(std.mem.indexOf(u8, out.written(), "o=z") == null);
+    try testing.expect(std.mem.find(u8, out.written(), "o=z") == null);
 }
 
 test "the pixels decompress to what was sent, chunk after chunk" {
@@ -236,9 +236,9 @@ test "the pixels decompress to what was sent, chunk after chunk" {
     defer joined.deinit(testing.allocator);
     var chunks: usize = 0;
     var rest = out.written();
-    while (std.mem.indexOf(u8, rest, "\x1b_G")) |at| {
-        const semi = std.mem.indexOfScalarPos(u8, rest, at, ';').?;
-        const end = std.mem.indexOfPos(u8, rest, semi, "\x1b\\").?;
+    while (std.mem.find(u8, rest, "\x1b_G")) |at| {
+        const semi = std.mem.findScalarPos(u8, rest, at, ';').?;
+        const end = std.mem.findPos(u8, rest, semi, "\x1b\\").?;
         try joined.appendSlice(testing.allocator, rest[semi + 1 .. end]);
         rest = rest[end + 2 ..];
         chunks += 1;
@@ -264,7 +264,7 @@ test "an image sent asking for an answer is ready on the word, or when the grace
     const px = [_]u8{ 1, 2, 3, 4 };
 
     _ = try l.transmit(&out.writer, 6, &px, .{ .width = 1, .height = 1, .answer = true, .now_ms = 1000 });
-    try testing.expect(std.mem.indexOf(u8, out.written(), "q=") == null);
+    try testing.expect(std.mem.find(u8, out.written(), "q=") == null);
     try testing.expect(!l.ready(6, 1100, 250));
     l.ack(.{ .id = 6, .message = "OK" });
     try testing.expect(l.ready(6, 1101, 250));
@@ -319,7 +319,7 @@ test "sending to an id on screen places it again, and freeing takes it all away"
     try f.layers.declare(layer);
     const again = try f.draw();
     try testing.expectEqual(@as(u32, 1), again.placements);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "a=p") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "a=p") != null);
 
     // Freed: the pixels and the placements, in one command the program
     // wrote, and nothing for the next frame to delete.
@@ -345,9 +345,9 @@ test "a layer at its own size names no columns or rows" {
     });
     _ = try f.draw();
     const bytes = f.written();
-    try testing.expect(std.mem.indexOf(u8, bytes, "i=16,p=9,X=6,Y=10,z=") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "c=") == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "r=") == null);
+    try testing.expect(std.mem.find(u8, bytes, "i=16,p=9,X=6,Y=10,z=") != null);
+    try testing.expect(std.mem.find(u8, bytes, "c=") == null);
+    try testing.expect(std.mem.find(u8, bytes, "r=") == null);
 }
 
 test "the images list is as long as the pictures alive" {
@@ -381,11 +381,11 @@ test "layers are stacked in the order their tuples give" {
     });
     _ = try f.draw();
     const bytes = f.written();
-    const first = std.mem.indexOf(u8, bytes, "i=1,").?;
-    const second = std.mem.indexOf(u8, bytes, "i=2,").?;
+    const first = std.mem.find(u8, bytes, "i=1,").?;
+    const second = std.mem.find(u8, bytes, "i=2,").?;
     try testing.expect(first < second);
-    try testing.expect(std.mem.indexOf(u8, bytes, "z=-1000000") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "z=-999999") != null);
+    try testing.expect(std.mem.find(u8, bytes, "z=-1000000") != null);
+    try testing.expect(std.mem.find(u8, bytes, "z=-999999") != null);
 }
 
 test "inserting a layer re-places unchanged layers at their new z positions" {
@@ -420,7 +420,7 @@ test "a layer over the text gets a z at or above zero" {
     _ = try f.draw();
     // Zero is the protocol's own default for `z`, so it is not written;
     // what matters is that nothing put it under the text.
-    try testing.expect(std.mem.indexOf(u8, f.written(), "z=-") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "z=-") == null);
 }
 
 test "a terminal with no graphics gets no graphics commands" {
@@ -433,7 +433,7 @@ test "a terminal with no graphics gets no graphics commands" {
     });
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.placements);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b_G") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b_G") == null);
 }
 
 //=========================================================================
@@ -461,8 +461,8 @@ test "the text pass never deletes a placement" {
 
     try testing.expect(stats.cells > 0);
     try testing.expectEqual(@as(u32, 0), stats.placements);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b_G") == null);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "a=d") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b_G") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "a=d") == null);
 }
 
 test "a link survives a frame in which a neighbouring cell changed" {
@@ -478,7 +478,7 @@ test "a link survives a frame in which a neighbouring cell changed" {
     // The cell beside the link changes; the link's own cells do not.
     try f.screen.write(5, 0, "x", .{}, .none);
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b]8;") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b]8;") == null);
     for (0..3) |col| {
         try testing.expectEqual(l, f.screen.readCell(@intCast(col), 0).?.link);
     }
@@ -488,7 +488,7 @@ test "a link survives a frame in which a neighbouring cell changed" {
     try testing.expect(l != other);
     try f.screen.write(1, 0, "i", .{}, other);
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "id=2") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "id=2") != null);
 }
 
 test "a program that asks for clicks gets clicks and no motion" {
@@ -499,12 +499,12 @@ test "a program that asks for clicks gets clicks and no motion" {
     var out: Writer = .fixed(&buffer);
     try morse.mouse(&out, .{ .motion = .press });
     const bytes = out.buffered();
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1000h") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1006h") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1002h") == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1003h") == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1002l") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?1003l") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1000h") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1006h") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1002h") == null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1003h") == null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1002l") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?1003l") != null);
 }
 
 test "sending pictures again allocates nothing once the buffers have grown" {
@@ -536,8 +536,8 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     l.configureSharedMemory(io);
     defer l.deinit();
     const n = try l.transmit(&out.writer, 5, &pixels, .{ .width = 1, .height = 1 });
-    try testing.expect(std.mem.indexOf(u8, out.written(), "t=s") != null);
-    try testing.expect(std.mem.indexOf(u8, out.written(), "S=4") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "t=s") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "S=4") != null);
     const name = l.image(5).?.shm.?;
     try testing.expectEqual(name.len, n);
     // on trial, the terminal is asked to answer even when the caller was not
@@ -569,7 +569,7 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     try testing.expect(!l.ready(7, 0, 1000));
     out.clearRetainingCapacity();
     _ = try l.transmit(&out.writer, 7, &pixels, .{ .width = 1, .height = 1, .compress = false });
-    try testing.expect(std.mem.indexOf(u8, out.written(), "t=s") == null);
+    try testing.expect(std.mem.find(u8, out.written(), "t=s") == null);
     try testing.expect(l.ready(7, 0, 1000));
 
     // silence: a terminal that never answers is not trusted with another
@@ -608,9 +608,9 @@ test "a replacement lands over the old picture, placed before dropped before fre
     _ = try p.declare(&f.layers, at, 2041, 250);
     const swapped = try f.draw();
     try testing.expectEqual(f.written().len, swapped.bytes);
-    const placed = std.mem.indexOf(u8, f.written(), "a=p,q=2,i=7,p=1").?;
-    const dropped = std.mem.indexOf(u8, f.written(), "a=d,q=2,d=i,i=6,p=1").?;
-    const freed = std.mem.indexOf(u8, f.written(), "a=d,q=2,d=I,i=6").?;
+    const placed = std.mem.find(u8, f.written(), "a=p,q=2,i=7,p=1").?;
+    const dropped = std.mem.find(u8, f.written(), "a=d,q=2,d=i,i=6,p=1").?;
+    const freed = std.mem.find(u8, f.written(), "a=d,q=2,d=I,i=6").?;
     try testing.expect(placed < dropped and dropped < freed);
     try testing.expect(f.layers.image(6) == null);
     _ = try p.declare(&f.layers, at, 2100, 250);
@@ -649,7 +649,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     try testing.expect(f.layers.image(2) != null);
     _ = try f.draw();
     try testing.expect(f.layers.image(2) == null);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "a=p,q=2,i=4") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "a=p,q=2,i=4") != null);
     // A free itself can fail too; retirement and the image survive.
     try p.retire(&f.layers);
     _ = try f.layers.emit(&sink.writer, f.caps);
@@ -981,7 +981,7 @@ test "inline pictures redraw after text damage, moves, removals and repaint, but
         try f.layers.declare(picture);
         try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
         const marker = if (protocol == .sixel) "\x1bP0;1;0q" else "\x1b]1337;File=";
-        try testing.expect(std.mem.indexOf(u8, f.written(), marker) != null);
+        try testing.expect(std.mem.find(u8, f.written(), marker) != null);
         try f.layers.declare(picture);
         try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
         _ = try f.screen.write(0, 0, "x", .{}, .none);
@@ -990,9 +990,9 @@ test "inline pictures redraw after text damage, moves, removals and repaint, but
         picture.rect.col = 3;
         try f.layers.declare(picture);
         try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
-        try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[1;4H") != null);
+        try testing.expect(std.mem.find(u8, f.written(), "\x1b[1;4H") != null);
         try testing.expect((try f.draw()).bytes > 0);
-        try testing.expect(std.mem.indexOf(u8, f.written(), marker) == null);
+        try testing.expect(std.mem.find(u8, f.written(), marker) == null);
         try testing.expectEqual(@as(usize, 0), f.layers.count());
         try f.layers.declare(picture);
         _ = try f.draw();
@@ -1002,7 +1002,7 @@ test "inline pictures redraw after text damage, moves, removals and repaint, but
         try f.layers.retire(7);
         _ = try f.draw();
         try testing.expectEqual(@as(usize, 0), f.layers.images().len);
-        try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b_G") == null);
+        try testing.expect(std.mem.find(u8, f.written(), "\x1b_G") == null);
     }
 }
 
@@ -1061,7 +1061,7 @@ test "inline pictures use source cropping, probe geometry and palette limits" {
     f.caps.sixel_registers = 1;
     try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 }, .source = .{ .x = 1, .y = 1, .width = 1, .height = 1 } });
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "q\"1;1;1;1#0;2;0;0;0#0@") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "q\"1;1;1;1#0;2;0;0;0#0@") != null);
     f.layers.configureSize(.{ .cells = .{ .cols = 8, .rows = 4 } });
     try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
     try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
@@ -1072,11 +1072,11 @@ test "inline pictures cursor-right mode is enabled on entry and undone on leave"
     defer f.deinit();
     f.caps.sixel_cursor_right = true;
     try f.renderer.enter(&f.out.writer, f.caps, .alt, .{});
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?8452h") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?8452h") != null);
     try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 3, .cols = 2, .rows = 1 } });
     try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
     try f.renderer.leave(&f.out.writer);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?8452l") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?8452l") != null);
 }
 
 fn retainInlineImages(gpa: Allocator) !void {

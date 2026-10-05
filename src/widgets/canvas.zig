@@ -277,7 +277,7 @@ pub const Painter = struct {
                 const bit = braille_bits[gy % down][gx % across];
                 var bytes: [4]u8 = undefined;
                 const now = existing(p.win, col, row);
-                const cp = std.unicode.utf8Decode(now) catch braille_base;
+                const cp = soleCodepoint(now) orelse braille_base;
                 const had: u8 = if (cp >= braille_base and cp <= braille_base + 0xff)
                     @intCast(cp - braille_base)
                 else
@@ -319,6 +319,13 @@ pub const Painter = struct {
     fn existing(win: visor.Window, col: u16, row: u16) []const u8 {
         if (col >= win.cols() or row >= win.rows()) return " ";
         return win.screen().textAt(win.rect().col + col, win.rect().row + row);
+    }
+
+    /// The one code point `bytes` spells, or null when it spells none or more.
+    fn soleCodepoint(bytes: []const u8) ?u21 {
+        var it = (std.unicode.Utf8View.init(bytes) catch return null).iterator();
+        const cp = it.nextCodepoint() orelse return null;
+        return if (it.nextCodepoint() == null) cp else null;
     }
 };
 
@@ -608,7 +615,7 @@ test "every point that locates to a mark puts one in that mark's cell" {
                 const drawn = h.term.screen().textAt(col, row);
                 try testing.expect(!std.mem.eql(u8, drawn, " "));
                 if (marker == .braille) {
-                    const cp = try std.unicode.utf8Decode(drawn);
+                    const cp = Painter.soleCodepoint(drawn).?;
                     try testing.expect(cp > braille_base and cp <= braille_base + 0xff);
                 }
             }

@@ -17,8 +17,6 @@
 //! This module imports `visor`. `visor` never imports this one: a base layer
 //! that depends on its widgets is not a base layer.
 
-const std = @import("std");
-
 /// The base this is drawn on, re-exported so a program that imports the
 /// widgets has the grid, the window and the styles without a second import.
 pub const visor = @import("visor");

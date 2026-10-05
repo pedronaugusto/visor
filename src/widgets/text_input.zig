@@ -239,14 +239,14 @@ pub const TextInput = struct {
     /// before it.
     pub fn lineStart(text: []const u8, cursor: usize) usize {
         const c = @min(cursor, text.len);
-        return if (std.mem.lastIndexOfScalar(u8, text[0..c], '\n')) |nl| nl + 1 else 0;
+        return if (std.mem.findScalarLast(u8, text[0..c], '\n')) |nl| nl + 1 else 0;
     }
 
     /// The end of the line the cursor is on, just before the next newline
     /// and the carriage return that may come with it.
     pub fn lineEnd(text: []const u8, cursor: usize) usize {
         const c = @min(cursor, text.len);
-        const nl = std.mem.indexOfScalarPos(u8, text, c, '\n') orelse return text.len;
+        const nl = std.mem.findScalarPos(u8, text, c, '\n') orelse return text.len;
         return if (nl > c and text[nl - 1] == '\r') nl - 1 else nl;
     }
 
@@ -684,10 +684,10 @@ pub const TextInput = struct {
                 bytes += e.removed + e.inserted;
             }
             if (drop == 0) return;
-            std.mem.copyForwards(u8, b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);
+            @memmove(b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);
             b._bytes.shrinkRetainingCapacity(total - bytes);
             const left = b._edits.items.len - drop;
-            std.mem.copyForwards(Edit, b._edits.items[0..left], b._edits.items[drop..]);
+            @memmove(b._edits.items[0..left], b._edits.items[drop..]);
             b._edits.shrinkRetainingCapacity(left);
             for (b._edits.items) |*e| e.bytes -= bytes;
             b._done -= drop;

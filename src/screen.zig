@@ -1744,7 +1744,7 @@ test "cell imports reject malformed glyphs and shapes before changing the grid" 
             try testing.expectError(error.InvalidCell, s.writeScaled(0, 0, bytes, .{}, .none, 2));
         }
     }
-    const multi = Cell{ .text = try s.intern("pooled-multiple-clusters") };
+    const multi: Cell = .{ .text = try s.intern("pooled-multiple-clusters") };
     try testing.expectError(error.InvalidCell, s.writeOwnedCell(0, 0, multi));
     var noncanonical: Cell = .{ .text = .inlined("x") };
     noncanonical.text.buf[5] = 1;
@@ -1757,7 +1757,7 @@ test "cell imports reject malformed glyphs and shapes before changing the grid" 
 test "a terminal bridge keeps stated widths and still checks pool identities" {
     var s = try made(4, 1);
     defer s.deinit();
-    const foreign = Cell{ .text = .inlined("x"), .shape = .{ .kind = .wide }, .link = try s.link("https://bridge.invalid", "") };
+    const foreign: Cell = .{ .text = .inlined("x"), .shape = .{ .kind = .wide }, .link = try s.link("https://bridge.invalid", "") };
     try testing.expectError(error.InvalidCell, s.cell(foreign));
     try s.writeOwnedCellUnchecked(0, 0, foreign);
     try testing.expectEqual(@as(u4, 2), s.readCell(0, 0).?.width());

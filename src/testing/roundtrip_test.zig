@@ -838,7 +838,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         try testing.expectEqual(bytes.len, stats.bytes);
 
         // The text pass is finished before the first graphics command.
-        const first = std.mem.indexOf(u8, bytes, "\x1b_G") orelse bytes.len;
+        const first = std.mem.find(u8, bytes, "\x1b_G") orelse bytes.len;
         try before_graphics.feed(bytes[0..first]);
         try term.expectScreensEqual(&h.screen, before_graphics.screen());
         try before_graphics.feed(bytes[first..]);
@@ -858,7 +858,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         // or freed, which the terminal took down itself.
         var left: usize = 0;
         for (previous) |was| {
-            if (std.mem.indexOfScalar(u32, resent.items, was.image) != null) continue;
+            if (std.mem.findScalar(u32, resent.items, was.image) != null) continue;
             for (showing.items) |now| {
                 if (now.image == was.image and now.placement == was.placement) break;
             } else left += 1;

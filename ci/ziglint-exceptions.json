@@ -35,13 +35,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z011",
-    "path": "src/term.zig",
-    "source": "var seen: std.StringArrayHashMapUnmanaged(void) = .empty;",
-    "detail": "'StringArrayHashMapUnmanaged' is deprecated: Deprecated; use `array_hash_map.String`.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/term.zig",
     "source": "try @import(\"screen.zig\").internal.resizeKeepingLink(&t._scr, size, &t._link);",
@@ -105,20 +98,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z013",
-    "path": "src/screen_test.zig",
-    "source": "const pool = @import(\"pool.zig\");",
-    "detail": "unused import 'pool'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z013",
-    "path": "src/screen_test.zig",
-    "source": "const textmod = @import(\"text.zig\");",
-    "detail": "unused import 'textmod'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/screen_test.zig",
     "source": "var r = try @import(\"render.zig\").Renderer.init(gpa, s.dimensions());",
@@ -130,13 +109,6 @@
     "path": "src/screen_test.zig",
     "source": "var renderer = try @import(\"render.zig\").Renderer.init(testing.allocator, s.dimensions());",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/layer_test.zig",
-    "source": "while (std.mem.indexOf(u8, rest, \"\\x1b_G\")) |at| {",
-    "detail": "'indexOf' is deprecated: Deprecated in favor of `find`.",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -266,20 +238,6 @@
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z013",
-    "path": "src/widgets.zig",
-    "source": "const std = @import(\"std\");",
-    "detail": "unused import 'std'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z016",
-    "path": "src/testing/corpus.zig",
-    "source": "std.debug.assert(lo >= s.base and hi - s.base < 64 and lo <= hi);",
-    "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
     "rule": "Z028",
     "path": "src/testing/roundtrip_test.zig",
     "source": "fn checkDamage(s: *const Screen, before: []const @import(\"../cell.zig\").internal.StoredCell) !void {",
@@ -294,73 +252,10 @@
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z001",
-    "path": "src/input.zig",
-    "source": "fn type_(p: *Piped, bytes: []const u8) void {",
-    "detail": "function 'type_' should be camelCase",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z020",
-    "path": "src/input.zig",
-    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z020",
-    "path": "src/input.zig",
-    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z020",
-    "path": "src/input.zig",
-    "source": "const self: *@This() = @ptrCast(@alignCast(ptr.?));",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z016",
-    "path": "src/render.zig",
-    "source": "std.debug.assert(r._gpa.ptr == prepared._gpa.ptr and r._gpa.vtable == prepared._gpa.vtable);",
-    "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z023",
     "path": "src/render.zig",
     "source": "fn printLines(r: *Renderer, out: *Writer, lines: *Screen, s: *Screen, comptime fit: Profile, caps: Caps, stats: *Stats) Error!void {",
     "detail": "'comptime' parameter should come before 'other'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/render.zig",
-    "source": "std.mem.copyForwards(Cell, region[0 .. region.len - moved], region[moved..]);",
-    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/render.zig",
-    "source": "std.mem.copyForwards(bool, untrusted[0 .. untrusted.len - distance], untrusted[distance..]);",
-    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/render.zig",
-    "source": "std.mem.copyBackwards(Cell, region[moved..], region[0 .. region.len - moved]);",
-    "detail": "'copyBackwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be >= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/render.zig",
-    "source": "std.mem.copyBackwards(bool, untrusted[distance..], untrusted[0 .. untrusted.len - distance]);",
-    "detail": "'copyBackwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be >= src.ptr.\nThis function is deprecated; use @memmove instead.",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -644,20 +539,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z020",
-    "path": "src/cell.zig",
-    "source": "pub fn index(l: @This()) ?u16 {",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z020",
-    "path": "src/cell.zig",
-    "source": "pub fn generation(l: @This()) u64 {",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/cell.zig",
     "source": "pub fn fits(c: Cell, col: u16, row: u16, size: @import(\"geom.zig\").Size) bool {",
@@ -672,20 +553,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z020",
-    "path": "src/widgets/list.zig",
-    "source": "fn height(h: *@This(), at: usize) usize {",
-    "detail": "inline @This(); assign it to `const Self = @This();`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z013",
-    "path": "src/widgets/markdown/gfm_test.zig",
-    "source": "const visor = @import(\"visor\");",
-    "detail": "unused import 'visor'",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
     "rule": "Z023",
     "path": "src/widgets/selection.zig",
     "source": "pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {",
@@ -693,24 +560,10 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z013",
-    "path": "src/widgets/scroll.zig",
-    "source": "const visor = @import(\"visor\");",
-    "detail": "unused import 'visor'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/widgets/scroll.zig",
     "source": "pub fn bar(v: View, total: usize) @import(\"scrollbar.zig\").Scrollbar.State {",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/widgets/canvas.zig",
-    "source": "const cp = try std.unicode.utf8Decode(drawn);",
-    "detail": "'utf8Decode' is deprecated: Deprecated. This function has an awkward API that is too easy to use incorrectly.",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -735,34 +588,6 @@
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z011",
-    "path": "src/widgets/text_input.zig",
-    "source": "std.mem.copyForwards(u8, b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);",
-    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z011",
-    "path": "src/widgets/text_input.zig",
-    "source": "std.mem.copyForwards(Edit, b._edits.items[0..left], b._edits.items[drop..]);",
-    "detail": "'copyForwards' is deprecated: Copy all of source into dest at position 0.\ndest.len must be >= source.len.\nIf the slices overlap, dest.ptr must be <= src.ptr.\nThis function is deprecated; use @memmove instead.",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z004",
-    "path": "src/screen.zig",
-    "source": "const multi = Cell{ .text = try s.intern(\"pooled-multiple-clusters\") };",
-    "detail": "prefer type annotation 'Cell' with an anonymous initializer for 'multi'; preserve the declaration kind, modifiers, and fields",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z004",
-    "path": "src/screen.zig",
-    "source": "const foreign = Cell{ .text = .inlined(\"x\"), .shape = .{ .kind = .wide }, .link = try s.link(\"https://bridge.invalid\", \"\") };",
-    "detail": "prefer type annotation 'Cell' with an anonymous initializer for 'foreign'; preserve the declaration kind, modifiers, and fields",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/screen.zig",
     "source": "pub const window_api = @import(\"window.zig\").WindowApi(@This());",
@@ -781,20 +606,6 @@
     "path": "src/screen.zig",
     "source": "pub const test_access = if (@import(\"builtin\").is_test) struct {",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z029",
-    "path": "src/tty.zig",
-    "source": "try fcntlSet(fd, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));",
-    "detail": "redundant @as(u32, ...): type u32 already known from context",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z029",
-    "path": "src/tty.zig",
-    "source": "try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));",
-    "detail": "redundant @as(u32, ...): type u32 already known from context",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {

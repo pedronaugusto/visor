@@ -150,5 +150,5 @@ test "canvas pictures follow the caller's sixel choice and retain the raster thr
     try t.expectEqual(@as(usize, 0), out.written().len);
     layers.configureSize(.{ .cells = .{ .cols = 2, .rows = 2 }, .cell = .{ .width = 4, .height = 8 } });
     try t.expectEqual(@as(usize, 1), try layers.emit(&out.writer, caps));
-    try t.expect(std.mem.indexOf(u8, out.written(), "\x1bP0;1;0q") != null);
+    try t.expect(std.mem.find(u8, out.written(), "\x1bP0;1;0q") != null);
 }

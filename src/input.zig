@@ -316,7 +316,7 @@ const Piped = struct {
         p.* = undefined;
     }
 
-    fn type_(p: *Piped, bytes: []const u8) void {
+    fn send(p: *Piped, bytes: []const u8) void {
         var left = bytes;
         while (left.len > 0) {
             const rc = std.posix.system.write(p.write_end, left.ptr, left.len);
@@ -362,7 +362,7 @@ test "input accepts a single byte of read storage" {
         .read_buffer = &read,
         .escape = .fromMilliseconds(20),
     });
-    p.type_("\x1b[A");
+    p.send("\x1b[A");
     p.hangUp();
     try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
     try testing.expectError(error.EndOfStream, in.next());
@@ -376,7 +376,7 @@ test "keys, text and replies come through as the parser makes them" {
     var read: [64]u8 = undefined;
     var in = try inputOver(&p.tty, &parser, &read, 25);
 
-    p.type_("a\x1b[A\x1b_Gi=5;OK\x1b\\hello\x1b[I");
+    p.send("a\x1b[A\x1b_Gi=5;OK\x1b\\hello\x1b[I");
     p.hangUp();
 
     const a = try in.next();
@@ -399,11 +399,11 @@ test "a lone escape is the Escape key once the caller's timeout has passed" {
     var read: [16]u8 = undefined;
     var in = try inputOver(&p.tty, &parser, &read, 10);
 
-    p.type_("\x1b");
+    p.send("\x1b");
     const e = try in.next();
     try testing.expectEqual(morse.Key.escape, e.key.key);
     // And `ESC [` is alt and a bracket, the other string that is both.
-    p.type_("\x1b[");
+    p.send("\x1b[");
     const b = try in.next();
     try testing.expectEqual(morse.Key{ .char = '[' }, b.key.key);
     try testing.expect(b.key.mods.alt);
@@ -418,12 +418,12 @@ test "an escape followed within the timeout is the start of a sequence" {
     // A long timeout, and the rest of the sequence well inside it.
     var in = try inputOver(&p.tty, &parser, &read, 5_000);
 
-    p.type_("\x1b");
+    p.send("\x1b");
     const later = try std.Thread.spawn(.{}, struct {
         fn run(pp: *Piped) void {
             // ziglint-ignore: Z026 a sleep cut short only sends the rest sooner, inside the timeout all the same
             std.Io.sleep(testing.io, .fromMilliseconds(30), .awake) catch {};
-            pp.type_("[A");
+            pp.send("[A");
         }
     }.run, .{&p});
     defer later.join();
@@ -438,7 +438,7 @@ test "the end of the stream settles what was pending, then says so" {
     var read: [16]u8 = undefined;
     var in = try inputOver(&p.tty, &parser, &read, 5_000);
 
-    p.type_("x\x1b");
+    p.send("x\x1b");
     p.hangUp();
     try testing.expectEqual(morse.Key{ .char = 'x' }, (try in.next()).key.key);
     try testing.expectEqual(morse.Key.escape, (try in.next()).key.key);
@@ -459,21 +459,21 @@ test "a read within a deadline hands over what came, and null once the deadline 
 
     // What is typed is handed over, and what is buffered comes first even
     // with a deadline already gone by.
-    p.type_("a\x1b[B");
+    p.send("a\x1b[B");
     try testing.expectEqual(morse.Key{ .char = 'a' }, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(1_000), .clock = .awake } })).?.key.key);
     try testing.expectEqual(morse.Key.down, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(-1), .clock = .awake } })).?.key.key);
 
     // A lone escape with a long timeout of its own is still held at a
     // short deadline, and the rest of its sequence makes it the key it
     // starts on the next read.
-    p.type_("\x1b");
+    p.send("\x1b");
     try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(20), .clock = .awake } }));
-    p.type_("[A");
+    p.send("[A");
     try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
 
     // And one whose own timeout ends first is the Escape key.
     var quick = try inputOver(&p.tty, &parser, &read, 10);
-    p.type_("\x1b");
+    p.send("\x1b");
     try testing.expectEqual(morse.Key.escape, (try quick.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(2_000), .clock = .awake } })).?.key.key);
 }
 
@@ -567,7 +567,7 @@ test "cancelling the task that reads stops the wait, with nothing written to wak
     try testing.expectError(error.Canceled, task.cancel(testing.io));
 
     // The same with a lone escape held, where the wait has a timeout.
-    p.type_("\x1b");
+    p.send("\x1b");
     var slow = try inputOver(&p.tty, &parser, &read, 60_000);
     var held = try testing.io.concurrent(Input.next, .{&slow});
     try std.Io.sleep(testing.io, .fromMilliseconds(20), .awake);
@@ -676,7 +676,7 @@ fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?
     {
         var p: Piped = try .init();
         defer p.deinit();
-        p.type_(stream.items);
+        p.send(stream.items);
         p.hangUp();
         var parser: [128]u8 = undefined;
         var read: [32]u8 = undefined;
@@ -752,13 +752,15 @@ test "a silent deadline submits one read and cancels it with the remaining budge
         reads: usize = 0,
         budget: Io.Timeout = .none,
 
+        const Self = @This();
+
         fn now(ptr: ?*anyopaque, _: Io.Clock) Io.Timestamp {
-            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            const self: *Self = @ptrCast(@alignCast(ptr.?));
             defer self.ticks += 1;
             return .fromNanoseconds(@as(i96, @intCast(self.ticks)) * 10 * std.time.ns_per_ms);
         }
         fn wait(ptr: ?*anyopaque, batch: *Io.Batch, timeout: Io.Timeout) Io.Batch.AwaitConcurrentError!void {
-            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            const self: *Self = @ptrCast(@alignCast(ptr.?));
             self.waits += 1;
             self.budget = timeout;
             var index = batch.submitted.head;
@@ -770,7 +772,7 @@ test "a silent deadline submits one read and cancels it with the remaining budge
             return error.Timeout;
         }
         fn cancel(ptr: ?*anyopaque, _: *Io.Batch) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr.?));
+            const self: *Self = @ptrCast(@alignCast(ptr.?));
             self.cancels += 1;
         }
     };

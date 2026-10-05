@@ -152,7 +152,9 @@ pub const Spread = struct {
 
     /// Whether every value from `lo` to `hi` came up, both included.
     pub fn covers(s: Spread, lo: i64, hi: i64) bool {
-        std.debug.assert(lo >= s.base and hi - s.base < 64 and lo <= hi);
+        std.debug.assert(lo >= s.base);
+        std.debug.assert(hi - s.base < 64);
+        std.debug.assert(lo <= hi);
         var v = lo;
         while (v <= hi) : (v += 1) {
             if (s.seen & (@as(u64, 1) << @intCast(v - s.base)) == 0) return false;

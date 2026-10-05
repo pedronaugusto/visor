@@ -401,7 +401,8 @@ pub const Renderer = struct {
     // Moves only storage. Terminal mode intent and the renderer's stable
     // address stay with their owner; the prepared value frees the old storage.
     fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
-        std.debug.assert(r._gpa.ptr == prepared._gpa.ptr and r._gpa.vtable == prepared._gpa.vtable);
+        std.debug.assert(r._gpa.ptr == prepared._gpa.ptr);
+        std.debug.assert(r._gpa.vtable == prepared._gpa.vtable);
         inline for (.{ "_size", "_prev", "_force", "_drifted", "_untrusted", "_hashes", "_buf" }) |field| {
             std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
         }
@@ -883,15 +884,15 @@ pub const Renderer = struct {
         const untrusted = r._untrusted[top .. @as(usize, bottom) + 1];
         const moved = @as(usize, distance) * cols;
         if (up) {
-            std.mem.copyForwards(Cell, region[0 .. region.len - moved], region[moved..]);
+            @memmove(region[0 .. region.len - moved], region[moved..]);
             @memset(region[region.len - moved ..], blank);
-            std.mem.copyForwards(bool, untrusted[0 .. untrusted.len - distance], untrusted[distance..]);
+            @memmove(untrusted[0 .. untrusted.len - distance], untrusted[distance..]);
             @memset(untrusted[untrusted.len - distance ..], false);
             for (bottom + 1 - distance..bottom + 1) |row| r._force[row] = true;
         } else {
-            std.mem.copyBackwards(Cell, region[moved..], region[0 .. region.len - moved]);
+            @memmove(region[moved..], region[0 .. region.len - moved]);
             @memset(region[0..moved], blank);
-            std.mem.copyBackwards(bool, untrusted[distance..], untrusted[0 .. untrusted.len - distance]);
+            @memmove(untrusted[distance..], untrusted[0 .. untrusted.len - distance]);
             @memset(untrusted[0..distance], false);
             for (top..top + distance) |row| r._force[row] = true;
         }
@@ -2954,7 +2955,7 @@ test "a mode never asked for is never written, either way" {
     try f.renderer.leave(&f.out.writer);
     const bytes = f.written();
     for ([_][]const u8{ "\x1b[>", "\x1b[<u", "?9", "?1000", "?1002", "?1003", "?1004", "?1005", "?1006", "?1015", "?1016", "?2004", "?2031" }) |needle| {
-        try testing.expect(std.mem.indexOf(u8, bytes, needle) == null);
+        try testing.expect(std.mem.find(u8, bytes, needle) == null);
     }
 }
 
@@ -3016,10 +3017,10 @@ test "entering asks the terminal to measure clusters when it was told to" {
 
     f.out.clearRetainingCapacity();
     try f.renderer.enter(&f.out.writer, .{ .width_method = .unicode }, .alt, .{});
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2027h") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?2027h") != null);
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2027l") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?2027l") != null);
 }
 
 test "leaving unwinds a partially written enter" {
@@ -3032,7 +3033,7 @@ test "leaving unwinds a partially written enter" {
 
     f.out.clearRetainingCapacity();
     try f.renderer.leave(&f.out.writer);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?1049l") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?1049l") != null);
 }
 
 test "a small frame is not bracketed and a large one is" {
@@ -3042,7 +3043,7 @@ test "a small frame is not bracketed and a large one is" {
 
     try f.screen.write(4, 1, "x", .{}, .none);
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2026h") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?2026h") == null);
 
     for (0..40) |row| {
         for (0..120) |col| {
@@ -3066,7 +3067,7 @@ test "a terminal that does not want the bracket never gets it" {
     f.renderer.repaint();
     try f.screen.write(0, 0, "x", .{}, .none);
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b[?2026") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b[?2026") == null);
 }
 
 test "cells changed in every other column are one run, not twenty" {
@@ -3166,7 +3167,7 @@ test "an expensive unchanged grapheme is moved over instead of bridged" {
 
     try testing.expectEqual(@as(u32, 2), stats.runs);
     try testing.expectEqual(@as(u32, 2), stats.cells);
-    try testing.expect(std.mem.indexOf(u8, f.written(), long) == null);
+    try testing.expect(std.mem.find(u8, f.written(), long) == null);
 }
 
 test "both ways of writing a row are priced in the bytes they really cost" {
@@ -3476,7 +3477,7 @@ test "a terminal that measures clusters is never told a width" {
     try f.screen.write(0, 0, "\u{26a0}\u{fe0f}", .{}, .none);
     try f.screen.write(2, 0, "\u{4e2d}", .{}, .none);
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b]66") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b]66") == null);
 }
 
 test "a scaled grapheme is one sequence and its block is never written" {
@@ -3681,7 +3682,7 @@ test "the cursor is moved relative to the saved origin in inline mode" {
     f.renderer._cursor = null;
     try f.screen.write(5, 5, "z", .{}, .none);
     try f.expectBytes("\x1b8\x1b[5B\x1b[6Gz");
-    try testing.expect(std.mem.indexOf(u8, f.written(), "H") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "H") == null);
 }
 
 test "growing an inline screen takes more rows and keeps what was above" {
@@ -3803,7 +3804,7 @@ test "a repaint in inline mode starts from a blank screen at the origin" {
     try t.feed("\x1b[3;1Hjunk");
     f.renderer.repaint();
     _ = try f.draw();
-    try testing.expect(std.mem.indexOf(u8, f.written(), "\x1b8\x1b[0J") != null);
+    try testing.expect(std.mem.find(u8, f.written(), "\x1b8\x1b[0J") != null);
     try t.feed(f.written());
     try expectRowText(&t, 1, "");
     try expectRowText(&t, 2, "  x");
@@ -3826,8 +3827,8 @@ test "inline mode never writes a scrolling region" {
     f.screen.scroll(.fromSize(f.screen.dimensions()), 1);
     const stats = try f.draw();
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "r") == null);
-    try testing.expect(std.mem.indexOf(u8, f.written(), "S") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "r") == null);
+    try testing.expect(std.mem.find(u8, f.written(), "S") == null);
 }
 
 test "leaving inline mode puts the cursor below the screen and keeps the frame" {
@@ -4209,7 +4210,7 @@ test "a cell a clustering terminal would join to the one beside it goes out with
         try testing.expectEqual(bytes.len, stats.bytes);
         var want: [32]u8 = undefined;
         const around = try std.fmt.bufPrint(&want, "\x1b[?2027l{s}\x1b[?2027h", .{pair[1]});
-        try testing.expect(std.mem.indexOf(u8, bytes, around) != null);
+        try testing.expect(std.mem.find(u8, bytes, around) != null);
         try testing.expectEqual(@as(usize, 1), std.mem.count(u8, bytes, "2027l"));
     }
     // Apart already: a letter and a skin tone, a regional indicator and a
@@ -4225,7 +4226,7 @@ test "a cell a clustering terminal would join to the one beside it goes out with
         try f.screen.write(0, 0, pair[0], .{}, .none);
         try f.screen.write(textmod.graphemeWidth(pair[0], .unicode), 0, pair[1], .{}, .none);
         _ = try f.draw();
-        try testing.expect(std.mem.indexOf(u8, f.written(), "2027") == null);
+        try testing.expect(std.mem.find(u8, f.written(), "2027") == null);
     }
     // A row of spacing marks is never a repeat: each copy would join the one
     // before it.
@@ -4243,7 +4244,7 @@ test "a cell a clustering terminal would join to the one beside it goes out with
     try narrow.screen.write(0, 0, "\u{1f1e6}", .{}, .none);
     try narrow.screen.write(2, 0, "\u{1f1e7}", .{}, .none);
     _ = try narrow.draw();
-    try testing.expect(std.mem.indexOf(u8, narrow.written(), "2027") == null);
+    try testing.expect(std.mem.find(u8, narrow.written(), "2027") == null);
 }
 
 test "a base and its marks in the only column go out with cluster measuring off around them" {
@@ -4254,7 +4255,7 @@ test "a base and its marks in the only column go out with cluster measuring off 
     const stats = try f.draw();
     const bytes = f.written();
     try testing.expectEqual(bytes.len, stats.bytes);
-    try testing.expect(std.mem.indexOf(u8, bytes, "\x1b[?2027le\u{301}\x1b[?2027h") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\x1b[?2027le\u{301}\x1b[?2027h") != null);
     // Only there: a plain letter, and the same cluster where there is room
     // for the cursor to move past it, go out as they are.
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, bytes, "2027l"));
@@ -4262,7 +4263,7 @@ test "a base and its marks in the only column go out with cluster measuring off 
     defer wide.deinit();
     try wide.screen.write(2, 0, "e\u{301}", .{}, .none);
     _ = try wide.draw();
-    try testing.expect(std.mem.indexOf(u8, wide.written(), "2027") == null);
+    try testing.expect(std.mem.find(u8, wide.written(), "2027") == null);
     // Nor measured by codepoint, where the terminal joins the mark anyway.
     var narrow: Fixture = try .init(testing.allocator, 1, 1);
     defer narrow.deinit();
@@ -4270,7 +4271,7 @@ test "a base and its marks in the only column go out with cluster measuring off 
     narrow.screen.method = .wcwidth;
     try narrow.screen.write(0, 0, "e\u{301}", .{}, .none);
     _ = try narrow.draw();
-    try testing.expect(std.mem.indexOf(u8, narrow.written(), "2027") == null);
+    try testing.expect(std.mem.find(u8, narrow.written(), "2027") == null);
 }
 
 test "a cluster that would join the cell on its left, and is more than marks, reaches a clustering terminal in a cell of its own" {
@@ -4379,8 +4380,8 @@ test "pool compaction repaints reused text and link identities, including throug
         try testing.expect(!previous.eql(f.screen.readCell(0, 0).?));
         const stats = try f.draw();
         try testing.expectEqual(@as(u32, 1), stats.repainted);
-        try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
-        try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
+        try testing.expect(std.mem.find(u8, f.written(), new) != null);
+        try testing.expect(std.mem.find(u8, f.written(), "https://new.invalid") != null);
         try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
     }
 }
@@ -4414,8 +4415,8 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         } else &next;
         const stats = try f.renderer.draw(&f.out.writer, screen, null, f.caps);
         try testing.expectEqual(@as(u32, 1), stats.repainted);
-        try testing.expect(std.mem.indexOf(u8, f.written(), new) != null);
-        try testing.expect(std.mem.indexOf(u8, f.written(), "https://new.invalid") != null);
+        try testing.expect(std.mem.find(u8, f.written(), new) != null);
+        try testing.expect(std.mem.find(u8, f.written(), "https://new.invalid") != null);
     }
 }
 
@@ -4472,8 +4473,8 @@ test "leaving remembers each mode until its disabling command succeeds" {
         f.out.clearRetainingCapacity();
         try f.renderer.leave(&f.out.writer);
         for (disabled) |sequence| {
-            const accepted = std.mem.indexOf(u8, blocked.buffered(), sequence) != null;
-            const cleanup = std.mem.indexOf(u8, f.written(), sequence) != null;
+            const accepted = std.mem.find(u8, blocked.buffered(), sequence) != null;
+            const cleanup = std.mem.find(u8, f.written(), sequence) != null;
             try testing.expect(accepted or cleanup);
             // A keyboard pop is not idempotent: the shell's stack frame
             // must not be popped a second time after the first succeeded.
@@ -4493,7 +4494,7 @@ test "leaving remembers capabilities until their disabling commands succeed" {
         f.out.clearRetainingCapacity();
         try f.renderer.leave(&f.out.writer);
         for ([_][]const u8{ "\x1b[?2048l", "\x1b[?2027l" }) |sequence| {
-            try testing.expect(std.mem.indexOf(u8, blocked.buffered(), sequence) != null or std.mem.indexOf(u8, f.written(), sequence) != null);
+            try testing.expect(std.mem.find(u8, blocked.buffered(), sequence) != null or std.mem.find(u8, f.written(), sequence) != null);
         }
     }
 }
@@ -4633,19 +4634,19 @@ test "picture frames keep cursor work and forced text rows" {
     try layers.declare(picture);
     const cursor = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
     try testing.expectEqual(@as(u32, 0), cursor.rows);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "\x1b[3;4H") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "\x1b[3;4H") != null);
     f.out.clearRetainingCapacity();
     f.renderer.repaintRow(1);
     try layers.declare(picture);
     const forced = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
     try testing.expectEqual(@as(u32, 1), forced.repainted);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "text") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "text") != null);
     f.out.clearRetainingCapacity();
     for ("new", 0..) |_, col| try f.screen.write(@intCast(col), 1, "new"[col..][0..1], .{}, .none);
     try layers.declare(picture);
     const changed = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);
     try testing.expectEqual(@as(u32, 1), changed.rows);
-    try testing.expect(std.mem.indexOf(u8, f.out.written(), "new") != null);
+    try testing.expect(std.mem.find(u8, f.out.written(), "new") != null);
 }
 
 fn testRgbStyle(i: usize, salt: usize) Style {

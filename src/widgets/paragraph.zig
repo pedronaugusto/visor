@@ -335,7 +335,7 @@ test "paragraph rows and clipping treat CRLF as one line break" {
         var rows = Paragraph.Rows.init(text, 3, mode, .unicode);
         var count: usize = 0;
         while (rows.next()) |r| {
-            try testing.expect(std.mem.indexOfAny(u8, text[r.start..r.end], "\r\n") == null);
+            try testing.expect(std.mem.findAny(u8, text[r.start..r.end], "\r\n") == null);
             count += 1;
         }
         const paragraph: Paragraph = .{ .lines = &.{.{ .text = text }}, .wrap = mode };

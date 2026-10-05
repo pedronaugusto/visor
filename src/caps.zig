@@ -400,7 +400,7 @@ test "the probe asks morse's questions, in morse's order, and nothing of its own
     // last.
     const asked = out.buffered();
     for ([_][]const u8{ "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[?2048$p", "\x1b[?1016$p", "\x1bP+q5463\x1b\\", "\x1bP+q524742\x1b\\", "\x1bP+q436f\x1b\\", "\x1b_Ga=q,i=1," }) |q| {
-        try testing.expect(std.mem.indexOf(u8, asked, q) != null);
+        try testing.expect(std.mem.find(u8, asked, q) != null);
     }
     try testing.expect(std.mem.endsWith(u8, asked, "\x1b[c"));
 }

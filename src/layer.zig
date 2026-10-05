@@ -787,7 +787,7 @@ pub const Layers = struct {
     /// A still-declared image is kept until a later frame stops using it.
     pub fn retire(l: *Layers, id: u32) Allocator.Error!void {
         const gpa = l._gpa;
-        if (std.mem.indexOfScalar(u32, l._retired.items, id) != null) return;
+        if (std.mem.findScalar(u32, l._retired.items, id) != null) return;
         try l._retired.append(gpa, id);
     }
 

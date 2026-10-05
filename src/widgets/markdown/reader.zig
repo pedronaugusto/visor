@@ -319,7 +319,7 @@ pub const Document = struct {
                     const target_start = label_end + 2;
                     if (targetEnd(body, target_start)) |end| {
                         const target = body[target_start..end];
-                        if (target.len > 0 and std.mem.indexOfAny(u8, target, " \t\n") == null) {
+                        if (target.len > 0 and std.mem.findAny(u8, target, " \t\n") == null) {
                             try d.append(body[plain..i], flags, uri);
                             try d.inlineRead(body[i + 1 .. label_end], flags, try d.cellTarget(target), depth + 1);
                             i = end + 1;
@@ -333,7 +333,7 @@ pub const Document = struct {
                 if (std.mem.findScalar(u8, body[i + 1 ..], '>')) |off| {
                     const end = i + 1 + off;
                     const target = body[i + 1 .. end];
-                    if ((std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "http://")) and std.mem.indexOfAny(u8, target, " \t") == null) {
+                    if ((std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "http://")) and std.mem.findAny(u8, target, " \t") == null) {
                         try d.append(body[plain..i], flags, uri);
                         try d.appendLiteral(target, flags, try d.cellTarget(target));
                         i = end + 1;

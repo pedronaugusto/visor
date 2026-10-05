@@ -823,7 +823,7 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
 
     // Each cell's legend line, keyed by the line itself: two cells whose
     // lines read the same are the same style to anyone reading the dump.
-    var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
+    var seen: std.array_hash_map.String(void) = .empty;
     const ids = try arena.alloc(u32, s._cells.len);
     var key: std.Io.Writer.Allocating = .init(arena);
     for (s._cells, 0..) |cell, i| {
@@ -1635,11 +1635,11 @@ test "past sixty-two styles every id is two characters, legend and grid alike" {
     try testing.expectEqual(@as(usize, rows), grid);
     try testing.expect(std.mem.startsWith(u8, out.written(), "# 00 fg=#000000 bg=default\n"));
     // The sixty-third style is the first to need the second character.
-    try testing.expect(std.mem.indexOf(u8, out.written(), "# 10 fg=#3e0000 bg=default\n") != null);
-    try testing.expect(std.mem.indexOf(u8, out.written(), "# 0Z fg=#3d0000 bg=default\n") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "# 10 fg=#3e0000 bg=default\n") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "# 0Z fg=#3d0000 bg=default\n") != null);
     // And the grid's first row is the first ten, two characters each.
-    try testing.expect(std.mem.indexOf(u8, out.written(), "\n00010203040506070809\n") != null);
-    try testing.expect(std.mem.indexOf(u8, out.written(), "?") == null);
+    try testing.expect(std.mem.find(u8, out.written(), "\n00010203040506070809\n") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "?") == null);
 }
 
 test "comparing two screens names the first cell that differs" {
@@ -1716,7 +1716,7 @@ test "past sixty-two styles the ids run 00 to 0Z and then 10, in order of first 
     try dumpScreenStyles(&screen, &out.writer);
     const got = out.written();
     try testing.expect(std.mem.startsWith(u8, got, "# 00 fg=palette:16 bg=default\n"));
-    try testing.expect(std.mem.indexOf(u8, got, "\n# 10 fg=palette:78 bg=default\n# 11 fg=palette:79 bg=default\n") != null);
+    try testing.expect(std.mem.find(u8, got, "\n# 10 fg=palette:78 bg=default\n# 11 fg=palette:79 bg=default\n") != null);
     try testing.expect(std.mem.endsWith(u8, got, "\n000102030405060708090a0b0c0d0e0f0g0h0i0j0k0l0m0n0o0p0q0r0s0t0u0v0w0x0y0z0A0B0C0D0E0F0G0H0I0J0K0L0M0N0O0P0Q0R0S0T0U0V0W0X0Y0Z1011\n"));
 }
 
@@ -1812,14 +1812,14 @@ test "style dump IDs grow beyond the two digit legend" {
             try testing.expect(std.mem.startsWith(u8, legend, "# "));
             try testing.expectEqual(@as(u8, ' '), legend[2 + digits]);
             var id: usize = 0;
-            for (legend[2..][0..digits]) |digit| id = id * 62 + std.mem.indexOfScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
+            for (legend[2..][0..digits]) |digit| id = id * 62 + std.mem.findScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
             try testing.expectEqual(i, id);
         }
         const grid = lines.next().?;
         try testing.expectEqual(@as(usize, count) * digits, grid.len);
         for (0..count) |i| {
             var id: usize = 0;
-            for (grid[i * digits ..][0..digits]) |digit| id = id * 62 + std.mem.indexOfScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
+            for (grid[i * digits ..][0..digits]) |digit| id = id * 62 + std.mem.findScalar(u8, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", digit).?;
             try testing.expectEqual(i, id);
         }
         try testing.expectEqualStrings("", lines.next().?);
