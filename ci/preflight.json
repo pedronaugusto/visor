@@ -10,12 +10,7 @@
   "test_support": [
     "src/testing/*"
   ],
-  "function_exceptions": {
-    "src/window.zig:WindowApi": {
-      "lines": 630,
-      "reason": "A type constructor, not a procedure: its body is the Window type, generic over the screen module because window.zig sits below screen.zig in the layers. The length counts the type's value types and its short methods; this bound cannot grow."
-    }
-  },
+  "function_exceptions": {},
   "layout_exceptions": {},
   "docs": {
     "zig build docs -- usage": {
