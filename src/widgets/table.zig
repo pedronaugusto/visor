@@ -120,7 +120,7 @@ pub const Table = struct {
 
         var row: u16 = 0;
         if (t.header) |h| {
-            win.fill(.{ .col = 0, .row = 0, .cols = win.cols(), .rows = 1 }, .blank(t.header_style)) catch unreachable;
+            try win.fill(.{ .col = 0, .row = 0, .cols = win.cols(), .rows = 1 }, .blank(t.header_style));
             try t.drawRow(body, cells, 0, h, t.header_style);
             row = 1;
         }
@@ -129,10 +129,10 @@ pub const Table = struct {
         for (shown.first..shown.first + shown.count) |which| {
             const chosen = state.selected == which;
             const style = if (chosen) t.selected_style else t.rows[which].style;
-            win.fill(
+            try win.fill(
                 .{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 },
                 .blank(if (chosen) style else t.style),
-            ) catch unreachable;
+            );
             if (marker_width != 0) {
                 const mark_style = t.marker_style orelse if (chosen) style else t.style;
                 if (chosen) {
@@ -141,7 +141,7 @@ pub const Table = struct {
                         .{ .col = 0, .row = row, .wrap = .none },
                     );
                 } else if (t.marker_style) |blank| {
-                    win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(blank)) catch unreachable;
+                    try win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(blank));
                 }
             }
             try t.drawRow(body, cells, row, t.rows[which], style);

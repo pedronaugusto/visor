@@ -72,10 +72,10 @@ pub const Tabs = struct {
         while (spans.next()) |span| {
             if (span.col >= win.cols()) return;
             const style = if (span.which == t.selected) t.selected_style else t.style;
-            win.fill(
+            try win.fill(
                 .{ .col = @intCast(span.col), .row = 0, .cols = @intCast(@min(span.cols, win.cols() - span.col)), .rows = 1 },
                 .blank(style),
-            ) catch unreachable;
+            );
             const label_col = span.col + t.padding;
             if (label_col < win.cols()) _ = try win.printSegment(
                 .{ .text = t.titles[span.which], .style = style },

@@ -67,7 +67,7 @@ pub const Block = struct {
     /// writes its frame and nothing else.
     pub fn draw(b: Block, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!visor.Window {
         if (win.rect().isEmpty()) return win;
-        if (b.style) |s| win.fill(.fromSize(win.size()), .blank(s)) catch unreachable;
+        if (b.style) |s| try win.fill(.fromSize(win.size()), .blank(s));
 
         const inner = win.child(.{ .border = .{
             .where = b.borders,

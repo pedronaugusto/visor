@@ -366,7 +366,7 @@ pub const Tree = struct {
         const n = t.nodes[node];
         const over: ?Style = if (chosen) t.selected_style else null;
         const fill: ?Style = if (chosen and t.highlight_row) over orelse t.style else t.style;
-        if (fill) |ground| win.fill(.{ .col = 0, .row = y, .cols = win.cols(), .rows = 1 }, .blank(ground)) catch unreachable;
+        if (fill) |ground| try win.fill(.{ .col = 0, .row = y, .cols = win.cols(), .rows = 1 }, .blank(ground));
         const ink = t.guide_style orelse over orelse t.style orelse Style{};
         const mark_ink = over orelse t.style orelse Style{};
 

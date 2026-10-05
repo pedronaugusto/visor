@@ -43,7 +43,7 @@ const table: [64][]const u8 = blk: {
             63 => t[m] = "\u{2588}",
             else => {
                 var buf: [4]u8 = undefined;
-                const n = std.unicode.utf8Encode(cp, &buf) catch unreachable;
+                const n = std.unicode.utf8Encode(cp, &buf) catch |err| @compileError(@errorName(err));
                 const bytes: [n]u8 = buf[0..n].*;
                 t[m] = &bytes;
                 cp += 1;

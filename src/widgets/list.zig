@@ -183,7 +183,7 @@ pub const List = struct {
                 line += 1;
                 row += 1;
             }) {
-                if (fill) |ground| win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(ground)) catch unreachable;
+                if (fill) |ground| try win.fill(.{ .col = 0, .row = row, .cols = win.cols(), .rows = 1 }, .blank(ground));
                 const content = win.child(.{ .col = indent, .row = row, .rows = 1 });
                 if (line > 0) {
                     try l.drawRuns(content, item.below[line - 1], over, content.cols());
@@ -192,7 +192,7 @@ pub const List = struct {
                 if (marker_width != 0) {
                     const mark_style = l.marker_style orelse over orelse l.style orelse Style{};
                     const mark = if (chosen) l.marker else l.blank_marker orelse blank: {
-                        win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(mark_style)) catch unreachable;
+                        try win.fill(.{ .col = 0, .row = row, .cols = marker_width, .rows = 1 }, .blank(mark_style));
                         break :blank "";
                     };
                     _ = try win.printSegment(

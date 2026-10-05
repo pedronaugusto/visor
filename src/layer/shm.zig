@@ -60,6 +60,8 @@ pub fn nextSequence() u64 {
 fn nameOf(seq: u64) Name {
     var n: Name = .{};
     const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+    comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
+    // unreachable: the longest name, a u32 and a u64 in hex, fits, as asserted above
     const s = std.fmt.bufPrint(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;
     n.len = @intCast(s.len);
     return n;

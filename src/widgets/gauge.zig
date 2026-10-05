@@ -46,7 +46,7 @@ pub const Gauge = struct {
         const whole: u16 = @intCast(@min(total / 8, cols));
         const part: u16 = if (g.partial_cells) @intCast(total % 8) else 0;
 
-        win.fill(.fromSize(win.size()), .blank(g.style)) catch unreachable;
+        try win.fill(.fromSize(win.size()), .blank(g.style));
         var row: u16 = 0;
         while (row < win.rows()) : (row += 1) {
             var col: u16 = 0;

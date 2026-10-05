@@ -265,18 +265,18 @@ pub const Term = struct {
             var spacer: Cell = .blank(t._style);
             spacer.shape.kind = .spacer_head;
             var at = t._col;
-            while (at < cols) : (at += 1) t._scr.writeOwnedCellUnchecked(at, t._row, spacer) catch unreachable;
+            while (at < cols) : (at += 1) t.setCell(at, t._row, spacer);
             t._col = 0;
             t.lineFeed();
         }
         if (told) |_| {
             const text = try t._scr.intern(grapheme);
-            t._scr.writeOwnedCellUnchecked(t._col, t._row, .init(.{
+            t.setCell(t._col, t._row, .init(.{
                 .text = text,
                 .style = t._style,
                 .link = t._link,
                 .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(grapheme) },
-            })) catch unreachable;
+            }));
         } else {
             t._scr.write(t._col, t._row, grapheme, t._style, t._link) catch |err| switch (err) {
                 error.InvalidHandle, error.InvalidCell => unreachable,
@@ -327,19 +327,19 @@ pub const Term = struct {
             // and the whole cluster at the start of the next.
             var spacer: Cell = .blank(t._style);
             spacer.shape.kind = .spacer_head;
-            t._scr.writeOwnedCellUnchecked(head, row, spacer) catch unreachable;
+            t.setCell(head, row, spacer);
             t._col = 0;
             t.lineFeed();
             head = 0;
             row = t._row;
         }
         const text = try t._scr.intern(joined);
-        t._scr.writeOwnedCellUnchecked(head, row, .init(.{
+        t.setCell(head, row, .init(.{
             .text = text,
             .style = left.style,
             .link = left.link,
             .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(joined) },
-        })) catch unreachable;
+        }));
         t._previous = firstCodepoint(joined);
         t._wrap_pending = false;
         t._col = head + w;
@@ -400,7 +400,7 @@ pub const Term = struct {
         for (0..distance) |k| {
             const row: u16 = @intCast(first + k);
             var col = rect.col;
-            while (col < rect.right()) : (col += 1) t._scr.writeOwnedCellUnchecked(col, row, blank) catch unreachable;
+            while (col < rect.right()) : (col += 1) t.setCell(col, row, blank);
         }
     }
 
@@ -530,6 +530,15 @@ pub const Term = struct {
 
     /// The cell an erase leaves behind: a space in the background the
     /// terminal is currently writing in.
+    /// A cell into the grid. Every cell Term writes holds handles taken
+    /// from its own screen and still live there: text interned a moment
+    /// before or inline, and no link, the link Term holds in that screen, or
+    /// a link read from one of its cells.
+    fn setCell(t: *Term, col: u16, row: u16, c: Cell) void {
+        // unreachable: the handles are this screen's own and live, as above
+        t._scr.writeOwnedCellUnchecked(col, row, c) catch unreachable;
+    }
+
     fn erased(t: *const Term) Cell {
         return .blank(.{ .bg = t._style.bg, .reverse = t._style.reverse });
     }
@@ -578,7 +587,7 @@ pub const Term = struct {
         const blank = t.erased();
         var i: u16 = 0;
         while (i < count and col + i < t._scr.dimensions().cols) : (i += 1) {
-            t._scr.writeOwnedCellUnchecked(col + i, row, blank) catch unreachable;
+            t.setCell(col + i, row, blank);
         }
     }
 
@@ -618,7 +627,7 @@ pub const Term = struct {
         var col = cols;
         while (col > t._col + count) {
             col -= 1;
-            t._scr.writeOwnedCellUnchecked(col, t._row, t._scr.readCell(col - count, t._row).?) catch unreachable;
+            t.setCell(col, t._row, t._scr.readCell(col - count, t._row).?);
         }
         t.eraseRun(t._col, t._row, count);
     }
@@ -630,7 +639,7 @@ pub const Term = struct {
         const count: u16 = @intCast(@min(n, cols - t._col));
         var col = t._col;
         while (col + count < cols) : (col += 1) {
-            t._scr.writeOwnedCellUnchecked(col, t._row, t._scr.readCell(col + count, t._row).?) catch unreachable;
+            t.setCell(col, t._row, t._scr.readCell(col + count, t._row).?);
         }
         t.eraseRun(cols - count, t._row, count);
     }
@@ -698,7 +707,7 @@ pub const Term = struct {
         const span: u32 = @as(u32, w) * scale;
         if (t._col + span > cols or @as(u32, t._row) + scale > rows) return;
         const text = try t._scr.intern(grapheme);
-        t._scr.writeOwnedCellUnchecked(t._col, t._row, .init(.{
+        t.setCell(t._col, t._row, .init(.{
             .text = text,
             .style = t._style,
             .link = t._link,
@@ -707,7 +716,7 @@ pub const Term = struct {
                 .drift = textmod.disagrees(grapheme),
                 .scale = scale,
             },
-        })) catch unreachable;
+        }));
         t._previous = firstCodepoint(grapheme);
         t._col = @intCast(t._col + span);
         if (t._col >= cols) {

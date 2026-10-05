@@ -259,9 +259,11 @@ pub const Screen = struct {
         // already in the new pools.
         for (cells) |*c| {
             if (c.text.isPooled()) {
+                // unreachable: preparePools interned it, so this finds it and allocates nothing
                 c.text = graphemes.intern(gpa, internal.textOf(s, c)) catch unreachable;
             }
             if (internal.target(s, c.link)) |t| {
+                // unreachable: preparePools interned it, so this finds it and allocates nothing
                 c.link = links.intern(gpa, t.uri, t.params) catch unreachable;
             }
         }
@@ -378,7 +380,7 @@ pub const Screen = struct {
     fn checkGlyph(bytes: []const u8) error{InvalidCell}!void {
         if (bytes.len == 1 and bytes[0] >= 0x20 and bytes[0] < 0x7f) return;
         if (bytes.len == 0 or !std.unicode.utf8ValidateSlice(bytes)) return error.InvalidCell;
-        var codepoints = (std.unicode.Utf8View.init(bytes) catch unreachable).iterator();
+        var codepoints = std.unicode.Utf8View.initUnchecked(bytes).iterator();
         while (codepoints.nextCodepoint()) |cp| if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) return error.InvalidCell;
         var clusters = textmod.Graphemes.init(bytes);
         if ((clusters.next() orelse return error.InvalidCell).len != bytes.len or
@@ -603,6 +605,7 @@ pub const Screen = struct {
         const blank: StoredCell = .blank(.{});
 
         if (distance >= r.rows) {
+            // unreachable: a default blank holds no handle and a space, which fill never refuses
             s.fill(r, .blank(.{})) catch unreachable;
             return;
         }

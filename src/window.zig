@@ -411,7 +411,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// Every cell of the window blank and default.
             pub fn clear(w: Window) void {
-                w.fill(.fromSize(w.size()), .blank(.{})) catch unreachable;
+                w.fill(.fromSize(w.size()), .blank(.{})) catch unreachable; // unreachable: a default blank holds no handle and a space
             }
 
             /// The window's rows moved by `n`, the vacated rows blank. A positive
