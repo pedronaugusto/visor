@@ -15,10 +15,6 @@
       "lines": 203,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
     },
-    "src/testing/roundtrip_test.zig:imageRoundTrip": {
-      "lines": 182,
-      "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
-    },
     "src/window.zig:WindowApi": {
       "lines": 641,
       "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."

@@ -726,164 +726,28 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
     h.caps.kitty_graphics = dice.valueRangeAtMost(u8, 0, 3) != 0;
     h.caps.scroll_detection = false;
 
-    // Two terminals: one given every byte, one given each frame only up to
-    // its first graphics command, which must already be the whole picture
-    // of the text.
-    var whole: Term = try .init(gpa, size);
-    defer whole.deinit();
-    whole.setMethod(.unicode);
-    var before_graphics: Term = try .init(gpa, size);
-    defer before_graphics.deinit();
-    before_graphics.setMethod(.unicode);
+    var run: PictureRun = try .init(gpa, &h, &dice, tally);
+    defer run.deinit();
 
-    var showing: std.ArrayList(Shown) = .empty;
-    defer showing.deinit(gpa);
-    var expected_commands: usize = 0;
-
-    // What the program writes itself, outside a frame: pixels sent and
-    // images freed. Never fed to the terminals, which draw frames.
-    var side: std.Io.Writer.Allocating = .init(gpa);
-    defer side.deinit();
-    // The images sent or freed this frame, whose placements the terminal
-    // took down itself.
-    var resent: std.ArrayList(u32) = .empty;
-    defer resent.deinit(gpa);
-
-    var frames: usize = 0;
-    while (frames < 6 and !dice.eos()) : (frames += 1) {
-        const previous = try gpa.dupe(Shown, showing.items);
+    while (run.frames < 6 and !dice.eos()) : (run.frames += 1) {
+        const previous = try gpa.dupe(Shown, run.showing.items);
         defer gpa.free(previous);
-        resent.clearRetainingCapacity();
+        run.resent.clearRetainingCapacity();
 
         var ops: usize = 0;
         const count = dice.valueRangeAtMost(u8, 1, 8);
-        while (ops < count) : (ops += 1) {
-            const picture_op = dice.valueRangeAtMost(u8, 0, 6);
-            if (tally) |tl| tl.picture_ops.add(picture_op);
-            switch (picture_op) {
-                0, 1 => {
-                    // A new picture, or the same one moved.
-                    const shown: Shown = .{
-                        .image = dice.valueRangeAtMost(u32, 1, 4),
-                        .placement = dice.valueRangeAtMost(u32, 1, 3),
-                        .rect = randomRect(&dice, size.cols, size.rows),
-                        .under = dice.value(bool),
-                        .order = .{
-                            .layer = dice.valueRangeAtMost(i32, -2, 2),
-                            .z = dice.valueRangeAtMost(i32, -2, 2),
-                            .sibling = dice.valueRangeAtMost(i32, -2, 2),
-                        },
-                    };
-                    for (showing.items) |*held| {
-                        if (held.image == shown.image and held.placement == shown.placement) {
-                            held.* = shown;
-                            break;
-                        }
-                    } else try showing.append(gpa, shown);
-                },
-                2 => {
-                    if (showing.items.len != 0) _ = showing.swapRemove(dice.index(showing.items.len));
-                },
-                3 => switch (dice.valueRangeAtMost(u8, 0, 2)) {
-                    // Pixels sent under an id, perhaps one on screen, which
-                    // the terminal takes down while they land.
-                    0 => {
-                        const id = dice.valueRangeAtMost(u32, 1, 4);
-                        const px = [_]u8{ 0, 0, 0, 255 } ** 4;
-                        _ = try h.layers.transmit(&side.writer, id, &px, .{
-                            .width = 2,
-                            .height = 2,
-                            .answer = dice.value(bool),
-                            .now_ms = @intCast(frames * 16),
-                        });
-                        try resent.append(gpa, id);
-                    },
-                    // The terminal answers for an image, or refuses it.
-                    1 => h.layers.ack(.{
-                        .id = dice.valueRangeAtMost(u32, 1, 4),
-                        .message = if (dice.value(bool)) "OK" else "ENOENT",
-                    }),
-                    // An image freed: its placements go with it, and nothing
-                    // is left for the frame to delete.
-                    2 => {
-                        const id = dice.valueRangeAtMost(u32, 1, 4);
-                        try h.layers.free(&side.writer, id);
-                        try resent.append(gpa, id);
-                        var i: usize = 0;
-                        while (i < showing.items.len) {
-                            if (showing.items[i].image == id) {
-                                _ = showing.swapRemove(i);
-                            } else i += 1;
-                        }
-                    },
-                    else => unreachable,
-                },
-                4 => {
-                    // A frame of animation: every picture a cell along.
-                    for (showing.items) |*held| {
-                        held.rect.col = @intCast(@min(held.rect.col + 1, size.cols - 1));
-                        held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
-                    }
-                },
-                5, 6 => try operate(&h, &dice),
-                else => unreachable,
-            }
-        }
-        for (showing.items) |p| try h.layers.declare(p.asLayer());
+        while (ops < count) : (ops += 1) try run.pictureOp();
+        for (run.showing.items) |p| try h.layers.declare(p.asLayer());
         try checkGrid(&h.screen);
-
-        h.out.clearRetainingCapacity();
-        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
-        const bytes = h.out.written();
-        try testing.expectEqual(bytes.len, stats.bytes);
-
-        // The text pass is finished before the first graphics command.
-        const first = std.mem.find(u8, bytes, "\x1b_G") orelse bytes.len;
-        try before_graphics.feed(bytes[0..first]);
-        try term.expectScreensEqual(&h.screen, before_graphics.screen());
-        try before_graphics.feed(bytes[first..]);
-        try whole.feed(bytes);
-        try term.expectScreensEqual(&h.screen, whole.screen());
-
-        // Every graphics command is counted, and none is written for a
-        // terminal without the protocol.
-        const commands = std.mem.count(u8, bytes, "\x1b_G");
-        try testing.expectEqual(commands, stats.placements);
-        if (!h.caps.kitty_graphics) try testing.expectEqual(@as(usize, 0), commands);
-        expected_commands += commands;
-        try testing.expectEqual(expected_commands, whole.graphics().len);
-
-        // A deletion names one placement, keeps the bytes, and happens only
-        // for a picture that left -- not for one whose image was sent again
-        // or freed, which the terminal took down itself.
-        var left: usize = 0;
-        for (previous) |was| {
-            if (std.mem.findScalar(u32, resent.items, was.image) != null) continue;
-            for (showing.items) |now| {
-                if (now.image == was.image and now.placement == was.placement) break;
-            } else left += 1;
-        }
-        const deletions = std.mem.count(u8, bytes, "a=d");
-        try testing.expectEqual(if (h.caps.kitty_graphics) left else 0, deletions);
-        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=a"));
-        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=A"));
-        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=N"));
-
-        // Declared again unchanged, the frame writes nothing at all.
-        for (showing.items) |p| try h.layers.declare(p.asLayer());
-        h.out.clearRetainingCapacity();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
-        for (showing.items) |p| try h.layers.declare(p.asLayer());
-        h.screen.damageAll();
-        h.out.clearRetainingCapacity();
-        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
+        try run.checkFrame(previous);
+        try run.checkSettled();
     }
 
-    if (tally) |tl| tl.frames.add(frames);
+    if (tally) |tl| tl.frames.add(run.frames);
 
     // Everything taken down: one deletion each, then nothing.
-    const remaining = showing.items.len;
-    showing.clearRetainingCapacity();
+    const remaining = run.showing.items.len;
+    run.showing.clearRetainingCapacity();
     h.out.clearRetainingCapacity();
     const down = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
     try testing.expectEqual(if (h.caps.kitty_graphics) remaining else 0, std.mem.count(u8, h.out.written(), "a=d"));
@@ -892,6 +756,195 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
     try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
     try testing.expectEqual(@as(usize, 0), h.layers.count());
 }
+
+/// One run of pictures: what the program shows, what it wrote outside a
+/// frame, and the two terminals the frames are read back by.
+const PictureRun = struct {
+    gpa: Allocator,
+    h: *Harness,
+    dice: *corpus.Dice,
+    tally: ?*Tally,
+    /// Given every byte.
+    whole: Term,
+    /// Given each frame only up to its first graphics command, which must
+    /// already be the whole picture of the text.
+    before_graphics: Term,
+    showing: std.ArrayList(Shown) = .empty,
+    /// What the program writes itself, outside a frame: pixels sent and
+    /// images freed. Never fed to the terminals, which draw frames.
+    side: std.Io.Writer.Allocating,
+    /// The images sent or freed this frame, whose placements the terminal
+    /// took down itself.
+    resent: std.ArrayList(u32) = .empty,
+    expected_commands: usize = 0,
+    frames: usize = 0,
+
+    fn init(gpa: Allocator, h: *Harness, dice: *corpus.Dice, tally: ?*Tally) !PictureRun {
+        const size = h.screen.dimensions();
+        var whole: Term = try .init(gpa, size);
+        errdefer whole.deinit();
+        whole.setMethod(.unicode);
+        var before_graphics: Term = try .init(gpa, size);
+        before_graphics.setMethod(.unicode);
+        return .{
+            .gpa = gpa,
+            .h = h,
+            .dice = dice,
+            .tally = tally,
+            .whole = whole,
+            .before_graphics = before_graphics,
+            .side = .init(gpa),
+        };
+    }
+
+    fn deinit(run: *PictureRun) void {
+        run.whole.deinit();
+        run.before_graphics.deinit();
+        run.showing.deinit(run.gpa);
+        run.side.deinit();
+        run.resent.deinit(run.gpa);
+        run.* = undefined;
+    }
+
+    /// One thing the program does to its pictures, or to the text.
+    fn pictureOp(run: *PictureRun) !void {
+        const dice = run.dice;
+        const size = run.h.screen.dimensions();
+        const picture_op = dice.valueRangeAtMost(u8, 0, 6);
+        if (run.tally) |tl| tl.picture_ops.add(picture_op);
+        switch (picture_op) {
+            0, 1 => {
+                // A new picture, or the same one moved.
+                const shown: Shown = .{
+                    .image = dice.valueRangeAtMost(u32, 1, 4),
+                    .placement = dice.valueRangeAtMost(u32, 1, 3),
+                    .rect = randomRect(dice, size.cols, size.rows),
+                    .under = dice.value(bool),
+                    .order = .{
+                        .layer = dice.valueRangeAtMost(i32, -2, 2),
+                        .z = dice.valueRangeAtMost(i32, -2, 2),
+                        .sibling = dice.valueRangeAtMost(i32, -2, 2),
+                    },
+                };
+                for (run.showing.items) |*held| {
+                    if (held.image == shown.image and held.placement == shown.placement) {
+                        held.* = shown;
+                        break;
+                    }
+                } else try run.showing.append(run.gpa, shown);
+            },
+            2 => {
+                if (run.showing.items.len != 0) _ = run.showing.swapRemove(dice.index(run.showing.items.len));
+            },
+            3 => try run.imageOp(),
+            4 => {
+                // A frame of animation: every picture a cell along.
+                for (run.showing.items) |*held| {
+                    held.rect.col = @intCast(@min(held.rect.col + 1, size.cols - 1));
+                    held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
+                }
+            },
+            5, 6 => try operate(run.h, dice),
+            else => unreachable,
+        }
+    }
+
+    /// Something done to an image rather than to a placement of it.
+    fn imageOp(run: *PictureRun) !void {
+        const dice = run.dice;
+        const layers = &run.h.layers;
+        switch (dice.valueRangeAtMost(u8, 0, 2)) {
+            // Pixels sent under an id, perhaps one on screen, which the
+            // terminal takes down while they land.
+            0 => {
+                const id = dice.valueRangeAtMost(u32, 1, 4);
+                const px = [_]u8{ 0, 0, 0, 255 } ** 4;
+                _ = try layers.transmit(&run.side.writer, id, &px, .{
+                    .width = 2,
+                    .height = 2,
+                    .answer = dice.value(bool),
+                    .now_ms = @intCast(run.frames * 16),
+                });
+                try run.resent.append(run.gpa, id);
+            },
+            // The terminal answers for an image, or refuses it.
+            1 => layers.ack(.{
+                .id = dice.valueRangeAtMost(u32, 1, 4),
+                .message = if (dice.value(bool)) "OK" else "ENOENT",
+            }),
+            // An image freed: its placements go with it, and nothing is
+            // left for the frame to delete.
+            2 => {
+                const id = dice.valueRangeAtMost(u32, 1, 4);
+                try layers.free(&run.side.writer, id);
+                try run.resent.append(run.gpa, id);
+                var i: usize = 0;
+                while (i < run.showing.items.len) {
+                    if (run.showing.items[i].image == id) {
+                        _ = run.showing.swapRemove(i);
+                    } else i += 1;
+                }
+            },
+            else => unreachable,
+        }
+    }
+
+    /// The frame drawn and read back: the text whole before the first
+    /// graphics command, every command counted, and a deletion for each
+    /// picture that left and for nothing else.
+    fn checkFrame(run: *PictureRun, previous: []const Shown) !void {
+        const h = run.h;
+        h.out.clearRetainingCapacity();
+        const stats = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
+        const bytes = h.out.written();
+        try testing.expectEqual(bytes.len, stats.bytes);
+
+        // The text pass is finished before the first graphics command.
+        const first = std.mem.find(u8, bytes, "\x1b_G") orelse bytes.len;
+        try run.before_graphics.feed(bytes[0..first]);
+        try term.expectScreensEqual(&h.screen, run.before_graphics.screen());
+        try run.before_graphics.feed(bytes[first..]);
+        try run.whole.feed(bytes);
+        try term.expectScreensEqual(&h.screen, run.whole.screen());
+
+        // Every graphics command is counted, and none is written for a
+        // terminal without the protocol.
+        const commands = std.mem.count(u8, bytes, "\x1b_G");
+        try testing.expectEqual(commands, stats.placements);
+        if (!h.caps.kitty_graphics) try testing.expectEqual(@as(usize, 0), commands);
+        run.expected_commands += commands;
+        try testing.expectEqual(run.expected_commands, run.whole.graphics().len);
+
+        // A deletion names one placement, keeps the bytes, and happens only
+        // for a picture that left -- not for one whose image was sent again
+        // or freed, which the terminal took down itself.
+        var left: usize = 0;
+        for (previous) |was| {
+            if (std.mem.findScalar(u32, run.resent.items, was.image) != null) continue;
+            for (run.showing.items) |now| {
+                if (now.image == was.image and now.placement == was.placement) break;
+            } else left += 1;
+        }
+        const deletions = std.mem.count(u8, bytes, "a=d");
+        try testing.expectEqual(if (h.caps.kitty_graphics) left else 0, deletions);
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=a"));
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=A"));
+        try testing.expectEqual(@as(usize, 0), std.mem.count(u8, bytes, "d=N"));
+    }
+
+    /// Declared again unchanged, the frame writes nothing at all, damaged
+    /// or not.
+    fn checkSettled(run: *PictureRun) !void {
+        const h = run.h;
+        for (run.showing.items) |p| try h.layers.declare(p.asLayer());
+        h.out.clearRetainingCapacity();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
+        for (run.showing.items) |p| try h.layers.declare(p.asLayer());
+        h.screen.damageAll();
+        h.out.clearRetainingCapacity();
+        try testing.expectEqual(@as(usize, 0), (try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps)).bytes);
+    }
+};
 
 test "pictures placed, moved, stacked and taken down keep every frame idempotent and out of the text pass" {
     try std.testing.fuzz(testing.allocator, struct {
