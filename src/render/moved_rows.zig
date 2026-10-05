@@ -15,31 +15,35 @@
 //! What this file will never do: guess. A row that matches by hash and not by
 //! cells is not a match.
 
+const std = @import("std");
+const morse = @import("../dependencies.zig").morse;
+const cellmod = @import("../cell.zig");
+const screen = @import("../screen.zig");
+const Caps = @import("../caps.zig").Caps;
+
+const Cell = cellmod.internal.StoredCell;
+const Profile = morse.Color.Profile;
+const Screen = screen.Screen;
+const Writer = std.Io.Writer;
+const assert = std.debug.assert;
+
+/// The fewest rows an offset must explain before a scroll is worth writing.
+const min_moved_rows = 2;
+/// The fewest dirty rows before it is worth hashing the frame at all. Below
+/// this a scroll cannot save more than it costs to look for one.
+const min_dirty_rows = 3;
+
+/// The scroll detection over a renderer's own frames. `render` is the file
+/// that defines `Renderer`, handed in because it sits above this one.
 pub fn Rows(comptime render: type) type {
     return struct {
-        const std = @import("std");
-        const morse = @import("../dependencies.zig").morse;
-
-        const cellmod = @import("../cell.zig");
-        const Caps = @import("../caps.zig").Caps;
-        const Profile = @import("../dependencies.zig").morse.Color.Profile;
-        const Screen = @import("../screen.zig").Screen;
-
-        const Cell = cellmod.internal.StoredCell;
         const Renderer = render.Renderer;
-        const Writer = std.Io.Writer;
-
-        /// The fewest rows an offset must explain before a scroll is worth writing.
-        const min_moved_rows = 2;
-        /// The fewest dirty rows before it is worth hashing the frame at all. Below
-        /// this a scroll cannot save more than it costs to look for one.
-        const min_dirty_rows = 3;
 
         /// Writes this frame's rows as a scroll if they are one, and tells the
         /// previous frame that they moved. Returns how many rows the terminal moved,
         /// or null when the frame is not a scroll.
-        pub fn apply(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps) Renderer.Error!?u32 {
-            const found = detect(r, s, fit, caps) orelse return null;
+        pub fn apply(r: *Renderer, comptime fit: Profile, out: *Writer, s: *Screen, caps: Caps) Renderer.Error!?u32 {
+            const found = detect(r, fit, s, caps) orelse return null;
             const rows = r.dimensions().rows;
 
             // The vacated rows are filled with the terminal's current background, so
@@ -63,32 +67,21 @@ pub fn Rows(comptime render: type) type {
             return @as(u32, found.bottom - found.top) + 1;
         }
 
-        /// A scroll the renderer could write instead of a repaint.
-        const Found = struct {
-            /// The first row of the scrolling region.
-            top: u16,
-            /// The last row of it.
-            bottom: u16,
-            /// How many rows the contents move.
-            distance: u16,
-            /// Whether they move up, the way a terminal scrolls when something is
-            /// written past the last row.
-            up: bool,
-        };
-
         /// Looks for the offset that explains the most rows, then for the longest
         /// band of rows it explains, then checks that band cell by cell.
-        fn detect(r: *Renderer, s: *const Screen, comptime fit: Profile, caps: Caps) ?Found {
+        fn detect(r: *Renderer, comptime fit: Profile, s: *const Screen, caps: Caps) ?Found {
             const rows = r.dimensions().rows;
             if (rows < 3 or r._repaint_all) return null;
             if (s._damage.count() < min_dirty_rows) return null;
             for (r._force) |f| if (f) return null;
 
+            // Two hashes a row, this frame's and the last one's, sized at resize.
+            assert(r._hashes.len == @as(usize, rows) * 2);
             const now = r._hashes[0..rows];
             const was = r._hashes[rows..][0..rows];
             for (0..rows) |i| {
-                now[i] = hashRow(@import("../screen.zig").internal.row(s, @intCast(i)), fit, caps);
-                was[i] = hashRow(render.internal.prevRow(r, @intCast(i)), fit, caps);
+                now[i] = hashRow(fit, screen.internal.row(s, @intCast(i)), caps);
+                was[i] = hashRow(fit, render.internal.prevRow(r, @intCast(i)), caps);
             }
 
             const offset = bestOffset(now, was) orelse return null;
@@ -106,7 +99,7 @@ pub fn Rows(comptime render: type) type {
             var i = band.first;
             while (i <= band.last) : (i += 1) {
                 const source: u16 = if (up) i + distance else i - distance;
-                if (!rowsEqual(@import("../screen.zig").internal.row(s, i), render.internal.prevRow(r, source), fit, caps)) return null;
+                if (!rowsEqual(fit, screen.internal.row(s, i), render.internal.prevRow(r, source), caps)) return null;
             }
 
             // A region whose edge runs through text drawn more than one row tall
@@ -114,90 +107,19 @@ pub fn Rows(comptime render: type) type {
             // and a terminal clears a block it no longer holds whole. Either frame
             // is enough to refuse, because the terminal holds the one and is about
             // to be given the other.
-            if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(@import("../screen.zig").internal.row(s, top - 1), @import("../screen.zig").internal.row(s, top)))) return null;
-            if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(@import("../screen.zig").internal.row(s, bottom), @import("../screen.zig").internal.row(s, bottom + 1)))) return null;
+            if (top > 0 and (tallAcross(render.internal.prevRow(r, top - 1), render.internal.prevRow(r, top)) or tallAcross(screen.internal.row(s, top - 1), screen.internal.row(s, top)))) return null;
+            if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(screen.internal.row(s, bottom), screen.internal.row(s, bottom + 1)))) return null;
+            // The region holds the band and the rows it moves into: inside the
+            // screen, and longer than the distance, or nothing would stay.
+            assert(distance > 0);
+            assert(bottom < rows);
+            assert(bottom - top + 1 > distance);
             return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
-        }
-
-        /// Whether a block of text drawn more than one row tall may run from one
-        /// row into the next: both hold a cell of such a block in the same column.
-        /// Two blocks that only touch answer yes too, which costs a repaint and
-        /// never a torn block.
-        fn tallAcross(above: []const Cell, below: []const Cell) bool {
-            for (above, below) |a, b| {
-                if (a.shape.scale > 1 and b.shape.scale > 1) return true;
-            }
-            return false;
-        }
-
-        /// The row offset that explains the most rows that really changed, or null
-        /// when no offset explains enough of them.
-        fn bestOffset(now: []const u64, was: []const u64) ?i32 {
-            const rows: i32 = @intCast(now.len);
-            var best: i32 = 0;
-            var best_count: u32 = 0;
-            var d: i32 = -(rows - 1);
-            while (d <= rows - 1) : (d += 1) {
-                if (d == 0) continue;
-                var n: u32 = 0;
-                var i: i32 = 0;
-                while (i < rows) : (i += 1) {
-                    const j = i - d;
-                    if (j < 0 or j >= rows) continue;
-                    const iu: usize = @intCast(i);
-                    const ju: usize = @intCast(j);
-                    if (now[iu] == was[ju] and now[iu] != was[iu]) n += 1;
-                }
-                if (n > best_count) {
-                    best_count = n;
-                    best = d;
-                }
-            }
-            if (best_count < min_moved_rows) return null;
-            return best;
-        }
-
-        /// The longest run of rows an offset explains, and how many of them really
-        /// changed.
-        fn longestBand(now: []const u64, was: []const u64, offset: i32) ?struct { first: u16, last: u16 } {
-            const rows: i32 = @intCast(now.len);
-            var best_first: i32 = -1;
-            var best_last: i32 = -1;
-            var best_moved: u32 = 0;
-
-            var run_first: i32 = -1;
-            var moved: u32 = 0;
-            var i: i32 = 0;
-            while (i <= rows) : (i += 1) {
-                const j = if (i < rows) i - offset else -1;
-                const ok = i < rows and j >= 0 and j < rows and
-                    now[@intCast(i)] == was[@intCast(j)];
-                if (ok) {
-                    if (run_first < 0) {
-                        run_first = i;
-                        moved = 0;
-                    }
-                    if (now[@intCast(i)] != was[@intCast(i)]) moved += 1;
-                    continue;
-                }
-                if (run_first >= 0) {
-                    const length = i - run_first;
-                    const best_length = best_last - best_first + 1;
-                    if (moved >= min_moved_rows and (best_first < 0 or length > best_length)) {
-                        best_first = run_first;
-                        best_last = i - 1;
-                        best_moved = moved;
-                    }
-                    run_first = -1;
-                }
-            }
-            if (best_first < 0) return null;
-            return .{ .first = @intCast(best_first), .last = @intCast(best_last) };
         }
 
         /// A row's contents as one number, so two frames can be compared row by row
         /// before they are compared cell by cell.
-        fn hashRow(cells: []const Cell, comptime fit: Profile, caps: Caps) u64 {
+        fn hashRow(comptime fit: Profile, cells: []const Cell, caps: Caps) u64 {
             if (render.heldAs(fit, caps)) return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(cells));
             // What the terminal shows, a stretch of cells at a time: fed to the hash
             // one cell at a time, the streaming state costs more than the hashing.
@@ -216,11 +138,100 @@ pub fn Rows(comptime render: type) type {
 
         /// Whether two rows hold the same thing, which is what a hash match is
         /// checked against.
-        fn rowsEqual(a: []const Cell, b: []const Cell, comptime fit: Profile, caps: Caps) bool {
+        fn rowsEqual(comptime fit: Profile, a: []const Cell, b: []const Cell, caps: Caps) bool {
             if (a.len != b.len) return false;
             if (render.heldAs(fit, caps)) return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
             for (a, b) |x, y| if (!render.visibleAs(fit, x, caps).eql(y)) return false;
             return true;
         }
     };
+}
+
+/// A scroll the renderer could write instead of a repaint.
+const Found = struct {
+    /// The first row of the scrolling region.
+    top: u16,
+    /// The last row of it.
+    bottom: u16,
+    /// How many rows the contents move.
+    distance: u16,
+    /// Whether they move up, the way a terminal scrolls when something is
+    /// written past the last row.
+    up: bool,
+};
+
+/// Whether a block of text drawn more than one row tall may run from one
+/// row into the next: both hold a cell of such a block in the same column.
+/// Two blocks that only touch answer yes too, which costs a repaint and
+/// never a torn block.
+fn tallAcross(above: []const Cell, below: []const Cell) bool {
+    for (above, below) |a, b| {
+        if (a.shape.scale > 1 and b.shape.scale > 1) return true;
+    }
+    return false;
+}
+
+/// The row offset that explains the most rows that really changed, or null
+/// when no offset explains enough of them.
+fn bestOffset(now: []const u64, was: []const u64) ?i32 {
+    const rows: i32 = @intCast(now.len);
+    var best: i32 = 0;
+    var best_count: u32 = 0;
+    var d: i32 = -(rows - 1);
+    while (d <= rows - 1) : (d += 1) {
+        if (d == 0) continue;
+        var n: u32 = 0;
+        var i: i32 = 0;
+        while (i < rows) : (i += 1) {
+            const j = i - d;
+            if (j < 0 or j >= rows) continue;
+            const iu: usize = @intCast(i);
+            const ju: usize = @intCast(j);
+            if (now[iu] == was[ju] and now[iu] != was[iu]) n += 1;
+        }
+        if (n > best_count) {
+            best_count = n;
+            best = d;
+        }
+    }
+    if (best_count < min_moved_rows) return null;
+    return best;
+}
+
+/// The longest run of rows an offset explains, and how many of them really
+/// changed.
+fn longestBand(now: []const u64, was: []const u64, offset: i32) ?struct { first: u16, last: u16 } {
+    const rows: i32 = @intCast(now.len);
+    var best_first: i32 = -1;
+    var best_last: i32 = -1;
+    var best_moved: u32 = 0;
+
+    var run_first: i32 = -1;
+    var moved: u32 = 0;
+    var i: i32 = 0;
+    while (i <= rows) : (i += 1) {
+        const j = if (i < rows) i - offset else -1;
+        const ok = i < rows and j >= 0 and j < rows and
+            now[@intCast(i)] == was[@intCast(j)];
+        if (ok) {
+            if (run_first < 0) {
+                run_first = i;
+                moved = 0;
+            }
+            if (now[@intCast(i)] != was[@intCast(i)]) moved += 1;
+            continue;
+        }
+        if (run_first >= 0) {
+            const length = i - run_first;
+            const best_length = best_last - best_first + 1;
+            if (moved >= min_moved_rows and (best_first < 0 or length > best_length)) {
+                best_first = run_first;
+                best_last = i - 1;
+                best_moved = moved;
+            }
+            run_first = -1;
+        }
+    }
+    if (best_first < 0) return null;
+    return .{ .first = @intCast(best_first), .last = @intCast(best_last) };
 }

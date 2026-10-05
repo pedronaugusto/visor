@@ -112,12 +112,12 @@ pub const List = struct {
 
         /// The item after this one, stopping at the last.
         pub fn next(s: *State, count: usize) void {
-            s.select(selection.move(s.selected, count, .next));
+            s.select(selection.move(.next, s.selected, count));
         }
 
         /// The item before this one, stopping at the first.
         pub fn previous(s: *State, count: usize) void {
-            s.select(selection.move(s.selected, count, .previous));
+            s.select(selection.move(.previous, s.selected, count));
         }
 
         /// The first item.
