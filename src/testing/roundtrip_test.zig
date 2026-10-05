@@ -218,7 +218,7 @@ fn checkGrid(s: *const Screen) !void {
 
 /// That the conservative damage map names every cell that changed, checked
 /// against a copy taken before the operations.
-fn checkDamage(s: *const Screen, before: []const @import("../cell.zig").internal.StoredCell) !void {
+fn checkDamage(s: *const Screen, before: []const cellmod.internal.StoredCell) !void {
     for (0..s.dimensions().rows) |r| {
         const span = s._damage.row(@intCast(r));
         var col: u16 = 0;
@@ -341,7 +341,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer t.deinit();
     t.setMethod(terminalMethod(method));
 
-    const before = try gpa.alloc(@import("../cell.zig").internal.StoredCell, h.screen._cells.len);
+    const before = try gpa.alloc(cellmod.internal.StoredCell, h.screen._cells.len);
     defer gpa.free(before);
 
     var frames: usize = 0;

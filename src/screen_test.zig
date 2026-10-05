@@ -12,6 +12,7 @@ const Rect = geom.Rect;
 const Size = geom.Size;
 const Style = cellmod.Style;
 const Screen = @import("screen.zig").Screen;
+const Renderer = @import("render.zig").Renderer;
 const Cursor = @import("screen.zig").Cursor;
 const testing = std.testing;
 const made = @import("screen.zig").test_access.made;
@@ -21,7 +22,7 @@ test "managed screens and renderers use their captured allocator through every o
         fn run(gpa: Allocator) !void {
             var s = try Screen.init(gpa, .{ .cols = 4, .rows = 1 });
             defer s.deinit();
-            var r = try @import("render.zig").Renderer.init(gpa, s.dimensions());
+            var r = try Renderer.init(gpa, s.dimensions());
             defer r.deinit();
             const text = try s.intern("a\u{301}\u{302}\u{303}");
             const link_id = try s.link("https://kept.invalid", "id=kept");
@@ -39,7 +40,7 @@ test "the grid and renderer store compact cells while exported handles stay chec
     var s = try made(3, 1);
     defer s.deinit();
     try testing.expect(@sizeOf(@TypeOf(s._cells[0])) <= 32);
-    var renderer = try @import("render.zig").Renderer.init(testing.allocator, s.dimensions());
+    var renderer = try Renderer.init(testing.allocator, s.dimensions());
     defer renderer.deinit();
     try testing.expect(@sizeOf(@TypeOf(renderer._prev[0])) <= 32);
     const glyph = "👩‍🚀";
@@ -61,7 +62,6 @@ test "the grid and renderer store compact cells while exported handles stay chec
 }
 
 test "raw pools and renderer storage stay behind the checked boundary" {
-    const Renderer = @import("render.zig").Renderer;
     try testing.expect(!@hasField(Screen, "graphemes"));
     try testing.expect(!@hasField(Screen, "links"));
     try testing.expect(!@hasField(Renderer, "prev"));
@@ -77,7 +77,6 @@ test "raw pools and renderer storage stay behind the checked boundary" {
 }
 
 test "screen and renderer geometry and allocation metadata have one owner" {
-    const Renderer = @import("render.zig").Renderer;
     inline for (.{ Screen, Renderer }) |Owner| {
         inline for (.{ "gpa", "size", "pool_generation" }) |field| try testing.expect(!@hasField(Owner, field));
     }

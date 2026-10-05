@@ -6,8 +6,10 @@ const Screen = @import("screen.zig").Screen;
 const render = @import("render.zig");
 const Renderer = render.Renderer;
 const Caps = @import("caps.zig").Caps;
-const Layers = @import("layer.zig").Layers;
-const Winsize = @import("winsize.zig").Winsize;
+const layer_mod = @import("layer.zig");
+const Layers = layer_mod.Layers;
+const winsize = @import("winsize.zig");
+const Winsize = winsize.Winsize;
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -270,7 +272,7 @@ test "a session repaints an unchanged in-band size, including pictures" {
     s._probe._caps.kitty_graphics = true;
     _ = try s.setCaps(&out.writer, s._probe.capabilities());
     try s._screen.write(0, 0, "x", .{}, .none);
-    const layer: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
+    const layer: layer_mod.Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
     try s._layers.declare(layer);
     _ = try s.draw(&out.writer);
     out.clearRetainingCapacity();
@@ -455,16 +457,16 @@ test "session housekeeping survives failed capability output" {
             .resize => {
                 try testing.expectEqual(@as(u16, 4), s.screen().dimensions().cols);
                 try testing.expectEqual(@as(u16, 3), s.renderer().dimensions().rows);
-                try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 40, .height = 60 }, s.windowSize().area);
+                try testing.expectEqual(winsize.Pixels{ .width = 40, .height = 60 }, s.windowSize().area);
             },
             .reply => |reply| switch (reply) {
                 .window_size => |report| switch (report.what) {
                     .text_area_cells => try testing.expectEqual(@as(u16, 4), s.screen().dimensions().cols),
-                    .text_area_pixels => try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 40, .height = 60 }, s.windowSize().area),
-                    .cell_pixels => try testing.expectEqual(@import("winsize.zig").Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),
+                    .text_area_pixels => try testing.expectEqual(winsize.Pixels{ .width = 40, .height = 60 }, s.windowSize().area),
+                    .cell_pixels => try testing.expectEqual(winsize.Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),
                     else => unreachable,
                 },
-                .graphics => try testing.expectEqual(@import("layer.zig").Image.State.ready, s.layers().image(2).?.state),
+                .graphics => try testing.expectEqual(layer_mod.Image.State.ready, s.layers().image(2).?.state),
                 else => unreachable,
             },
             else => unreachable,

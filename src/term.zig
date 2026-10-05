@@ -29,6 +29,7 @@ const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const textmod = @import("text.zig");
 const Screen = @import("screen.zig").Screen;
+const screen_internal = @import("screen.zig").internal;
 
 const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
@@ -136,7 +137,7 @@ pub const Term = struct {
     /// terminal to be blank leaves the old frame showing wherever the new
     /// one has nothing to write.
     pub fn resize(t: *Term, size: Size) Allocator.Error!void {
-        try @import("screen.zig").internal.resizeKeepingLink(&t._scr, size, &t._link);
+        try screen_internal.resizeKeepingLink(&t._scr, size, &t._link);
         t._scroll_top = 0;
         t._scroll_bottom = if (size.rows == 0) 0 else size.rows - 1;
         t._col = @min(t._col, if (size.cols == 0) 0 else size.cols - 1);
@@ -781,7 +782,7 @@ pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Er
         var col: u16 = 0;
         while (col < s.dimensions().cols) : (col += 1) {
             const c = &s._cells[s.index(col, row)];
-            try w.writeAll(if (c.isTail()) opts.tail else @import("screen.zig").internal.textOf(s, c));
+            try w.writeAll(if (c.isTail()) opts.tail else screen_internal.textOf(s, c));
         }
         try w.writeByte('\n');
     }
@@ -833,7 +834,7 @@ pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.A
         const source = if (s.headOf(col, row)) |head| s._cells[s.index(head.col, head.row)] else cell;
         key.clearRetainingCapacity();
         writeStyleName(&key.writer, source.style) catch return error.OutOfMemory;
-        if (@import("screen.zig").internal.target(s, source.link)) |target| {
+        if (screen_internal.target(s, source.link)) |target| {
             key.writer.print(" link={s}", .{target.uri}) catch return error.OutOfMemory;
         }
         const found = try seen.getOrPut(arena, key.written());
@@ -963,10 +964,10 @@ fn reportCell(want: *const Screen, got: *const Screen, col: u16, row: u16) void 
     const b = got._cells[got.index(col, row)];
     log.err("cell {d},{d} differs", .{ col, row });
     log.err("  want: \"{s}\" {any} link={any} shape={any}", .{
-        want.textAt(col, row), a.style, @import("screen.zig").internal.target(want, a.link), a.shape,
+        want.textAt(col, row), a.style, screen_internal.target(want, a.link), a.shape,
     });
     log.err("  have: \"{s}\" {any} link={any} shape={any}", .{
-        got.textAt(col, row), b.style, @import("screen.zig").internal.target(got, b.link), b.shape,
+        got.textAt(col, row), b.style, screen_internal.target(got, b.link), b.shape,
     });
     log.err("--- want ---\n{f}", .{Grid{ .screen = want }});
     log.err("--- have ---\n{f}", .{Grid{ .screen = got }});
@@ -994,9 +995,9 @@ pub const Grid = struct {
 
 /// Whether two cells' links name the same target, which is not the same as
 /// holding the same index: the two screens interned in different orders.
-fn linksEqual(want: *const Screen, got: *const Screen, a: @TypeOf(@as(@import("cell.zig").internal.StoredCell, .{}).link), b: @TypeOf(@as(@import("cell.zig").internal.StoredCell, .{}).link)) bool {
-    const ta = @import("screen.zig").internal.target(want, a);
-    const tb = @import("screen.zig").internal.target(got, b);
+fn linksEqual(want: *const Screen, got: *const Screen, a: @TypeOf(@as(cellmod.internal.StoredCell, .{}).link), b: @TypeOf(@as(cellmod.internal.StoredCell, .{}).link)) bool {
+    const ta = screen_internal.target(want, a);
+    const tb = screen_internal.target(got, b);
     if (ta == null or tb == null) return (ta == null) == (tb == null);
     return std.mem.eql(u8, ta.?.uri, tb.?.uri) and std.mem.eql(u8, ta.?.params, tb.?.params);
 }

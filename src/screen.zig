@@ -24,13 +24,16 @@
 //! The previous frame belongs to the renderer, which is the only thing that knows what the terminal was shown.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const pool = @import("pool.zig");
 const textmod = @import("text.zig");
-const Damage = @import("damage.zig").Damage;
+const damage_mod = @import("damage.zig");
+const window = @import("window.zig");
+const Damage = damage_mod.Damage;
 
 const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
@@ -86,7 +89,7 @@ pub const internal = struct {
 };
 
 /// The grid.
-pub const window_api = @import("window.zig").WindowApi(@This());
+pub const window_api = window.WindowApi(@This());
 
 pub const Screen = struct {
     // Fields prefixed _ belong to the owner; change geometry through resize.
@@ -1341,7 +1344,7 @@ test "clear puts every cell back and damages only what it moved" {
     s._damage.clear();
     s.clear();
     try testing.expectEqual(@as(usize, 1), s._damage.count());
-    try testing.expectEqual(@import("damage.zig").Span{ .first = 2, .last = 2 }, s._damage.row(1).?);
+    try testing.expectEqual(damage_mod.Span{ .first = 2, .last = 2 }, s._damage.row(1).?);
     for (s._cells) |c| try testing.expect(c.eql(.blank(.{})));
 }
 
@@ -1827,7 +1830,7 @@ test "screen fills keep whole glyph extents inside their rectangle" {
     }
 }
 
-pub const test_access = if (@import("builtin").is_test) struct {
+pub const test_access = if (builtin.is_test) struct {
     pub const made = madeFixture;
     pub const checkInvariants = invariantsFixture;
 } else struct {};

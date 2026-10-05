@@ -35,7 +35,9 @@ const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
-const moved_rows = @import("render/moved_rows.zig").Rows(@This());
+const moved_rows_mod = @import("render/moved_rows.zig");
+const moved_rows = moved_rows_mod.Rows(@This());
+const Layer = @import("layer.zig").Layer;
 const Layers = @import("layer.zig").Layers;
 const textmod = @import("text.zig");
 const Caps = @import("caps.zig").Caps;
@@ -3537,13 +3539,13 @@ test "a scaled grapheme reaches the emulator as the block it is" {
     try f.screen.write(5, 1, "c", .{}, .none);
     _ = try f.draw();
     try t.feed(f.written());
-    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+    try term_mod.expectScreensEqual(&f.screen, t.screen());
 
     // Written over, the block goes on both sides the same way.
     try f.screen.write(2, 1, "x", .{}, .none);
     _ = try f.draw();
     try t.feed(f.written());
-    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+    try term_mod.expectScreensEqual(&f.screen, t.screen());
 }
 
 test "a change of width method repaints every row that ever drifted" {
@@ -3585,7 +3587,8 @@ test "a screen of the wrong size is refused rather than drawn" {
     try testing.expectError(error.SizeMismatch, f.draw());
 }
 
-const Term = @import("term.zig").Term;
+const term_mod = @import("term.zig");
+const Term = term_mod.Term;
 
 /// A terminal with a prompt's worth of lines already on it, so the cursor is
 /// somewhere down the screen the way it is when a program starts.
@@ -3749,7 +3752,7 @@ test "a repaint erases a row the previous frame took to be blank" {
     f.renderer.repaint();
     _ = try f.draw();
     try t.feed(f.written());
-    try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+    try term_mod.expectScreensEqual(&f.screen, t.screen());
 }
 
 test "a row repainted on suspicion is written whole even where it is blank" {
@@ -4296,7 +4299,7 @@ test "a cluster that would join the cell on its left, and is more than marks, re
         const stats = try f.draw();
         try testing.expectEqual(f.written().len, stats.bytes);
         try t.feed(f.written());
-        try @import("term.zig").expectScreensEqual(&f.screen, t.screen());
+        try term_mod.expectScreensEqual(&f.screen, t.screen());
         try testing.expectEqual(@as(u32, 1), stats.rejoined);
         // and drawn again unchanged, nothing
         try f.expectBytes("");
@@ -4313,7 +4316,7 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     try f.renderer.enter(&f.out.writer, c, .alt, .{});
     for ("row one", 0..) |_, col| try f.screen.write(@intCast(col), 0, "row one"[col..][0..1], .{}, .none);
     for ("row two", 0..) |_, col| try f.screen.write(@intCast(col), 1, "row two"[col..][0..1], .{}, .none);
-    const picture: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    const picture: Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
     try layers.declare(picture);
     _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
     f.out.clearRetainingCapacity();
@@ -4439,11 +4442,11 @@ test "an ASCII batch keeps its first cell apart from a Unicode prepend" {
         try f.screen.write(2, 0, "b", .{}, .none);
         _ = try f.draw();
         try term.feed(f.written());
-        try @import("term.zig").expectScreensEqual(&f.screen, term.screen());
+        try term_mod.expectScreensEqual(&f.screen, term.screen());
         try f.screen.write(1, 0, "c", .{}, .none);
         _ = try f.draw();
         try term.feed(f.written());
-        try @import("term.zig").expectScreensEqual(&f.screen, term.screen());
+        try term_mod.expectScreensEqual(&f.screen, term.screen());
     }
 }
 
@@ -4621,7 +4624,7 @@ test "picture frames keep cursor work and forced text rows" {
     defer layers.deinit();
     var caps = f.caps;
     caps.kitty_graphics = true;
-    const picture: @import("layer.zig").Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    const picture: Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
     for ("text", 0..) |_, col| try f.screen.write(@intCast(col), 1, "text"[col..][0..1], .{}, .none);
     try layers.declare(picture);
     _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);

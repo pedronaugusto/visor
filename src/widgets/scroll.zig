@@ -13,6 +13,7 @@
 //! on one of them opens is `Window.linkAt`, because a cell carries its link.
 
 const std = @import("std");
+const Scrollbar = @import("scrollbar.zig").Scrollbar;
 
 /// Which rows of something longer a view shows.
 pub const Scroll = struct {
@@ -82,7 +83,7 @@ pub const Scroll = struct {
     }
 
     /// The same numbers as a scrollbar takes them.
-    pub fn bar(v: View, total: usize) @import("scrollbar.zig").Scrollbar.State {
+    pub fn bar(v: View, total: usize) Scrollbar.State {
         return .{ .content = total, .viewport = v.end - v.start, .position = v.start };
     }
 };

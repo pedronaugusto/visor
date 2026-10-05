@@ -5,6 +5,7 @@
 const std = @import("std");
 const visor = @import("visor");
 
+const raster_mod = @import("canvas/raster.zig");
 const sextants = @import("sextants.zig");
 
 /// What a canvas draws its marks with.
@@ -56,9 +57,9 @@ const braille_base: u21 = 0x2800;
 
 /// A plane to draw shapes on, in the caller's own coordinates.
 pub const Canvas = struct {
-    pub const Surface = @import("canvas/raster.zig").Surface;
-    pub const Paint = @import("canvas/raster.zig").Paint;
-    pub const Blend = @import("canvas/raster.zig").Blend;
+    pub const Surface = raster_mod.Surface;
+    pub const Paint = raster_mod.Paint;
+    pub const Blend = raster_mod.Blend;
 
     /// One terminal plotting shape. Maps borrow separate contours in plot
     /// coordinates; longitude and latitude fit bounds [-180,180], [-90,90].

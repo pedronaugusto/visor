@@ -5,6 +5,7 @@ const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const textmod = @import("text.zig");
 const Screen = @import("screen.zig").Screen;
+const screen_internal = @import("screen.zig").internal;
 const Target = @import("pool.zig").Target;
 
 const Cell = cellmod.Cell;
@@ -357,7 +358,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
     }, .{ .wrap = .word });
     for (0..plain.dimensions().rows) |r| {
         if (r % 2 == 0) continue;
-        for (@import("screen.zig").internal.rowMut(&plain, @intCast(r))) |*c| {
+        for (screen_internal.rowMut(&plain, @intCast(r))) |*c| {
             if (!c.eql(.blank(.{}))) c.style.dim = true;
         }
     }

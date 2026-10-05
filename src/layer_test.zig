@@ -13,6 +13,7 @@ const Transmit = @import("layer.zig").Transmit;
 const ImageIds = @import("layer.zig").ImageIds;
 const Replacement = @import("layer.zig").Replacement;
 const Layers = @import("layer.zig").Layers;
+const layer_access = @import("layer.zig").test_access;
 const testing = std.testing;
 
 const Screen = @import("screen.zig").Screen;
@@ -666,9 +667,9 @@ test "image ids stay within their range and refuse exhaustion" {
     try testing.expectError(error.InvalidIdRange, ImageIds.init(3, 2, 1));
     var ids = try ImageIds.init(std.math.maxInt(u32) - 1, std.math.maxInt(u32), 1);
     const id = try ids.acquire(&l);
-    try @import("layer.zig").test_access.record(&l, .{ .id = id });
+    try layer_access.record(&l, .{ .id = id });
     const next = try ids.acquire(&l);
-    try @import("layer.zig").test_access.record(&l, .{ .id = next });
+    try layer_access.record(&l, .{ .id = next });
     try testing.expect(id != next);
     try testing.expectError(error.NoImageId, ids.acquire(&l));
 }
@@ -709,10 +710,10 @@ test "shared memory reserves ownership before creating a name" {
 }
 
 test "shared memory validates the protocol size before any ownership or output" {
-    try testing.expectEqual(std.math.maxInt(u32), try @import("layer.zig").test_access.sharedSize(std.math.maxInt(u32)));
+    try testing.expectEqual(std.math.maxInt(u32), try layer_access.sharedSize(std.math.maxInt(u32)));
     if (@bitSizeOf(usize) <= 32) return error.SkipZigTest;
     const oversized: usize = @as(usize, std.math.maxInt(u32)) + 1;
-    try testing.expectError(error.PayloadTooLarge, @import("layer.zig").test_access.sharedSize(oversized));
+    try testing.expectError(error.PayloadTooLarge, layer_access.sharedSize(oversized));
     var fail = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     var l: Layers = .init(fail.allocator());
     l.configureSharedMemory(testing.io);

@@ -30,6 +30,7 @@
 //! neither protocol has a placement id.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 
 const geom = @import("geom.zig");
@@ -1080,7 +1081,7 @@ fn findSameIndex(list: []const Layer, layer: Layer) ?usize {
     return null;
 }
 
-pub const test_access = if (@import("builtin").is_test) struct {
+pub const test_access = if (builtin.is_test) struct {
     pub const sharedSize = sharedSizeFixture;
     pub const record = Layers.record;
 } else struct {};

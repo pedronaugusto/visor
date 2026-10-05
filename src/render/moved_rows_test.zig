@@ -21,6 +21,7 @@ const cellmod = @import("../cell.zig");
 const render = @import("../render.zig");
 const Caps = @import("../caps.zig").Caps;
 const Screen = @import("../screen.zig").Screen;
+const term = @import("../term.zig");
 const Renderer = render.Renderer;
 const Cell = cellmod.internal.StoredCell;
 const testing = std.testing;
@@ -167,7 +168,7 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     var f: Fixture = try .init(gpa, 10, 9);
     defer f.deinit();
     f.caps.scaled_text = true;
-    var t: @import("../term.zig").Term = try .init(gpa, f.screen.dimensions());
+    var t: term.Term = try .init(gpa, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
     f.renderer._shown = null;
@@ -188,5 +189,5 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     const stats = try f.draw();
     try t.feed(f.out.written());
     try testing.expectEqual(@as(u32, 0), stats.scrolled);
-    try @import("../term.zig").expectScreensEqual(&f.screen, t.screen());
+    try term.expectScreensEqual(&f.screen, t.screen());
 }
