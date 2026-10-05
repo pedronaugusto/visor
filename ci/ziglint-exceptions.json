@@ -462,13 +462,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z026",
-    "path": "src/input.zig",
-    "source": "std.Io.sleep(testing.io, .fromMilliseconds(30), .awake) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z012",
     "path": "src/caps.zig",
     "source": "pub fn init(asked: morse.Probe) Probe {",
@@ -1425,41 +1418,6 @@
     "path": "src/tty.zig",
     "source": "try fcntlSet(master, std.posix.F.SETFL, @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));",
     "detail": "redundant @as(u32, ...): type u32 already known from context",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z026",
-    "path": "src/tty.zig",
-    "source": "terminal.restore(t._input.handle, input_mode) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z026",
-    "path": "src/tty.zig",
-    "source": "if (!is_windows) terminal.restore(was.handle, was.mode) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z026",
-    "path": "src/tty.zig",
-    "source": "r.leave(&out) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z026",
-    "path": "src/tty.zig",
-    "source": "terminal.restore(was.input, was.input_mode) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z026",
-    "path": "src/tty.zig",
-    "source": "terminal.restore(was.output, was.output_mode) catch {};",
-    "detail": "empty catch block suppresses errors: `catch {}`",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {

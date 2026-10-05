@@ -420,6 +420,7 @@ test "an escape followed within the timeout is the start of a sequence" {
     p.type_("\x1b");
     const later = try std.Thread.spawn(.{}, struct {
         fn run(pp: *Piped) void {
+            // ziglint-ignore: Z026 a sleep cut short only sends the rest sooner, inside the timeout all the same
             std.Io.sleep(testing.io, .fromMilliseconds(30), .awake) catch {};
             pp.type_("[A");
         }

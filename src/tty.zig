@@ -224,6 +224,7 @@ pub const Tty = struct {
         if (is_windows) {
             const input_mode = terminal.rawMode(t._input.handle) catch |err| return modeError(err);
             const output_mode = terminal.rawMode(t._file.handle) catch |err| {
+                // ziglint-ignore: Z026 the output's failure is the one reported; a second has nowhere to go
                 terminal.restore(t._input.handle, input_mode) catch {};
                 return modeError(err);
             };
@@ -488,16 +489,22 @@ pub const Panic = std.debug.FullPanic(struct {
 /// undone through a buffer on the stack and output that may fail. On POSIX,
 /// raw mode comes back first and the output never waits for space.
 fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
-    // Raw mode must come back even when output cannot accept a byte.
+    // Raw mode must come back even when output cannot accept a byte. Every
+    // step is best effort: the caller may be a panic handler, nothing here
+    // can report a failure, and a step that fails must not stop the next.
+    // ziglint-ignore: Z026 best effort, see above
     if (!is_windows) terminal.restore(was.handle, was.mode) catch {};
     if (renderer) |r| {
         var buffer: [512]u8 = undefined;
         var out: Writer = .fixed(&buffer);
+        // ziglint-ignore: Z026 a full buffer still holds the sequences that fit, which are written
         r.leave(&out) catch {};
         writeRaw(if (is_windows) was.output else was.handle, out.buffered());
     }
     if (is_windows) {
+        // ziglint-ignore: Z026 best effort, see above
         terminal.restore(was.input, was.input_mode) catch {};
+        // ziglint-ignore: Z026 best effort, see above
         terminal.restore(was.output, was.output_mode) catch {};
         return;
     }
