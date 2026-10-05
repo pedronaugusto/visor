@@ -274,7 +274,7 @@ pub const Tty = struct {
     }
 
     /// Anything entering or leaving a screen can fail with.
-    pub const EnterError = ModeError || render.Error || error{AlreadyEntered};
+    pub const EnterError = ModeError || Renderer.Error || error{AlreadyEntered};
 
     /// Takes the screen: raw mode, then everything `Renderer.enter` writes,
     /// flushed. From here the way back — `leave`, `restore`, `close`,
@@ -299,7 +299,7 @@ pub const Tty = struct {
 
     /// Gives the screen back: everything `Renderer.leave` writes, flushed,
     /// and then the terminal's mode as it was found.
-    pub fn leave(t: *Tty) render.Error!void {
+    pub fn leave(t: *Tty) Renderer.Error!void {
         const r = t._renderer orelse {
             t.restore();
             return;

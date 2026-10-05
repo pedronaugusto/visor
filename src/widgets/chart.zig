@@ -18,7 +18,6 @@ const Align = layout.Align;
 const Canvas = canvas_mod.Canvas;
 const Marker = canvas_mod.Marker;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// One side of a chart: what it spans, what it is called, and how it is
 /// marked.
@@ -71,7 +70,7 @@ pub const Chart = struct {
     legend: bool = true,
 
     /// Draws the axes, the labels, the datasets and the legend.
-    pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(c: Chart, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
 
         var gutter: u16 = 0;
@@ -118,7 +117,7 @@ pub const Chart = struct {
     }
 
     /// The y labels, right-aligned in the gutter, the first at the bottom.
-    fn drawYLabels(c: Chart, win: Window, gutter: u16, axis_row: u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawYLabels(c: Chart, win: visor.Window, gutter: u16, axis_row: u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (gutter == 0 or c.y.labels.len == 0) return;
         for (c.y.labels, 0..) |text, i| {
             const row = rowFor(i, c.y.labels.len, axis_row);
@@ -140,7 +139,7 @@ pub const Chart = struct {
     /// The x labels on the row under the axis, the first at the left.
     fn drawXLabels(
         c: Chart,
-        win: Window,
+        win: visor.Window,
         from: u16,
         row: u16,
         rows: u16,
@@ -170,7 +169,7 @@ pub const Chart = struct {
     }
 
     /// The dataset names, in the plot's top-right corner.
-    fn drawLegend(c: Chart, plot: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawLegend(c: Chart, plot: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         var widest: u16 = 0;
         var named: u16 = 0;
         for (c.datasets) |d| {

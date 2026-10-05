@@ -1,93 +1,9 @@
 [
   {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn hash(ctx: Context, e: Entry) u64 {",
-    "detail": "public function exposes private type 'Context'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn hash(ctx: Context, e: Entry) u64 {",
-    "detail": "public function exposes private type 'Entry'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
-    "detail": "public function exposes private type 'Context'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
-    "detail": "public function exposes private type 'Entry'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Context, a: Entry, b: Entry) bool {",
-    "detail": "public function exposes private type 'Entry'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn hash(_: Adapted, key: []const u8) u64 {",
-    "detail": "public function exposes private type 'Adapted'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Adapted, key: []const u8, e: Entry) bool {",
-    "detail": "public function exposes private type 'Adapted'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Adapted, key: []const u8, e: Entry) bool {",
-    "detail": "public function exposes private type 'Entry'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z030",
     "path": "src/pool.zig",
     "source": "pub fn deinit(p: *Graphemes, gpa: Allocator) void {",
     "detail": "deinit should set p.* = undefined",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn hash(ctx: Context, i: u16) u64 {",
-    "detail": "public function exposes private type 'Context'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Context, a: u16, b: u16) bool {",
-    "detail": "public function exposes private type 'Context'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn hash(_: Adapted, key: Target) u64 {",
-    "detail": "public function exposes private type 'Adapted'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/pool.zig",
-    "source": "pub fn eql(ctx: Adapted, key: Target, i: u16) bool {",
-    "detail": "public function exposes private type 'Adapted'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -462,38 +378,10 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z012",
-    "path": "src/caps.zig",
-    "source": "pub fn init(asked: morse.Probe) Probe {",
-    "detail": "public function exposes private type 'Probe'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z016",
     "path": "src/render.zig",
     "source": "std.debug.assert(r._gpa.ptr == prepared._gpa.ptr and r._gpa.vtable == prepared._gpa.vtable);",
     "detail": "split compound assert: `assert(a and b)` -> `assert(a); assert(b);`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn draw(r: *Renderer, w: *Writer, s: *Screen, layers: ?*Layers, caps: Caps) Error!Stats {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn leave(r: *Renderer, w: *Writer) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -707,34 +595,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn leaveFlushed(r: *Renderer, out: *Writer) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Renderer.Stats) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z015",
-    "path": "src/render.zig",
-    "source": "pub fn setLink(r: *Renderer, out: *Writer, s: *Screen, to: Link, caps: Caps, stats: *Renderer.Stats) Error!void {",
-    "detail": "public function exposes private error set 'Error'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z023",
     "path": "src/render.zig",
     "source": "fn trailingBlank(cells: []const Cell, comptime fit: Profile, caps: Caps) u16 {",
@@ -875,45 +735,10 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z012",
-    "path": "src/layer.zig",
-    "source": "pub fn before(a: Order, b: Order) bool {",
-    "detail": "public function exposes private type 'Order'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/layer.zig",
-    "source": "pub fn before(a: Order, b: Order) bool {",
-    "detail": "public function exposes private type 'Order'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z028",
     "path": "src/layer.zig",
     "source": "pub const test_access = if (@import(\"builtin\").is_test) struct {",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/sextants.zig",
-    "source": "pub fn draw(s: Sextants, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/chart.zig",
-    "source": "pub fn draw(c: Chart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/list.zig",
-    "source": "pub fn draw(l: List, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -924,13 +749,6 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z012",
-    "path": "src/widgets/keys.zig",
-    "source": "pub fn draw(k: Keys, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z013",
     "path": "src/widgets/markdown/gfm_test.zig",
     "source": "const visor = @import(\"visor\");",
@@ -938,59 +756,10 @@
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z012",
-    "path": "src/widgets/selection.zig",
-    "source": "pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {",
-    "detail": "public function exposes private type 'Direction'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z023",
     "path": "src/widgets/selection.zig",
     "source": "pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {",
     "detail": "'comptime' parameter should come before 'other'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/rule.zig",
-    "source": "pub fn draw(r: Rule, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/tabs.zig",
-    "source": "pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/markdown.zig",
-    "source": "pub fn init(document: *const reader.Document, cols: u16, method: visor.Method) RowIterator {",
-    "detail": "public function exposes private type 'RowIterator'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/markdown.zig",
-    "source": "pub fn next(it: *RowIterator) ?VisualRow {",
-    "detail": "public function exposes private type 'VisualRow'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/paragraph.zig",
-    "source": "pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/paragraph.zig",
-    "source": "pub fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) RowIterator {",
-    "detail": "public function exposes private type 'RowIterator'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -1005,90 +774,6 @@
     "path": "src/widgets/scroll.zig",
     "source": "pub fn bar(v: View, total: usize) @import(\"scrollbar.zig\").Scrollbar.State {",
     "detail": "inline @import; assign to a top-level const",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas/raster.zig",
-    "source": "pub fn dimensions(s: *const Surface) Pixels {",
-    "detail": "public function exposes private type 'Pixels'",
-    "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/table.zig",
-    "source": "pub fn draw(t: Table, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn painter(c: Canvas, win: Window) Painter {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn point(p: Painter, x: f64, y: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn rect(",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn polyline(p: Painter, coords: []const [2]f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn points(p: Painter, coords: []const [2]f64, style: Style) !void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn map(p: Painter, contours: []const []const [2]f64, style: Style) !void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {",
-    "detail": "public function exposes private type 'Style'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/canvas.zig",
-    "source": "pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {",
-    "detail": "public function exposes private type 'Style'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
@@ -1120,181 +805,6 @@
     "reason": "Existing declaration on main, moved or retargeted by its layout; this exact finding is retained while landing preflight."
   },
   {
-    "rule": "Z012",
-    "path": "src/widgets/scrollbar.zig",
-    "source": "pub fn thumbIn(s: State, len: u16) struct { start: u16, len: u16 } {",
-    "detail": "public function exposes private type 'State'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/scrollbar.zig",
-    "source": "pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/gauge.zig",
-    "source": "pub fn draw(g: Gauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/gauge.zig",
-    "source": "pub fn draw(g: LineGauge, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/barchart.zig",
-    "source": "pub fn draw(c: BarChart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/tree.zig",
-    "source": "pub fn draw(t: Tree, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/sparkline.zig",
-    "source": "pub fn draw(s: Sparkline, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/calendar.zig",
-    "source": "pub fn draw(c: Calendar, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn apply(p: Padding, area: Rect) Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn apply(p: Padding, area: Rect) Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn split(l: Layout, area: Rect, out: []Rect) []Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn splitFixed(l: Layout, comptime n: usize, area: Rect) [n]Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn repeat(direction: Direction, requested: Rect, spacing: u16, out: []Rect) []Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/layout.zig",
-    "source": "pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {",
-    "detail": "public function exposes private type 'Rect'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn next(r: *Rows) ?Row {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn rows(text: []const u8, cols: u16, method: Method) Rows {",
-    "detail": "public function exposes private type 'Method'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn rowCount(text: []const u8, cols: u16, method: Method) usize {",
-    "detail": "public function exposes private type 'Method'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn place(text: []const u8, cols: u16, method: Method, cursor: usize) Place {",
-    "detail": "public function exposes private type 'Method'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn at(text: []const u8, cols: u16, method: Method, row: usize, col: usize) usize {",
-    "detail": "public function exposes private type 'Method'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn draw(t: TextInput, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn init(gpa: std.mem.Allocator) Buffer {",
-    "detail": "public function exposes private type 'Buffer'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn initText(gpa: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error!Buffer {",
-    "detail": "public function exposes private type 'Buffer'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn selection(b: *const Buffer) ?Range {",
-    "detail": "public function exposes private type 'Range'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/text_input.zig",
-    "source": "pub fn moveRows(b: *Buffer, by: isize, cols: u16, method: Method, extend: bool) void {",
-    "detail": "public function exposes private type 'Method'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z011",
     "path": "src/widgets/text_input.zig",
     "source": "std.mem.copyForwards(u8, b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);",
@@ -1309,66 +819,10 @@
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {
-    "rule": "Z012",
-    "path": "src/widgets/block.zig",
-    "source": "pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/widgets/block.zig",
-    "source": "pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {",
-    "detail": "public function exposes private type 'Window'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
     "rule": "Z017",
     "path": "src/screen.zig",
     "source": "return try pool.OwnedTarget.init(gpa, t);",
     "detail": "avoid try in return; hoist it to preserve payload coercion: `const value = try pool.OwnedTarget.init(gpa, t); return value;`",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn eql(row: Row, other: Row) bool {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn eql(row: Row, other: Row) bool {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn diff(row: Row, other: Row) Row.Diff {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn diff(row: Row, other: Row) Row.Diff {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn len(row: Row) usize {",
-    "detail": "public function exposes private type 'Row'",
-    "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
-  },
-  {
-    "rule": "Z012",
-    "path": "src/screen.zig",
-    "source": "pub fn get(row: Row, col: usize) ?Cell {",
-    "detail": "public function exposes private type 'Row'",
     "reason": "Existing finding at migration; this exact source and diagnostic are retained until the owning code is revised."
   },
   {

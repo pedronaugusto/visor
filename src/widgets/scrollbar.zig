@@ -11,7 +11,6 @@ const visor = @import("visor");
 const layout = @import("layout.zig");
 const Direction = layout.Direction;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// Where a viewport is in something longer.
 pub const Scrollbar = struct {
@@ -46,7 +45,7 @@ pub const Scrollbar = struct {
         /// Public because a program that lets the mouse drag a scrollbar has
         /// to invert this, and inverting arithmetic it cannot see is how a
         /// drag ends up a cell out.
-        pub fn thumbIn(s: State, len: u16) struct { start: u16, len: u16 } {
+        pub fn thumbIn(s: Scrollbar.State, len: u16) struct { start: u16, len: u16 } {
             if (len == 0 or s.content == 0) return .{ .start = 0, .len = 0 };
             if (s.viewport >= s.content) return .{ .start = 0, .len = len };
             const size: u16 = @intCast(@max(1, @as(u128, s.viewport) * len / s.content));
@@ -58,7 +57,7 @@ pub const Scrollbar = struct {
     };
 
     /// Draws the track and the thumb along the window's first column or row.
-    pub fn draw(b: Scrollbar, win: Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(b: Scrollbar, win: visor.Window, state: State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
         if (b.hide_when_whole and state.viewport >= state.content) return;
 
@@ -95,7 +94,7 @@ pub const Scrollbar = struct {
     }
 
     /// One cell along the bar's axis.
-    fn put(b: Scrollbar, win: Window, at: u16, glyph: []const u8, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn put(b: Scrollbar, win: visor.Window, at: u16, glyph: []const u8, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         switch (b.direction) {
             .vertical => try win.write(0, at, glyph, style, .none),
             .horizontal => try win.write(at, 0, glyph, style, .none),

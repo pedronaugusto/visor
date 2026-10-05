@@ -16,7 +16,6 @@ const visor = @import("visor");
 const layout = @import("layout.zig");
 const Align = layout.Align;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// One line of a paragraph: its text, and the style and link it draws in.
 pub const Line = struct {
@@ -67,7 +66,7 @@ pub const Paragraph = struct {
     }
 
     /// Draws as many rows as the window has, starting at `scroll`.
-    pub fn draw(p: Paragraph, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(p: Paragraph, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
         var produced: usize = 0;
         var row: u16 = 0;
@@ -108,7 +107,7 @@ pub const Paragraph = struct {
 /// this refills from the start of the last row it was given and hands back
 /// absolute ranges. A paragraph of ten thousand rows therefore costs the
 /// same thirty-two rows of stack as a paragraph of two.
-const RowIterator = struct {
+pub const RowIterator = struct {
     _text: []const u8,
     _cols: u16,
     _mode: visor.Wrap,

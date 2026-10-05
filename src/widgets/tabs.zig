@@ -8,7 +8,6 @@ const std = @import("std");
 const visor = @import("visor");
 
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// Titles in a row, one of them chosen.
 pub const Tabs = struct {
@@ -67,7 +66,7 @@ pub const Tabs = struct {
     }
 
     /// Draws the titles on the window's first row.
-    pub fn draw(t: Tabs, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: Tabs, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
         var spans = t.spanIterator(win.screen().method);
         while (spans.next()) |span| {

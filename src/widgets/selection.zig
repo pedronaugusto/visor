@@ -1,5 +1,5 @@
 //! Bounded selection movement shared by lists and tables.
-const Direction = enum { next, previous };
+pub const Direction = enum { next, previous };
 
 pub fn move(selected: ?usize, count: usize, comptime direction: Direction) ?usize {
     if (count == 0) return null;

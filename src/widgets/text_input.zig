@@ -24,9 +24,7 @@
 const std = @import("std");
 const visor = @import("visor");
 
-const Method = visor.Method;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// Text being typed, and where the cursor is in it.
 pub const TextInput = struct {
@@ -81,12 +79,12 @@ pub const TextInput = struct {
     pub const Rows = struct {
         _text: []const u8,
         _cols: u16,
-        _method: Method,
+        _method: visor.Method,
         _at: usize = 0,
         _done: bool = false,
 
         /// The next row, or null after the last.
-        pub fn next(r: *Rows) ?Row {
+        pub fn next(r: *Rows) ?TextInput.Row {
             if (r._done) return null;
             const start = r._at;
             var used: u32 = 0;
@@ -119,12 +117,12 @@ pub const TextInput = struct {
     };
 
     /// The rows of `text` at `cols` cells, measured by `method`.
-    pub fn rows(text: []const u8, cols: u16, method: Method) Rows {
+    pub fn rows(text: []const u8, cols: u16, method: visor.Method) Rows {
         return .{ ._text = text, ._cols = @max(cols, 1), ._method = method };
     }
 
     /// How many rows `text` takes at `cols` cells.
-    pub fn rowCount(text: []const u8, cols: u16, method: Method) usize {
+    pub fn rowCount(text: []const u8, cols: u16, method: visor.Method) usize {
         var it = rows(text, cols, method);
         var n: usize = 0;
         while (it.next()) |_| n += 1;
@@ -134,7 +132,7 @@ pub const TextInput = struct {
     /// Where a byte offset stands: its row, and the cell column in it. A
     /// cursor at a soft break belongs to the start of the next row; one at a
     /// newline, to the end of the row the newline ends.
-    pub fn place(text: []const u8, cols: u16, method: Method, cursor: usize) Place {
+    pub fn place(text: []const u8, cols: u16, method: visor.Method, cursor: usize) Place {
         const c = @min(cursor, text.len);
         var it = rows(text, cols, method);
         var row: usize = 0;
@@ -154,7 +152,7 @@ pub const TextInput = struct {
 
     /// The byte offset at a row and a column: the cluster there, or the
     /// row's end when the row is shorter. A row past the last is the last.
-    pub fn at(text: []const u8, cols: u16, method: Method, row: usize, col: usize) usize {
+    pub fn at(text: []const u8, cols: u16, method: visor.Method, row: usize, col: usize) usize {
         var it = rows(text, cols, method);
         var r = it.next().?;
         var n: usize = 0;
@@ -259,7 +257,7 @@ pub const TextInput = struct {
     /// Draws as many rows as the window has, moving `state.first` so the
     /// cursor's row is among them, and puts the terminal's cursor at the
     /// text cursor when `show_cursor` is on.
-    pub fn draw(t: TextInput, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: TextInput, win: visor.Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
         const method = win.screen().method;
         const cols = win.cols();
@@ -363,12 +361,12 @@ pub const TextInput = struct {
         };
 
         /// An empty buffer.
-        pub fn init(gpa: std.mem.Allocator) Buffer {
+        pub fn init(gpa: std.mem.Allocator) TextInput.Buffer {
             return .{ ._gpa = gpa };
         }
 
         /// A buffer holding `bytes`, the cursor at the end, nothing to undo.
-        pub fn initText(gpa: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error!Buffer {
+        pub fn initText(gpa: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error!TextInput.Buffer {
             var b: Buffer = .init(gpa);
             try b._text.appendSlice(gpa, bytes);
             b._cursor = bytes.len;
@@ -393,7 +391,7 @@ pub const TextInput = struct {
         }
 
         /// The selected bytes, in order, or null when nothing is selected.
-        pub fn selection(b: *const Buffer) ?Range {
+        pub fn selection(b: *const Buffer) ?TextInput.Range {
             const anchor = b._anchor orelse return null;
             if (anchor == b._cursor) return null;
             return .{ .start = @min(anchor, b._cursor), .end = @max(anchor, b._cursor) };
@@ -445,7 +443,7 @@ pub const TextInput = struct {
         /// Moves the cursor `by` rows of the text laid out `cols` wide, down
         /// for a positive count, keeping to the column the first of a run of
         /// such moves started at. Past the first or last row it stops there.
-        pub fn moveRows(b: *Buffer, by: isize, cols: u16, method: Method, extend: bool) void {
+        pub fn moveRows(b: *Buffer, by: isize, cols: u16, method: visor.Method, extend: bool) void {
             const t = b._text.items;
             const here = place(t, cols, method, b._cursor);
             const goal = b._goal orelse here.col;
@@ -887,7 +885,7 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally
     }
     const t = text.items;
     const cols = dice.valueRangeAtMost(u16, 1, 12);
-    const method: Method = if (dice.value(bool)) .unicode else .wcwidth;
+    const method: visor.Method = if (dice.value(bool)) .unicode else .wcwidth;
     if (tally) |tl| {
         tl.parts.add(part);
         tl.cols.add(cols);

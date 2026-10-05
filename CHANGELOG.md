@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Renderer.Error` names what `draw`, `enter` and `leave` fail with, and `Session.draw` and `Tty.leave` return it. The set was declared beside `Renderer` rather than in it, where no caller of `visor` could name it.
+
 - Share the Zig CI gate through preflight, with requested fast runs and full merge checks.
 
 - `Caps.Probe` learns `colors` from morse's `Co` question, counting answers and refusals in the same waiting window as the other capabilities.

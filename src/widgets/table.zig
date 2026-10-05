@@ -12,7 +12,6 @@ const layout = @import("layout.zig");
 const Align = layout.Align;
 const Constraint = layout.Constraint;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// One row of a table: one string a column. Named `Table.Row` outside this
 /// file.
@@ -105,7 +104,7 @@ pub const Table = struct {
 
     /// Draws the header and as many rows as are left, moving the offset
     /// when the selection would otherwise be off screen.
-    pub fn draw(t: Table, win: Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: Table, win: visor.Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty() or t.widths.len == 0) return;
 
         const marker_width = win.width(t.marker);
@@ -153,7 +152,7 @@ pub const Table = struct {
     /// One row's cells, each in its own column.
     fn drawRow(
         t: Table,
-        body: Window,
+        body: visor.Window,
         cells: []const visor.Rect,
         row: u16,
         r: Row,

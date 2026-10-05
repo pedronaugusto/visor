@@ -7,9 +7,6 @@ const visor = @import("visor");
 
 const sextants = @import("sextants.zig");
 
-const Style = visor.Style;
-const Window = visor.Window;
-
 /// What a canvas draws its marks with.
 pub const Marker = enum {
     /// Eight marks a cell, two across and four down. The sharpest, and the
@@ -78,7 +75,7 @@ pub const Canvas = struct {
         },
         paint: Paint = .{},
         /// Cell attributes; foreground comes from paint.rgba.
-        style: Style = .{},
+        style: visor.Style = .{},
     };
 
     /// Borrowed picture resources. The caller chooses ids and retires them
@@ -101,7 +98,7 @@ pub const Canvas = struct {
     /// Paint to pictures when supported and supplied; otherwise use marker.
     /// A picture surface is cleared and fitted to the window. Pixels use
     /// straight alpha; empty cell marks leave the window's contents alone.
-    pub fn draw(c: Canvas, win: Window, shapes: []const Shape, options: DrawOptions) !void {
+    pub fn draw(c: Canvas, win: visor.Window, shapes: []const Shape, options: DrawOptions) !void {
         if (win.rect().isEmpty()) return;
         const protocol = options.caps.pictures();
         if (protocol == .kitty or protocol == .sixel) {
@@ -142,7 +139,7 @@ pub const Canvas = struct {
     marker: Marker = .braille,
 
     /// A canvas bound to a window, which is what shapes are drawn through.
-    pub fn painter(c: Canvas, win: Window) Painter {
+    pub fn painter(c: Canvas, win: visor.Window) Painter {
         return .{ .canvas = c, .win = win };
     }
 };
@@ -152,7 +149,7 @@ pub const Painter = struct {
     /// The plane's coordinates and marker.
     canvas: Canvas,
     /// The window the marks land in.
-    win: Window,
+    win: visor.Window,
 
     /// A place on the plane as a place on the mark grid, or null when it
     /// falls outside.
@@ -168,13 +165,13 @@ pub const Painter = struct {
     }
 
     /// One mark.
-    pub fn point(p: Painter, x: f64, y: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn point(p: Painter, x: f64, y: f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const at = p.locate(x, y) orelse return;
         try p.mark(at.x, at.y, style);
     }
 
     /// A straight line between two places, by the oldest algorithm there is.
-    pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const clipped = clipSegment(x1, y1, x2, y2, p.canvas.x_bounds, p.canvas.y_bounds) orelse return;
         const a = p.locate(clipped[0], clipped[1]) orelse return;
         const b = p.locate(clipped[2], clipped[3]) orelse return;
@@ -209,7 +206,7 @@ pub const Painter = struct {
         y: f64,
         cols: f64,
         rows: f64,
-        style: Style,
+        style: visor.Style,
     ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         try p.line(x, y, x + cols, y, style);
         try p.line(x + cols, y, x + cols, y + rows, style);
@@ -218,7 +215,7 @@ pub const Painter = struct {
     }
 
     /// Every point of a series, joined.
-    pub fn polyline(p: Painter, coords: []const [2]f64, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn polyline(p: Painter, coords: []const [2]f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (coords.len == 0) return;
         if (coords.len == 1) return p.point(coords[0][0], coords[0][1], style);
         for (coords[1..], 0..) |b, i| {
@@ -228,24 +225,24 @@ pub const Painter = struct {
     }
 
     /// Every point independently, for a scatter plot.
-    pub fn points(p: Painter, coords: []const [2]f64, style: Style) !void {
+    pub fn points(p: Painter, coords: []const [2]f64, style: visor.Style) !void {
         for (coords) |at| try p.point(at[0], at[1], style);
     }
 
     /// Separate contours, with no line joining one contour to the next.
-    pub fn map(p: Painter, contours: []const []const [2]f64, style: Style) !void {
+    pub fn map(p: Painter, contours: []const []const [2]f64, style: visor.Style) !void {
         for (contours) |path| try p.polyline(path, style);
     }
 
-    pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {
+    pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) !void {
         try p.round(x, y, radius, false, style);
     }
 
-    pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: Style) !void {
+    pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) !void {
         try p.round(x, y, radius, true, style);
     }
 
-    fn round(p: Painter, x: f64, y: f64, radius: f64, filled: bool, style: Style) !void {
+    fn round(p: Painter, x: f64, y: f64, radius: f64, filled: bool, style: visor.Style) !void {
         if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(radius) or radius < 0) return;
         if (radius == 0) return p.point(x, y, style);
         const across = @as(u32, p.win.cols()) * p.canvas.marker.across();
@@ -268,7 +265,7 @@ pub const Painter = struct {
     }
 
     /// One mark on the grid, combined with whatever is already in its cell.
-    fn mark(p: Painter, gx: u32, gy: u32, style: Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn mark(p: Painter, gx: u32, gy: u32, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const across = p.canvas.marker.across();
         const down = p.canvas.marker.down();
         const col: u16 = @intCast(gx / across);
@@ -319,7 +316,7 @@ pub const Painter = struct {
     /// Read out of the screen rather than out of a copy of the cell: a
     /// grapheme short enough to live in the cell is a slice of the cell, so
     /// a copy's bytes are gone by the time the caller looks at them.
-    fn existing(win: Window, col: u16, row: u16) []const u8 {
+    fn existing(win: visor.Window, col: u16, row: u16) []const u8 {
         if (col >= win.cols() or row >= win.rows()) return " ";
         return win.screen().textAt(win.rect().col + col, win.rect().row + row);
     }

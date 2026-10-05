@@ -249,7 +249,7 @@ pub const Caps = struct {
         _last_ms: ?i64 = null,
 
         /// A fresh probe for these questions. Feed is the only answer writer.
-        pub fn init(asked: morse.Probe) Probe {
+        pub fn init(asked: morse.Probe) Caps.Probe {
             return .{ ._questions = asked };
         }
 

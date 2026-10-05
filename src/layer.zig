@@ -113,7 +113,7 @@ pub const Layer = struct {
         sibling: i32 = 0,
 
         /// Whether `a` is painted before `b`.
-        pub fn before(a: Order, b: Order) bool {
+        pub fn before(a: Layer.Order, b: Layer.Order) bool {
             if (a.layer != b.layer) return a.layer < b.layer;
             if (a.z != b.z) return a.z < b.z;
             return a.sibling < b.sibling;

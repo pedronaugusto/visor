@@ -24,8 +24,6 @@
 const std = @import("std");
 const visor = @import("visor");
 
-const Rect = visor.Rect;
-
 /// Which way a split runs.
 pub const Direction = enum {
     /// Into columns, left to right.
@@ -87,11 +85,11 @@ pub const Padding = struct {
 
     /// What is left of `r` after the padding is taken off. Never wider or
     /// taller than `r`, and empty rather than negative.
-    pub fn apply(p: Padding, area: Rect) Rect {
+    pub fn apply(p: Padding, area: visor.Rect) visor.Rect {
         return p.applyLogical(bounded(area)).clipped();
     }
 
-    fn applyLogical(p: Padding, r: Rect) LogicalRect {
+    fn applyLogical(p: Padding, r: visor.Rect) LogicalRect {
         const cols = r.cols -| p.left -| p.right;
         const rows = r.rows -| p.top -| p.bottom;
         if (cols == 0 or rows == 0) return .{ .col = r.col, .row = r.row };
@@ -131,7 +129,7 @@ pub const Layout = struct {
     /// parts are in order, never overlap, and together with the spacing
     /// between them cover the whole of `area` unless the constraints asked
     /// for less than there is.
-    pub fn split(l: Layout, area: Rect, out: []Rect) []Rect {
+    pub fn split(l: Layout, area: visor.Rect, out: []visor.Rect) []visor.Rect {
         const n = @min(l.constraints.len, out.len);
         if (n == 0) return out[0..0];
         // Divide the requested area before clipping its parts.
@@ -257,9 +255,9 @@ pub const Layout = struct {
     ///
     /// Asserts there are exactly `n` constraints, which a `comptime` length
     /// makes a compile-time-known mistake at every call site that has one.
-    pub fn splitFixed(l: Layout, comptime n: usize, area: Rect) [n]Rect {
+    pub fn splitFixed(l: Layout, comptime n: usize, area: visor.Rect) [n]visor.Rect {
         std.debug.assert(l.constraints.len == n);
-        var out: [n]Rect = @splat(.{});
+        var out: [n]visor.Rect = @splat(.{});
         _ = l.split(area, &out);
         return out;
     }
@@ -278,7 +276,7 @@ pub const Layout = struct {
     /// from the start of it. The cells that do not divide evenly are left
     /// over at the end rather than given to some parts, so every part is
     /// the same size and a grid of them lines up whatever their number.
-    pub fn repeat(direction: Direction, requested: Rect, spacing: u16, out: []Rect) []Rect {
+    pub fn repeat(direction: Direction, requested: visor.Rect, spacing: u16, out: []visor.Rect) []visor.Rect {
         const area = bounded(requested);
         const n = out.len;
         if (n == 0) return out;
@@ -304,7 +302,7 @@ pub const Layout = struct {
     }
 
     /// How long a rectangle is along the split's axis.
-    fn axisOf(l: Layout, r: Rect) u16 {
+    fn axisOf(l: Layout, r: visor.Rect) u16 {
         return switch (l.direction) {
             .horizontal => r.cols,
             .vertical => r.rows,
@@ -312,7 +310,7 @@ pub const Layout = struct {
     }
 
     /// Makes a rectangle that long along the split's axis.
-    fn setAxis(l: Layout, r: *Rect, n: u16) void {
+    fn setAxis(l: Layout, r: *visor.Rect, n: u16) void {
         switch (l.direction) {
             .horizontal => r.cols = n,
             .vertical => r.rows = n,
@@ -343,7 +341,7 @@ pub const Layout = struct {
 /// What a title, a label or a centred dialogue needs: the caller says how
 /// big and where, and gets back the rectangle to draw in, clipped to the
 /// area it was given.
-pub fn place(requested: Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) Rect {
+pub fn place(requested: visor.Rect, size: visor.Size, horizontal_align: Align, vertical_align: Align) visor.Rect {
     const area = bounded(requested);
     const cols = @min(size.cols, area.cols);
     const rows = @min(size.rows, area.rows);
@@ -368,7 +366,7 @@ const LogicalRect = struct {
         return r.row + r.rows;
     }
 
-    fn clipped(r: LogicalRect) Rect {
+    fn clipped(r: LogicalRect) visor.Rect {
         const end = @as(u32, std.math.maxInt(u16)) + 1;
         const cols: u16 = @intCast(@min(r.cols, end -| r.col));
         const rows: u16 = @intCast(@min(r.rows, end -| r.row));
@@ -382,7 +380,7 @@ const LogicalRect = struct {
 };
 
 // The part of an area whose coordinates can be represented.
-fn bounded(area: Rect) Rect {
+fn bounded(area: visor.Rect) visor.Rect {
     return (LogicalRect{ .col = area.col, .row = area.row, .cols = area.cols, .rows = area.rows }).clipped();
 }
 
@@ -399,7 +397,7 @@ const std_testing = std.testing;
 const corpus = @import("corpus");
 
 /// The whole grid as a rectangle, for the tests below.
-fn grid(cols: u16, rows: u16) Rect {
+fn grid(cols: u16, rows: u16) visor.Rect {
     return .{ .col = 0, .row = 0, .cols = cols, .rows = rows };
 }
 
@@ -409,9 +407,9 @@ test "fixed parts take what they asked for and a fill takes the rest" {
         .{ .fill = 1 },
         .{ .fixed = 2 },
     })).splitFixed(3, grid(10, 4));
-    try std_testing.expectEqual(Rect{ .col = 0, .row = 0, .cols = 3, .rows = 4 }, parts[0]);
-    try std_testing.expectEqual(Rect{ .col = 3, .row = 0, .cols = 5, .rows = 4 }, parts[1]);
-    try std_testing.expectEqual(Rect{ .col = 8, .row = 0, .cols = 2, .rows = 4 }, parts[2]);
+    try std_testing.expectEqual(visor.Rect{ .col = 0, .row = 0, .cols = 3, .rows = 4 }, parts[0]);
+    try std_testing.expectEqual(visor.Rect{ .col = 3, .row = 0, .cols = 5, .rows = 4 }, parts[1]);
+    try std_testing.expectEqual(visor.Rect{ .col = 8, .row = 0, .cols = 2, .rows = 4 }, parts[2]);
 }
 
 test "a split clips at the u16 coordinate edge" {
@@ -421,13 +419,13 @@ test "a split clips at the u16 coordinate edge" {
         .cols = 4,
         .rows = 1,
     });
-    try std_testing.expectEqual(Rect{
+    try std_testing.expectEqual(visor.Rect{
         .col = std.math.maxInt(u16) - 1,
         .row = 0,
         .cols = 2,
         .rows = 1,
     }, parts[0]);
-    try std_testing.expectEqual(Rect{
+    try std_testing.expectEqual(visor.Rect{
         .col = std.math.maxInt(u16),
         .row = 0,
         .cols = 0,
@@ -512,7 +510,7 @@ test "a margin comes off every side before the split" {
         .constraints = &.{.{ .fill = 1 }},
         .margin = .all(1),
     }).splitFixed(1, grid(10, 6));
-    try std_testing.expectEqual(Rect{ .col = 1, .row = 1, .cols = 8, .rows = 4 }, parts[0]);
+    try std_testing.expectEqual(visor.Rect{ .col = 1, .row = 1, .cols = 8, .rows = 4 }, parts[0]);
 }
 
 test "splits nest, because a part is a rectangle like any other" {
@@ -524,22 +522,22 @@ test "splits nest, because a part is a rectangle like any other" {
         .{ .percent = 50 },
         .{ .fill = 1 },
     })).splitFixed(2, rows[1]);
-    try std_testing.expectEqual(Rect{ .col = 0, .row = 1, .cols = 10, .rows = 9 }, columns[0]);
-    try std_testing.expectEqual(Rect{ .col = 10, .row = 1, .cols = 10, .rows = 9 }, columns[1]);
+    try std_testing.expectEqual(visor.Rect{ .col = 0, .row = 1, .cols = 10, .rows = 9 }, columns[0]);
+    try std_testing.expectEqual(visor.Rect{ .col = 10, .row = 1, .cols = 10, .rows = 9 }, columns[1]);
 }
 
 test "padding never gives back more than it was given" {
     const r = (Padding.all(9)).apply(grid(4, 4));
     try std_testing.expect(r.isEmpty());
     try std_testing.expectEqual(
-        Rect{ .col = 2, .row = 0, .cols = 6, .rows = 4 },
+        visor.Rect{ .col = 2, .row = 0, .cols = 6, .rows = 4 },
         (Padding.horizontal(2)).apply(grid(10, 4)),
     );
 }
 
 test "a rectangle is placed where the alignment says" {
     const r = place(grid(10, 4), .{ .cols = 4, .rows = 2 }, .center, .right);
-    try std_testing.expectEqual(Rect{ .col = 3, .row = 2, .cols = 4, .rows = 2 }, r);
+    try std_testing.expectEqual(visor.Rect{ .col = 3, .row = 2, .cols = 4, .rows = 2 }, r);
     try std_testing.expectEqual(@as(u16, 0), offset(10, 20, .right));
 }
 
@@ -574,7 +572,7 @@ fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
             else => .{ .fill = dice.valueRangeAtMost(u16, 0, 4) },
         };
     }
-    const whole: Rect = .{
+    const whole: visor.Rect = .{
         .col = dice.valueRangeAtMost(u16, 0, 5),
         .row = dice.valueRangeAtMost(u16, 0, 5),
         .cols = dice.valueRangeAtMost(u16, 0, 40),
@@ -592,7 +590,7 @@ fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
         t.axis.add(if (l.direction == .horizontal) whole.cols else whole.rows);
     }
 
-    var out: [8]Rect = @splat(.{});
+    var out: [8]visor.Rect = @splat(.{});
     const parts = l.split(whole, out[0..n]);
     if (parts.len != n) return error.WrongNumberOfParts;
 
@@ -665,12 +663,12 @@ test "as many columns as fit, each at least so wide, with the spacing between" {
 }
 
 test "repeated parts are one size, the spacing between them, the rest left at the end" {
-    var out: [3]Rect = undefined;
+    var out: [3]visor.Rect = undefined;
     const parts = Layout.repeat(.horizontal, .{ .col = 2, .row = 1, .cols = 80, .rows = 5 }, 3, &out);
     // (80 - 6) / 3 = 24, two cells over.
-    try std_testing.expectEqual(Rect{ .col = 2, .row = 1, .cols = 24, .rows = 5 }, parts[0]);
-    try std_testing.expectEqual(Rect{ .col = 29, .row = 1, .cols = 24, .rows = 5 }, parts[1]);
-    try std_testing.expectEqual(Rect{ .col = 56, .row = 1, .cols = 24, .rows = 5 }, parts[2]);
+    try std_testing.expectEqual(visor.Rect{ .col = 2, .row = 1, .cols = 24, .rows = 5 }, parts[0]);
+    try std_testing.expectEqual(visor.Rect{ .col = 29, .row = 1, .cols = 24, .rows = 5 }, parts[1]);
+    try std_testing.expectEqual(visor.Rect{ .col = 56, .row = 1, .cols = 24, .rows = 5 }, parts[2]);
 
     // Whatever the area, the count and the spacing, every part is inside
     // the area, the same size as the others, and after the one before.
@@ -678,8 +676,8 @@ test "repeated parts are one size, the spacing between them, the rest left at th
     while (area_cols <= 30) : (area_cols += 1) {
         for (1..6) |n| {
             for (0..4) |spacing| {
-                var many: [5]Rect = undefined;
-                const area: Rect = .{ .col = 3, .row = 0, .cols = area_cols, .rows = 2 };
+                var many: [5]visor.Rect = undefined;
+                const area: visor.Rect = .{ .col = 3, .row = 0, .cols = area_cols, .rows = 2 };
                 const got = Layout.repeat(.horizontal, area, @intCast(spacing), many[0..n]);
                 var edge: u32 = area.col;
                 for (got) |r| {
@@ -693,15 +691,15 @@ test "repeated parts are one size, the spacing between them, the rest left at th
     }
     // And down, the same.
     const rows = Layout.repeat(.vertical, .{ .rows = 7, .cols = 4 }, 1, out[0..2]);
-    try std_testing.expectEqual(Rect{ .row = 4, .cols = 4, .rows = 3 }, rows[1]);
+    try std_testing.expectEqual(visor.Rect{ .row = 4, .cols = 4, .rows = 3 }, rows[1]);
 }
 
 test "placing and repeating rectangles clip at the u16 coordinate edge" {
     const edge = std.math.maxInt(u16);
-    const area: Rect = .{ .col = edge - 2, .row = edge - 2, .cols = 20, .rows = 20 };
+    const area: visor.Rect = .{ .col = edge - 2, .row = edge - 2, .cols = 20, .rows = 20 };
     const aligned = place(area, .{ .cols = 2, .rows = 2 }, .right, .right);
-    try std.testing.expectEqual(Rect{ .col = edge - 1, .row = edge - 1, .cols = 2, .rows = 2 }, aligned);
-    var out: [2]Rect = undefined;
+    try std.testing.expectEqual(visor.Rect{ .col = edge - 1, .row = edge - 1, .cols = 2, .rows = 2 }, aligned);
+    var out: [2]visor.Rect = undefined;
     _ = Layout.repeat(.horizontal, area, 1, &out);
     for (out) |r| {
         try std.testing.expect(r.right() <= @as(u32, edge) + 1);
@@ -715,16 +713,16 @@ test "placing and repeating rectangles clip at the u16 coordinate edge" {
         try std.testing.expect(r.rows <= 1);
     }
     const padded = Padding.all(1).apply(area);
-    try std.testing.expectEqual(Rect{ .col = edge - 1, .row = edge - 1, .cols = 1, .rows = 1 }, padded);
+    try std.testing.expectEqual(visor.Rect{ .col = edge - 1, .row = edge - 1, .cols = 1, .rows = 1 }, padded);
 }
 
 test "layout part counts stay wide until the available cells are divided" {
     const n = @as(usize, std.math.maxInt(u16)) + 3;
     const constraints = try std.testing.allocator.alloc(Constraint, n);
     defer std.testing.allocator.free(constraints);
-    const out = try std.testing.allocator.alloc(Rect, n);
+    const out = try std.testing.allocator.alloc(visor.Rect, n);
     defer std.testing.allocator.free(out);
-    const area: Rect = .{ .cols = 8, .rows = 1 };
+    const area: visor.Rect = .{ .cols = 8, .rows = 1 };
     for ([_]Constraint{ .{ .fill = std.math.maxInt(u16) }, .{ .fixed = std.math.maxInt(u16) } }) |constraint| {
         @memset(constraints, constraint);
         _ = Layout.horizontal(constraints).split(area, out);

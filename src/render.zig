@@ -205,14 +205,6 @@ const ModeWrites = struct {
 /// row of it is always written whole, blanks erased rather than skipped.
 const unknown: Cell = .{ .text = .{ .buf = @splat(0), .len = 0 }, .style = .{}, .link = .none, .shape = .{} };
 
-/// Anything `draw`, `enter` or `leave` can fail with.
-pub const Error = morse.TextError || error{
-    /// The screen is not the size the renderer was made or resized to.
-    SizeMismatch,
-    /// Entry is still live, including after a partial write; leave it first.
-    AlreadyEntered,
-};
-
 /// The frame size at or below which the synchronised-output bracket is not
 /// worth its sixteen bytes.
 ///
@@ -227,6 +219,14 @@ pub const sync_gate = 1024;
 /// The last frame, and the style, link and cursor the terminal is currently
 /// in.
 pub const Renderer = struct {
+    /// Anything `draw`, `enter` or `leave` can fail with.
+    pub const Error = morse.TextError || error{
+        /// The screen is not the size the renderer was made or resized to.
+        SizeMismatch,
+        /// Entry is still live, including after a partial write; leave it first.
+        AlreadyEntered,
+    };
+
     // Fields prefixed _ belong to the owner; use methods for terminal state.
     /// Requested terminal configuration, including a partial entry or change.
     /// A copy: changing it cannot change output or cleanup obligations.
@@ -2131,7 +2131,7 @@ fn apartCost(text: []const u8) usize {
 /// declarations are not, so these are the package's and not its API.
 pub const internal = struct {
     // A flush failure leaves cleanup intent available to Tty.restore.
-    pub fn leaveFlushed(r: *Renderer, out: *Writer) Error!void {
+    pub fn leaveFlushed(r: *Renderer, out: *Writer) Renderer.Error!void {
         const entered = r._entered;
         const region = r._region;
         const shape = r._shape;
@@ -2158,13 +2158,13 @@ pub const internal = struct {
     pub fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
         r.shiftPrev(top, bottom, distance, up);
     }
-    pub fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
+    pub fn hideForWrite(r: *Renderer, out: *Writer) Renderer.Error!void {
         return r.hideForWrite(out);
     }
-    pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Renderer.Stats) Error!void {
+    pub fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Renderer.Stats) Renderer.Error!void {
         return r.setStyle(out, to, stats);
     }
-    pub fn setLink(r: *Renderer, out: *Writer, s: *Screen, to: Link, caps: Caps, stats: *Renderer.Stats) Error!void {
+    pub fn setLink(r: *Renderer, out: *Writer, s: *Screen, to: Link, caps: Caps, stats: *Renderer.Stats) Renderer.Error!void {
         return r.setLink(out, s, to, caps, stats);
     }
 };

@@ -226,7 +226,7 @@ const VisualTableLine = struct {
 
 /// Ranges index Document.text(); bytes, spans and fence metadata borrow the
 /// Document until deinit. Spans overlap this row and retain document ranges.
-const VisualRow = struct {
+pub const VisualRow = struct {
     block_index: usize,
     block: reader.Block,
     start: usize,
@@ -239,7 +239,7 @@ const VisualRow = struct {
     table: ?VisualTableLine = null,
 };
 
-const RowIterator = struct {
+pub const RowIterator = struct {
     _document: *const reader.Document,
     _cols: u16,
     _method: visor.Method,

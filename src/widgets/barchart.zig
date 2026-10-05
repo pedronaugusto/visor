@@ -11,7 +11,6 @@ const visor = @import("visor");
 const layout = @import("layout.zig");
 const Direction = layout.Direction;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// The eight heights a cell of a standing bar can be drawn at.
 const heights = [8][]const u8{
@@ -57,7 +56,7 @@ pub const BarChart = struct {
     show_values: bool = true,
 
     /// Draws every bar that fits.
-    pub fn draw(c: BarChart, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(c: BarChart, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty() or c.bars.len == 0) return;
         var top = c.max orelse 0;
         if (c.max == null) for (c.bars) |b| {
@@ -71,7 +70,7 @@ pub const BarChart = struct {
     }
 
     /// Bars that grow upward from the bottom row, their labels under them.
-    fn drawStanding(c: BarChart, win: Window, top: u64) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawStanding(c: BarChart, win: visor.Window, top: u64) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         var labelled = false;
         for (c.bars) |b| {
             if (b.label.len != 0) labelled = true;
@@ -102,7 +101,7 @@ pub const BarChart = struct {
     }
 
     /// Bars that grow rightward, one row each, their labels to the left.
-    fn drawLying(c: BarChart, win: Window, top: u64) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawLying(c: BarChart, win: visor.Window, top: u64) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         var label_width: u16 = 0;
         for (c.bars) |b| label_width = @max(label_width, win.width(b.label));
         if (label_width >= win.cols()) return;
@@ -138,7 +137,7 @@ pub const BarChart = struct {
     }
 
     /// What a bar says about itself, on the bar.
-    fn drawValue(c: BarChart, win: Window, b: Bar, col: u16, row: u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawValue(c: BarChart, win: visor.Window, b: Bar, col: u16, row: u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         var digits: [20]u8 = undefined;
         const text = b.text orelse std.fmt.bufPrint(&digits, "{d}", .{b.value}) catch return;
         if (text.len == 0) return;
@@ -151,7 +150,7 @@ pub const BarChart = struct {
     /// A bar's name, centred under it.
     fn drawLabel(
         c: BarChart,
-        win: Window,
+        win: visor.Window,
         text: []const u8,
         col: u16,
         row: u16,

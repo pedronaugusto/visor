@@ -11,7 +11,6 @@ const visor = @import("visor");
 const layout = @import("layout.zig");
 const Direction = layout.Direction;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// A line across a window or down it.
 pub const Rule = struct {
@@ -39,7 +38,7 @@ pub const Rule = struct {
 
     /// Draws the rule along the window's first row, or down its first
     /// column, the whole length of the window.
-    pub fn draw(r: Rule, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(r: Rule, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty()) return;
         switch (r.direction) {
             .horizontal => {

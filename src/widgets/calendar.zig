@@ -10,7 +10,6 @@ const visor = @import("visor");
 
 const layout = @import("layout.zig");
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// A day, as a calendar counts them.
 pub const Date = struct {
@@ -137,7 +136,7 @@ pub const Calendar = struct {
     }
 
     /// Draws the month.
-    pub fn draw(c: Calendar, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(c: Calendar, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         if (win.rect().isEmpty() or daysInMonth(c.year, c.month) == 0) return;
         var row: u16 = 0;
 

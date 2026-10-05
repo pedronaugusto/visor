@@ -85,7 +85,7 @@ pub const Session = struct {
         return &s._probe;
     }
 
-    pub const Error = Allocator.Error || render.Error || Renderer.ModesError;
+    pub const Error = Allocator.Error || Renderer.Error || Renderer.ModesError;
 
     /// Allocates the screen and renderer at the same size. The probe id
     /// belongs to the caller and must be excluded from its image ids.
@@ -230,7 +230,7 @@ pub const Session = struct {
     }
 
     /// Writes one frame, after `resize` and application painting. No flush.
-    pub fn draw(s: *Session, w: *Writer) render.Error!Renderer.Stats {
+    pub fn draw(s: *Session, w: *Writer) Renderer.Error!Renderer.Stats {
         s._layers.configureSize(s._ws);
         return s._renderer.draw(w, &s._screen, &s._layers, s._caps);
     }

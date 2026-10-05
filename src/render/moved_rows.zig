@@ -38,7 +38,7 @@ pub fn Rows(comptime render: type) type {
         /// Writes this frame's rows as a scroll if they are one, and tells the
         /// previous frame that they moved. Returns how many rows the terminal moved,
         /// or null when the frame is not a scroll.
-        pub fn apply(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps) render.Error!?u32 {
+        pub fn apply(r: *Renderer, out: *Writer, s: *Screen, comptime fit: Profile, caps: Caps) Renderer.Error!?u32 {
             const found = detect(r, s, fit, caps) orelse return null;
             const rows = r.dimensions().rows;
 

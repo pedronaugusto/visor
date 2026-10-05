@@ -55,30 +55,30 @@ pub const Graphemes = struct {
     const Index = std.HashMapUnmanaged(Entry, void, Context, std.hash_map.default_max_load_percentage);
 
     /// One interned grapheme's place in `bytes`.
-    const Entry = struct { offset: u32, len: u16 };
+    pub const Entry = struct { offset: u32, len: u16 };
 
     /// Hashing and equality for an `Entry`, which both have to read the
     /// bytes it points at.
-    const Context = struct {
+    pub const Context = struct {
         bytes: []const u8,
 
-        pub fn hash(ctx: Context, e: Entry) u64 {
+        pub fn hash(ctx: Graphemes.Context, e: Graphemes.Entry) u64 {
             return std.hash.Wyhash.hash(0, ctx.bytes[e.offset..][0..e.len]);
         }
-        pub fn eql(ctx: Context, a: Entry, b: Entry) bool {
+        pub fn eql(ctx: Graphemes.Context, a: Graphemes.Entry, b: Graphemes.Entry) bool {
             return std.mem.eql(u8, ctx.bytes[a.offset..][0..a.len], ctx.bytes[b.offset..][0..b.len]);
         }
     };
 
     /// The same, for a lookup by the grapheme itself rather than by an entry
     /// already in the pool.
-    const Adapted = struct {
+    pub const Adapted = struct {
         bytes: []const u8,
 
-        pub fn hash(_: Adapted, key: []const u8) u64 {
+        pub fn hash(_: Graphemes.Adapted, key: []const u8) u64 {
             return std.hash.Wyhash.hash(0, key);
         }
-        pub fn eql(ctx: Adapted, key: []const u8, e: Entry) bool {
+        pub fn eql(ctx: Graphemes.Adapted, key: []const u8, e: Graphemes.Entry) bool {
             return std.mem.eql(u8, key, ctx.bytes[e.offset..][0..e.len]);
         }
     };
@@ -197,26 +197,26 @@ pub const Links = struct {
     const Index = std.HashMapUnmanaged(u16, void, Context, std.hash_map.default_max_load_percentage);
 
     /// Where a link's two strings are.
-    const Entry = struct { uri_off: u32, uri_len: u16, params_off: u32, params_len: u16 };
+    pub const Entry = struct { uri_off: u32, uri_len: u16, params_off: u32, params_len: u16 };
 
-    const Context = struct {
+    pub const Context = struct {
         links: *const Links,
 
-        pub fn hash(ctx: Context, i: u16) u64 {
+        pub fn hash(ctx: Links.Context, i: u16) u64 {
             return hashTarget(ctx.links.get(pooledLink(i)).?);
         }
-        pub fn eql(ctx: Context, a: u16, b: u16) bool {
+        pub fn eql(ctx: Links.Context, a: u16, b: u16) bool {
             return eqlTarget(ctx.links.get(pooledLink(a)).?, ctx.links.get(pooledLink(b)).?);
         }
     };
 
-    const Adapted = struct {
+    pub const Adapted = struct {
         links: *const Links,
 
-        pub fn hash(_: Adapted, key: Target) u64 {
+        pub fn hash(_: Links.Adapted, key: Target) u64 {
             return hashTarget(key);
         }
-        pub fn eql(ctx: Adapted, key: Target, i: u16) bool {
+        pub fn eql(ctx: Links.Adapted, key: Target, i: u16) bool {
             return eqlTarget(key, ctx.links.get(pooledLink(i)).?);
         }
     };

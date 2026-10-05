@@ -11,14 +11,13 @@ const layout = @import("layout.zig");
 const Align = layout.Align;
 const Padding = layout.Padding;
 const Style = visor.Style;
-const Window = visor.Window;
 
 /// A frame, a title and padding around a window.
 pub const Block = struct {
     /// Which sides carry a line.
-    borders: Window.Border.Where = .none,
+    borders: visor.Window.Border.Where = .none,
     /// The six glyphs the frame is drawn with.
-    glyphs: Window.Border.Glyphs = .single,
+    glyphs: visor.Window.Border.Glyphs = .single,
     /// The style the frame is drawn in.
     border_style: Style = .{},
     /// A title on the top row.
@@ -66,7 +65,7 @@ pub const Block = struct {
     /// padding, and is empty when there is nothing left — so a caller draws
     /// into it without checking, and a block in a window two cells tall
     /// writes its frame and nothing else.
-    pub fn draw(b: Block, win: Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Window {
+    pub fn draw(b: Block, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!visor.Window {
         if (win.rect().isEmpty()) return win;
         if (b.style) |s| win.fill(.fromSize(win.size()), .blank(s)) catch unreachable;
 
@@ -97,7 +96,7 @@ pub const Block = struct {
     }
 
     /// One title, between the two vertical sides of the frame.
-    fn drawTitle(b: Block, win: Window, row: u16, t: Title) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawTitle(b: Block, win: visor.Window, row: u16, t: Title) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
         const left: u16 = if (b.borders.left) 1 else 0;
         const right: u16 = if (b.borders.right) 1 else 0;
         const room = win.cols() -| left -| right;

@@ -1,7 +1,7 @@
 //! RGBA storage and bounded, antialiased terminal drawing primitives.
 //! Pixels are straight alpha. No palette, glow, transport or clock lives here.
 const std = @import("std");
-const Pixels = @import("visor").Pixels;
+const visor = @import("visor");
 
 pub const Blend = enum { normal, additive };
 
@@ -27,7 +27,7 @@ pub const Surface = struct {
     }
 
     /// Dimensions copied from the geometry this allocation owns.
-    pub fn dimensions(s: *const Surface) Pixels {
+    pub fn dimensions(s: *const Surface) visor.Pixels {
         return .{ .width = s._width, .height = s._height };
     }
 

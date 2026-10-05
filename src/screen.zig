@@ -762,7 +762,7 @@ pub const Screen = struct {
         /// Cell.eql over the row, including its length and checked pool
         /// identities. Equal pooled contents in different generations differ.
         /// Both rows borrow their screens and must still be current.
-        pub fn eql(row: Row, other: Row) bool {
+        pub fn eql(row: Screen.Row, other: Screen.Row) bool {
             if (row.len() != other.len()) return false;
             var changes = row.diff(other);
             return changes.next() == null;
@@ -772,7 +772,7 @@ pub const Screen = struct {
         /// Uses the same checked identity semantics as Screen.diff. The view
         /// borrows both rows: no cell changes, compaction, resize or destruction
         /// of either screen until iteration ends. Returned columns are copies.
-        pub fn diff(row: Row, other: Row) Row.Diff {
+        pub fn diff(row: Screen.Row, other: Screen.Row) Screen.Row.Diff {
             return .{ ._a = row, ._b = other };
         }
 
@@ -795,10 +795,10 @@ pub const Screen = struct {
             }
         };
 
-        pub fn len(row: Row) usize {
+        pub fn len(row: Screen.Row) usize {
             return row._cells.len;
         }
-        pub fn get(row: Row, col: usize) ?Cell {
+        pub fn get(row: Screen.Row, col: usize) ?Cell {
             if (col >= row._cells.len) return null;
             return cellmod.internal.exportCell(&row._cells[col], row._generation);
         }
