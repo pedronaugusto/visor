@@ -39,6 +39,7 @@ const Color = cellmod.Color;
 const Style = cellmod.Style;
 const Writer = std.Io.Writer;
 const log = std.log.scoped(.visor);
+const assert = std.debug.assert;
 
 /// The terminal.
 pub const Term = struct {
@@ -143,6 +144,7 @@ pub const Term = struct {
         t._col = @min(t._col, if (size.cols == 0) 0 else size.cols - 1);
         t._row = @min(t._row, if (size.rows == 0) 0 else size.rows - 1);
         t._wrap_pending = false;
+        t.assertCursor();
     }
 
     /// The bytes a renderer wrote.
@@ -151,6 +153,7 @@ pub const Term = struct {
     /// until the rest of it arrives, so a caller may hand over whatever a
     /// read gave it.
     pub fn feed(t: *Term, bytes: []const u8) Allocator.Error!void {
+        defer t.assertCursor();
         if (t._pending.items.len != 0) {
             try t._pending.appendSlice(t._gpa, bytes);
             const held = try t._pending.toOwnedSlice(t._gpa);
@@ -159,6 +162,19 @@ pub const Term = struct {
             return;
         }
         try t.consume(bytes);
+    }
+
+    /// What any bytes leave true: the cursor on the grid, a pending wrap
+    /// only at the last column, and the scrolling region inside the grid,
+    /// top above bottom.
+    fn assertCursor(t: *const Term) void {
+        const size = t._scr.dimensions();
+        if (size.cols == 0 or size.rows == 0) return;
+        assert(t._col < size.cols);
+        assert(t._row < size.rows);
+        assert(!t._wrap_pending or t._col == size.cols - 1);
+        assert(t._scroll_top <= t._scroll_bottom);
+        assert(t._scroll_bottom < size.rows);
     }
 
     //=====================================================================

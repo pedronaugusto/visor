@@ -196,6 +196,9 @@ pub const Screen = struct {
         s._damage.deinit(gpa);
         s._damage = resized._damage;
         s._size = size;
+        // One cell and one damage span for every place on the new grid.
+        std.debug.assert(s._cells.len == size.area());
+        std.debug.assert(s._damage.rowCount() == size.rows);
 
         s.clampCursor();
         s.damageAll();
@@ -813,6 +816,8 @@ pub const Screen = struct {
 
     /// Where a cell is in `cells`.
     pub fn index(s: *const Screen, col: u16, row_n: u16) usize {
+        std.debug.assert(col < s.dimensions().cols);
+        std.debug.assert(row_n < s.dimensions().rows);
         return @as(usize, row_n) * s.dimensions().cols + col;
     }
 

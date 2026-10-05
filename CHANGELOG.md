@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Screen.index` asserts its column and row are on the grid, and the grid, renderer, pools, emulator, damage map, layout and `TextInput.Buffer` assert the invariants they rely on: storage sized to the grid, pool handles that read back what was written, the emulator's cursor and scrolling region on the grid, and an undo history whose bytes are its edits' own, in order.
+
 - `expectScreensEqual` reports the cell that differs and both grids through `std.log` at the error level under the `visor` scope, which the program's log handler writes or drops, instead of printing to standard error. The examples write their output to standard output.
 
 - `Renderer.Error` names what `draw`, `enter` and `leave` fail with, and `Session.draw` and `Tty.leave` return it. The set was declared beside `Renderer` rather than in it, where no caller of `visor` could name it.

@@ -172,40 +172,12 @@ pub const Layout = struct {
         }
 
         // What is left, shared among the parts that asked for a share.
-        var left: u16 = @intCast(total - taken);
-        while (left > 0) {
-            var denom: u128 = 0;
-            for (l.constraints[0..n], out[0..n]) |c, r| {
-                if (l.axisOf(r) < capOf(c)) denom += weightOf(c);
-            }
-            if (denom == 0) break;
-
-            var granted: u16 = 0;
-            for (l.constraints[0..n], out[0..n]) |c, *r| {
-                const have = l.axisOf(r.*);
-                const cap = capOf(c);
-                if (have >= cap) continue;
-                const w = weightOf(c);
-                if (w == 0) continue;
-                const share: u16 = @intCast(@as(u128, left) * w / denom);
-                const grant = @min(share, cap - have);
-                l.setAxis(r, have + grant);
-                granted += grant;
-            }
-            left -= granted;
-
-            // The cells that would not divide, to the earlier parts.
-            var spare = left;
-            for (l.constraints[0..n], out[0..n]) |c, *r| {
-                if (spare == 0) break;
-                const have = l.axisOf(r.*);
-                const cap = capOf(c);
-                if (have >= cap or weightOf(c) == 0) continue;
-                l.setAxis(r, have + 1);
-                spare -= 1;
-            }
-            if (granted == 0 and spare == left) break;
-            left = spare;
+        l.shareOut(l.constraints[0..n], out[0..n], @intCast(total - taken));
+        // The parts never take more than the axis holds after the gaps.
+        if (std.debug.runtime_safety) {
+            var sum: u128 = 0;
+            for (out[0..n]) |r| sum += l.axisOf(r);
+            std.debug.assert(sum <= total);
         }
 
         // And where each part starts.
@@ -248,6 +220,56 @@ pub const Layout = struct {
             }
         }
         return out[0..n];
+    }
+
+    /// What is left after every part took what it asked for, shared among
+    /// the parts that asked for a share, by weight and up to their caps.
+    fn shareOut(l: Layout, constraints: []const Constraint, parts: []visor.Rect, room: u16) void {
+        const before = l.axisSum(parts);
+        var left = room;
+        while (left > 0) {
+            var denom: u128 = 0;
+            for (constraints, parts) |c, r| {
+                if (l.axisOf(r) < capOf(c)) denom += weightOf(c);
+            }
+            if (denom == 0) break;
+
+            var granted: u16 = 0;
+            for (constraints, parts) |c, *r| {
+                const have = l.axisOf(r.*);
+                const cap = capOf(c);
+                if (have >= cap) continue;
+                const w = weightOf(c);
+                if (w == 0) continue;
+                const share: u16 = @intCast(@as(u128, left) * w / denom);
+                const grant = @min(share, cap - have);
+                l.setAxis(r, have + grant);
+                granted += grant;
+            }
+            left -= granted;
+
+            // The cells that would not divide, to the earlier parts.
+            var spare = left;
+            for (constraints, parts) |c, *r| {
+                if (spare == 0) break;
+                const have = l.axisOf(r.*);
+                const cap = capOf(c);
+                if (have >= cap or weightOf(c) == 0) continue;
+                l.setAxis(r, have + 1);
+                spare -= 1;
+            }
+            if (granted == 0 and spare == left) break;
+            left = spare;
+        }
+        // The parts gained what was handed out, and no more than the room.
+        std.debug.assert(l.axisSum(parts) == before + (room - left));
+    }
+
+    /// How much of the axis the parts take between them.
+    fn axisSum(l: Layout, parts: []const visor.Rect) u128 {
+        var sum: u128 = 0;
+        for (parts) |r| sum += l.axisOf(r);
+        return sum;
     }
 
     /// The parts as an array, for the common case of a split whose shape is

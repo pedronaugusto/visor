@@ -15,6 +15,7 @@
 //! `init` and at `resize`.
 
 const std = @import("std");
+const assert = std.debug.assert;
 
 /// The columns of one row that changed, both ends inside the range.
 pub const Span = struct {
@@ -95,6 +96,7 @@ pub const Damage = struct {
         if (e.first > e.last) d._dirty += 1;
         if (first < e.first) e.first = first;
         if (last > e.last) e.last = last;
+        assert(d._dirty <= d._rows.len);
     }
 
     /// Records that every cell of every row changed.
@@ -109,7 +111,12 @@ pub const Damage = struct {
 
     /// Everything clean, which is what `draw` leaves behind.
     pub fn clear(d: *Damage) void {
-        if (d._dirty == 0) return;
+        if (d._dirty == 0) {
+            // The count is kept with the spans, so none dirty is every row
+            // clean, and there is nothing to write.
+            if (std.debug.runtime_safety) for (d._rows) |e| assert(e.first > e.last);
+            return;
+        }
         @memset(d._rows, .{});
         d._dirty = 0;
     }

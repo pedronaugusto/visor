@@ -564,6 +564,7 @@ pub const TextInput = struct {
             b._cursor = e.cursor_before;
             b._anchor = e.anchor_before;
             b.endEdit();
+            b.assertState();
             return true;
         }
 
@@ -579,6 +580,7 @@ pub const TextInput = struct {
             b._cursor = e.at + e.inserted;
             b._anchor = null;
             b.endEdit();
+            b.assertState();
             return true;
         }
 
@@ -588,6 +590,24 @@ pub const TextInput = struct {
             } else b._anchor = null;
             b._cursor = to;
             b.endEdit();
+            b.assertState();
+        }
+
+        /// What every change leaves true: the cursor and anchor inside the
+        /// text, no more edits applied than kept, and the history's bytes
+        /// the edits' own, back to back in order, which is how undo and redo
+        /// read them back.
+        fn assertState(b: *const Buffer) void {
+            std.debug.assert(b._cursor <= b._text.items.len);
+            if (b._anchor) |a| std.debug.assert(a <= b._text.items.len);
+            std.debug.assert(b._done <= b._edits.items.len);
+            if (!std.debug.runtime_safety) return;
+            var end: usize = 0;
+            for (b._edits.items) |e| {
+                std.debug.assert(e.bytes == end);
+                end = e.bytes + e.removed + e.inserted;
+            }
+            std.debug.assert(end == b._bytes.items.len);
         }
 
         fn endEdit(b: *Buffer) void {
@@ -605,6 +625,7 @@ pub const TextInput = struct {
             b._anchor = null;
             b._goal = null;
             b._open = kind != .other;
+            b.assertState();
         }
 
         fn record(b: *Buffer, at_: usize, removed: []const u8, inserted: []const u8, kind: Kind) std.mem.Allocator.Error!void {
@@ -655,6 +676,7 @@ pub const TextInput = struct {
                 b._done += 1;
             }
             b.trim();
+            std.debug.assert(b._bytes.items.len <= b.history_limit);
         }
 
         /// Whether an edit joins the last one: typing that goes on where the

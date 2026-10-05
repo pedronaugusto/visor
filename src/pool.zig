@@ -19,6 +19,7 @@ const std = @import("std");
 const cellmod = @import("cell.zig");
 
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 const Text = cellmod.internal.StoredCell.Text;
 const Link = @TypeOf(@as(cellmod.internal.StoredCell, .{}).link);
 
@@ -38,11 +39,18 @@ fn pooledText(offset: u32, len: u16) Text {
     var t: Text = .{ .buf = @splat(0), .len = Text.pooled };
     std.mem.writeInt(u32, t.buf[0..4], offset, .little);
     std.mem.writeInt(u16, t.buf[4..6], len, .little);
+    // What `Text.offset` and `Text.length` read back is what was written.
+    assert(t.offset().? == offset);
+    assert(t.length() == len);
     return t;
 }
 
 fn pooledLink(index: u16) Link {
-    return @enumFromInt(index + 1);
+    // Zero is `.none`, so the last index has no handle.
+    assert(index < std.math.maxInt(u16));
+    const link: Link = @enumFromInt(index + 1);
+    assert(link.index().? == index);
+    return link;
 }
 
 /// The pool of graphemes longer than a cell holds inline.
@@ -109,6 +117,8 @@ pub const Graphemes = struct {
         try p.index.ensureUnusedCapacityContext(gpa, 1, .{ .bytes = p.bytes.items });
         const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
         p.bytes.appendSliceAssumeCapacity(source);
+        // The entry names the bytes just appended, the end of the pool.
+        assert(@as(usize, offset) + byte_len == p.bytes.items.len);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return pooledText(offset, byte_len);
@@ -265,6 +275,10 @@ pub const Links = struct {
         const params_off: u32 = @intCast(l.bytes.items.len);
         const params_source = if (params_borrowed) |off| l.bytes.items[off..][0..params.len] else params;
         l.bytes.appendSliceAssumeCapacity(params_source);
+        // The two strings sit back to back at the end of the pool, which is
+        // where `get` reads them from.
+        assert(@as(usize, uri_off) + uri_len == params_off);
+        assert(@as(usize, params_off) + params_len == l.bytes.items.len);
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,

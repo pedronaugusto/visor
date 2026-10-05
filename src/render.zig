@@ -922,6 +922,11 @@ pub const Renderer = struct {
         r._hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
         errdefer gpa.free(r._hashes);
         r._buf = try gpa.alloc(u8, sync_gate);
+        // The last frame is one cell for each place on the grid; every
+        // per-row record is one a row, and the scroll search two.
+        std.debug.assert(r._prev.len == size.area());
+        std.debug.assert(r._force.len == size.rows);
+        std.debug.assert(r._hashes.len == 2 * @as(usize, size.rows));
     }
 
     /// Gives all of it back.
