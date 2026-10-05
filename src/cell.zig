@@ -86,6 +86,14 @@ fn canonicalColor(color: Color) Color {
     };
 }
 
+/// What a cell is: how wide the grapheme is and whether this cell is the
+/// one that draws it.
+///
+/// `spacer_tail` is the covered second column of a wide grapheme.
+/// `spacer_head` is the blank a wrap leaves at the end of a row when the
+/// wide grapheme that would have gone there did not fit and went to the
+/// next row instead: it is not a space anyone asked for, and the diff
+/// and the drift repaint both have to be able to tell it from one.
 const CellKind = enum(u2) {
     /// One column, and it draws.
     narrow = 0,
@@ -116,6 +124,98 @@ const CellShape = packed struct(u8) {
     _reserved: u2 = 0,
 };
 
+/// The grapheme: up to six bytes stored in the cell, an offset into the
+/// screen's pool beyond.
+///
+/// `len` is the byte length when the grapheme is inline and `pooled`
+/// when it is not; in the pooled case `buf` carries a `u32` offset and a
+/// `u16` length, little-endian, which is exactly the six bytes. Unused
+/// bytes are always zero. Pooled text also carries its pool generation;
+/// equality compares handles within that generation, not content across pools.
+///
+/// Six inline bytes keep the common graphemes inside the cell while
+/// leaving room for checked handles. Six covers every single-codepoint cluster,
+/// and a base and a combining mark of three bytes each -- the warning
+/// sign with its presentation selector, which is the cluster this
+/// package cares most about, is exactly six.
+fn TextType(comptime checked: bool) type {
+    return extern struct {
+        const Self = @This();
+
+        /// The grapheme's bytes, or the offset and length of its place in
+        /// the pool.
+        buf: [6]u8,
+        /// The issuing pool identity, zero for inline text.
+        pool_generation: [if (checked) 6 else 0]u8 = @splat(0),
+        /// The inline byte length, or `pooled`.
+        len: u8,
+
+        /// The most bytes a grapheme can occupy inside a cell.
+        pub const max_inline = 6;
+        /// The `len` value that says `buf` is an offset and a length.
+        pub const pooled = std.math.maxInt(u8);
+
+        comptime {
+            // A pooled grapheme's u32 offset and u16 length fill the inline
+            // bytes exactly, and `pooled` is no inline length.
+            std.debug.assert(@sizeOf(u32) + @sizeOf(u16) == max_inline);
+            std.debug.assert(@typeInfo(@FieldType(Self, "buf")).array.len == max_inline);
+            std.debug.assert(pooled > max_inline);
+        }
+
+        /// A single space: what a blank cell holds.
+        pub const space: Self = .{ .buf = .{ ' ', 0, 0, 0, 0, 0 }, .len = 1 };
+
+        /// A grapheme short enough to live in the cell. Asserts it fits.
+        pub fn inlined(bytes: []const u8) Self {
+            std.debug.assert(bytes.len <= max_inline);
+            var t: Self = .{ .buf = @splat(0), .len = @intCast(bytes.len) };
+            @memcpy(t.buf[0..bytes.len], bytes);
+            return t;
+        }
+
+        /// Whether the grapheme is in the pool rather than in the cell.
+        pub fn isPooled(t: Self) bool {
+            return t.len == pooled;
+        }
+
+        /// Where in the pool the grapheme starts, or null when it is inline.
+        pub fn offset(t: Self) ?u32 {
+            if (!t.isPooled()) return null;
+            return std.mem.readInt(u32, t.buf[0..4], .little);
+        }
+
+        /// How many bytes the grapheme is.
+        pub fn length(t: Self) u16 {
+            if (!t.isPooled()) return t.len;
+            return std.mem.readInt(u16, t.buf[4..6], .little);
+        }
+
+        /// Inline bytes, or null when resolving needs the issuing screen.
+        pub fn inlineSlice(t: *const Self) ?[]const u8 {
+            if (t.isPooled() or t.len > max_inline) return null;
+            return t.buf[0..t.len];
+        }
+
+        /// The issuing pool identity, zero for inline text.
+        pub fn generation(t: Self) u64 {
+            return if (checked) std.mem.readInt(u48, &t.pool_generation, .little) else 0;
+        }
+
+        /// Whether the grapheme is one printable ASCII byte, which every
+        /// width model measures the same way.
+        pub fn isAscii(t: Self) bool {
+            return t.len == 1 and t.buf[0] >= 0x20 and t.buf[0] < 0x7f;
+        }
+
+        /// Whether two texts are the same inline value or the same pooled
+        /// handle. Texts from different generations are different handles.
+        pub fn eql(a: Self, b: Self) bool {
+            return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+        }
+    };
+}
+
 fn CellType(comptime checked: bool) type {
     return extern struct {
         const Self = @This();
@@ -135,94 +235,10 @@ fn CellType(comptime checked: bool) type {
         /// Zeroed tail bytes keep whole-cell memory comparison defined.
         _reserved: [if (checked) 4 else 0]u8 = @splat(0),
 
-        /// The grapheme: up to six bytes stored in the cell, an offset into the
-        /// screen's pool beyond.
-        ///
-        /// `len` is the byte length when the grapheme is inline and `pooled`
-        /// when it is not; in the pooled case `buf` carries a `u32` offset and a
-        /// `u16` length, little-endian, which is exactly the six bytes. Unused
-        /// bytes are always zero. Pooled text also carries its pool generation;
-        /// equality compares handles within that generation, not content across pools.
-        ///
-        /// Six inline bytes keep the common graphemes inside the cell while
-        /// leaving room for checked handles. Six covers every single-codepoint cluster,
-        /// and a base and a combining mark of three bytes each -- the warning
-        /// sign with its presentation selector, which is the cluster this
-        /// package cares most about, is exactly six.
-        pub const Text = extern struct {
-            /// The grapheme's bytes, or the offset and length of its place in
-            /// the pool.
-            buf: [6]u8,
-            /// The issuing pool identity, zero for inline text.
-            pool_generation: [if (checked) 6 else 0]u8 = @splat(0),
-            /// The inline byte length, or `pooled`.
-            len: u8,
+        /// The grapheme, inline or an offset into the screen's pool.
+        pub const Text = TextType(checked);
 
-            /// The most bytes a grapheme can occupy inside a cell.
-            pub const max_inline = 6;
-            /// The `len` value that says `buf` is an offset and a length.
-            pub const pooled = std.math.maxInt(u8);
-
-            /// A single space: what a blank cell holds.
-            pub const space: Text = .{ .buf = .{ ' ', 0, 0, 0, 0, 0 }, .len = 1 };
-
-            /// A grapheme short enough to live in the cell. Asserts it fits.
-            pub fn inlined(bytes: []const u8) Text {
-                std.debug.assert(bytes.len <= max_inline);
-                var t: Text = .{ .buf = @splat(0), .len = @intCast(bytes.len) };
-                @memcpy(t.buf[0..bytes.len], bytes);
-                return t;
-            }
-
-            /// Whether the grapheme is in the pool rather than in the cell.
-            pub fn isPooled(t: Text) bool {
-                return t.len == pooled;
-            }
-
-            /// Where in the pool the grapheme starts, or null when it is inline.
-            pub fn offset(t: Text) ?u32 {
-                if (!t.isPooled()) return null;
-                return std.mem.readInt(u32, t.buf[0..4], .little);
-            }
-
-            /// How many bytes the grapheme is.
-            pub fn length(t: Text) u16 {
-                if (!t.isPooled()) return t.len;
-                return std.mem.readInt(u16, t.buf[4..6], .little);
-            }
-
-            /// Inline bytes, or null when resolving needs the issuing screen.
-            pub fn inlineSlice(t: *const Text) ?[]const u8 {
-                if (t.isPooled() or t.len > max_inline) return null;
-                return t.buf[0..t.len];
-            }
-
-            /// The issuing pool identity, zero for inline text.
-            pub fn generation(t: Text) u64 {
-                return if (checked) std.mem.readInt(u48, &t.pool_generation, .little) else 0;
-            }
-
-            /// Whether the grapheme is one printable ASCII byte, which every
-            /// width model measures the same way.
-            pub fn isAscii(t: Text) bool {
-                return t.len == 1 and t.buf[0] >= 0x20 and t.buf[0] < 0x7f;
-            }
-
-            /// Whether two texts are the same inline value or the same pooled
-            /// handle. Texts from different generations are different handles.
-            pub fn eql(a: Text, b: Text) bool {
-                return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
-            }
-        };
-
-        /// What a cell is: how wide the grapheme is and whether this cell is the
-        /// one that draws it.
-        ///
-        /// `spacer_tail` is the covered second column of a wide grapheme.
-        /// `spacer_head` is the blank a wrap leaves at the end of a row when the
-        /// wide grapheme that would have gone there did not fit and went to the
-        /// next row instead: it is not a space anyone asked for, and the diff
-        /// and the drift repaint both have to be able to tell it from one.
+        /// What a cell is: narrow, wide, or one of the two spacers.
         pub const Kind = CellKind;
         pub const Shape = CellShape;
 
@@ -385,6 +401,7 @@ comptime {
     std.debug.assert(@sizeOf(Cell) == 48);
     std.debug.assert(@bitSizeOf(Cell) == 48 * 8);
     std.debug.assert(@sizeOf(Cell.Text) == 13);
+    std.debug.assert(@sizeOf(internal.StoredCell.Text) == 7);
     std.debug.assert(@sizeOf(Style) == 22);
     std.debug.assert(@sizeOf(Cell.Shape) == 1);
 }

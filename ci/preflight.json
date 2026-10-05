@@ -11,13 +11,9 @@
     "src/testing/*"
   ],
   "function_exceptions": {
-    "src/cell.zig:CellType": {
-      "lines": 203,
-      "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
-    },
     "src/window.zig:WindowApi": {
-      "lines": 641,
-      "reason": "Existing implementation at adoption; this exact bound cannot grow and shrinks when the function is split."
+      "lines": 630,
+      "reason": "A type constructor, not a procedure: its body is the Window type, generic over the screen module because window.zig sits below screen.zig in the layers. The length counts the type's value types and its short methods; this bound cannot grow."
     }
   },
   "layout_exceptions": {},
