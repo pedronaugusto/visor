@@ -257,7 +257,7 @@ pub const TextInput = struct {
     /// Draws as many rows as the window has, moving `state.first` so the
     /// cursor's row is among them, and puts the terminal's cursor at the
     /// text cursor when `show_cursor` is on.
-    pub fn draw(t: TextInput, win: visor.Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: TextInput, win: visor.Window, state: *State) visor.DrawError!void {
         if (win.rect().isEmpty()) return;
         const method = win.screen().method;
         const cols = win.cols();
@@ -988,12 +988,6 @@ test "the layout's corpus draws every piece, every width, both methods and long 
     try testing.expect(t.cols.covers(1, 12));
     try testing.expect(t.method.covers(0, 1));
     try testing.expect(t.parts.least == 0 and t.parts.most >= 40);
-}
-
-test "input row iterator source and progress stay behind next" {
-    inline for (.{ "text", "cols", "method", "at", "done" }) |field| {
-        try testing.expect(!@hasField(TextInput.Rows, field));
-    }
 }
 
 test "a word starts on a cluster, not inside one a space began" {

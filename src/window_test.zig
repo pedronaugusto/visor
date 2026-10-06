@@ -476,7 +476,6 @@ test "custom borders refuse malformed glyphs without changing the grid" {
 }
 
 test "window geometry stays with the screen that clipped it" {
-    inline for (.{ "screen", "rect", "ink" }) |field| try testing.expect(!@hasField(Window, field));
     var s = try Screen.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer s.deinit();
     const w = s.window().sub(.{ .col = 3, .row = 1, .cols = 20, .rows = 20 });

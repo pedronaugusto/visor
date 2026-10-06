@@ -66,7 +66,7 @@ pub const Paragraph = struct {
     }
 
     /// Draws as many rows as the window has, starting at `scroll`.
-    pub fn draw(p: Paragraph, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(p: Paragraph, win: visor.Window) visor.DrawError!void {
         if (win.rect().isEmpty()) return;
         var produced: usize = 0;
         var row: u16 = 0;
@@ -349,12 +349,6 @@ test "paragraph rows and clipping treat CRLF as one line break" {
         } else {
             try testing.expectEqualStrings("c", h.screen.textAt(0, @intCast(count - 1)));
         }
-    }
-}
-
-test "paragraph row iterator source and refill state stay behind next" {
-    inline for (.{ "text", "cols", "mode", "method", "base", "buf", "have", "at", "last" }) |field| {
-        try testing.expect(!@hasField(Paragraph.Rows, field));
     }
 }
 

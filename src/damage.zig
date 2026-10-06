@@ -201,10 +201,6 @@ test "a resized map is clean and the right length" {
     try testing.expect(!d.any());
 }
 
-test "damage storage stays behind its allocation owner" {
-    try testing.expect(!@hasField(Damage, "rows"));
-}
-
 test "dirty counts follow repeated marks, clears and resizes" {
     var d: Damage = try .init(testing.allocator, 4);
     defer d.deinit(testing.allocator);

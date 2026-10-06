@@ -103,16 +103,6 @@ test "raster ellipses keep tiny finite radii through their arithmetic" {
     try t.expectEqual(@as(u8, 0), surface.pixels()[11]);
 }
 
-test "canvas picture borrows owners rather than another allocator" {
-    try t.expect(!@hasField(Canvas.Picture, "allocator"));
-}
-
-test "surface allocation geometry and pixel storage have one owner" {
-    inline for (.{ "allocator", "width", "height", "pixels" }) |field| {
-        try t.expect(!@hasField(Canvas.Surface, field));
-    }
-}
-
 test "surface resize prepares pixels before committing geometry" {
     try t.checkAllAllocationFailures(t.allocator, resizeSurface, .{});
 }

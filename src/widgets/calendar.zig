@@ -136,7 +136,7 @@ pub const Calendar = struct {
     }
 
     /// Draws the month.
-    pub fn draw(c: Calendar, win: visor.Window) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(c: Calendar, win: visor.Window) visor.DrawError!void {
         if (win.rect().isEmpty() or daysInMonth(c.year, c.month) == 0) return;
         var row: u16 = 0;
 

@@ -255,11 +255,19 @@ pub const Term = struct {
     }
 
     /// The same, with the width the cluster was told to take rather than
-    /// the one this terminal would measure.
-    fn putAs(t: *Term, grapheme: []const u8, told: ?u2) Allocator.Error!void {
+    /// the one this terminal would measure. A control is drawn as nothing,
+    /// and bytes that are not UTF-8 as the replacement character, before
+    /// anything reads them: the stream is arbitrary, the grid is not.
+    fn putAs(t: *Term, bytes: []const u8, told: ?u2) Allocator.Error!void {
         if (t._scr.dimensions().cols == 0 or t._scr.dimensions().rows == 0) return;
+        const grapheme = screen_internal.sanitized(bytes) orelse return;
         if (told == null and try t.join(grapheme)) return;
         return t.place(grapheme, told);
+    }
+
+    /// Text for a cell, already sanitized and so within the pool's length.
+    fn intern(t: *Term, grapheme: []const u8) Allocator.Error!Cell.Text {
+        return screen_internal.internShort(&t._scr, grapheme);
     }
 
     /// A grapheme into a cell of its own, joined to nothing.
@@ -288,7 +296,7 @@ pub const Term = struct {
             t.lineFeed();
         }
         if (told) |_| {
-            const text = try t._scr.intern(grapheme);
+            const text = try t.intern(grapheme);
             t.setCell(t._col, t._row, .init(.{
                 .text = text,
                 .style = t._style,
@@ -296,6 +304,10 @@ pub const Term = struct {
                 .shape = .{ .kind = if (w == 2) .wide else .narrow, .drift = textmod.disagrees(grapheme) },
             }));
         } else {
+            // unreachable: the link is this screen's own and live, and the
+            // grapheme is one sanitized cluster, or one part of one, that
+            // takes columns by this method -- which `write` draws and never
+            // refuses.
             t._scr.write(t._col, t._row, grapheme, t._style, t._link) catch |err| switch (err) {
                 error.InvalidHandle, error.InvalidCell => unreachable,
                 error.OutOfMemory => return error.OutOfMemory,
@@ -351,7 +363,7 @@ pub const Term = struct {
             head = 0;
             row = t._row;
         }
-        const text = try t._scr.intern(joined);
+        const text = try t.intern(joined);
         t.setCell(head, row, .init(.{
             .text = text,
             .style = left.style,
@@ -371,13 +383,23 @@ pub const Term = struct {
     /// `CSI n b`, REP: the codepoint that began the last cell printed
     /// (`previous`), printed again `n` times, wrapping, scrolling and joining
     /// exactly as printing it would.
-    fn repeat(t: *Term, n: u32) Allocator.Error!void {
+    ///
+    /// A count in the billions is one short sequence, and printing it copy
+    /// by copy would hang the emulator. Past a screenful and a row, each
+    /// further row of copies only scrolls one more identical row in, so the
+    /// count is cut to that plus its remainder in rows, which leaves the grid
+    /// and the cursor as the whole count would. A codepoint a terminal
+    /// measuring clusters joins to its own copy has no such row, and stops
+    /// at twice a screenful, by when every cell it can reach is written.
+    fn repeat(t: *Term, count: u32) Allocator.Error!void {
         const cp = t._previous orelse return;
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(cp, &buf) catch return;
-        var i: u32 = 0;
+        const copy = buf[0..len];
+        const n = repeatCount(count, t._scr.dimensions(), copy, t._scr.method);
+        var i: usize = 0;
         // each copy printed as the codepoint would be, joining what it joins
-        while (i < n) : (i += 1) try t.put(buf[0..len]);
+        while (i < n) : (i += 1) try t.put(copy);
     }
 
     /// Down one row, scrolling the region when there is nowhere to go.
@@ -680,7 +702,7 @@ pub const Term = struct {
                 .none
             else
                 t._scr.link(found.uri, found.params) catch |err| switch (err) {
-                    error.ControlInText => return string.len,
+                    error.ControlInText, error.TooLong => return string.len,
                     error.OutOfMemory => return error.OutOfMemory,
                 };
         }
@@ -711,10 +733,11 @@ pub const Term = struct {
     /// One grapheme drawn at a scale: a block at the cursor, which then
     /// moves past it along the top row. A block that does not fit draws
     /// nothing, which is as far as this emulator follows the protocol.
-    fn putScaled(t: *Term, grapheme: []const u8, told: ?u2, scale: u3) Allocator.Error!void {
+    fn putScaled(t: *Term, bytes: []const u8, told: ?u2, scale: u3) Allocator.Error!void {
         const cols = t._scr.dimensions().cols;
         const rows = t._scr.dimensions().rows;
         if (cols == 0 or rows == 0) return;
+        const grapheme = screen_internal.sanitized(bytes) orelse return;
         const w: u16 = told orelse textmod.graphemeWidth(grapheme, t._scr.method);
         if (w == 0 or w > 2) return;
         if (t._wrap_pending) {
@@ -724,7 +747,7 @@ pub const Term = struct {
         }
         const span: u32 = @as(u32, w) * scale;
         if (t._col + span > cols or @as(u32, t._row) + scale > rows) return;
-        const text = try t._scr.intern(grapheme);
+        const text = try t.intern(grapheme);
         t.setCell(t._col, t._row, .init(.{
             .text = text,
             .style = t._style,
@@ -1037,10 +1060,24 @@ fn incompleteTail(run: []const u8) usize {
     return 0;
 }
 
-/// The last codepoint of a grapheme, or null when the bytes are not UTF-8.
+/// The first codepoint of a grapheme: U+FFFD when its first bytes are not
+/// UTF-8, and null for no bytes.
 fn firstCodepoint(grapheme: []const u8) ?u21 {
-    var it: std.unicode.Utf8Iterator = .{ .bytes = grapheme, .i = 0 };
-    return it.nextCodepoint();
+    if (grapheme.len == 0) return null;
+    const len = std.unicode.utf8ByteSequenceLength(grapheme[0]) catch return 0xfffd;
+    if (len > grapheme.len) return 0xfffd;
+    return std.unicode.utf8Decode(grapheme[0..len]) catch 0xfffd;
+}
+
+/// How many copies of `copy` a repeat of `count` prints (`Term.repeat`).
+fn repeatCount(count: u32, size: Size, copy: []const u8, method: textmod.Method) usize {
+    const w = textmod.graphemeWidth(copy, method);
+    if (w == 0 or w > size.cols) return 0;
+    if (method == .unicode and textmod.joinsCell(copy, copy)) return @min(count, 2 * size.area());
+    const per_row: usize = size.cols / w;
+    const steady = per_row * (@as(usize, size.rows) + 1);
+    if (count <= steady) return count;
+    return steady + (count - steady) % per_row;
 }
 
 /// Where a run of printable bytes ends.
@@ -1074,6 +1111,7 @@ fn atLeastOne(csi: morse.Csi) u32 {
 }
 
 const testing = std.testing;
+const checkInvariants = @import("screen.zig").test_access.checkInvariants;
 
 /// A terminal of a size, with a helper for feeding it a string.
 fn made(cols: u16, rows: u16) !Term {
@@ -1864,8 +1902,83 @@ test "scroll margins normalize zero defaults before checking their region" {
     try testing.expectEqual(@as(u16, 3), term._scroll_bottom);
 }
 
-test "terminal allocation and stream state stay behind their owner" {
-    inline for (.{ "gpa", "scr", "pending", "style", "link", "col", "row", "wrap_pending", "autowrap", "scroll_top", "scroll_bottom", "graphics", "saved", "previous", "clusters_off" }) |field| {
-        try testing.expect(!@hasField(Term, field));
+test "bytes that are not UTF-8 are the replacement character, under every width method" {
+    for ([_]textmod.Method{ .wcwidth, .unicode, .explicit }) |method| {
+        var t = try made(10, 3);
+        defer t.deinit();
+        t.setMethod(method);
+        try t.feed("a\xffb\xe4\xb8");
+        try t.feed("c");
+        try testing.expectEqualStrings("a", textAt(&t, 0, 0));
+        try testing.expectEqualStrings("\u{fffd}", textAt(&t, 1, 0));
+        try testing.expectEqualStrings("b", textAt(&t, 2, 0));
+        try testing.expectEqualStrings("\u{fffd}", textAt(&t, 3, 0));
+        try testing.expectEqualStrings("c", textAt(&t, 4, 0));
+        // A repeat of a replacement character is one more of it.
+        try t.feed("\xff\x1b[2b");
+        try testing.expectEqualStrings("\u{fffd}", textAt(&t, 7, 0));
+        try checkInvariants(t.screen());
+    }
+}
+
+test "a cluster that takes a column only measured whole is printed, not refused" {
+    for ([_]textmod.Method{ .wcwidth, .unicode, .explicit }) |method| {
+        var t = try made(4, 1);
+        defer t.deinit();
+        t.setMethod(method);
+        try t.feed("\u{1161}\u{85}x");
+        try testing.expectEqualStrings("x", textAt(&t, if (method == .wcwidth) 0 else 1, 0));
+    }
+}
+
+test "a repeat count in the billions ends as the whole count would" {
+    // 2^32 copies in all, a multiple of the row: every row full, the
+    // cursor waiting to wrap at the last column.
+    var t = try made(4, 2);
+    defer t.deinit();
+    try t.feed("a\x1b[4294967295b");
+    for (0..2) |row| for (0..4) |col| try testing.expectEqualStrings("a", textAt(&t, @intCast(col), @intCast(row)));
+    // And a cut count leaves what printing every copy does, at every
+    // remainder, narrow and wide, with an odd column left over.
+    for ([_][]const u8{ "a", "\u{4e2d}" }) |glyph| for (16..40) |count| {
+        var whole = try made(5, 2);
+        defer whole.deinit();
+        var cut = try made(5, 2);
+        defer cut.deinit();
+        try whole.feed(glyph);
+        try cut.feed(glyph);
+        for (0..count) |_| try whole.feed(glyph);
+        var seq: [16]u8 = undefined;
+        try cut.feed(try std.fmt.bufPrint(&seq, "\x1b[{d}b", .{count}));
+        try expectScreensEqual(whole.screen(), cut.screen());
+        try testing.expectEqual(whole._col, cut._col);
+        try testing.expectEqual(whole._row, cut._row);
+        try testing.expectEqual(whole._wrap_pending, cut._wrap_pending);
+        try testing.expect(repeatCount(@intCast(count + 40), whole.screen().dimensions(), glyph, .unicode) <= 40);
+    };
+}
+
+test "arbitrary bytes keep the grid's invariants under every width method" {
+    var prng: std.Random.DefaultPrng = .init(0x7e57);
+    const random = prng.random();
+    // Bytes biased toward what breaks a decoder: escapes, C1 lead bytes,
+    // continuation bytes, marks and wide codepoints.
+    const pieces = [_][]const u8{ "\x1b", "[", "]", "8;;", "\x07", "\xc2\x85", "\xc2\x9b", "\x80", "\xff", "\xe4", "\u{301}", "\u{1161}", "\u{4e2d}", "\u{1f1e6}", "\u{200d}", "\u{600}", "b", "66;w=2;", "4294967295", "\r\n", ";" };
+    for (0..600) |_| {
+        for ([_]textmod.Method{ .wcwidth, .unicode, .explicit }) |method| {
+            var t = try made(7, 3);
+            defer t.deinit();
+            t.setMethod(method);
+            var buf: [96]u8 = undefined;
+            var n: usize = 0;
+            while (n < buf.len) {
+                const piece: []const u8 = if (random.boolean()) pieces[random.uintLessThan(usize, pieces.len)] else &.{random.int(u8)};
+                if (n + piece.len > buf.len) break;
+                @memcpy(buf[n..][0..piece.len], piece);
+                n += piece.len;
+            }
+            try t.feed(buf[0..n]);
+            try checkInvariants(t.screen());
+        }
     }
 }

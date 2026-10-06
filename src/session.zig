@@ -113,8 +113,9 @@ pub const Session = struct {
         s.* = undefined;
     }
 
-    /// Applies caller-selected caps as well as the probe's learned ones.
-    /// An application can call this after `handle` to apply its own policy.
+    /// Applies the caller's capability policy, whole.
+    /// What the probe learns later is merged into it field by field (see
+    /// `handle`), so an override set here outlives a late answer.
     /// Success supersedes pending learned policy; failure keeps it retryable.
     pub fn setCaps(s: *Session, w: *Writer, caps: Caps) Error!bool {
         const changed = !std.meta.eql(s._caps, caps);
@@ -159,12 +160,17 @@ pub const Session = struct {
     /// due. Size reports are coalesced until `resize`; caps and graphics
     /// replies are applied now. Keys, text and application policy stay with
     /// the caller. `now_ms` comes from the caller's clock for the probe.
+    /// A probe answer changes only the capabilities it changed in the probe:
+    /// every other field of the policy -- whatever the caller set through
+    /// `setCaps`, such as `osc8` or a colour guess -- is kept, however late
+    /// the answer arrives.
     /// Housekeeping is retained even when capability output fails; the next
     /// event retries that output without replaying the consumed input.
     pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
         const was = s._probe.capabilities();
         s._probe.feed(event, now_ms);
-        if (!std.meta.eql(was, s._probe.capabilities())) s._pending_caps = s._probe.capabilities();
+        const learned = s._probe.capabilities();
+        if (!std.meta.eql(was, learned)) s._pending_caps = merged(s._pending_caps orelse s._caps, was, learned);
         // Consume the input before writing: the terminal cannot replay a
         // resize or acknowledgement when capability output needs a retry.
         var redraw = false;
@@ -199,6 +205,17 @@ pub const Session = struct {
         return policy_changed or redraw;
     }
 
+    /// `policy` with every field the probe changed from `was` to `learned`
+    /// taken from `learned`, and every other field left as the policy has it.
+    fn merged(policy: Caps, was: Caps, learned: Caps) Caps {
+        var next = policy;
+        inline for (std.meta.fields(Caps)) |field| {
+            if (!std.meta.eql(@field(was, field.name), @field(learned, field.name)))
+                @field(next, field.name) = @field(learned, field.name);
+        }
+        return next;
+    }
+
     /// Applies the last size once, before the caller paints. Both grids
     /// follow it. An unchanged report with in-band resize enabled repaints:
     /// the signal may have drawn before the terminal's own size changed.
@@ -213,7 +230,7 @@ pub const Session = struct {
             // commit. The remaining storage swap cannot fail, so allocation
             // failure cannot split the two grids or invalidate old borrows.
             var prepared: ?Renderer = if (!std.meta.eql(s._renderer.dimensions(), next.cells))
-                try Renderer.init(s._gpa, next.cells)
+                try render.internal.prepare(s._gpa, next.cells)
             else
                 null;
             defer if (prepared) |*r| r.deinit();
@@ -387,9 +404,6 @@ test "a failed session resize keeps both grids and their borrowed content togeth
 }
 
 test "session allocation and coordinated state stay behind their owner" {
-    inline for (.{ "gpa", "screen", "renderer", "ws", "caps", "probe", "layers", "pending", "resize_report" }) |field| {
-        try testing.expect(!@hasField(Session, field));
-    }
     var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 3, .rows = 2 } }, .{ .graphics_id = 1 });
     defer s.deinit();
     try testing.expectEqual(s.windowSize().cells, s.screen().dimensions());
@@ -490,4 +504,38 @@ test "session policy can cancel pending learned capabilities at the current valu
     try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 11));
     try testing.expect(!s.renderer().entered().?.caps.in_band_resize);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
+}
+
+test "a late probe answer keeps the caller's capability overrides" {
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    defer s.deinit();
+    var bytes: [1024]u8 = undefined;
+    var out: Writer = .fixed(&bytes);
+    var policy = s.capabilities();
+    policy.osc8 = true;
+    policy.truecolor = true;
+    policy.rep = true;
+    _ = try s.setCaps(&out, policy);
+    const answer: morse.Event = .{ .reply = morse.Reply.parse("\x1b[?2026;1$y").? };
+    try testing.expect(try s.handle(&out, answer, 5));
+    const caps = s.capabilities();
+    try testing.expect(caps.sync);
+    try testing.expect(caps.osc8);
+    try testing.expect(caps.truecolor);
+    try testing.expect(caps.rep);
+    // The same answer again changes nothing the probe knows, so the
+    // caller's later choice stands; a new answer changes only its field.
+    policy = s.capabilities();
+    policy.sync = false;
+    _ = try s.setCaps(&out, policy);
+    try testing.expect(!try s.handle(&out, answer, 6));
+    try testing.expect(!s.capabilities().sync);
+    try testing.expect(try s.handle(&out, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 7));
+    try testing.expect(s.capabilities().in_band_resize);
+    try testing.expect(!s.capabilities().sync);
+    try testing.expect(s.capabilities().osc8);
+}
+
+test "a session is small enough to return and hold by value" {
+    try testing.expect(@sizeOf(Session) < 4096);
 }

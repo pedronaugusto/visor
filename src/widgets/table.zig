@@ -104,7 +104,7 @@ pub const Table = struct {
 
     /// Draws the header and as many rows as are left, moving the offset
     /// when the selection would otherwise be off screen.
-    pub fn draw(t: Table, win: visor.Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: Table, win: visor.Window, state: *State) visor.DrawError!void {
         if (win.rect().isEmpty() or t.widths.len == 0) return;
 
         const marker_width = win.width(t.marker);
@@ -157,7 +157,7 @@ pub const Table = struct {
         row: u16,
         r: Row,
         style: Style,
-    ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    ) visor.DrawError!void {
         for (cells, 0..) |rect, i| {
             if (i >= r.cells.len) break;
             if (rect.cols == 0) continue;

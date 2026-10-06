@@ -62,10 +62,6 @@ test "the grid and renderer store compact cells while exported handles stay chec
 }
 
 test "raw pools and renderer storage stay behind the checked boundary" {
-    try testing.expect(!@hasField(Screen, "graphemes"));
-    try testing.expect(!@hasField(Screen, "links"));
-    try testing.expect(!@hasField(Renderer, "prev"));
-    try testing.expect(!@hasField(Renderer, "link"));
     var s = try made(1, 1);
     defer s.deinit();
     const text = try s.intern("a\u{301}\u{302}\u{303}");
@@ -77,11 +73,6 @@ test "raw pools and renderer storage stay behind the checked boundary" {
 }
 
 test "screen and renderer geometry and allocation metadata have one owner" {
-    inline for (.{ Screen, Renderer }) |Owner| {
-        inline for (.{ "gpa", "size", "pool_generation" }) |field| try testing.expect(!@hasField(Owner, field));
-    }
-    try testing.expect(!@hasField(Screen, "damage"));
-    inline for (.{ "force", "drifted", "untrusted", "hashes", "buf", "style_sequences", "region" }) |field| try testing.expect(!@hasField(Renderer, field));
     var screen = try Screen.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer screen.deinit();
     var renderer = try Renderer.init(testing.allocator, screen.dimensions());

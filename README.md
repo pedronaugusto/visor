@@ -5,7 +5,7 @@
 visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
 the terminal from the frame it is showing to the one it should be showing. A
-second module, `visor.widgets`, holds a layout solver and nineteen widgets
+second module, `visor.widgets`, holds a layout solver and twenty widgets
 drawn on that grid, and the base never imports it.
 
 ## Usage
@@ -160,6 +160,12 @@ grapheme longer than six bytes the screen has not seen before, and say so
 with a `try`. Interning new links, pool compaction and resizing can allocate.
 The owned-copy helpers allocate through the copy's allocator.
 
+**Compaction.** The pools keep every grapheme and link ever interned until
+`compactPool`, or a resize to a new size, sweeps out what no cell uses; a
+resize to the same size only damages the grid. A program showing endless
+new text calls `compactPool` now and then, and pays for it: the pools'
+identity changes, so the next `draw` repaints every cell.
+
 Text and link targets returned by the screen are borrowed. Inline text
 lives in its cell; pooled text and targets live in growable pools, so
 interning unrelated text or links can invalidate their slices even when the
@@ -174,7 +180,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 |---|---|
 | The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
 | Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
-| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`. |
+| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`, `CellError`, `DrawError`. |
 | The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
@@ -191,7 +197,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
 | The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
-| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports. |
+| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports, and `DrawError`, what every `draw` fails with. |
 
 ### Canvas
 
@@ -370,46 +376,24 @@ comparing the meaning are the same answer.
 A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
 `Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
 
-Cells read from the screen carry checked text and link handles. The grid and
-renderer store compact cells; Screen owns their pool identity. Screen and
-Renderer geometry is read through `dimensions()` and changed through `resize`.
-Term owns its grid, allocator and stream state. `screen()` and `graphics()`
-lend read-only views; `position()` and `savedCursor()` return copied positions.
-Feed bytes and resize through the terminal so its cursor, links and grid stay
-together.
+State with a leading underscore belongs to the value that holds it and is
+read and changed through that value's methods; the doc comments say what
+each lends and for how long. Pooled handles carry the generation of the pool
+that issued them, so a handle that outlived a compaction or came from another
+screen is refused with `InvalidHandle` rather than read. `copyCell` moves a
+live cell between screens, and the owned-copy helpers keep content through
+compaction.
 
-Session owns coordinated size, capabilities and probe progress. Read them
-through `windowSize()`, `capabilities()` and `probe()`; change them through
-`handle`, `resize` and `setCaps`. `screen()`, `renderer()` and `layers()` lend
-the component owners for painting, terminal entry and pictures. Session owns
-their lifetime and coordinated resize.
-
-Renderer pen, cursor, width method, frame flags and cleanup intent are internal.
-`entered()` returns a copy of the requested configuration, including partial
-entry. A second live `enter` returns `AlreadyEntered` before writing or changing
-state; leave before entering again. `Session.enter` also preserves the parser
-on refusal. Use `enter`, `setModes`, `setCaps`, `repaint` and `untrustCursor` to
-change terminal state.
-
-Allocation, pool identity, damage and renderer work buffers are internal
-`_` storage, owned by their initialized value. Row access returns
-a borrowed row with `len()` and checked `get(col)` values; writes go through
-Screen rather than mutable row slices. Pooled handles carry their issuing generation. Compaction
-and resize invalidate retained handles; another screen cannot use them.
-`textOf`, cell writes, fills and copies return `InvalidHandle` before using a
-stale or foreign handle; `target` returns null. Inline text and `Link.none`
-are portable. Use `copyCell` with the source screen to transfer a live cell,
-or the owned-copy helpers to keep content through compaction. Raw pools and
-renderer baselines are internal storage, with `_` field names. Raw pool
-constructors and raw text resolution are not public APIs.
-
-Raw `Cell` and `Cell.Text` values are untrusted input. `Screen.cell(value)`
-checks one printable UTF-8 cluster, its shape and pool handles and returns a
-canonical cell or `InvalidCell` / `InvalidHandle`. Checked placement, fills
-and copies apply the same precondition before changing the grid. `write`
-and `writeScaled` ignore empty input and initial controls, and reject
-nonprinting or multi-cluster glyphs; invalid UTF-8 is still replaced with the replacement character. `intern` stores
-bytes; validation happens when those bytes become a cell.
+**A cell is a claim; text is content.** A hand-built `Cell` is checked by
+`Screen.cell` — one cluster, UTF-8, no control, a column or two by the
+screen's width method, a shape that matches — and refused with
+`InvalidCell` or `InvalidHandle` before the grid changes. Text handed to
+`write`, `print` or a widget is drawn the way a terminal would draw it:
+bytes that are not UTF-8 become the replacement character, and a control or
+a cluster that takes no column, such as a combining mark that begins a
+segment, is drawn as nothing. Only more than one cluster in one `write` is
+an error. Every fallible draw returns `DrawError`, which is `CellError` and
+`Allocator.Error`.
 
 `Screen.writeOwnedCellUnchecked` and its Window counterpart are the bridge
 for another terminal's measured cells: handles stay checked, while the
@@ -727,8 +711,9 @@ the input. Drain the batch, call `resize(w)` once, paint `screen()`, then
 `draw(w)` and flush your writer. Both grids follow
 the last resize; an unchanged in-band report repaints too, and each resize
 asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
-mouse parsing in step with the requested encoding. `setCaps` lets the caller
-apply its own overrides after a probe answer. With `Input`, use
+mouse parsing in step with the requested encoding. `setCaps` sets the
+caller's whole policy; a probe answer arriving later changes only the
+fields it learned, so overrides such as `osc8` survive it. With `Input`, use
 `renderer().setModes` and `Input.setMousePixels` together; `Session.setModes`
 is the convenience for a caller-owned morse parser. Input keeps its parser,
 buffers and unread bytes internal.
@@ -784,7 +769,7 @@ its own.
 - **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one. `Input` is a read, not a loop: the program decides where it runs and what an event means.
 - **No widget whose substance is handling keys, focus or a clock.** Those are three quarters event handling, and the program has the loop. `Keys` shows which keys work and handles none; `TextInput` says where the cursor lands, and `TextInput.Buffer` does the edit a key asks for (insert, delete by a motion, select, undo, redo, on whole clusters), but which key asks for which is the program's.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
-- **No colour degraded to a profile.** A program that asks for sixteen colours gets sixteen colours.
+- **No colour guessed from the environment.** Every colour is fitted to the profile the caller or the probe chose (`Caps.colorProfile`); one already in that form is written as given.
 - **Pictures without decoding.** Kitty placements, sixel pixels and iTerm2 encoded image files share `Layers`; cell pictures use the widgets. Visor does not decode or encode image files. iTerm2 source cropping and pixel offsets must be applied by the caller before storage; inline protocols paint in declaration order and do not offer kitty's independent text-underlay placements.
 - **Two places for a screen.** The alternate screen, or inline at the prompt, with rows printed above it into the scrollback. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
 
@@ -801,8 +786,8 @@ wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
 the examples without running them, and CI does that for `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
 `aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
-[`zig build ci-linux --`](zig build ci-linux --) runs the suite in Docker from any machine; it is
-a local script and no CI job calls it.
+`zig build ci-linux` runs the suite in Docker from any machine; no CI job
+calls it.
 
 `Tty` is the one file that reaches the operating system, through
 `conduit.tty`, which owns the terminal's calls for this package and for
@@ -814,7 +799,9 @@ compiled and not run.
 
 ## Testing
 
-Local build scripts clear `.zig-cache/{o,h,z,tmp}` above the measured cap through preflight; run `zig build cache` before direct Zig builds (only a rebuild is lost).
+`zig build check-consumer`, part of the lint `zig build test` runs first,
+builds a project that depends on visor with only visor's own dependencies
+present, so nothing visor fetches for its CI is needed to build on it.
 
 `zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
@@ -877,6 +864,10 @@ back through texts it held, in order, to the first, and redo to the last; trees
 of random shape, opened at random, must walk as a slow reading of the same
 nodes says; random Markdown sources of pipes, delimiter cells, task marks and
 inline markup must keep every range in bounds and draw the rows they count.
+Text no one cleaned — marks that begin a segment, C1 controls, bytes that
+are not UTF-8, zero-width and joining clusters — is drawn through the text
+widgets under every width method and must round-trip like any other frame,
+and arbitrary bytes fed to `Term` must leave its grid's invariants whole.
 
 Rows printed above an inline screen are fuzzed against the emulator — any rows
 on any screen at any place in the terminal read back above it — and run once

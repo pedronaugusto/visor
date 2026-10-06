@@ -345,9 +345,16 @@ pub const internal = struct {
     // Clipping uses the full head extent; imported continuation cells
     // become one blank cell when placed independently.
     pub fn fits(c: Cell, col: u16, row: u16, size: geom.Size) bool {
-        const span: u16 = if (c.isTail() or c.shape.kind == .spacer_head) 1 else c.width();
-        const height: u16 = if (c.isTail() or c.shape.kind == .spacer_head) 1 else c.rows();
-        return col < size.cols and row < size.rows and @as(u32, col) + span <= size.cols and @as(u32, row) + height <= size.rows;
+        const extent = footprint(c);
+        return col < size.cols and row < size.rows and @as(u32, col) + extent.cols <= size.cols and @as(u32, row) + extent.rows <= size.rows;
+    }
+
+    /// The cells placing `c` covers: its whole block for a head, one cell
+    /// for a tail or a spacer, which are placed as one blank. A fill steps
+    /// by it, so each head lands beside the last rather than over it.
+    pub fn footprint(c: Cell) geom.Size {
+        if (c.isTail() or c.shape.kind == .spacer_head) return .{ .cols = 1, .rows = 1 };
+        return .{ .cols = c.width(), .rows = c.rows() };
     }
 
     pub fn store(c: Cell) StoredCell {

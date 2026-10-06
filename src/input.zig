@@ -797,9 +797,3 @@ test "a silent deadline submits one read and cancels it with the remaining budge
     try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), clocked.budget.duration.raw.nanoseconds);
     try testing.expectEqual(Io.Clock.awake, clocked.budget.duration.clock);
 }
-
-test "input framing and borrowed buffers stay behind their owner" {
-    inline for (.{ "tty", "parser", "read_buffer", "fresh", "escape", "ended", "resize_due" }) |field| {
-        try testing.expect(!@hasField(Input, field));
-    }
-}

@@ -24,6 +24,9 @@ pub const visor = @import("visor");
 /// The version of this module, which is the version of the package.
 pub const version = visor.version;
 
+/// What every widget's `draw` can fail with, `visor.DrawError`.
+pub const DrawError = visor.DrawError;
+
 const layout_mod = @import("widgets/layout.zig");
 
 //=========================================================================

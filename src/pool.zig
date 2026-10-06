@@ -35,6 +35,11 @@ pub fn nextGeneration() u64 {
     }
 }
 
+/// The longest grapheme, link target or link parameter list a pool names:
+/// a length is sixteen bits. The screen refuses longer ones before they
+/// reach a pool (`error.TooLong`), so here it is an invariant.
+pub const max_len = std.math.maxInt(u16);
+
 fn pooledText(offset: u32, len: u16) Text {
     var t: Text = .{ .buf = @splat(0), .len = Text.pooled };
     std.mem.writeInt(u32, t.buf[0..4], offset, .little);
@@ -103,10 +108,11 @@ pub const Graphemes = struct {
     ///
     /// Allocates only when the grapheme is longer than six bytes and has
     /// not been seen before, which is never for ASCII and rare for anything
-    /// else.
+    /// else. The grapheme is at most `max_len` bytes.
     pub fn intern(p: *Graphemes, gpa: Allocator, grapheme: []const u8) Allocator.Error!Text {
         if (grapheme.len <= Text.max_inline) return .inlined(grapheme);
-        const byte_len = std.math.cast(u16, grapheme.len) orelse return error.OutOfMemory;
+        assert(grapheme.len <= max_len);
+        const byte_len: u16 = @intCast(grapheme.len);
 
         const found = p.index.getEntryAdapted(grapheme, Adapted{ .bytes = p.bytes.items });
         if (found) |e| return pooledText(e.key_ptr.offset, e.key_ptr.len);
@@ -252,14 +258,17 @@ pub const Links = struct {
     }
 
     /// The link for a target, interned: the same URI and parameters always
-    /// give the same `Link`.
+    /// give the same `Link`. Each is at most `max_len` bytes. A table
+    /// holding every link a sixteen-bit handle names is out of memory.
     pub fn intern(l: *Links, gpa: Allocator, uri: []const u8, params: []const u8) Allocator.Error!Link {
         if (uri.len == 0) return .none;
         const target: Target = .{ .uri = uri, .params = params };
         if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return pooledLink(i);
 
-        const uri_len = std.math.cast(u16, uri.len) orelse return error.OutOfMemory;
-        const params_len = std.math.cast(u16, params.len) orelse return error.OutOfMemory;
+        assert(uri.len <= max_len);
+        assert(params.len <= max_len);
+        const uri_len: u16 = @intCast(uri.len);
+        const params_len: u16 = @intCast(params.len);
         const uri_off = std.math.cast(u32, l.bytes.items.len) orelse return error.OutOfMemory;
         const i = std.math.cast(u16, l.entries.items.len) orelse return error.OutOfMemory;
         if (i == std.math.maxInt(u16)) return error.OutOfMemory;
@@ -459,10 +468,4 @@ test "the pool gives its memory back under a failing allocator" {
             }
         }
     }.run, .{});
-}
-
-test "owned link copies keep allocation and slices behind their owner" {
-    inline for (.{ "gpa", "uri", "params" }) |field| {
-        try testing.expect(!@hasField(OwnedTarget, field));
-    }
 }

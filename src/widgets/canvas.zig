@@ -166,13 +166,13 @@ pub const Painter = struct {
     }
 
     /// One mark.
-    pub fn point(p: Painter, x: f64, y: f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn point(p: Painter, x: f64, y: f64, style: visor.Style) visor.DrawError!void {
         const at = p.locate(x, y) orelse return;
         try p.mark(at.x, at.y, style);
     }
 
     /// A straight line between two places, by the oldest algorithm there is.
-    pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn line(p: Painter, x1: f64, y1: f64, x2: f64, y2: f64, style: visor.Style) visor.DrawError!void {
         const clipped = clipSegment(x1, y1, x2, y2, p.canvas.x_bounds, p.canvas.y_bounds) orelse return;
         const a = p.locate(clipped[0], clipped[1]) orelse return;
         const b = p.locate(clipped[2], clipped[3]) orelse return;
@@ -208,7 +208,7 @@ pub const Painter = struct {
         cols: f64,
         rows: f64,
         style: visor.Style,
-    ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    ) visor.DrawError!void {
         try p.line(x, y, x + cols, y, style);
         try p.line(x + cols, y, x + cols, y + rows, style);
         try p.line(x + cols, y + rows, x, y + rows, style);
@@ -216,7 +216,7 @@ pub const Painter = struct {
     }
 
     /// Every point of a series, joined.
-    pub fn polyline(p: Painter, coords: []const [2]f64, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn polyline(p: Painter, coords: []const [2]f64, style: visor.Style) visor.DrawError!void {
         if (coords.len == 0) return;
         if (coords.len == 1) return p.point(coords[0][0], coords[0][1], style);
         for (coords[1..], 0..) |b, i| {
@@ -266,7 +266,7 @@ pub const Painter = struct {
     }
 
     /// One mark on the grid, combined with whatever is already in its cell.
-    fn mark(p: Painter, gx: u32, gy: u32, style: visor.Style) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn mark(p: Painter, gx: u32, gy: u32, style: visor.Style) visor.DrawError!void {
         const across = p.canvas.marker.across();
         const down = p.canvas.marker.down();
         const col: u16 = @intCast(gx / across);

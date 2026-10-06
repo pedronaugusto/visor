@@ -850,16 +850,13 @@ test "primitive restoration output does not wait for a full descriptor" {
         worker.join();
     }
     while (!started.load(.acquire)) std.atomic.spinLoopHint();
-    try std.Io.sleep(testing.io, .fromMilliseconds(200), .awake);
+    // A writer that does not block finishes at once; one that blocks never
+    // does. Up to five seconds tells them apart on a loaded runner.
+    var waited: u32 = 0;
+    while (!done.load(.acquire) and waited < 500) : (waited += 1) try std.Io.sleep(testing.io, .fromMilliseconds(10), .awake);
     try testing.expect(done.load(.acquire));
     const after = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
     try testing.expectEqual(before, after);
-}
-
-test "terminal descriptors and restoration state stay behind their owner" {
-    inline for (.{ "file", "io", "input", "saved", "renderer", "next_raw", "resize_pipe" }) |field| {
-        try testing.expect(!@hasField(Tty, field));
-    }
 }
 
 // A controlled pause after the handler has borrowed the descriptor. These

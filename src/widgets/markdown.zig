@@ -53,9 +53,10 @@ pub const Markdown = struct {
         return total;
     }
 
-    /// Draw visible rows. Links are interned in the destination Screen;
-    /// unsafe targets remain text. No parser or layout allocations occur.
-    pub fn draw(m: Markdown, win: visor.Window) !void {
+    /// Draw visible rows. Links are interned in the destination Screen,
+    /// once a span; a target with a control in it or longer than a link
+    /// holds (65535 bytes) remains text. No parser or layout allocations occur.
+    pub fn draw(m: Markdown, win: visor.Window) visor.DrawError!void {
         if (win.rect().isEmpty()) return;
         var rows = Rows.init(m.document, win.cols(), win.screen().method);
         var skipped: usize = 0;
@@ -97,7 +98,7 @@ pub const Markdown = struct {
 
     /// One row of a table: its cells' lines side by side, or the rule under
     /// the header.
-    fn drawTableLine(m: Markdown, win: visor.Window, y: u16, prefix: u16, row: VisualRow, line: VisualTableLine, widths: []const u16) !void {
+    fn drawTableLine(m: Markdown, win: visor.Window, y: u16, prefix: u16, row: VisualRow, line: VisualTableLine, widths: []const u16) visor.DrawError!void {
         const table = row.block.table.?;
         const doc = m.document;
         var x: u32 = prefix;
@@ -143,7 +144,7 @@ pub const Markdown = struct {
     /// Clusters of `text`, which starts at `start` in the document's text,
     /// from column `x` up to `limit`, styled by the spans over them. Code
     /// draws tabs to four-column stops and scrolls by `scroll_columns`.
-    fn drawText(m: Markdown, win: visor.Window, x0: u32, y: u16, limit: u32, text: []const u8, start: usize, spans: []const reader.Span, style: visor.Style, code: bool) !u32 {
+    fn drawText(m: Markdown, win: visor.Window, x0: u32, y: u16, limit: u32, text: []const u8, start: usize, spans: []const reader.Span, style: visor.Style, code: bool) visor.DrawError!u32 {
         var x = x0;
         var it: visor.Graphemes = .init(text);
         var low: usize = 0;
@@ -153,6 +154,9 @@ pub const Markdown = struct {
             if (spans[middle].end <= start) low = middle + 1 else high = middle;
         }
         var span_index = low;
+        // The link of the span last linked, interned once for all its clusters.
+        var linked: ?usize = null;
+        var span_link: visor.Link = .none;
         var skipped_columns: u32 = 0;
         var code_column: u32 = 0;
         while (it.nextAt()) |g| {
@@ -175,10 +179,14 @@ pub const Markdown = struct {
                 if (span.flags.code) ink = overlay(ink, m.theme.inline_code);
                 if (span.uri.len > 0) {
                     ink = overlay(ink, m.theme.link);
-                    link = win.screen().link(span.uri, "") catch |err| switch (err) {
-                        error.ControlInText => .none,
-                        else => return err,
-                    };
+                    if (linked != span_index) {
+                        linked = span_index;
+                        span_link = win.screen().link(span.uri, "") catch |err| switch (err) {
+                            error.ControlInText, error.TooLong => .none,
+                            error.OutOfMemory => return error.OutOfMemory,
+                        };
+                    }
+                    link = span_link;
                 }
             }
             if (tab) {
@@ -423,10 +431,4 @@ fn overlay(base: visor.Style, role: visor.Style) visor.Style {
         }
     }
     return out;
-}
-
-test "markdown row iterator block and prose progress stay behind next" {
-    inline for (.{ "document", "cols", "method", "block", "prose", "first" }) |field| {
-        try std.testing.expect(!@hasField(Markdown.Rows, field));
-    }
 }

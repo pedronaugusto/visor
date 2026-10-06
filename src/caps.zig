@@ -587,12 +587,6 @@ test "probe quiet time spans the signed clock range" {
     try testing.expect(!probe.settled(std.math.minInt(i64), 50));
 }
 
-test "probe questions answers and learned state stay behind their owner" {
-    inline for (.{ "questions", "caps", "answered", "last_ms" }) |field| {
-        try testing.expect(!@hasField(Caps.Probe, field));
-    }
-}
-
 test "the picture protocol is kitty, then iTerm2, then sixel, then cells, unless the caller chose" {
     try testing.expectEqual(Caps.Pictures.cells, (Caps{}).pictures());
     try testing.expectEqual(Caps.Pictures.sixel, (Caps{ .sixel = true }).pictures());

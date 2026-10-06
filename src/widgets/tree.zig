@@ -322,7 +322,7 @@ pub const Tree = struct {
 
     /// Draws as many rows as the window has, moving the offset when the
     /// selection would otherwise be off screen.
-    pub fn draw(t: Tree, win: visor.Window, state: *State) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn draw(t: Tree, win: visor.Window, state: *State) visor.DrawError!void {
         if (win.rect().isEmpty()) return;
         const shown = t.visible(win.rows(), state);
         var at = shown.first orelse return;
@@ -362,7 +362,7 @@ pub const Tree = struct {
         }
     }
 
-    fn drawRow(t: Tree, win: visor.Window, y: u16, node: usize, chosen: bool, after: *const [guide_levels]u16) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    fn drawRow(t: Tree, win: visor.Window, y: u16, node: usize, chosen: bool, after: *const [guide_levels]u16) visor.DrawError!void {
         const n = t.nodes[node];
         const over: ?Style = if (chosen) t.selected_style else null;
         const fill: ?Style = if (chosen and t.highlight_row) over orelse t.style else t.style;

@@ -299,7 +299,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// One cell, in this window's coordinates, clipped by its whole extent.
             /// Stale or foreign handles return `InvalidHandle`; malformed cells return `InvalidCell`.
-            pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+            pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) Screen.CellError!void {
                 const checked = try w._screen.cell(c);
                 if (!w.fitsCell(col, row, checked)) return;
                 var drawn = checked;
@@ -320,7 +320,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// Copies a cell from another screen into this window.
             /// The cell must still belong to the source's current pool generations.
-            pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+            pub fn copyCell(w: Window, source: *const Screen, col: u16, row: u16, c: Cell) Screen.DrawError!void {
                 const checked = try source.cell(c);
                 if (!w.fitsCell(col, row, checked)) return;
                 var drawn = checked;
@@ -342,14 +342,13 @@ pub fn WindowApi(comptime screen_module: type) type {
                 grapheme: []const u8,
                 style: Style,
                 link: Link,
-            ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+            ) Screen.DrawError!void {
                 if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
-                if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return;
-                const valid = try screen_module.internal.glyph(grapheme);
+                const valid = (try screen_module.internal.printable(grapheme, w._screen.method)) orelse return;
                 const span = textmod.graphemeWidth(valid, w._screen.method);
                 if (!w.fits(col, row, span, 1)) return;
-                const drawn = if (w._ink == null) style else w.styled(col, row, span, grapheme, style);
-                try w._screen.write(w._rect.col + col, w._rect.row + row, grapheme, drawn, link);
+                const drawn = if (w._ink == null) style else w.styled(col, row, span, valid, style);
+                try w._screen.write(w._rect.col + col, w._rect.row + row, valid, drawn, link);
             }
 
             // A window owns placement clipping; Screen owns handle checks and tails.
@@ -371,22 +370,22 @@ pub fn WindowApi(comptime screen_module: type) type {
                 style: Style,
                 link: Link,
                 scale: u3,
-            ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!bool {
+            ) Screen.DrawError!bool {
                 if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
-                if (grapheme.len == 0 or grapheme[0] < 0x20 or grapheme[0] == 0x7f) return false;
-                const valid = try screen_module.internal.glyph(grapheme);
+                const valid = (try screen_module.internal.printable(grapheme, w._screen.method)) orelse return false;
                 const tall: u16 = @max(scale, 1);
                 const wide: u16 = textmod.graphemeWidth(valid, w._screen.method);
                 if (col >= w._rect.cols or row >= w._rect.rows) return false;
                 if (@as(u32, col) + @as(u32, wide) * tall > w._rect.cols) return false;
                 if (@as(u32, row) + tall > w._rect.rows) return false;
-                const drawn = if (w._ink == null) style else w.styled(col, row, wide * tall, grapheme, style);
-                return w._screen.writeScaled(w._rect.col + col, w._rect.row + row, grapheme, drawn, link, scale);
+                const drawn = if (w._ink == null) style else w.styled(col, row, wide * tall, valid, style);
+                return w._screen.writeScaled(w._rect.col + col, w._rect.row + row, valid, drawn, link, scale);
             }
 
-            /// A rectangle of one cell, in this window's coordinates.
+            /// A rectangle of one cell, in this window's coordinates. A wide or
+            /// scaled cell is laid one whole block after another, as `Screen.fill`.
             /// Stale or foreign handles return `InvalidHandle` before any cell changes.
-            pub fn fill(w: Window, area: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+            pub fn fill(w: Window, area: Rect, c: Cell) Screen.CellError!void {
                 _ = try w._screen.cell(c);
                 const inside = area.intersect(.fromSize(w.size()));
                 if (inside.isEmpty()) return;
@@ -394,10 +393,11 @@ pub fn WindowApi(comptime screen_module: type) type {
                     // Multi-cell fills use the same extent check as direct placement.
                     // The fill's own rectangle is the boundary, not just the window.
                     const bounded = w.sub(inside);
+                    const step = cellmod.internal.footprint(c);
                     var row = inside.row;
-                    while (row < inside.bottom()) : (row += 1) {
+                    while (row < inside.bottom()) : (row +|= step.rows) {
                         var col = inside.col;
-                        while (col < inside.right()) : (col += 1) try bounded.writeOwnedCell(col - inside.col, @intCast(row - inside.row), c);
+                        while (col < inside.right()) : (col +|= step.cols) try bounded.writeOwnedCell(col - inside.col, @intCast(row - inside.row), c);
                     }
                     return;
                 }
@@ -427,7 +427,7 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// longer than six bytes, by the same rule as `Screen.write`. A newline
             /// always ends a row; a word break looks ahead within one segment, so a
             /// word split across two segments breaks at the join.
-            pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
+            pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) Screen.DrawError!Print {
                 var at: Print = .{ .col = opts.col, .row = opts.row };
                 if (w._rect.isEmpty()) {
                     at.overflow = segments.len != 0;
@@ -438,7 +438,7 @@ pub fn WindowApi(comptime screen_module: type) type {
             }
 
             /// One run.
-            pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
+            pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) Screen.DrawError!Print {
                 return w.print(&.{segment}, opts);
             }
 
@@ -536,7 +536,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                 segment: Segment,
                 opts: PrintOptions,
                 from: Print,
-            ) (std.mem.Allocator.Error || error{ InvalidHandle, InvalidCell })!Print {
+            ) Screen.DrawError!Print {
                 var at = from;
                 if (at.row >= w._rect.rows) {
                     at.overflow = at.overflow or segment.text.len != 0;

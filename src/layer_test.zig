@@ -951,18 +951,6 @@ test "failed direct transmission stays refused through grace and can be retried"
     }
 }
 
-test "replacement ownership and refusal state stay behind their owner" {
-    inline for (.{ "current", "pending", "dirty" }) |field| {
-        try testing.expect(!@hasField(Replacement, field));
-    }
-}
-
-test "image id bounds and allocation cursor stay behind their owner" {
-    inline for (.{ "first", "last", "graphics_id", "next" }) |field| {
-        try testing.expect(!@hasField(ImageIds, field));
-    }
-}
-
 const inline_palette = [_]morse.Rgb{ .{ .r = 0, .g = 0, .b = 0 }, .{ .r = 255, .g = 0, .b = 0 } };
 const inline_pixels = [_]u8{ 1, 1, 1, 1 };
 

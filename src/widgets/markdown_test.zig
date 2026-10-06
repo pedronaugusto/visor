@@ -114,11 +114,6 @@ test "markdown code scrolling tabs and clipped windows agree with row counts" {
 
 test "markdown document exposes only borrowed const parsing ranges" {
     const Document = widgets.Markdown.Document;
-    try t.expect(!@hasField(Document, "allocator"));
-    try t.expect(!@hasField(Document, "source"));
-    try t.expect(!@hasField(Document, "text"));
-    try t.expect(!@hasField(Document, "spans"));
-    try t.expect(!@hasField(Document, "blocks"));
     var doc = try Document.init(t.allocator, "**label** [link](https://x)");
     defer doc.deinit();
     const source: []const u8 = doc.source();

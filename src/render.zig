@@ -268,8 +268,11 @@ pub const Renderer = struct {
     /// bracket be decided after the frame's size is known.
     _buf: []u8,
     /// SGR spellings already constructed for style pairs this renderer has
-    /// seen. A collision only rebuilds one spelling.
-    _style_sequences: StyleSequenceCache = .{},
+    /// seen. A collision only rebuilds one spelling. On the heap, taken by
+    /// `init` with the rest: it is most of what a renderer weighs, and the
+    /// value is returned and moved. Null only in the storage `resize`
+    /// prepares, which never draws and hands over everything but this.
+    _style_sequences: ?*StyleSequenceCache = null,
 
     /// The style the terminal is in.
     _style: Style = .{},
@@ -366,6 +369,17 @@ pub const Renderer = struct {
 
     /// Allocates the previous frame.
     pub fn init(gpa: Allocator, size: Size) Allocator.Error!Renderer {
+        var r = try prepare(gpa, size);
+        errdefer r.release();
+        const cache = try gpa.create(StyleSequenceCache);
+        cache.* = .{};
+        r._style_sequences = cache;
+        return r;
+    }
+
+    /// The storage of one size, without the style cache a size does not
+    /// change: what `resize` swaps in.
+    fn prepare(gpa: Allocator, size: Size) Allocator.Error!Renderer {
         var r: Renderer = .{
             ._gpa = gpa,
             ._size = size,
@@ -395,7 +409,7 @@ pub const Renderer = struct {
     /// at the old size after it had changed -- is its own business, and
     /// nothing about what it now shows is known.
     pub fn resize(r: *Renderer, size: Size) Allocator.Error!void {
-        var prepared = try Renderer.init(r._gpa, size);
+        var prepared = try prepare(r._gpa, size);
         defer prepared.deinit();
         r.resizePrepared(&prepared);
     }
@@ -938,6 +952,12 @@ pub const Renderer = struct {
         gpa.free(r._untrusted);
         gpa.free(r._hashes);
         gpa.free(r._buf);
+        if (r._style_sequences) |cache| gpa.destroy(cache);
+    }
+
+    /// The style cache of a renderer `init` made; only those draw.
+    fn styleCache(r: *Renderer) *StyleSequenceCache {
+        return r._style_sequences.?;
     }
 
     /// Whether any row carries the renderer's own reason to be written.
@@ -1802,7 +1822,7 @@ pub const Renderer = struct {
     fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
         if (std.mem.eql(u8, std.mem.asBytes(&r._style), std.mem.asBytes(&to))) return;
         const from = r._style;
-        if (r._style_sequences.get(from, to)) |sequence| {
+        if (r.styleCache().get(from, to)) |sequence| {
             try out.writeAll(sequence);
         } else {
             var bytes: [StyleSequenceCache.max_len]u8 = undefined;
@@ -1814,7 +1834,7 @@ pub const Renderer = struct {
                 return;
             };
             const sequence = fixed.buffered();
-            r._style_sequences.put(from, to, sequence);
+            r.styleCache().put(from, to, sequence);
             try out.writeAll(sequence);
         }
         r._style = to;
@@ -2071,9 +2091,9 @@ const StyleSequenceCache = struct {
 fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
     if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
     const from = state.style;
-    const n = r._style_sequences.getCost(from, to) orelse cost: {
+    const n = r.styleCache().getCost(from, to) orelse cost: {
         const computed = morse.cost.diffStyle(from, to);
-        r._style_sequences.putCost(from, to, computed);
+        r.styleCache().putCost(from, to, computed);
         break :cost computed;
     };
     state.style = to;
@@ -2158,6 +2178,9 @@ pub const internal = struct {
 
     pub fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
         r.resizePrepared(prepared);
+    }
+    pub fn prepare(gpa: Allocator, size: Size) Allocator.Error!Renderer {
+        return Renderer.prepare(gpa, size);
     }
 
     pub fn prevRow(r: *const Renderer, row: u16) []const Cell {
@@ -4528,9 +4551,6 @@ test "retrying a partial leave does not pop the keyboard stack twice" {
 }
 
 test "renderer terminal state stays behind its owner" {
-    inline for (.{ "style", "cursor", "shown", "shape", "method", "repaint_all", "entered", "drawn" }) |field| {
-        try testing.expect(!@hasField(Renderer, field));
-    }
     var r = try Renderer.init(testing.allocator, .{ .cols = 1, .rows = 1 });
     defer r.deinit();
     var bytes: [1024]u8 = undefined;
@@ -4727,4 +4747,14 @@ test "style cache collisions never substitute a different transition" {
             try testing.expectEqualSlices(u8, reverse.buffered(), hit);
         }
     }
+}
+
+test "a renderer is small enough to return and hold by value" {
+    // The style cache is on the heap, and a resize keeps it.
+    try testing.expect(@sizeOf(Renderer) < 2048);
+    var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
+    defer r.deinit();
+    const cache = r._style_sequences;
+    try r.resize(.{ .cols = 6, .rows = 3 });
+    try testing.expectEqual(cache, r._style_sequences);
 }

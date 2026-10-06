@@ -90,6 +90,12 @@ pub const mix = palette_mod.mix;
 pub const Screen = screen_mod.Screen;
 /// Where the terminal's cursor should end the frame.
 pub const Cursor = screen_mod.Cursor;
+/// A cell a screen refuses: a stale or foreign handle, or a glyph or shape
+/// that is not one printable cluster by the screen's width method.
+pub const CellError = screen_mod.Screen.CellError;
+/// What drawing into a screen, a window or a widget can fail with:
+/// `CellError`, and the allocation interning a new grapheme can need.
+pub const DrawError = screen_mod.Screen.DrawError;
 /// An offset, clipped view of a `Screen`. The only thing drawing code holds.
 pub const Window = window_mod.Window;
 /// A rectangle of cells.
@@ -252,4 +258,24 @@ test "transmission options have one public name" {
     defer out.deinit();
     _ = try layers.transmit(&out.writer, 1, &.{ 0, 0, 0, 255 }, how);
     try std.testing.expectEqual(@as(usize, 1), layers.images().len);
+}
+
+/// Every field of `T` outside `public` is its owner's state, named with a
+/// leading underscore: read through a method, never taken whole. Checked
+/// while the tests compile, naming the field that is neither.
+fn expectOwned(comptime T: type, comptime public: []const []const u8) void {
+    inline for (std.meta.fields(T)) |field| {
+        const listed = for (public) |name| {
+            if (std.mem.eql(u8, name, field.name)) break true;
+        } else false;
+        if (!listed and field.name[0] != '_') @compileError(@typeName(T) ++ "." ++ field.name ++ " is neither public nor underscored");
+    }
+}
+
+test "owned state outside each type's documented fields stays behind its owner" {
+    // What a program sets on the grid each frame.
+    comptime expectOwned(Screen, &.{ "cursor", "pointer", "method" });
+    inline for (.{ Renderer, Session, Term, Tty, Input, Damage, Graphemes, Parts, Caps.Probe, OwnedTarget, Replacement, ImageIds, Window, Layers }) |T| {
+        comptime expectOwned(T, &.{});
+    }
 }

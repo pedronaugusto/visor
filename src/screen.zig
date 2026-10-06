@@ -59,10 +59,8 @@ pub const Cursor = struct {
 
 // Cooperation inside the package; this namespace is not exported by visor.
 pub const internal = struct {
-    pub fn glyph(bytes: []const u8) error{InvalidCell}![]const u8 {
-        const valid = Screen.valid(bytes);
-        try Screen.checkGlyph(valid);
-        return valid;
+    pub fn printable(text: []const u8, method: textmod.Method) error{InvalidCell}!?[]const u8 {
+        return Screen.printable(text, method);
     }
     pub fn placeCell(s: *Screen, col: u16, row_n: u16, checked: Cell) void {
         s.placeOwnedCell(col, row_n, cellmod.internal.store(checked));
@@ -86,12 +84,38 @@ pub const internal = struct {
     pub fn resizeKeepingLink(s: *Screen, size: Size, link: *Link) Allocator.Error!void {
         try s.resizeKeepingLink(size, link);
     }
+    /// One cluster of a stream as a terminal reads it: null for a control
+    /// (C0, DEL or C1), the replacement character for bytes that are not
+    /// UTF-8 or too long for the pool, and the bytes themselves otherwise.
+    /// Width is the caller's: a terminal may have been told it.
+    pub fn sanitized(text: []const u8) ?[]const u8 {
+        if (text.len == 0) return null;
+        const grapheme = Screen.valid(text);
+        if (grapheme.len == 1 and grapheme[0] >= 0x20 and grapheme[0] < 0x7f) return grapheme;
+        if (Screen.hasControl(grapheme)) return null;
+        return grapheme;
+    }
+    /// `intern` for bytes the caller has already bounded by `pool.max_len`.
+    pub fn internShort(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
+        std.debug.assert(bytes.len <= pool.max_len);
+        return s.internShort(bytes);
+    }
 };
 
 /// The grid.
 pub const window_api = window.WindowApi(@This());
 
 pub const Screen = struct {
+    /// A cell this screen refuses: `InvalidHandle` for a text or link
+    /// handle that is stale, foreign or out of bounds, `InvalidCell` for a
+    /// glyph or shape that does not describe one printable cluster here.
+    pub const CellError = error{ InvalidHandle, InvalidCell };
+    /// What drawing into a screen, or into a window of one, can fail with:
+    /// `CellError`, and the allocation interning a new grapheme can need.
+    pub const DrawError = Allocator.Error || CellError;
+    /// What interning a link target can fail with.
+    pub const LinkError = Allocator.Error || error{ ControlInText, TooLong };
+
     // Fields prefixed _ belong to the owner; change geometry through resize.
     /// The current grid dimensions, copied rather than borrowed storage.
     pub fn dimensions(owner: *const Screen) Size {
@@ -151,9 +175,11 @@ pub const Screen = struct {
 
     /// A new size, contents kept where they still fit, everything damaged.
     ///
-    /// Compacts the pools; surviving cells keep their text and targets,
-    /// with identities rewritten to name the new pools. Borrowed slices
-    /// must not be retained across resize.
+    /// A different size compacts the pools; surviving cells keep their text
+    /// and targets, with identities rewritten to name the new pools, and the
+    /// next draw repaints every cell. The same size only damages the grid
+    /// and keeps the pools. Borrowed slices must not be retained across
+    /// resize.
     pub fn resize(s: *Screen, size: Size) Allocator.Error!void {
         try s.resizeKeepingLink(size, null);
     }
@@ -215,7 +241,9 @@ pub const Screen = struct {
     /// and damage everything anyway.
     ///
     /// It is a call, not a policy: `draw` never allocates and nothing is
-    /// freed behind a live grid cell. Retained handles are refused after the sweep.
+    /// freed behind a live grid cell. Retained handles are refused after the
+    /// sweep. The pools' identity changes, so the next draw repaints every
+    /// cell: compact between bursts of new text, not every frame.
     pub fn compactPool(s: *Screen) Allocator.Error!void {
         try s.compactKeepingLink(null);
     }
@@ -337,7 +365,7 @@ pub const Screen = struct {
     /// there would wrap it onto the next row; a block that does not fit
     /// becomes a blank too. A cell handed in as a tail is taken as a blank:
     /// tails are the grid's own bookkeeping.
-    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+    pub fn writeOwnedCell(s: *Screen, col: u16, row: u16, c: Cell) CellError!void {
         const checked = try s.cell(c);
         s.placeOwnedCell(col, row, cellmod.internal.store(checked));
     }
@@ -346,13 +374,13 @@ pub const Screen = struct {
     /// InvalidCell means the bytes are not one printable cluster, the shape
     /// does not describe it in this screen's width method, or reserved bytes
     /// are set. InvalidHandle means a pool handle is stale, foreign or out of bounds.
-    pub fn cell(s: *const Screen, c: Cell) error{ InvalidHandle, InvalidCell }!Cell {
+    pub fn cell(s: *const Screen, c: Cell) CellError!Cell {
         const bytes = try s.checkedText(&c);
         return validateCell(c, bytes, s.method);
     }
 
     fn validateCell(c: Cell, bytes: []const u8, method: textmod.Method) error{InvalidCell}!Cell {
-        try checkGlyph(bytes);
+        try checkGlyph(bytes, method);
         if (c.shape._reserved != 0 or !std.mem.allEqual(u8, &c._reserved, 0)) return error.InvalidCell;
         if (!c.text.isPooled()) {
             if (c.text.generation() != 0 or !std.mem.allEqual(u8, c.text.buf[c.text.len..], 0)) return error.InvalidCell;
@@ -366,7 +394,7 @@ pub const Screen = struct {
         return checked;
     }
 
-    fn checkedText(s: *const Screen, c: *const Cell) error{ InvalidHandle, InvalidCell }![]const u8 {
+    fn checkedText(s: *const Screen, c: *const Cell) CellError![]const u8 {
         // Pool identity checks precede glyph checks even for malformed input.
         if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
         if (!c.text.isPooled() and c.text.len > Cell.Text.max_inline) return error.InvalidCell;
@@ -383,14 +411,44 @@ pub const Screen = struct {
         s.placeOwnedCell(col, row, cellmod.internal.store(c));
     }
 
-    fn checkGlyph(bytes: []const u8) error{InvalidCell}!void {
+    /// Whether `bytes` are one cluster a terminal measuring by `method`
+    /// draws in at least one column: UTF-8, no control (C0, DEL or C1), and
+    /// not a cluster that takes no column, which is a different set of
+    /// clusters under each method.
+    fn checkGlyph(bytes: []const u8, method: textmod.Method) error{InvalidCell}!void {
         if (bytes.len == 1 and bytes[0] >= 0x20 and bytes[0] < 0x7f) return;
         if (bytes.len == 0 or !std.unicode.utf8ValidateSlice(bytes)) return error.InvalidCell;
-        var codepoints = std.unicode.Utf8View.initUnchecked(bytes).iterator();
-        while (codepoints.nextCodepoint()) |cp| if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) return error.InvalidCell;
+        if (hasControl(bytes)) return error.InvalidCell;
         var clusters = textmod.Graphemes.init(bytes);
         if ((clusters.next() orelse return error.InvalidCell).len != bytes.len or
-            textmod.graphemeWidth(bytes, .wcwidth) == 0) return error.InvalidCell;
+            textmod.graphemeWidth(bytes, method) == 0) return error.InvalidCell;
+    }
+
+    fn hasControl(bytes: []const u8) bool {
+        var codepoints = std.unicode.Utf8View.initUnchecked(bytes).iterator();
+        while (codepoints.nextCodepoint()) |cp| if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) return true;
+        return false;
+    }
+
+    /// What `write` puts in a cell for one cluster of the caller's text, or
+    /// null for text a terminal would draw nothing for.
+    ///
+    /// Text is content, not a programmer's claim about a cell, so whatever
+    /// it holds is drawn the way a terminal would or skipped: bytes that are
+    /// not UTF-8, and a cluster too long for the pool to name, become the
+    /// replacement character; a control (C0, DEL or C1) and a cluster that
+    /// takes no column under `method` -- a combining mark that begins a
+    /// segment, a zero-width space -- are skipped. Only text that is more
+    /// than one cluster is the caller's mistake, and returns `InvalidCell`.
+    fn printable(text: []const u8, method: textmod.Method) error{InvalidCell}!?[]const u8 {
+        if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return null;
+        const grapheme = valid(text);
+        if (grapheme.len == 1 and grapheme[0] < 0x80) return grapheme;
+        var clusters = textmod.Graphemes.init(grapheme);
+        if (clusters.next().?.len != grapheme.len) return error.InvalidCell;
+        // UTF-8 and one cluster by now, so a refusal is a control or no width.
+        checkGlyph(grapheme, method) catch return null;
+        return grapheme;
     }
 
     // The grid's own cells have already passed the handle checks.
@@ -446,10 +504,10 @@ pub const Screen = struct {
 
     /// Copies a cell from another screen, re-interning every owned value.
     /// Stale handles or a cell belonging to a different source return `InvalidHandle`.
-    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) (Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    pub fn copyCell(s: *Screen, source: *const Screen, col: u16, row: u16, c: Cell) DrawError!void {
         const checked = try source.cell(c);
         var put = try validateCell(checked, try source.textOf(&c), s.method);
-        if (c.text.isPooled()) put.text = try s.intern(try source.textOf(&c));
+        if (c.text.isPooled()) put.text = try s.internShort(try source.textOf(&c));
         if (source.target(c.link)) |link_target| {
             put.link = cellmod.internal.exportLink(try s._links.intern(s._gpa, link_target.uri, link_target.params), s._pool_generation);
         } else {
@@ -461,12 +519,15 @@ pub const Screen = struct {
     /// A grapheme measured, placed, and its tail written if it is wide.
     ///
     /// Allocates only when the grapheme is longer than six bytes and the
-    /// screen has not seen it before. Empty input and initial C0 controls or
-    /// DEL are ignored. Other nonprinting or multi-cluster glyphs return
-    /// InvalidCell before the grid changes. Bytes that are
-    /// not UTF-8 are written as the replacement character, which is what a
-    /// terminal would have shown for them, so the grid never holds bytes the
-    /// terminal would read differently from the way they were measured.
+    /// screen has not seen it before. Empty input, controls (C0, DEL and
+    /// C1, the cluster that begins with one) and a cluster that takes no
+    /// column by this screen's `method` are skipped: they are text a
+    /// terminal draws nothing for. Bytes that are not UTF-8, and a cluster
+    /// longer than the pool names (65535 bytes), are written as the
+    /// replacement character, which is what a terminal would have shown for
+    /// them, so the grid never holds bytes the terminal would read
+    /// differently from the way they were measured. Text of more than one
+    /// cluster returns InvalidCell before the grid changes.
     ///
     /// Measured by codepoint, a cluster of more than one codepoint that
     /// takes columns goes in the cells a terminal measuring that way gives
@@ -481,10 +542,9 @@ pub const Screen = struct {
         text: []const u8,
         style: Style,
         to: Link,
-    ) (Allocator.Error || error{ InvalidHandle, InvalidCell })!void {
+    ) DrawError!void {
         if (to != .none and s.target(to) == null) return error.InvalidHandle;
-        if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return;
-        const grapheme = try internal.glyph(text);
+        const grapheme = (try printable(text, s.method)) orelse return;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) {
             var parts: textmod.Parts = .init(grapheme);
@@ -498,14 +558,14 @@ pub const Screen = struct {
             return;
         }
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
-        if (w == 0) return;
+        std.debug.assert(w > 0);
         return s.writeOne(col, row, grapheme, @intCast(w), style, to);
     }
 
     /// One cell's worth of text, already measured at one or two columns.
     fn writeOne(s: *Screen, col: u16, row: u16, grapheme: []const u8, w: u2, style: Style, to: Link) Allocator.Error!void {
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
-        const t = try s.intern(grapheme);
+        const t = try s.internShort(grapheme);
         s.placeOwnedCell(col, row, cellmod.internal.store(.{
             .text = t,
             .style = cellmod.canonical(style),
@@ -535,23 +595,22 @@ pub const Screen = struct {
         style: Style,
         to: Link,
         scale: u3,
-    ) (Allocator.Error || error{ InvalidHandle, InvalidCell })!bool {
+    ) DrawError!bool {
         if (to != .none and s.target(to) == null) return error.InvalidHandle;
         if (scale <= 1) {
             try s.write(col, row, text, style, to);
             return true;
         }
-        if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return false;
-        const grapheme = try internal.glyph(text);
+        const grapheme = (try printable(text, s.method)) orelse return false;
         const ascii = grapheme.len == 1 and grapheme[0] < 0x80;
         // A cluster a terminal measuring by codepoint splits across cells
         // is not one glyph to scale.
         if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) return false;
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
-        if (w == 0) return false;
+        std.debug.assert(w > 0);
         if (@as(u32, col) + @as(u32, w) * scale > s.dimensions().cols) return false;
         if (@as(u32, row) + scale > s.dimensions().rows) return false;
-        const t = try s.intern(grapheme);
+        const t = try s.internShort(grapheme);
         s.placeOwnedCell(col, row, cellmod.internal.store(.{
             .text = t,
             .style = cellmod.canonical(style),
@@ -565,22 +624,26 @@ pub const Screen = struct {
         return true;
     }
 
-    /// A grapheme as it may go in a cell: itself when it is UTF-8, and the
-    /// replacement character when it is not.
+    /// A grapheme as it may go in a cell: itself when it is UTF-8 the pool
+    /// can name, and the replacement character when it is not.
     fn valid(grapheme: []const u8) []const u8 {
         if (grapheme.len == 1 and grapheme[0] < 0x80) return grapheme;
+        if (grapheme.len > pool.max_len) return "\u{fffd}";
         return if (std.unicode.utf8ValidateSlice(grapheme)) grapheme else "\u{fffd}";
     }
 
-    /// A rectangle of one cell.
-    pub fn fill(s: *Screen, rect: Rect, c: Cell) error{ InvalidHandle, InvalidCell }!void {
+    /// A rectangle of one cell. A wide or scaled cell is laid side by side
+    /// and row under row, one whole block after another; a block that would
+    /// cross the rectangle's edge is not written.
+    pub fn fill(s: *Screen, rect: Rect, c: Cell) CellError!void {
         const checked = try s.cell(c);
         const r = rect.intersect(.fromSize(s.dimensions()));
         if (r.isEmpty()) return;
+        const step = cellmod.internal.footprint(checked);
         var y = r.row;
-        while (y < r.bottom()) : (y += 1) {
+        while (y < r.bottom()) : (y +|= step.rows) {
             var col = r.col;
-            while (col < r.right()) : (col += 1) {
+            while (col < r.right()) : (col +|= step.cols) {
                 if (cellmod.internal.fits(checked, col - r.col, y - r.row, r.size()))
                     s.placeOwnedCell(col, y, cellmod.internal.store(checked));
             }
@@ -641,7 +704,13 @@ pub const Screen = struct {
     /// Bytes into the pool, deduplicated; inline when they fit.
     /// A cell using them is validated by `cell` or checked placement.
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
-    pub fn intern(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
+    /// More than 65535 bytes return `TooLong`: a pooled length is sixteen bits.
+    pub fn intern(s: *Screen, bytes: []const u8) (Allocator.Error || error{TooLong})!Cell.Text {
+        if (bytes.len > pool.max_len) return error.TooLong;
+        return s.internShort(bytes);
+    }
+
+    fn internShort(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
         const t = try s._graphemes.intern(s._gpa, bytes);
         return cellmod.internal.exportCell(&.{ .text = t }, s._pool_generation).text;
     }
@@ -654,9 +723,13 @@ pub const Screen = struct {
     /// them as two.
     /// C0 controls and DEL in either field return `ControlInText` before
     /// the table changes, by the same rule morse applies when writing OSC.
-    pub fn link(s: *Screen, uri: []const u8, params: []const u8) (Allocator.Error || error{ControlInText})!Link {
+    /// A field longer than 65535 bytes returns `TooLong`, and a table
+    /// already holding 65534 links `OutOfMemory`; compaction gives back
+    /// the ones no cell uses.
+    pub fn link(s: *Screen, uri: []const u8, params: []const u8) LinkError!Link {
         try morse.checkText(uri);
         try morse.checkText(params);
+        if (uri.len > pool.max_len or params.len > pool.max_len) return error.TooLong;
         return cellmod.internal.exportLink(try s._links.intern(s._gpa, uri, params), s._pool_generation);
     }
 
@@ -1731,6 +1804,8 @@ test "cell imports reject malformed glyphs and shapes before changing the grid" 
         .{ .text = .inlined("ab") },
         .{ .text = .inlined("\x1b") },
         .{ .text = .inlined("\xff") },
+        .{ .text = .inlined("\u{85}") },
+        .{ .text = .inlined("\u{200b}") },
         .{ .text = .inlined("\u{301}") },
         .{ .text = .inlined("x"), .shape = .{ .kind = .wide } },
         .{ .text = .inlined("中") },
@@ -1745,13 +1820,13 @@ test "cell imports reject malformed glyphs and shapes before changing the grid" 
         try testing.expect(!s._damage.any());
         try testing.expectEqualStrings(" ", s.textAt(0, 0));
     }
-    for ([_][]const u8{ "", "ab", "\x1b", "\u{301}", "a\u{85}" }) |bytes| {
-        try testing.expectError(error.InvalidCell, internal.glyph(bytes));
-        if (bytes.len > 1 and bytes[0] >= 0x20) {
-            try testing.expectError(error.InvalidCell, s.write(0, 0, bytes, .{}, .none));
-            try testing.expectError(error.InvalidCell, s.writeScaled(0, 0, bytes, .{}, .none, 2));
-        }
+    // Text is refused only when it is more than one cluster.
+    for ([_][]const u8{ "ab", "a\u{85}", "\u{301}x" }) |bytes| {
+        try testing.expectError(error.InvalidCell, internal.printable(bytes, s.method));
+        try testing.expectError(error.InvalidCell, s.write(0, 0, bytes, .{}, .none));
+        try testing.expectError(error.InvalidCell, s.writeScaled(0, 0, bytes, .{}, .none, 2));
     }
+    try testing.expect(!s._damage.any());
     const multi: Cell = .{ .text = try s.intern("pooled-multiple-clusters") };
     try testing.expectError(error.InvalidCell, s.writeOwnedCell(0, 0, multi));
     var noncanonical: Cell = .{ .text = .inlined("x") };
@@ -1832,6 +1907,112 @@ test "screen fills keep whole glyph extents inside their rectangle" {
         for (0..5) |row| for (0..8) |col| {
             try testing.expectEqualDeep(via_window.readCell(@intCast(col), @intCast(row)), s.readCell(@intCast(col), @intCast(row)));
         };
+    }
+}
+
+test "a cell's glyph is printable by the screen's own width method" {
+    // A Hangul vowel takes a column measured whole and none measured by
+    // codepoint.
+    var s = try made(2, 1);
+    defer s.deinit();
+    const c: Cell = .{ .text = .inlined("\u{1161}") };
+    try s.writeOwnedCell(0, 0, c);
+    try testing.expectEqualStrings("\u{1161}", s.textAt(0, 0));
+    s.method = .wcwidth;
+    try testing.expectError(error.InvalidCell, s.writeOwnedCell(1, 0, c));
+    // A lone combining mark is a column only when the terminal was told
+    // it: measured whole it joins the cell to its left.
+    const mark: Cell = .{ .text = .inlined("\u{301}") };
+    s.method = .explicit;
+    try s.writeOwnedCell(1, 0, mark);
+    s.method = .unicode;
+    try testing.expectError(error.InvalidCell, s.writeOwnedCell(1, 0, mark));
+}
+
+test "text a terminal draws nothing for is skipped, under every width method" {
+    const methods = [_]textmod.Method{ .wcwidth, .unicode, .explicit };
+    for (methods) |method| {
+        var s = try made(4, 2);
+        defer s.deinit();
+        s.method = method;
+        for (0..2) |row| for (0..4) |col| try s.write(@intCast(col), @intCast(row), "z", .{}, .none);
+        s._damage.clear();
+        for ([_][]const u8{ "\x1b", "\u{85}", "\u{9b}", "\u{200b}", "\u{feff}", "\r\n" }) |bytes| {
+            try s.write(0, 0, bytes, .{}, .none);
+            try testing.expect(!try s.writeScaled(0, 0, bytes, .{}, .none, 2));
+            try s.window().write(0, 0, bytes, .{}, .none);
+            try testing.expect(!try s.window().writeScaled(0, 0, bytes, .{}, .none, 2));
+        }
+        try testing.expect(!s._damage.any());
+        // A mark that begins a segment is a column only where the terminal
+        // is told it; either way it is no error.
+        try s.write(1, 0, "\u{301}", .{}, .none);
+        try testing.expectEqualStrings(if (method == .explicit) "\u{301}" else "z", s.textAt(1, 0));
+        // Bytes that are not UTF-8, and a cluster too long for the pool,
+        // are the replacement character.
+        try s.write(2, 0, "\xff", .{}, .none);
+        try testing.expectEqualStrings("\u{fffd}", s.textAt(2, 0));
+        const long = try testing.allocator.alloc(u8, 1 + 2 * 40_000);
+        defer testing.allocator.free(long);
+        long[0] = 'e';
+        for (0..40_000) |i| @memcpy(long[1 + 2 * i ..][0..2], "\u{301}");
+        try s.write(3, 0, long, .{}, .none);
+        try testing.expectEqualStrings("\u{fffd}", s.textAt(3, 0));
+        try testing.expectError(error.TooLong, s.intern(long));
+        try checkInvariants(&s);
+
+        // Printing measures what it draws: a control and a mark that takes
+        // no column take none, and the rest of the text is where it would be.
+        var printed = try made(8, 2);
+        defer printed.deinit();
+        printed.method = method;
+        _ = try printed.window().print(&.{.{ .text = "caf\n\u{301}x" }}, .{});
+        _ = try printed.window().print(&.{.{ .text = "a\u{85}b" }}, .{ .col = 4 });
+        try testing.expectEqualStrings("x", printed.textAt(if (method == .explicit) 1 else 0, 1));
+        try testing.expectEqualStrings("b", printed.textAt(5, 0));
+        try checkInvariants(&printed);
+    }
+}
+
+test "a link target or parameters too long for the table are refused by name" {
+    var s = try made(2, 1);
+    defer s.deinit();
+    const long = try testing.allocator.alloc(u8, 70_000);
+    defer testing.allocator.free(long);
+    @memset(long, 'x');
+    try testing.expectError(error.TooLong, s.link(long, ""));
+    try testing.expectError(error.TooLong, s.link("https://ziglang.org", long));
+    try testing.expectEqual(@as(usize, 0), s._links.count());
+}
+
+test "filling with a wide or scaled cell lays whole blocks side by side" {
+    var source = try made(6, 4);
+    defer source.deinit();
+    try source.write(0, 0, "\u{4e2d}", .{}, .none);
+    _ = try source.writeScaled(0, 1, "x", .{}, .none, 2);
+    const wide = source.readCell(0, 0).?;
+    const scaled = source.readCell(0, 1).?;
+    for ([_]bool{ false, true }) |through_window| {
+        var s = try made(7, 5);
+        defer s.deinit();
+        if (through_window) try s.window().fill(.fromSize(s.dimensions()), wide) else try s.fill(.fromSize(s.dimensions()), wide);
+        for (0..5) |row| {
+            for ([_]u16{ 0, 2, 4 }) |col| {
+                try testing.expectEqualStrings("\u{4e2d}", s.textAt(col, @intCast(row)));
+                try testing.expect(s.readCell(col + 1, @intCast(row)).?.isTail());
+            }
+            // The last column has no room for a block and keeps what it had.
+            try testing.expectEqualStrings(" ", s.textAt(6, @intCast(row)));
+        }
+        try checkInvariants(&s);
+
+        if (through_window) try s.window().fill(.fromSize(s.dimensions()), scaled) else try s.fill(.fromSize(s.dimensions()), scaled);
+        for ([_]u16{ 0, 2 }) |row| for ([_]u16{ 0, 2, 4 }) |col| {
+            const head = s.readCell(col, row).?;
+            try testing.expectEqualStrings("x", s.textAt(col, row));
+            try testing.expectEqual(@as(u3, 2), head.rows());
+        };
+        try checkInvariants(&s);
     }
 }
 

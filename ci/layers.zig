@@ -90,6 +90,7 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "markdown scenarios", .patterns = &.{
         "src/widgets/markdown/gfm_test.zig",
         "src/widgets/markdown_test.zig",
+        "src/widgets/hostile_text_test.zig",
     } },
     .{ .name = "widget tests", .patterns = &.{
         "src/widgets_test.zig",
@@ -177,6 +178,7 @@ pub const required = [_][]const u8{
     "src/widgets.zig",
     "src/widgets/markdown/gfm_test.zig",
     "src/widgets/markdown_test.zig",
+    "src/widgets/hostile_text_test.zig",
     "src/widgets_test.zig",
 };
 

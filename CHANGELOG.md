@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- `Screen.write`, `writeScaled`, `Window.write`, `print` and every widget draw text as a terminal would instead of refusing it: a control (C0, DEL or C1) and a cluster that takes no column are drawn as nothing, and bytes that are not UTF-8 or a cluster longer than 65535 bytes are the replacement character. `InvalidCell` from text now means only more than one cluster in one `write`. A hand-built cell is checked against the screen's own width method, where it was always checked by codepoint. Markdown, Paragraph, List and TextInput no longer fail on a combining mark that begins a segment, U+0085, or a Hangul vowel.
+
+- Measured whole (`Method.unicode`), a cluster that begins with a combining mark takes no column: a terminal measuring clusters puts it in the cell to its left, and no order of writing keeps it apart. `graphemeWidth`, `width`, wrapping and every widget measure it so.
+
+- `Term.feed` takes any bytes: a byte that is not UTF-8 is a replacement character, where it panicked, and a C1 control draws nothing. `REP` with a count past a screenful prints only as many copies as change the result, so `ESC [ 4294967295 b` no longer hangs it.
+
+- `Screen.fill` and `Window.fill` with a wide or scaled cell lay whole blocks side by side; each head used to clear the one before it, leaving one glyph.
+
+- `Session.handle` folds a probe answer into the current policy field by field, so overrides set through `setCaps` (`osc8`, `rep`, a colour guess) survive a late answer. It used to replace the whole policy with the probe's.
+
+- The renderer's style cache is on the heap, so `Renderer` is a few hundred bytes instead of 176 KiB, and `resize` keeps the cache.
+
+- `CellError` and `DrawError` name what checked cells and drawing fail with, in `Screen`, `visor` and `widgets`, and every signature uses them. `Markdown.draw` returns `DrawError` where its error set was inferred.
+
+- `Screen.intern` returns `TooLong` for more than 65535 bytes, and `Screen.link` for a target or parameters that long (`Screen.LinkError`); both returned `OutOfMemory`. `Term` and `Markdown` leave such a link out, and `Markdown` interns a span's link once rather than once a cluster.
+
+- A project that depends on visor builds: `build.zig` reaches preflight through `lazyImport`, in visor's own tree only. `zig build check-consumer`, part of the lint, builds one with only visor's own dependencies present.
+
 - `Screen.index` asserts its column and row are on the grid, and the grid, renderer, pools, emulator, damage map, layout and `TextInput.Buffer` assert the invariants they rely on: storage sized to the grid, pool handles that read back what was written, the emulator's cursor and scrolling region on the grid, and an undo history whose bytes are its edits' own, in order.
 
 - `expectScreensEqual` reports the cell that differs and both grids through `std.log` at the error level under the `visor` scope, which the program's log handler writes or drops, instead of printing to standard error. The examples write their output to standard output.

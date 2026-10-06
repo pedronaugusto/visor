@@ -164,17 +164,45 @@ pub const Graphemes = struct {
 /// before them, and the astronaut that is a woman, a joiner and a rocket is a
 /// woman in two columns and a rocket in the next two. `Parts` says where
 /// those cells begin.
+///
+/// Measured whole, a cluster that cannot stand alone (`standsAlone`) --
+/// one that begins with a combining mark, the start of a segment cut from
+/// the text it combined with -- takes none: a terminal measuring clusters
+/// puts it in the cell to its left, whatever that cell holds.
 pub fn graphemeWidth(grapheme: []const u8, method: Method) u16 {
     if (grapheme.len == 1 and grapheme[0] >= 0x20 and grapheme[0] < 0x7f) return 1;
     switch (method) {
-        .wcwidth => {
-            var total: usize = 0;
-            var it: Utf8 = .init(grapheme);
-            while (it.next()) |cp| total += codepointWidth(cp);
-            return @intCast(@min(total, std.math.maxInt(u16)));
+        .wcwidth => return codepointsWidth(grapheme),
+        .unicode => {
+            const whole: u16 = @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2));
+            return if (whole != 0 and !standsAlone(grapheme, whole)) 0 else whole;
         },
-        .unicode, .explicit => return @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2)),
+        .explicit => return @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2)),
     }
+}
+
+fn codepointsWidth(grapheme: []const u8) u16 {
+    var total: usize = 0;
+    var it: Utf8 = .init(grapheme);
+    while (it.next()) |cp| total += codepointWidth(cp);
+    return @intCast(@min(total, std.math.maxInt(u16)));
+}
+
+/// Whether a terminal measuring clusters can show a cluster `whole`
+/// columns wide in a cell of its own, whatever is to its left.
+///
+/// Such a terminal joins a cluster to the cell on its left when the break
+/// rules say so (`joinsCell`). Most clusters join only some neighbours,
+/// and a renderer keeps them apart by writing them first. A cluster that
+/// begins with a mark or a joiner joins even a blank, so order cannot help;
+/// what still can is mode 2027 off, under which the terminal measures by
+/// codepoint, and that keeps the cluster in its cell only when nothing
+/// after its first codepoint takes a column and the width comes out the
+/// same. A lone combining mark is neither: measured by codepoint it takes
+/// nothing, and it lands in the cell to its left on every such terminal.
+fn standsAlone(grapheme: []const u8, whole: u16) bool {
+    if (!joinsCellByRules(" ", grapheme)) return true;
+    return combinesOnly(grapheme) and codepointsWidth(grapheme) == whole;
 }
 
 /// The cells a terminal measuring by codepoint puts one grapheme cluster
@@ -781,9 +809,4 @@ test "prepend characters keep their standalone column in codepoint measurement" 
     try testing.expectEqual(@as(u2, 1), parts.next().?.cols);
     try testing.expectEqual(@as(u2, 1), parts.next().?.cols);
     try testing.expect(parts.next() == null);
-}
-
-test "text iterator source and progress stay behind next" {
-    inline for (.{ "bytes", "inner", "ascii_at" }) |field| try testing.expect(!@hasField(Graphemes, field));
-    try testing.expect(!@hasField(Parts, "it"));
 }

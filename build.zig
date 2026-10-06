@@ -1,5 +1,4 @@
 const std = @import("std");
-const preflight = @import("preflight");
 const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
@@ -219,7 +218,36 @@ pub fn build(b: *std.Build) void {
     if (test_filter) |f| conformance.addArg(b.fmt("-Dtest-filter={s}", .{f}));
     conformance.has_side_effects = true;
     conformance_step.dependOn(&conformance.step);
-    preflight.addCi(b, .{ .tests = test_step, .portable_tests = true });
+
+    //=====================================================================
+    // CI wiring
+    //
+    // Only in visor's own tree. preflight is a lazy dependency, and a lazy
+    // package's build.zig can only be reached through `lazyImport`: a plain
+    // `@import` of it fails to compile in any project that depends on visor
+    // and has not fetched preflight, which is every such project.
+    //=====================================================================
+
+    if (b.pkg_hash.len != 0) return;
+    if (b.lazyImport(@This(), "preflight")) |preflight| {
+        preflight.addCi(b, .{ .tests = test_step, .portable_tests = true });
+    }
+
+    // A project that depends on visor by path, built with fetching off and
+    // a package directory holding only what visor needs to build -- morse,
+    // conduit and uucode, copied from where this build found them -- so
+    // nothing visor fetches for its own CI can be reached. It is the build
+    // a consumer gets.
+    const packages = b.addWriteFiles();
+    inline for (.{ morse, conduit, uucode }) |dependency| {
+        _ = packages.addCopyDirectory(dependency.path(""), dependency.builder.pkg_hash, .{});
+    }
+    const consumer = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "--system" });
+    consumer.addDirectoryArg(packages.getDirectory());
+    consumer.setCwd(b.path("ci/consumer"));
+    consumer.has_side_effects = true;
+    consumer.expectExitCode(0);
+    b.step("check-consumer", "Build a project that depends on visor, with only visor's own dependencies").dependOn(&consumer.step);
 }
 
 /// Whether to hand this compilation to LLVM rather than to Zig's own
