@@ -266,7 +266,8 @@ pub fn build(b: *std.Build) void {
 /// the release it is fixed.
 ///
 /// `conformance/build.zig` builds the same package under the same backend
-/// and calls this too, which is why it is public.
+/// and calls this too, which is why it is public; so does any program built
+/// on visor in Debug there, `ci/consumer` among them.
 pub fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
     if (optimize != .Debug) return null;
     const result = target.result;
