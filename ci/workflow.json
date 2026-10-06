@@ -11,6 +11,5 @@
     "aarch64-macos"
   ],
   "compile_once": true,
-  "test_timeout": "",
   "sanitizer": "test"
 }

@@ -242,7 +242,7 @@ pub fn build(b: *std.Build) void {
             .program = b.path("ci/consumer.zig"),
             .modules = &.{ "visor", "visor.widgets" },
             .packages = &.{ morse, conduit, uucode },
-            .use_llvm = needsLlvm(target, optimize),
+            .use_llvm = "needsLlvm",
         });
     }
 }

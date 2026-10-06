@@ -28,15 +28,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `Screen.intern` returns `TooLong` for more than 65535 bytes, and `Screen.link` for a target or parameters that long (`Screen.LinkError`); both returned `OutOfMemory`. `Term` and `Markdown` leave such a link out, and `Markdown` interns a span's link once rather than once a cluster.
 
-- A project that depends on visor builds: `build.zig` reaches preflight through `lazyImport`, in visor's own tree only. `zig build check-consumer`, part of the lint, builds one with only visor's own dependencies present.
+- A project that depends on visor builds: `build.zig` reaches preflight through `lazyImport`, in visor's own tree only.
 
 - `Screen.index` asserts its column and row are on the grid, and the grid, renderer, pools, emulator, damage map, layout and `TextInput.Buffer` assert the invariants they rely on: storage sized to the grid, pool handles that read back what was written, the emulator's cursor and scrolling region on the grid, and an undo history whose bytes are its edits' own, in order.
 
 - `expectScreensEqual` reports the cell that differs and both grids through `std.log` at the error level under the `visor` scope, which the program's log handler writes or drops, instead of printing to standard error. The examples write their output to standard output.
 
 - `Renderer.Error` names what `draw`, `enter` and `leave` fail with, and `Session.draw` and `Tty.leave` return it. The set was declared beside `Renderer` rather than in it, where no caller of `visor` could name it.
-
-- Share the Zig CI gate through preflight, with requested fast runs and full merge checks.
 
 - `Caps.Probe` learns `colors` from morse's `Co` question, counting answers and refusals in the same waiting window as the other capabilities.
 
@@ -86,15 +84,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
 
-- Reject undeclared dependencies, duplicate layer membership and imports of source executables.
-
-- Check named source layers, cycles, entry files and dependency owners during source CI.
-
-- Keep drawing policies below their owners and assemble integration tests above them.
 - Resolve Markdown document types without importing their own file.
 - Give terminal and Unicode dependencies one source owner.
 
-- Bound local Zig build caches before builds, retaining downloaded packages and tools.
 - Pin conduit at confirmed per-child scope completion and fallible private-scope release.
 
 - The root restoreGlobal documentation names every registered terminal it restores.
@@ -203,10 +195,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - A fetched visor carries its `LICENSE`, `README.md` and `CHANGELOG.md`: the manifest's `.paths` left all three out.
-
-### Changed
-
-- CI pins preflight 9e72aac, which checks layers and cycles over the production graph. Test files and fixtures leave the layer table, and the widgets are one layer of peers over `layout` and `selection`. visor no longer pins gantry itself; preflight brings it.
 
 ## [0.4.0] - 2026-09-30
 

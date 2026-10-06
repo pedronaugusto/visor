@@ -786,8 +786,6 @@ wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
 the examples without running them, and CI does that for `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
 `aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
-`zig build ci-linux` runs the suite in Docker from any machine; no CI job
-calls it.
 
 `Tty` is the one file that reaches the operating system, through
 `conduit.tty`, which owns the terminal's calls for this package and for
