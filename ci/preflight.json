@@ -8,7 +8,7 @@
     "src/testing/corpus.zig"
   ],
   "test_support": [
-    "src/testing/*"
+    "src/testing/**"
   ],
   "function_exceptions": {},
   "layout_exceptions": {},

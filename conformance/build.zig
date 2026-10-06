@@ -44,7 +44,10 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "visor", .module = visor.module("visor") },
                 .{ .name = "visor.widgets", .module = visor.module("visor.widgets") },
-                .{ .name = "corpus", .module = visor.module("corpus") },
+                // visor's test data, not a module it publishes: the same
+                // file the package's own suite replays, so both emulators
+                // read the same bytes.
+                .{ .name = "corpus", .module = b.createModule(.{ .root_source_file = visor.path("src/testing/corpus.zig") }) },
                 .{ .name = "ghostty-vt", .module = ghostty.module("ghostty-vt") },
             },
         }),

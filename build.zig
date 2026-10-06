@@ -70,8 +70,10 @@ pub fn build(b: *std.Build) void {
 
     // The inputs the round-trip properties replay. Its own module because
     // the suite inside the package and the conformance build outside it
-    // have to replay the same bytes, and a file belongs to one module.
-    const corpus = b.addModule("corpus", .{ .root_source_file = b.path("src/testing/corpus.zig") });
+    // have to replay the same bytes, and a file belongs to one module. It is
+    // test data, so it is not published: the conformance build makes its
+    // own module from the same file.
+    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig") });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -231,23 +233,18 @@ pub fn build(b: *std.Build) void {
     if (b.pkg_hash.len != 0) return;
     if (b.lazyImport(@This(), "preflight")) |preflight| {
         preflight.addCi(b, .{ .tests = test_step, .portable_tests = true });
+        // A project that depends on visor by path, built with fetching off
+        // and only morse, conduit and uucode beside it, so nothing visor
+        // fetches for its own CI can be reached. It is the build a consumer
+        // gets.
+        preflight.addConsumerCheck(b, .{
+            .package = "visor",
+            .program = b.path("ci/consumer.zig"),
+            .modules = &.{ "visor", "visor.widgets" },
+            .packages = &.{ morse, conduit, uucode },
+            .use_llvm = needsLlvm(target, optimize),
+        });
     }
-
-    // A project that depends on visor by path, built with fetching off and
-    // a package directory holding only what visor needs to build -- morse,
-    // conduit and uucode, copied from where this build found them -- so
-    // nothing visor fetches for its own CI can be reached. It is the build
-    // a consumer gets.
-    const packages = b.addWriteFiles();
-    inline for (.{ morse, conduit, uucode }) |dependency| {
-        _ = packages.addCopyDirectory(dependency.path(""), dependency.builder.pkg_hash, .{});
-    }
-    const consumer = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "--system" });
-    consumer.addDirectoryArg(packages.getDirectory());
-    consumer.setCwd(b.path("ci/consumer"));
-    consumer.has_side_effects = true;
-    consumer.expectExitCode(0);
-    b.step("check-consumer", "Build a project that depends on visor, with only visor's own dependencies").dependOn(&consumer.step);
 }
 
 /// Whether to hand this compilation to LLVM rather than to Zig's own
@@ -267,7 +264,7 @@ pub fn build(b: *std.Build) void {
 ///
 /// `conformance/build.zig` builds the same package under the same backend
 /// and calls this too, which is why it is public; so does any program built
-/// on visor in Debug there, `ci/consumer` among them.
+/// on visor in Debug there, `check-consumer`'s among them.
 pub fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
     if (optimize != .Debug) return null;
     const result = target.result;

@@ -1,15 +1,13 @@
-//! Source layers, lowest first. Every source has one explicit place.
+//! Production source layers, lowest first. Every production source has one
+//! explicit place; test code is in no layer.
 const gantry = @import("gantry");
 
 pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "primitives", .patterns = &.{
-        "src/testing/corpus.zig",
         "src/damage.zig",
         "src/dependencies.zig",
         "src/geom.zig",
         "src/layer/**",
-        "src/widgets/markdown/reader.zig",
-        "src/widgets/selection.zig",
     } },
     .{ .name = "text and geometry", .patterns = &.{
         "src/cell.zig",
@@ -34,14 +32,8 @@ pub const layers: []const gantry.rules.Layer = &.{
     } },
     .{ .name = "rendering", .patterns = &.{
         "src/render.zig",
-        "src/window_test.zig",
     } },
-    .{ .name = "session and scenarios", .patterns = &.{
-        "src/testing/render_budget_test.zig",
-        "src/layer_test.zig",
-        "src/render/moved_rows_test.zig",
-        "src/testing/roundtrip_test.zig",
-        "src/screen_test.zig",
+    .{ .name = "session and terminal", .patterns = &.{
         "src/session.zig",
         "src/tty.zig",
     } },
@@ -50,50 +42,41 @@ pub const layers: []const gantry.rules.Layer = &.{
     } },
     .{ .name = "public", .patterns = &.{
         "src/visor.zig",
-        "src/tests.zig",
     } },
+    // The second module, on the first. What several widgets share sits
+    // under the widgets; the widgets are peers in one layer, where one may
+    // build on another (a tree on a list, a chart on a canvas) and the cycle
+    // rule keeps them a DAG.
     .{ .name = "widget geometry", .patterns = &.{
-        "src/testing/widget_harness.zig",
         "src/widgets/layout.zig",
-        "src/widgets/canvas/**",
+        "src/widgets/selection.zig",
     } },
-    .{ .name = "widget views", .patterns = &.{
+    .{ .name = "widgets", .patterns = &.{
         "src/widgets/barchart.zig",
         "src/widgets/block.zig",
         "src/widgets/calendar.zig",
+        "src/widgets/canvas.zig",
+        "src/widgets/canvas/**",
+        "src/widgets/chart.zig",
         "src/widgets/edges.zig",
         "src/widgets/gauge.zig",
         "src/widgets/keys.zig",
         "src/widgets/list.zig",
+        "src/widgets/markdown.zig",
+        "src/widgets/markdown/reader.zig",
         "src/widgets/paragraph.zig",
         "src/widgets/rule.zig",
+        "src/widgets/scroll.zig",
         "src/widgets/scrollbar.zig",
         "src/widgets/sextants.zig",
         "src/widgets/sparkline.zig",
         "src/widgets/table.zig",
         "src/widgets/tabs.zig",
         "src/widgets/text_input.zig",
-    } },
-    .{ .name = "composed widgets", .patterns = &.{
-        "src/widgets/canvas.zig",
-        "src/widgets/markdown.zig",
-        "src/widgets/scroll.zig",
         "src/widgets/tree.zig",
     } },
-    .{ .name = "widget scenarios", .patterns = &.{
-        "src/widgets/canvas_test.zig",
-        "src/widgets/chart.zig",
-    } },
-    .{ .name = "widgets", .patterns = &.{
+    .{ .name = "widgets module", .patterns = &.{
         "src/widgets.zig",
-    } },
-    .{ .name = "markdown scenarios", .patterns = &.{
-        "src/widgets/markdown/gfm_test.zig",
-        "src/widgets/markdown_test.zig",
-        "src/widgets/hostile_text_test.zig",
-    } },
-    .{ .name = "widget tests", .patterns = &.{
-        "src/widgets_test.zig",
     } },
 };
 
@@ -120,66 +103,15 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "uucode owner", .target = "uucode", .except_from = &.{"src/dependencies.zig"} },
 };
 
+/// The roots the builds compile, the conformance build's included, and the
+/// one seam to the dependencies.
 pub const required = [_][]const u8{
-    "src/testing/corpus.zig",
-    "src/damage.zig",
-    "src/dependencies.zig",
-    "src/geom.zig",
-    "src/layer/shm.zig",
-    "src/widgets/markdown/reader.zig",
-    "src/widgets/selection.zig",
-    "src/cell.zig",
-    "src/palette.zig",
-    "src/text.zig",
-    "src/winsize.zig",
-    "src/caps.zig",
-    "src/pool.zig",
-    "src/layer.zig",
-    "src/window.zig",
-    "src/screen.zig",
-    "src/render/moved_rows.zig",
-    "src/term.zig",
-    "src/render.zig",
-    "src/window_test.zig",
-    "src/testing/render_budget_test.zig",
-    "src/layer_test.zig",
-    "src/render/moved_rows_test.zig",
-    "src/testing/roundtrip_test.zig",
-    "src/screen_test.zig",
-    "src/session.zig",
-    "src/tty.zig",
-    "src/input.zig",
     "src/visor.zig",
-    "src/tests.zig",
-    "src/testing/widget_harness.zig",
-    "src/widgets/layout.zig",
-    "src/widgets/canvas/raster.zig",
-    "src/widgets/barchart.zig",
-    "src/widgets/block.zig",
-    "src/widgets/calendar.zig",
-    "src/widgets/edges.zig",
-    "src/widgets/gauge.zig",
-    "src/widgets/keys.zig",
-    "src/widgets/list.zig",
-    "src/widgets/paragraph.zig",
-    "src/widgets/rule.zig",
-    "src/widgets/scrollbar.zig",
-    "src/widgets/sextants.zig",
-    "src/widgets/sparkline.zig",
-    "src/widgets/table.zig",
-    "src/widgets/tabs.zig",
-    "src/widgets/text_input.zig",
-    "src/widgets/canvas.zig",
-    "src/widgets/markdown.zig",
-    "src/widgets/scroll.zig",
-    "src/widgets/tree.zig",
-    "src/widgets/canvas_test.zig",
-    "src/widgets/chart.zig",
     "src/widgets.zig",
-    "src/widgets/markdown/gfm_test.zig",
-    "src/widgets/markdown_test.zig",
-    "src/widgets/hostile_text_test.zig",
+    "src/dependencies.zig",
+    "src/tests.zig",
     "src/widgets_test.zig",
+    "src/testing/corpus.zig",
 };
 
 /// Tokens only their owners may spell. The console and the terminal's

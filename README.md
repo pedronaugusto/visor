@@ -799,7 +799,7 @@ compiled and not run.
 
 ## Testing
 
-`zig build check-consumer`, part of the lint `zig build test` runs first,
+`zig build check-consumer`, part of the lint `zig build ci` runs first,
 builds a project that depends on visor with only visor's own dependencies
 present, so nothing visor fetches for its CI is needed to build on it.
 

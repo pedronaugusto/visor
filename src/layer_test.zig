@@ -9,7 +9,6 @@ const Writer = std.Io.Writer;
 const under_base: i32 = -1_000_000;
 const Image = @import("layer.zig").Image;
 const Layer = @import("layer.zig").Layer;
-const Transmit = @import("layer.zig").Transmit;
 const ImageIds = @import("layer.zig").ImageIds;
 const Replacement = @import("layer.zig").Replacement;
 const Layers = @import("layer.zig").Layers;

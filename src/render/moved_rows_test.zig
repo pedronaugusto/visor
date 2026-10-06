@@ -16,14 +16,11 @@
 //! cells is not a match.
 
 const std = @import("std");
-const morse = @import("../dependencies.zig").morse;
-const cellmod = @import("../cell.zig");
 const render = @import("../render.zig");
 const Caps = @import("../caps.zig").Caps;
 const Screen = @import("../screen.zig").Screen;
 const term = @import("../term.zig");
 const Renderer = render.Renderer;
-const Cell = cellmod.internal.StoredCell;
 const testing = std.testing;
 
 /// A screen and a renderer that have already agreed on a first frame.

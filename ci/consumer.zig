@@ -1,3 +1,7 @@
+//! What a project that depends on visor writes, built by `zig build
+//! check-consumer` with fetching off and only visor's own dependencies
+//! present: visor's build.zig must compile and run without any of its CI
+//! dependencies.
 const std = @import("std");
 const visor = @import("visor");
 const widgets = @import("visor.widgets");

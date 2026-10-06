@@ -28,7 +28,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const morse = @import("dependencies.zig").morse;
 const terminal = @import("dependencies.zig").tty;
 
 const Winsize = @import("winsize.zig").Winsize;

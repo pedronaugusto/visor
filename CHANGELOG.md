@@ -196,6 +196,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pool compaction repaints text and pictures, including when resize compacts the pools.
 - `zig build test -Dtest-filter=…` runs only matching tests.
 
+### Breaking
+
+- visor no longer publishes a `corpus` module. It is the round trips' test data, not API; the conformance build makes its own module from `src/testing/corpus.zig`.
+
+### Fixed
+
+- A fetched visor carries its `LICENSE`, `README.md` and `CHANGELOG.md`: the manifest's `.paths` left all three out.
+
+### Changed
+
+- CI pins preflight 9e72aac, which checks layers and cycles over the production graph. Test files and fixtures leave the layer table, and the widgets are one layer of peers over `layout` and `selection`. visor no longer pins gantry itself; preflight brings it.
+
 ## [0.4.0] - 2026-09-30
 
 ### Changed

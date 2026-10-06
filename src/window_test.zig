@@ -6,7 +6,6 @@ const geom = @import("geom.zig");
 const textmod = @import("text.zig");
 const Screen = @import("screen.zig").Screen;
 const screen_internal = @import("screen.zig").internal;
-const Target = @import("pool.zig").Target;
 
 const Cell = cellmod.Cell;
 const Link = cellmod.Link;

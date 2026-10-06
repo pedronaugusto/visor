@@ -3,16 +3,10 @@
     .version = "0.4.0",
     .dependencies = .{
         .preflight = .{
-            .url = "https://codeload.github.com/pedronaugusto/preflight/tar.gz/f5e7d2debd34d51b786fa1161e47f0195f7cd706",
-            .hash = "preflight-0.1.0-LX1ZwiiQAgDJIF9YGj18_kcdJqmEn2tt39VwKmYli6Nz",
+            .url = "https://codeload.github.com/pedronaugusto/preflight/tar.gz/9e72aac1b9f2837716105dca4de617685a4ca284",
+            .hash = "preflight-0.1.0-LX1ZwvN6AwDbnX3xF1J-0h68Hi_duYUxFTmiG__3gP6D",
             .lazy = true,
         },
-        .gantry = .{
-            .url = "git+https://github.com/pedronaugusto/gantry#b5b991bcc590a8f7032444287465269acda4fdaa",
-            .hash = "gantry-0.1.0-1iNrkcw4BwBD3pRucqF5FkGsGSOPIhkPh0rLr1u4EMDW",
-            .lazy = true,
-        },
-
         .uucode = .{
             .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
             .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
@@ -32,5 +26,8 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
     },
 }

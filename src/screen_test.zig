@@ -1,8 +1,6 @@
 const std = @import("std");
-const morse = @import("dependencies.zig").morse;
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
-const Damage = @import("damage.zig").Damage;
 const Allocator = std.mem.Allocator;
 const Cell = cellmod.Cell;
 const StoredCell = cellmod.internal.StoredCell;
@@ -13,10 +11,8 @@ const Size = geom.Size;
 const Style = cellmod.Style;
 const Screen = @import("screen.zig").Screen;
 const Renderer = @import("render.zig").Renderer;
-const Cursor = @import("screen.zig").Cursor;
 const testing = std.testing;
 const made = @import("screen.zig").test_access.made;
-const checkInvariants = @import("screen.zig").test_access.checkInvariants;
 test "managed screens and renderers use their captured allocator through every operation" {
     try testing.checkAllAllocationFailures(testing.allocator, struct {
         fn run(gpa: Allocator) !void {
