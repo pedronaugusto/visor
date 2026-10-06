@@ -22,8 +22,8 @@
             .hash = "morse-0.7.0-OKnGoe2bEgCkaEVGU_BLcxV54IRPH0Bvz-HdcgSBdF6D",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#33a956ed2e77ec0e9bf8d8f79ba6429c171333ba",
-            .hash = "conduit-0.5.1-4rIA7we9EgD9kSsaj7aR1M6U4VrjLP6mHGYHjsW1Y6o6",
+            .url = "git+https://github.com/pedronaugusto/conduit#73b8fdfd260137924463cdd440d6bbbb48fbb7f6",
+            .hash = "conduit-0.5.1-4rIA72bOEwBaPTzyER-nj8RXKPDLIT8iu0qgoVA0bQk5",
         },
     },
     .minimum_zig_version = "0.16.0",

@@ -198,8 +198,7 @@ pub const Input = struct {
         const file = in._tty.inputFile();
         while (true) {
             const lim = in.limit(until);
-            const left = lim.timeout.toDurationFromNow(in._tty.ioContext()) orelse return in.readBlocking(file);
-            const ms: u32 = @intCast(std.math.clamp(left.raw.toMilliseconds(), 0, std.math.maxInt(u32) - 1));
+            const ms = consoleWaitMs(in._tty.ioContext(), lim.timeout) orelse return in.readBlocking(file);
             switch (console.waitInput(file.handle, ms) catch return in.readBlocking(file)) {
                 .ready => {},
                 .timed_out => return if (lim.expires) .expired else .quiet,
@@ -282,6 +281,13 @@ pub const Input = struct {
     }
 };
 
+/// What is left of `timeout` for a console wait, which counts whole
+/// milliseconds and never `INFINITE`; `null` for no timeout.
+fn consoleWaitMs(io: Io, timeout: Io.Timeout) ?u32 {
+    const deadline = Deadline.fromTimeout(io, timeout) orelse return null;
+    return deadline.windowsMs(io);
+}
+
 /// Whether a console's queued input holds a key going down, which is what a
 /// read in terminal input mode returns bytes for.
 fn keyWaiting(records: []const console.InputRecord) bool {
@@ -291,6 +297,8 @@ fn keyWaiting(records: []const console.InputRecord) bool {
 
 /// The console's input records and waits are conduit's.
 const console = @import("dependencies.zig").tty.console;
+/// Rounds the time left up to the whole milliseconds a console wait takes.
+const Deadline = @import("dependencies.zig").tty.Deadline;
 
 const testing = std.testing;
 const conduit = @import("dependencies.zig").conduit;
@@ -796,4 +804,27 @@ test "a silent deadline submits one read and cancels it with the remaining budge
     try testing.expectEqual(@as(usize, 1), clocked.cancels);
     try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), clocked.budget.duration.raw.nanoseconds);
     try testing.expectEqual(Io.Clock.awake, clocked.budget.duration.clock);
+}
+
+test "a console wait keeps the last fraction of a millisecond" {
+    const Clock = struct {
+        var nanoseconds: i96 = 0;
+        fn now(_: ?*anyopaque, _: Io.Clock) Io.Timestamp {
+            return .{ .nanoseconds = nanoseconds };
+        }
+    };
+    var vtable = testing.io.vtable.*;
+    vtable.now = Clock.now;
+    const io: Io = .{ .userdata = testing.io.userdata, .vtable = &vtable };
+    Clock.nanoseconds = 0;
+    const half: Io.Timeout = .{ .duration = .{ .raw = .fromNanoseconds(std.time.ns_per_ms / 2), .clock = .awake } };
+    const one_and_a_half: Io.Timeout = .{ .duration = .{ .raw = .fromNanoseconds(3 * std.time.ns_per_ms / 2), .clock = .awake } };
+    // Rounding the time left down would end the wait early and report the
+    // caller's deadline passed while it is still ahead.
+    try testing.expectEqual(@as(?u32, 1), consoleWaitMs(io, half));
+    try testing.expectEqual(@as(?u32, 2), consoleWaitMs(io, one_and_a_half));
+    try testing.expectEqual(@as(?u32, null), consoleWaitMs(io, .none));
+    const passed = one_and_a_half.toDeadline(io);
+    Clock.nanoseconds = 2 * std.time.ns_per_ms;
+    try testing.expectEqual(@as(?u32, 0), consoleWaitMs(io, passed));
 }

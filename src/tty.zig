@@ -373,19 +373,12 @@ pub const Tty = struct {
         if (is_windows) return;
         if (t._resize_pipe[0] != -1) return;
         if (watching == max_watchers) return error.SystemResources;
-        var fds: [2]std.posix.fd_t = undefined;
-        switch (std.posix.errno(std.posix.system.pipe(&fds))) {
-            .SUCCESS => {},
-            .MFILE, .NFILE => return error.SystemResources,
-            else => return error.Unexpected,
-        }
-        errdefer for (fds) |fd| {
-            _ = std.posix.system.close(fd);
+        // conduit's pipe, so a child conduit starts while it is being made
+        // is not handed it before it is marked close-on-exec.
+        const fds = terminal.pipe(.{ .nonblocking = true }) catch |err| switch (err) {
+            error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded => return error.SystemResources,
+            error.Unexpected => return error.Unexpected,
         };
-        for (fds) |fd| {
-            try fcntlSet(fd, std.posix.F.SETFL, @bitCast(std.posix.O{ .NONBLOCK = true }));
-            try fcntlSet(fd, std.posix.F.SETFD, std.posix.FD_CLOEXEC);
-        }
         for (&watchers) |*w| {
             if (w.fd != -1) continue;
             w.publish(fds[1]);
@@ -932,4 +925,50 @@ test "a resize handler preserves errno when its pipe is full" {
     onWinch(.WINCH);
     const after = errno_ptr.*;
     try testing.expectEqual(interrupted, after);
+}
+
+test "a resize pipe is close-on-exec and nonblocking at both ends" {
+    if (is_windows) return error.SkipZigTest;
+    var t: Tty = .adopt(testing.io, undefined);
+    try t.watchResize();
+    defer t.unwatchResize();
+    for (t._resize_pipe) |fd| {
+        const fd_flags = std.posix.system.fcntl(fd, std.posix.F.GETFD, @as(usize, 0));
+        try testing.expectEqual(std.posix.E.SUCCESS, std.posix.errno(fd_flags));
+        try testing.expect(@as(usize, @intCast(fd_flags)) & std.posix.FD_CLOEXEC != 0);
+        const fl_flags = std.posix.system.fcntl(fd, std.posix.F.GETFL, @as(usize, 0));
+        try testing.expectEqual(std.posix.E.SUCCESS, std.posix.errno(fl_flags));
+        const nonblock: u32 = @bitCast(std.posix.O{ .NONBLOCK = true });
+        try testing.expect(@as(usize, @intCast(fl_flags)) & nonblock != 0);
+    }
+}
+
+test "a resize pipe is not made while conduit is starting a child" {
+    // Where the pipe and its flag are two calls, a child conduit starts in
+    // between would inherit both ends. conduit keeps its spawns out of that
+    // gap only for pipes made under its lock.
+    if (is_windows or !terminal.opening_is_two_calls) return error.SkipZigTest;
+    terminal.ForkGap.startingAChild();
+    var starting = true;
+    defer if (starting) terminal.ForkGap.release();
+
+    var t: Tty = .adopt(testing.io, undefined);
+    var watched: std.atomic.Value(bool) = .init(false);
+    var result: error{ SystemResources, Unexpected }!void = {};
+    const watcher = try std.Thread.spawn(.{}, struct {
+        fn run(tty: *Tty, outcome: *error{ SystemResources, Unexpected }!void, done: *std.atomic.Value(bool)) void {
+            outcome.* = tty.watchResize();
+            done.store(true, .release);
+        }
+    }.run, .{ &t, &result, &watched });
+
+    // Ample time for a pipe made outside the lock to be made.
+    try Io.sleep(testing.io, .fromMilliseconds(50), .awake);
+    const made_while_starting = watched.load(.acquire);
+    terminal.ForkGap.release();
+    starting = false;
+    watcher.join();
+    try result;
+    t.unwatchResize();
+    try testing.expect(!made_while_starting);
 }
