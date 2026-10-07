@@ -182,17 +182,17 @@ fn checkGrid(s: *const Screen) !void {
     for (0..s.dimensions().rows) |r| {
         var col: u16 = 0;
         while (col < s.dimensions().cols) {
-            const c = s._cells[s.index(col, @intCast(r))];
-            try testing.expect(c.shape._reserved == 0);
+            const c = s.own_cells[s.index(col, @intCast(r))];
+            try testing.expect(c.shape.reserved == 0);
             if (c.text.isPooled()) {
-                try testing.expect(c.text.offset().? + c.text.length() <= s._graphemes.len());
+                try testing.expect(c.text.offset().? + c.text.length() <= s.graphemes.len());
             }
-            if (c.link.index()) |li| try testing.expect(li < s._links.count());
+            if (c.link.index()) |li| try testing.expect(li < s.links.count());
             if (c.isTail()) {
                 // A tail is its head's, content and all: the renderer never
                 // writes one, and the terminal makes its own from the head.
                 const head = s.headOf(col, @intCast(r)) orelse return error.OrphanTail;
-                var own = s._cells[s.index(head.col, head.row)];
+                var own = s.own_cells[s.index(head.col, head.row)];
                 own.shape.kind = .spacer_tail;
                 try testing.expect(c.eql(own));
                 col += 1;
@@ -206,7 +206,7 @@ fn checkGrid(s: *const Screen) !void {
             for (0..c.rows()) |dr| {
                 for (0..span) |dc| {
                     if (dr == 0 and dc == 0) continue;
-                    const t = s._cells[s.index(@intCast(col + dc), @intCast(r + dr))];
+                    const t = s.own_cells[s.index(@intCast(col + dc), @intCast(r + dr))];
                     try testing.expect(t.isTail());
                     try testing.expectEqual(c.shape.scale, t.shape.scale);
                 }
@@ -220,11 +220,11 @@ fn checkGrid(s: *const Screen) !void {
 /// against a copy taken before the operations.
 fn checkDamage(s: *const Screen, before: []const cellmod.internal.StoredCell) !void {
     for (0..s.dimensions().rows) |r| {
-        const span = s._damage.row(@intCast(r));
+        const span = s.damage.row(@intCast(r));
         var col: u16 = 0;
         while (col < s.dimensions().cols) : (col += 1) {
             const i = s.index(col, @intCast(r));
-            const changed = !s._cells[i].eql(before[i]);
+            const changed = !s.own_cells[i].eql(before[i]);
             const named = if (span) |sp| col >= sp.first and col <= sp.last else false;
             if (changed and !named) return error.DamageUnderReported;
         }
@@ -341,13 +341,13 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer t.deinit();
     t.setMethod(terminalMethod(method));
 
-    const before = try gpa.alloc(cellmod.internal.StoredCell, h.screen._cells.len);
+    const before = try gpa.alloc(cellmod.internal.StoredCell, h.screen.own_cells.len);
     defer gpa.free(before);
 
     var frames: usize = 0;
     while (frames < 6 and !dice.eos()) : (frames += 1) {
-        @memcpy(before, h.screen._cells);
-        h.screen._damage.clear();
+        @memcpy(before, h.screen.own_cells);
+        h.screen.damage.clear();
 
         var ops: usize = 0;
         const count = dice.valueRangeAtMost(u8, 1, 12);
@@ -396,12 +396,12 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
 fn corrupt(r: *Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
     const count = dice.valueRangeAtMost(u8, 1, 8);
-    while (i < count and r._prev.len != 0) : (i += 1) {
-        r._prev[dice.index(r._prev.len)] = .blank(styles[dice.index(styles.len)]);
+    while (i < count and r.prev.len != 0) : (i += 1) {
+        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
-    r._style = styles[dice.index(styles.len)];
-    r._cursor = null;
-    r._shown = null;
+    r.style = styles[dice.index(styles.len)];
+    r.own_cursor = null;
+    r.shown = null;
 }
 
 test "the round trip holds against a terminal measuring by codepoint" {

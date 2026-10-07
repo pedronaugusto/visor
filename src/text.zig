@@ -107,50 +107,53 @@ const Utf8 = struct {
 /// Bytes that are not UTF-8 are clusters of their own, one a maximal
 /// subpart, which is what a terminal draws a replacement character for.
 pub const Graphemes = struct {
-    _bytes: []const u8,
-    _inner: uucode.grapheme.Iterator(Utf8),
-    _ascii_at: ?usize = null,
+    /// Private.
+    bytes: []const u8,
+    /// Private.
+    inner: uucode.grapheme.Iterator(Utf8),
+    /// Private.
+    ascii_at: ?usize = null,
 
     /// The clusters of `bytes`, in order.
     pub fn init(bytes: []const u8) Graphemes {
         return .{
-            ._bytes = bytes,
-            ._inner = .init(.init(bytes)),
-            ._ascii_at = if (printableAscii(bytes)) 0 else null,
+            .bytes = bytes,
+            .inner = .init(.init(bytes)),
+            .ascii_at = if (printableAscii(bytes)) 0 else null,
         };
     }
 
     /// The clusters from `at` on, which must be where one starts, counted
     /// from `at`. Keeps the ASCII path without scanning the rest again.
     fn restart(g: Graphemes, at: usize) Graphemes {
-        const rest = g._bytes[at..];
+        const rest = g.bytes[at..];
         return .{
-            ._bytes = rest,
-            ._inner = .init(.init(rest)),
-            ._ascii_at = if (g._ascii_at != null) 0 else null,
+            .bytes = rest,
+            .inner = .init(.init(rest)),
+            .ascii_at = if (g.ascii_at != null) 0 else null,
         };
     }
 
     /// The next cluster, or null at the end.
     pub fn next(g: *Graphemes) ?[]const u8 {
-        if (g._ascii_at) |at| {
-            if (at == g._bytes.len) return null;
-            g._ascii_at = at + 1;
-            return g._bytes[at .. at + 1];
+        if (g.ascii_at) |at| {
+            if (at == g.bytes.len) return null;
+            g.ascii_at = at + 1;
+            return g.bytes[at .. at + 1];
         }
-        const found = g._inner.nextGrapheme() orelse return null;
-        return g._bytes[found.start..found.end];
+        const found = g.inner.nextGrapheme() orelse return null;
+        return g.bytes[found.start..found.end];
     }
 
     /// The next cluster and where it starts, or null at the end.
     pub fn nextAt(g: *Graphemes) ?struct { bytes: []const u8, start: usize } {
-        if (g._ascii_at) |at| {
-            if (at == g._bytes.len) return null;
-            g._ascii_at = at + 1;
-            return .{ .bytes = g._bytes[at .. at + 1], .start = at };
+        if (g.ascii_at) |at| {
+            if (at == g.bytes.len) return null;
+            g.ascii_at = at + 1;
+            return .{ .bytes = g.bytes[at .. at + 1], .start = at };
         }
-        const found = g._inner.nextGrapheme() orelse return null;
-        return .{ .bytes = g._bytes[found.start..found.end], .start = found.start };
+        const found = g.inner.nextGrapheme() orelse return null;
+        return .{ .bytes = g.bytes[found.start..found.end], .start = found.start };
     }
 };
 
@@ -211,30 +214,31 @@ fn standsAlone(grapheme: []const u8, whole: u16) bool {
 /// take none go with it. A cluster of one such codepoint, which is nearly
 /// every cluster, is one part.
 pub const Parts = struct {
-    _it: Utf8,
+    /// Private.
+    it: Utf8,
 
     /// The parts of `grapheme`, in order.
     pub fn init(grapheme: []const u8) Parts {
-        return .{ ._it = .init(grapheme) };
+        return .{ .it = .init(grapheme) };
     }
 
     /// The next part and the columns it takes (0, 1 or 2), or null at the
     /// end. A part of no columns is only ever the first, when the cluster
     /// begins with a codepoint that takes none.
     pub fn next(p: *Parts) ?struct { bytes: []const u8, cols: u2 } {
-        const bytes = p._it.bytes;
-        const start = p._it.i;
-        const first = p._it.next() orelse return null;
+        const bytes = p.it.bytes;
+        const start = p.it.i;
+        const first = p.it.next() orelse return null;
         const cols = codepointWidth(first);
         while (true) {
-            const at = p._it.i;
-            const cp = p._it.next() orelse break;
+            const at = p.it.i;
+            const cp = p.it.next() orelse break;
             if (codepointWidth(cp) != 0) {
-                p._it.i = at;
+                p.it.i = at;
                 break;
             }
         }
-        return .{ .bytes = bytes[start..p._it.i], .cols = @intCast(@min(cols, 2)) };
+        return .{ .bytes = bytes[start..p.it.i], .cols = @intCast(@min(cols, 2)) };
     }
 };
 

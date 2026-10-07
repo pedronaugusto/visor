@@ -60,7 +60,7 @@ test "a child asked for outside its parent comes back empty" {
     const c = s.window().child(.{ .col = 20, .row = 20, .cols = 4, .rows = 4 });
     try testing.expect(c.rect().isEmpty());
     try c.writeOwnedCell(0, 0, .init(.{ .text = .inlined("x") }));
-    try testing.expect(!s._damage.any());
+    try testing.expect(!s.damage.any());
 }
 
 test "a child with no size given is the rest of the parent" {
@@ -77,7 +77,7 @@ test "a write past the window's edge writes nothing at all" {
     const c = s.window().child(.{ .col = 1, .row = 0, .cols = 2, .rows = 1 });
     try c.writeOwnedCell(5, 0, .init(.{ .text = .inlined("x") }));
     try c.writeOwnedCell(0, 5, .init(.{ .text = .inlined("x") }));
-    try testing.expect(!s._damage.any());
+    try testing.expect(!s.damage.any());
     try testing.expectEqual(@as(?Cell, null), c.readCell(2, 0));
 }
 
@@ -154,7 +154,7 @@ test "print measuring only writes nothing" {
     defer s.deinit();
     const at = try s.window().printSegment(.{ .text = "abcd" }, .{ .commit = false });
     try testing.expectEqual(@as(u16, 4), at.col);
-    try testing.expect(!s._damage.any());
+    try testing.expect(!s.damage.any());
 }
 
 test "a newline in a segment ends the row whatever the wrap is" {
@@ -372,7 +372,7 @@ test "a widget drawn through an ink is the widget drawn plain with the look appl
         .{ .text = "\u{4e2d} three four", .style = .{ .fg = .ansi(.cyan) } },
     }, .{ .wrap = .word });
 
-    for (plain._cells, inked._cells) |a, b| try testing.expect(a.eql(b));
+    for (plain.own_cells, inked.own_cells) |a, b| try testing.expect(a.eql(b));
 }
 
 test "a rectangle of the window's own cells is the child over it, clipped" {
@@ -393,7 +393,7 @@ test "printing measures without allocating and commits only unseen pooled text w
     fail.fail_index = fail.alloc_index;
     const measured = try s.window().printSegment(.{ .text = long }, .{ .commit = false });
     try testing.expectEqual(@as(u16, 1), measured.col);
-    try testing.expectEqual(@as(usize, 0), s._graphemes.len());
+    try testing.expectEqual(@as(usize, 0), s.graphemes.len());
     _ = try s.window().printSegment(.{ .text = "inline" }, .{});
     try testing.expectError(error.OutOfMemory, s.window().printSegment(.{ .text = long }, .{}));
     fail.fail_index = std.math.maxInt(usize);

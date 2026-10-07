@@ -38,8 +38,8 @@ const Fixture = struct {
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
         errdefer r.deinit();
-        r._shown = false;
-        r._cursor = .{ .col = 0, .row = 0 };
+        r.shown = false;
+        r.own_cursor = .{ .col = 0, .row = 0 };
         return .{
             .gpa = gpa,
             .screen = s,
@@ -168,8 +168,8 @@ test "a region whose edge runs through tall text is refused, and the terminal ke
     var t: term.Term = try .init(gpa, f.screen.dimensions());
     defer t.deinit();
     t.setMethod(.unicode);
-    f.renderer._shown = null;
-    f.renderer._cursor = null;
+    f.renderer.shown = null;
+    f.renderer.own_cursor = null;
 
     for ([_]u16{ 2, 8 }) |row| try f.screen.write(1, row, "\u{4e2d}", .{}, .none);
     try f.screen.write(5, 2, "\u{4e2d}", .{}, .none);

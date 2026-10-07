@@ -78,48 +78,53 @@ pub const TextInput = struct {
     /// The rows of a text at a width, one at a time. Never empty: an empty
     /// text is one empty row.
     pub const Rows = struct {
-        _text: []const u8,
-        _cols: u16,
-        _method: visor.Method,
-        _at: usize = 0,
-        _done: bool = false,
+        /// Private.
+        own_text: []const u8,
+        /// Private.
+        cols: u16,
+        /// Private.
+        method: visor.Method,
+        /// Private.
+        own_at: usize = 0,
+        /// Private.
+        done: bool = false,
 
         /// The next row, or null after the last.
         pub fn next(r: *Rows) ?TextInput.Row {
-            if (r._done) return null;
-            const start = r._at;
+            if (r.done) return null;
+            const start = r.own_at;
             var used: u32 = 0;
             var last_space: ?usize = null;
-            var it: visor.Graphemes = .init(r._text[start..]);
+            var it: visor.Graphemes = .init(r.own_text[start..]);
             while (it.nextAt()) |found| {
                 const i = start + found.start;
                 const g = found.bytes;
                 // A newline is one cluster, or two when a carriage return
                 // came before it; either ends the row and belongs to it.
                 if (g[g.len - 1] == '\n') {
-                    r._at = i + g.len;
+                    r.own_at = i + g.len;
                     return .{ .from = start, .to = i, .hard = true };
                 }
-                const w = visor.graphemeWidth(g, r._method);
+                const w = visor.graphemeWidth(g, r.method);
                 // A cluster wider than the whole row still takes a row: the
                 // alternative is a row that never ends.
-                if (used != 0 and used + w > r._cols) {
+                if (used != 0 and used + w > r.cols) {
                     const brk = if (last_space) |sp| sp + 1 else i;
-                    r._at = brk;
+                    r.own_at = brk;
                     return .{ .from = start, .to = brk };
                 }
                 if (g.len == 1 and g[0] == ' ') last_space = i;
                 used += w;
             }
-            r._done = true;
-            r._at = r._text.len;
-            return .{ .from = start, .to = r._text.len };
+            r.done = true;
+            r.own_at = r.own_text.len;
+            return .{ .from = start, .to = r.own_text.len };
         }
     };
 
     /// The rows of `text` at `cols` cells, measured by `method`.
     pub fn rows(text: []const u8, cols: u16, method: visor.Method) Rows {
-        return .{ ._text = text, ._cols = @max(cols, 1), ._method = method };
+        return .{ .own_text = text, .cols = @max(cols, 1), .method = method };
     }
 
     /// How many rows `text` takes at `cols` cells.
@@ -309,19 +314,24 @@ pub const TextInput = struct {
     /// `seal` ends it for a program that wants its own boundary -- on a
     /// pause, say, which needs a clock this does not have.
     pub const Buffer = struct {
-        _gpa: std.mem.Allocator,
-        _text: std.ArrayList(u8) = .empty,
-        _cursor: usize = 0,
-        _anchor: ?usize = null,
-        /// The column vertical moves keep to, set by the first of them.
-        _goal: ?usize = null,
-        /// Removed and inserted bytes of every edit kept, in order.
-        _bytes: std.ArrayList(u8) = .empty,
-        _edits: std.ArrayList(Edit) = .empty,
-        /// How many edits are applied; the ones after are for redo.
-        _done: usize = 0,
-        /// Whether the last edit may take the next one into it.
-        _open: bool = false,
+        /// Private.
+        gpa: std.mem.Allocator,
+        /// Private.
+        own_text: std.ArrayList(u8) = .empty,
+        /// Private.
+        own_cursor: usize = 0,
+        /// Private.
+        anchor: ?usize = null,
+        /// Private: the column vertical moves keep to, set by the first of them.
+        goal: ?usize = null,
+        /// Private: removed and inserted bytes of every edit kept, in order.
+        bytes: std.ArrayList(u8) = .empty,
+        /// Private.
+        edits: std.ArrayList(Edit) = .empty,
+        /// Private: how many edits are applied; the ones after are for redo.
+        done: usize = 0,
+        /// Private: whether the last edit may take the next one into it.
+        open: bool = false,
         /// The most bytes of removed and inserted text kept for undo. The
         /// oldest edits go first; an edit larger than this is not kept.
         history_limit: usize = 1 << 20,
@@ -351,7 +361,7 @@ pub const TextInput = struct {
 
         const Edit = struct {
             at: usize,
-            /// Where its bytes start in `_bytes`: the removed, then the
+            /// Where its bytes start in `bytes`: the removed, then the
             /// inserted.
             bytes: usize,
             removed: usize,
@@ -363,64 +373,64 @@ pub const TextInput = struct {
 
         /// An empty buffer.
         pub fn init(gpa: std.mem.Allocator) TextInput.Buffer {
-            return .{ ._gpa = gpa };
+            return .{ .gpa = gpa };
         }
 
         /// A buffer holding `bytes`, the cursor at the end, nothing to undo.
         pub fn initText(gpa: std.mem.Allocator, bytes: []const u8) std.mem.Allocator.Error!TextInput.Buffer {
             var b: Buffer = .init(gpa);
-            try b._text.appendSlice(gpa, bytes);
-            b._cursor = bytes.len;
+            try b.own_text.appendSlice(gpa, bytes);
+            b.own_cursor = bytes.len;
             return b;
         }
 
         pub fn deinit(b: *Buffer) void {
-            b._text.deinit(b._gpa);
-            b._bytes.deinit(b._gpa);
-            b._edits.deinit(b._gpa);
+            b.own_text.deinit(b.gpa);
+            b.bytes.deinit(b.gpa);
+            b.edits.deinit(b.gpa);
             b.* = undefined;
         }
 
         /// The text, borrowed until the next edit.
         pub fn text(b: *const Buffer) []const u8 {
-            return b._text.items;
+            return b.own_text.items;
         }
 
         /// The cursor, as a byte offset into the text.
         pub fn cursor(b: *const Buffer) usize {
-            return b._cursor;
+            return b.own_cursor;
         }
 
         /// The selected bytes, in order, or null when nothing is selected.
         pub fn selection(b: *const Buffer) ?TextInput.Range {
-            const anchor = b._anchor orelse return null;
-            if (anchor == b._cursor) return null;
-            return .{ .start = @min(anchor, b._cursor), .end = @max(anchor, b._cursor) };
+            const anchor = b.anchor orelse return null;
+            if (anchor == b.own_cursor) return null;
+            return .{ .start = @min(anchor, b.own_cursor), .end = @max(anchor, b.own_cursor) };
         }
 
         /// The selected text, empty when nothing is, borrowed until the
         /// next edit: what a program copies.
         pub fn selectedText(b: *const Buffer) []const u8 {
             const sel = b.selection() orelse return "";
-            return b._text.items[sel.start..sel.end];
+            return b.own_text.items[sel.start..sel.end];
         }
 
         /// The widget for this buffer: its text, its cursor and its
         /// selection, in the default styles.
         pub fn input(b: *const Buffer) TextInput {
-            return .{ .text = b.text(), .cursor = b._cursor, .selection = b.selection() };
+            return .{ .text = b.text(), .cursor = b.own_cursor, .selection = b.selection() };
         }
 
         /// Where a motion lands from the cursor.
         pub fn target(b: *const Buffer, motion: Motion) usize {
-            const t = b._text.items;
+            const t = b.own_text.items;
             return switch (motion) {
-                .left => TextInput.prev(t, b._cursor),
-                .right => TextInput.next(t, b._cursor),
-                .word_left => TextInput.wordStart(t, b._cursor),
-                .word_right => TextInput.wordEnd(t, b._cursor),
-                .line_start => TextInput.lineStart(t, b._cursor),
-                .line_end => TextInput.lineEnd(t, b._cursor),
+                .left => TextInput.prev(t, b.own_cursor),
+                .right => TextInput.next(t, b.own_cursor),
+                .word_left => TextInput.wordStart(t, b.own_cursor),
+                .word_right => TextInput.wordEnd(t, b.own_cursor),
+                .line_start => TextInput.lineStart(t, b.own_cursor),
+                .line_end => TextInput.lineEnd(t, b.own_cursor),
                 .start => 0,
                 .end => t.len,
             };
@@ -445,19 +455,19 @@ pub const TextInput = struct {
         /// for a positive count, keeping to the column the first of a run of
         /// such moves started at. Past the first or last row it stops there.
         pub fn moveRows(b: *Buffer, by: isize, cols: u16, method: visor.Method, extend: bool) void {
-            const t = b._text.items;
-            const here = place(t, cols, method, b._cursor);
-            const goal = b._goal orelse here.col;
+            const t = b.own_text.items;
+            const here = place(t, cols, method, b.own_cursor);
+            const goal = b.goal orelse here.col;
             const last = rowCount(t, cols, method) - 1;
             const row: usize = if (by < 0) here.row -| @abs(by) else @min(here.row +| @abs(by), last);
             b.land(at(t, cols, method, row, goal), extend);
-            b._goal = goal;
+            b.goal = goal;
         }
 
         /// Moves the cursor to a byte offset, which goes back to the start of
         /// the cluster it falls in: where a click lands, from `at`.
         pub fn moveTo(b: *Buffer, offset: usize, extend: bool) void {
-            const t = b._text.items;
+            const t = b.own_text.items;
             const c = @min(offset, t.len);
             // The cluster containing `c` starts at or before it; its start is
             // the last boundary at or before `c` on its line.
@@ -473,14 +483,14 @@ pub const TextInput = struct {
 
         /// Selects the whole text, the cursor at its end.
         pub fn selectAll(b: *Buffer) void {
-            b._anchor = 0;
-            b._cursor = b._text.items.len;
+            b.anchor = 0;
+            b.own_cursor = b.own_text.items.len;
             b.endEdit();
         }
 
         /// Drops the selection and leaves the cursor where it is.
         pub fn selectNone(b: *Buffer) void {
-            b._anchor = null;
+            b.anchor = null;
             b.endEdit();
         }
 
@@ -492,7 +502,7 @@ pub const TextInput = struct {
             var it: visor.Graphemes = .init(bytes);
             _ = it.next();
             const one = it.next() == null and bytes[0] != '\n' and bytes[0] != '\r';
-            try b.replace(b._cursor, b._cursor, bytes, if (one) .typing else .other);
+            try b.replace(b.own_cursor, b.own_cursor, bytes, if (one) .typing else .other);
         }
 
         /// Deletes the selection when there is one, and otherwise the text
@@ -501,69 +511,69 @@ pub const TextInput = struct {
         /// the end of the line.
         pub fn delete(b: *Buffer, motion: Motion) std.mem.Allocator.Error!void {
             if (b.selection()) |sel| return b.replace(sel.start, sel.end, "", .other);
-            b._anchor = null;
+            b.anchor = null;
             const to = b.target(motion);
-            if (to == b._cursor) return;
+            if (to == b.own_cursor) return;
             const kind: Kind = switch (motion) {
                 .left => .back,
                 .right => .forward,
                 else => .other,
             };
-            try b.replace(@min(to, b._cursor), @max(to, b._cursor), "", kind);
+            try b.replace(@min(to, b.own_cursor), @max(to, b.own_cursor), "", kind);
         }
 
         /// Replaces the whole text, as one edit that can be undone.
         pub fn replaceAll(b: *Buffer, bytes: []const u8) std.mem.Allocator.Error!void {
-            b._anchor = null;
-            try b.replace(0, b._text.items.len, bytes, .other);
+            b.anchor = null;
+            try b.replace(0, b.own_text.items.len, bytes, .other);
         }
 
         /// Replaces the whole text and forgets every edit: a fresh input,
         /// after the text was sent, say.
         pub fn reset(b: *Buffer, bytes: []const u8) std.mem.Allocator.Error!void {
-            b._text.clearRetainingCapacity();
-            try b._text.appendSlice(b._gpa, bytes);
-            b._cursor = bytes.len;
-            b._anchor = null;
-            b._goal = null;
+            b.own_text.clearRetainingCapacity();
+            try b.own_text.appendSlice(b.gpa, bytes);
+            b.own_cursor = bytes.len;
+            b.anchor = null;
+            b.goal = null;
             b.clearHistory();
         }
 
         /// Ends the edit being made, so the next starts an undo step of its
         /// own.
         pub fn seal(b: *Buffer) void {
-            b._open = false;
+            b.open = false;
         }
 
         /// Forgets every edit, done and undone.
         pub fn clearHistory(b: *Buffer) void {
-            b._bytes.clearRetainingCapacity();
-            b._edits.clearRetainingCapacity();
-            b._done = 0;
-            b._open = false;
+            b.bytes.clearRetainingCapacity();
+            b.edits.clearRetainingCapacity();
+            b.done = 0;
+            b.open = false;
         }
 
         /// Whether there is an edit to undo.
         pub fn canUndo(b: *const Buffer) bool {
-            return b._done > 0;
+            return b.done > 0;
         }
 
         /// Whether there is an undone edit to redo.
         pub fn canRedo(b: *const Buffer) bool {
-            return b._done < b._edits.items.len;
+            return b.done < b.edits.items.len;
         }
 
         /// Takes back the last edit, the cursor and selection put back as
         /// they were before it. False when there is nothing to undo.
         pub fn undo(b: *Buffer) std.mem.Allocator.Error!bool {
-            if (b._done == 0) return false;
-            const e = b._edits.items[b._done - 1];
-            const removed = b._bytes.items[e.bytes..][0..e.removed];
-            try b._text.ensureUnusedCapacity(b._gpa, e.removed -| e.inserted);
-            b._text.replaceRangeAssumeCapacity(e.at, e.inserted, removed);
-            b._done -= 1;
-            b._cursor = e.cursor_before;
-            b._anchor = e.anchor_before;
+            if (b.done == 0) return false;
+            const e = b.edits.items[b.done - 1];
+            const removed = b.bytes.items[e.bytes..][0..e.removed];
+            try b.own_text.ensureUnusedCapacity(b.gpa, e.removed -| e.inserted);
+            b.own_text.replaceRangeAssumeCapacity(e.at, e.inserted, removed);
+            b.done -= 1;
+            b.own_cursor = e.cursor_before;
+            b.anchor = e.anchor_before;
             b.endEdit();
             b.assertState();
             return true;
@@ -572,14 +582,14 @@ pub const TextInput = struct {
         /// Makes the last edit undone again. False when there is nothing to
         /// redo.
         pub fn redo(b: *Buffer) std.mem.Allocator.Error!bool {
-            if (b._done == b._edits.items.len) return false;
-            const e = b._edits.items[b._done];
-            const inserted = b._bytes.items[e.bytes + e.removed ..][0..e.inserted];
-            try b._text.ensureUnusedCapacity(b._gpa, e.inserted -| e.removed);
-            b._text.replaceRangeAssumeCapacity(e.at, e.removed, inserted);
-            b._done += 1;
-            b._cursor = e.at + e.inserted;
-            b._anchor = null;
+            if (b.done == b.edits.items.len) return false;
+            const e = b.edits.items[b.done];
+            const inserted = b.bytes.items[e.bytes + e.removed ..][0..e.inserted];
+            try b.own_text.ensureUnusedCapacity(b.gpa, e.inserted -| e.removed);
+            b.own_text.replaceRangeAssumeCapacity(e.at, e.removed, inserted);
+            b.done += 1;
+            b.own_cursor = e.at + e.inserted;
+            b.anchor = null;
             b.endEdit();
             b.assertState();
             return true;
@@ -587,9 +597,9 @@ pub const TextInput = struct {
 
         fn land(b: *Buffer, to: usize, extend: bool) void {
             if (extend) {
-                if (b._anchor == null) b._anchor = b._cursor;
-            } else b._anchor = null;
-            b._cursor = to;
+                if (b.anchor == null) b.anchor = b.own_cursor;
+            } else b.anchor = null;
+            b.own_cursor = to;
             b.endEdit();
             b.assertState();
         }
@@ -599,85 +609,85 @@ pub const TextInput = struct {
         /// the edits' own, back to back in order, which is how undo and redo
         /// read them back.
         fn assertState(b: *const Buffer) void {
-            std.debug.assert(b._cursor <= b._text.items.len);
-            if (b._anchor) |a| std.debug.assert(a <= b._text.items.len);
-            std.debug.assert(b._done <= b._edits.items.len);
+            std.debug.assert(b.own_cursor <= b.own_text.items.len);
+            if (b.anchor) |a| std.debug.assert(a <= b.own_text.items.len);
+            std.debug.assert(b.done <= b.edits.items.len);
             if (!builtin.optimize.runtimeSafety()) return;
             var end: usize = 0;
-            for (b._edits.items) |e| {
+            for (b.edits.items) |e| {
                 std.debug.assert(e.bytes == end);
                 end = e.bytes + e.removed + e.inserted;
             }
-            std.debug.assert(end == b._bytes.items.len);
+            std.debug.assert(end == b.bytes.items.len);
         }
 
         fn endEdit(b: *Buffer) void {
-            b._open = false;
-            b._goal = null;
+            b.open = false;
+            b.goal = null;
         }
 
         /// `text[from..to]` replaced by `bytes`, recorded first. Nothing
         /// changes when an allocation fails.
         fn replace(b: *Buffer, from: usize, to: usize, bytes: []const u8, kind: Kind) std.mem.Allocator.Error!void {
-            try b._text.ensureUnusedCapacity(b._gpa, bytes.len -| (to - from));
-            try b.record(from, b._text.items[from..to], bytes, kind);
-            b._text.replaceRangeAssumeCapacity(from, to - from, bytes);
-            b._cursor = from + bytes.len;
-            b._anchor = null;
-            b._goal = null;
-            b._open = kind != .other;
+            try b.own_text.ensureUnusedCapacity(b.gpa, bytes.len -| (to - from));
+            try b.record(from, b.own_text.items[from..to], bytes, kind);
+            b.own_text.replaceRangeAssumeCapacity(from, to - from, bytes);
+            b.own_cursor = from + bytes.len;
+            b.anchor = null;
+            b.goal = null;
+            b.open = kind != .other;
             b.assertState();
         }
 
         fn record(b: *Buffer, at_: usize, removed: []const u8, inserted: []const u8, kind: Kind) std.mem.Allocator.Error!void {
-            const gpa = b._gpa;
+            const gpa = b.gpa;
             // The edits that were undone go when a new one is made.
-            const kept_bytes = if (b._done == 0) 0 else blk: {
-                const e = b._edits.items[b._done - 1];
+            const kept_bytes = if (b.done == 0) 0 else blk: {
+                const e = b.edits.items[b.done - 1];
                 break :blk e.bytes + e.removed + e.inserted;
             };
-            const joined = b._open and b._done == b._edits.items.len and b._done > 0 and
-                b.joins(b._edits.items[b._done - 1], at_, removed, inserted, kind);
-            try b._bytes.ensureTotalCapacity(gpa, kept_bytes + removed.len + inserted.len);
-            if (!joined) try b._edits.ensureTotalCapacity(gpa, b._done + 1);
+            const joined = b.open and b.done == b.edits.items.len and b.done > 0 and
+                b.joins(b.edits.items[b.done - 1], at_, removed, inserted, kind);
+            try b.bytes.ensureTotalCapacity(gpa, kept_bytes + removed.len + inserted.len);
+            if (!joined) try b.edits.ensureTotalCapacity(gpa, b.done + 1);
 
-            b._edits.shrinkRetainingCapacity(b._done);
-            b._bytes.shrinkRetainingCapacity(kept_bytes);
+            b.edits.shrinkRetainingCapacity(b.done);
+            b.bytes.shrinkRetainingCapacity(kept_bytes);
             if (joined) {
-                const last = &b._edits.items[b._done - 1];
+                const last = &b.edits.items[b.done - 1];
                 switch (kind) {
                     .typing => {
-                        b._bytes.appendSliceAssumeCapacity(inserted);
+                        b.bytes.appendSliceAssumeCapacity(inserted);
                         last.inserted += inserted.len;
                     },
                     .back => {
-                        b._bytes.insertSliceAssumeCapacity(last.bytes, removed);
+                        b.bytes.insertSliceAssumeCapacity(last.bytes, removed);
                         last.removed += removed.len;
                         last.at = at_;
                     },
                     .forward => {
-                        b._bytes.appendSliceAssumeCapacity(removed);
+                        b.bytes.appendSliceAssumeCapacity(removed);
                         last.removed += removed.len;
                     },
                     .other => unreachable,
                 }
             } else {
-                const start = b._bytes.items.len;
-                b._bytes.appendSliceAssumeCapacity(removed);
-                b._bytes.appendSliceAssumeCapacity(inserted);
-                b._edits.appendAssumeCapacity(.{
+                const start = b.bytes.items.len;
+                b.bytes.appendSliceAssumeCapacity(removed);
+                b.bytes.appendSliceAssumeCapacity(inserted);
+                b.edits.appendAssumeCapacity(.{
                     .at = at_,
                     .bytes = start,
                     .removed = removed.len,
                     .inserted = inserted.len,
-                    .cursor_before = b._cursor,
-                    .anchor_before = b._anchor,
+                    .cursor_before = b.own_cursor,
+                    .anchor_before = b.anchor,
                     .kind = kind,
                 });
-                b._done += 1;
+                b.done += 1;
             }
             b.trim();
-            std.debug.assert(b._bytes.items.len <= b.history_limit);
+            std.debug.assert(b.bytes.items.len <= b.history_limit);
         }
 
         /// Whether an edit joins the last one: typing that goes on where the
@@ -688,7 +698,7 @@ pub const TextInput = struct {
             return switch (kind) {
                 .typing => typing: {
                     if (last.removed != 0 or at_ != last.at + last.inserted) break :typing false;
-                    const before = b._bytes.items[last.bytes + last.removed + last.inserted - 1];
+                    const before = b.bytes.items[last.bytes + last.removed + last.inserted - 1];
                     break :typing !(spaceCluster(&.{before}) and !spaceCluster(inserted));
                 },
                 .back => at_ + removed.len == last.at,
@@ -701,21 +711,21 @@ pub const TextInput = struct {
         fn trim(b: *Buffer) void {
             var drop: usize = 0;
             var bytes: usize = 0;
-            const total = b._bytes.items.len;
-            while (drop < b._edits.items.len and total - bytes > b.history_limit) : (drop += 1) {
-                const e = b._edits.items[drop];
+            const total = b.bytes.items.len;
+            while (drop < b.edits.items.len and total - bytes > b.history_limit) : (drop += 1) {
+                const e = b.edits.items[drop];
                 bytes += e.removed + e.inserted;
             }
             if (drop == 0) return;
-            @memmove(b._bytes.items[0 .. total - bytes], b._bytes.items[bytes..]);
-            b._bytes.shrinkRetainingCapacity(total - bytes);
-            const left = b._edits.items.len - drop;
-            @memmove(b._edits.items[0..left], b._edits.items[drop..]);
-            b._edits.shrinkRetainingCapacity(left);
-            for (b._edits.items) |*e| e.bytes -= bytes;
-            b._done -= drop;
+            @memmove(b.bytes.items[0 .. total - bytes], b.bytes.items[bytes..]);
+            b.bytes.shrinkRetainingCapacity(total - bytes);
+            const left = b.edits.items.len - drop;
+            @memmove(b.edits.items[0..left], b.edits.items[drop..]);
+            b.edits.shrinkRetainingCapacity(left);
+            for (b.edits.items) |*e| e.bytes -= bytes;
+            b.done -= drop;
             // The last edit is gone when it alone was too large.
-            if (b._done == 0) b._open = false;
+            if (b.done == 0) b.open = false;
         }
     };
 };
@@ -933,10 +943,10 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally
             }
             try testing.expectEqual(@as(usize, 1), wide);
         }
-        owned = it._at;
-        if (!r.hard) try testing.expectEqual(r.to, it._at);
+        owned = it.own_at;
+        if (!r.hard) try testing.expectEqual(r.to, it.own_at);
     }
-    try testing.expect(it._done);
+    try testing.expect(it.done);
     try testing.expectEqual(t.len, owned);
     try testing.expectEqual(count, TextInput.rowCount(t, cols, method));
 

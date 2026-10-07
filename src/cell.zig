@@ -120,8 +120,8 @@ const CellShape = packed struct(u8) {
     /// columns; every covered cell is a `spacer_tail` carrying the same
     /// scale, so the two kinds of tail can be told apart.
     scale: u3 = 0,
-    /// Zero, always: the cell is compared as memory.
-    _reserved: u2 = 0,
+    /// Private: zero, always: the cell is compared as memory.
+    reserved: u2 = 0,
 };
 
 /// The grapheme: up to six bytes stored in the cell, an offset into the
@@ -232,8 +232,8 @@ fn CellType(comptime checked: bool) type {
         /// How wide the grapheme is, whether this cell draws it, and whether the
         /// two width models disagree about it.
         shape: Shape = .{},
-        /// Zeroed tail bytes keep whole-cell memory comparison defined.
-        _reserved: [if (checked) 4 else 0]u8 = @splat(0),
+        /// Private: zeroed tail bytes keep whole-cell memory comparison defined.
+        reserved: [if (checked) 4 else 0]u8 = @splat(0),
 
         /// The grapheme, inline or an offset into the screen's pool.
         pub const Text = TextType(checked);

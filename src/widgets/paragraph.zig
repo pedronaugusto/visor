@@ -109,47 +109,55 @@ pub const Paragraph = struct {
 /// absolute ranges. A paragraph of ten thousand rows therefore costs the
 /// same thirty-two rows of stack as a paragraph of two.
 pub const RowIterator = struct {
-    _text: []const u8,
-    _cols: u16,
-    _mode: visor.Wrap,
-    _method: visor.Method,
-    _base: usize = 0,
-    _buf: [32]visor.Row = undefined,
-    _have: usize = 0,
-    _at: usize = 0,
-    /// Whether the last refill saw the end of the text.
-    _last: bool = false,
+    /// Private.
+    own_text: []const u8,
+    /// Private.
+    cols: u16,
+    /// Private.
+    mode: visor.Wrap,
+    /// Private.
+    method: visor.Method,
+    /// Private.
+    base: usize = 0,
+    /// Private.
+    buf: [32]visor.Row = undefined,
+    /// Private.
+    have: usize = 0,
+    /// Private.
+    own_at: usize = 0,
+    /// Private: whether the last refill saw the end of the text.
+    last: bool = false,
 
     /// Break `text` into rows `cols` wide, the way `Paragraph.draw` does.
     pub fn init(text: []const u8, cols: u16, mode: visor.Wrap, method: visor.Method) RowIterator {
-        return .{ ._text = text, ._cols = cols, ._mode = mode, ._method = method };
+        return .{ .own_text = text, .cols = cols, .mode = mode, .method = method };
     }
 
     /// The next row, as a range of the whole text, or null after the last.
     pub fn next(it: *RowIterator) ?visor.Row {
-        if (it._at == it._have) {
-            if (it._last) return null;
-            it._have = visor.wrap(it._text[it._base..], it._cols, it._mode, it._method, &it._buf);
-            it._at = 0;
-            if (it._have == 0) return null;
-            if (it._have < it._buf.len) {
-                it._last = true;
+        if (it.own_at == it.have) {
+            if (it.last) return null;
+            it.have = visor.wrap(it.own_text[it.base..], it.cols, it.mode, it.method, &it.buf);
+            it.own_at = 0;
+            if (it.have == 0) return null;
+            if (it.have < it.buf.len) {
+                it.last = true;
             } else {
                 // The last row of a full buffer is where the next refill
                 // starts, so it is handed out by that refill and not by
                 // this one.
-                it._have -= 1;
+                it.have -= 1;
             }
         }
-        const r = it._buf[it._at];
+        const r = it.buf[it.own_at];
         const out: visor.Row = .{
-            .start = it._base + r.start,
-            .end = it._base + r.end,
+            .start = it.base + r.start,
+            .end = it.base + r.end,
             .columns = r.columns,
         };
-        it._at += 1;
+        it.own_at += 1;
         // The row that was held back is where the next refill starts.
-        if (it._at == it._have and !it._last) it._base += it._buf[it._have].start;
+        if (it.own_at == it.have and !it.last) it.base += it.buf[it.have].start;
         return out;
     }
 };

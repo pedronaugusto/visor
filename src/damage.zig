@@ -29,10 +29,10 @@ pub const Span = struct {
 /// The dirty map: per row, the first and last column touched.
 /// Unmanaged allocation: pass the init allocator to resize and deinit.
 pub const Damage = struct {
-    /// One entry a row. `first > last` means the row is clean.
-    _rows: []Entry,
-    /// Dirty rows, kept by the same operations that widen their spans.
-    _dirty: usize = 0,
+    /// Private: one entry a row. `first > last` means the row is clean.
+    rows: []Entry,
+    /// Private: dirty rows, kept by the same operations that widen their spans.
+    dirty: usize = 0,
 
     /// A row's span in the form it is stored in, so that a clean row is
     /// representable without a second field.
@@ -43,19 +43,19 @@ pub const Damage = struct {
 
     /// The number of rows this map owns, copied rather than borrowed storage.
     pub fn rowCount(d: *const Damage) usize {
-        return d._rows.len;
+        return d.rows.len;
     }
 
     /// A clean map for a grid of `rows` rows.
     pub fn init(gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!Damage {
         const entries = try gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        return .{ ._rows = entries };
+        return .{ .rows = entries };
     }
 
     /// Gives the map back.
     pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {
-        gpa.free(d._rows);
+        gpa.free(d.rows);
         d.* = undefined;
     }
 
@@ -64,25 +64,25 @@ pub const Damage = struct {
     pub fn resize(d: *Damage, gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!void {
         const entries = try gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        gpa.free(d._rows);
-        d._rows = entries;
-        d._dirty = 0;
+        gpa.free(d.rows);
+        d.rows = entries;
+        d.dirty = 0;
     }
 
     /// The span of a row, or null when nothing in it changed.
     pub fn row(d: *const Damage, n: u16) ?Span {
-        if (n >= d._rows.len) return null;
-        const e = d._rows[n];
+        if (n >= d.rows.len) return null;
+        const e = d.rows[n];
         if (e.first > e.last) return null;
         return .{ .first = e.first, .last = e.last };
     }
 
     /// Records that a cell changed.
     pub fn mark(d: *Damage, col: u16, r: u16) void {
-        if (r >= d._rows.len) return;
-        const e = &d._rows[r];
+        if (r >= d.rows.len) return;
+        const e = &d.rows[r];
         if (e.first > e.last) {
-            d._dirty += 1;
+            d.dirty += 1;
             e.* = .{ .first = col, .last = col };
             return;
         }
@@ -92,12 +92,12 @@ pub const Damage = struct {
 
     /// Records that a range of columns in a row changed, both ends inside.
     pub fn markSpan(d: *Damage, first: u16, last: u16, r: u16) void {
-        if (r >= d._rows.len or first > last) return;
-        const e = &d._rows[r];
-        if (e.first > e.last) d._dirty += 1;
+        if (r >= d.rows.len or first > last) return;
+        const e = &d.rows[r];
+        if (e.first > e.last) d.dirty += 1;
         if (first < e.first) e.first = first;
         if (last > e.last) e.last = last;
-        assert(d._dirty <= d._rows.len);
+        assert(d.dirty <= d.rows.len);
     }
 
     /// Records that every cell of every row changed.
@@ -106,30 +106,30 @@ pub const Damage = struct {
             d.clear();
             return;
         }
-        @memset(d._rows, .{ .first = 0, .last = cols - 1 });
-        d._dirty = d._rows.len;
+        @memset(d.rows, .{ .first = 0, .last = cols - 1 });
+        d.dirty = d.rows.len;
     }
 
     /// Everything clean, which is what `draw` leaves behind.
     pub fn clear(d: *Damage) void {
-        if (d._dirty == 0) {
+        if (d.dirty == 0) {
             // The count is kept with the spans, so none dirty is every row
             // clean, and there is nothing to write.
-            if (builtin.optimize.runtimeSafety()) for (d._rows) |e| assert(e.first > e.last);
+            if (builtin.optimize.runtimeSafety()) for (d.rows) |e| assert(e.first > e.last);
             return;
         }
-        @memset(d._rows, .{});
-        d._dirty = 0;
+        @memset(d.rows, .{});
+        d.dirty = 0;
     }
 
     /// Whether any row is dirty.
     pub fn any(d: *const Damage) bool {
-        return d._dirty != 0;
+        return d.dirty != 0;
     }
 
     /// How many rows are dirty.
     pub fn count(d: *const Damage) usize {
-        return d._dirty;
+        return d.dirty;
     }
 };
 

@@ -14,33 +14,36 @@ const Style = visor.Style;
 /// A day, as a calendar counts them.
 pub const Date = struct {
     // Internal representation; dates are constructed through init.
-    _year: i32,
-    _month: u8,
-    _day: u8,
+    /// Private.
+    own_year: i32,
+    /// Private.
+    own_month: u8,
+    /// Private.
+    own_day: u8,
 
     /// A Gregorian date, or InvalidDate when its month or day does not exist.
     pub fn init(year_number: i32, month_number: u8, day_number: u8) error{InvalidDate}!Date {
         const last = daysInMonth(year_number, month_number);
         if (day_number == 0 or day_number > last) return error.InvalidDate;
-        return .{ ._year = year_number, ._month = month_number, ._day = day_number };
+        return .{ .own_year = year_number, .own_month = month_number, .own_day = day_number };
     }
 
     /// The proleptic Gregorian year, including year zero.
     pub fn year(d: Date) i32 {
-        return d._year;
+        return d.own_year;
     }
     /// The month, one through twelve.
     pub fn month(d: Date) u8 {
-        return d._month;
+        return d.own_month;
     }
     /// The day, one through the last day of the month.
     pub fn day(d: Date) u8 {
-        return d._day;
+        return d.own_day;
     }
 
     /// Whether two dates are the same day.
     pub fn eql(a: Date, b: Date) bool {
-        return a._year == b._year and a._month == b._month and a._day == b._day;
+        return a.own_year == b.own_year and a.own_month == b.own_month and a.own_day == b.own_day;
     }
 };
 

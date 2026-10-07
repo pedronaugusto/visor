@@ -29,25 +29,3 @@ test {
     _ = @import("widgets/sextants.zig");
     std.testing.refAllDecls(widgets);
 }
-
-/// Every field of `T` outside `public` is its owner's state, named with a
-/// leading underscore: read through a method, never taken whole. Checked
-/// while the tests compile, naming the field that is neither.
-fn expectOwned(comptime T: type, comptime public: []const []const u8) void {
-    inline for (@typeInfo(T).@"struct".field_names) |field_name| {
-        const listed = for (public) |name| {
-            if (std.mem.eql(u8, name, field_name)) break true;
-        } else false;
-        if (!listed and field_name[0] != '_') @compileError(@typeName(T) ++ "." ++ field_name ++ " is neither public nor underscored");
-    }
-}
-
-test "widget state outside the documented fields stays behind its owner" {
-    comptime expectOwned(widgets.Markdown.Rows, &.{});
-    comptime expectOwned(widgets.Markdown.Document, &.{});
-    comptime expectOwned(widgets.Paragraph.Rows, &.{});
-    comptime expectOwned(widgets.TextInput.Rows, &.{});
-    comptime expectOwned(widgets.Canvas.Surface, &.{});
-    // A picture borrows its owners and takes no allocator of its own.
-    comptime expectOwned(widgets.Canvas.Picture, &.{ "surface", "layers", "writer", "image", "placement", "order", "sixel_palette" });
-}

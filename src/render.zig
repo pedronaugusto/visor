@@ -229,81 +229,83 @@ pub const Renderer = struct {
         AlreadyEntered,
     };
 
-    // Fields prefixed _ belong to the owner; use methods for terminal state.
+    // Fields documented Private: belong to the owner; use methods for terminal state.
     /// Requested terminal configuration, including a partial entry or change.
     /// A copy: changing it cannot change output or cleanup obligations.
     pub fn entered(owner: *const Renderer) ?Entered {
-        return owner._entered;
+        return owner.own_entered;
     }
 
     /// The current grid dimensions, copied rather than borrowed storage.
     pub fn dimensions(owner: *const Renderer) Size {
-        return owner._size;
+        return owner.size;
     }
 
-    /// The allocator `init` was given.
-    _gpa: Allocator,
-    /// The size both the previous frame and the screen must be.
-    _size: Size,
-    /// What the terminal was last shown.
-    _prev: []Cell,
-    /// The pool generation whose identities the previous frame records.
-    _pool_generation: ?u64 = null,
-    /// Rows the renderer has its own reason to write whole.
-    _force: []bool,
-    /// Rows that have ever held a grapheme the two width models disagree
+    /// Private: the allocator `init` was given.
+    gpa: Allocator,
+    /// Private: the size both the previous frame and the screen must be.
+    size: Size,
+    /// Private: what the terminal was last shown.
+    prev: []Cell,
+    /// Private: the pool generation whose identities the previous frame records.
+    pool_generation: ?u64 = null,
+    /// Private: rows the renderer has its own reason to write whole.
+    force: []bool,
+    /// Private: rows that have ever held a grapheme the two width models disagree
     /// about. A change of width method repaints all of them, touched or not:
     /// a terminal that clips a row it measures wider than the model does is
     /// not something the model can see happen.
-    _drifted: []bool,
-    /// Rows of `prev` a cell diff cannot safely cross. Unlike `drifted`,
+    drifted: []bool,
+    /// Private: rows of `prev` a cell diff cannot safely cross. Unlike `drifted`,
     /// this follows scrolling content and is cleared when the row becomes
     /// safe again.
-    _untrusted: []bool,
-    /// A hash of each row of `prev` and of the screen, for finding a frame
+    untrusted: []bool,
+    /// Private: A hash of each row of `prev` and of the screen, for finding a frame
     /// whose rows moved.
-    _hashes: []u64,
-    /// The renderer's own write buffer. A frame that fits in it is written
+    hashes: []u64,
+    /// Private: the renderer's own write buffer. A frame that fits in it is written
     /// to the caller in one go, which is what lets the synchronised-output
     /// bracket be decided after the frame's size is known.
-    _buf: []u8,
-    /// SGR spellings already constructed for style pairs this renderer has
+    buf: []u8,
+    /// Private: SGR spellings already constructed for style pairs this renderer has
     /// seen. A collision only rebuilds one spelling. On the heap, taken by
     /// `init` with the rest: it is most of what a renderer weighs, and the
     /// value is returned and moved. Null only in the storage `resize`
     /// prepares, which never draws and hands over everything but this.
-    _style_sequences: ?*StyleSequenceCache = null,
+    style_sequences: ?*StyleSequenceCache = null,
 
-    /// The style the terminal is in.
-    _style: Style = .{},
-    /// The link the terminal has open.
-    _link: Link = .none,
-    /// Where the terminal's cursor is, or null when the renderer does not
+    /// Private: the style the terminal is in.
+    style: Style = .{},
+    /// Private: the link the terminal has open.
+    link: Link = .none,
+    /// Private: where the terminal's cursor is, or null when the renderer does not
     /// know — after a scroll, after a repaint, after a row whose width the
     /// terminal may have disagreed about, and after a write into the last
     /// column, where a terminal holds a wrap pending.
-    _cursor: ?Point = null,
-    /// Whether the terminal is showing its cursor, or null when unknown.
-    _shown: ?bool = null,
-    /// The shape the terminal is drawing its cursor as, or null when
+    own_cursor: ?Point = null,
+    /// Private: whether the terminal is showing its cursor, or null when unknown.
+    shown: ?bool = null,
+    /// Private: the shape the terminal is drawing its cursor as, or null when
     /// unknown.
-    _shape: ?morse.CursorShape = null,
-    /// The width method the last frame was drawn under.
-    _method: ?textmod.Method = null,
-    /// What the last frame's colours were fitted to.
-    _colors: ?ColorFit = null,
-    /// Whether the next draw writes every cell.
-    _repaint_all: bool = false,
-    /// The session configuration requested, including a partially written change.
-    _entered: ?Entered = null,
-    _cleanup: ModeCleanup = .{},
-    _written: ModeWrites = .{},
-    /// Whether a complete frame has been written through this renderer.
-    _drawn: bool = false,
-    /// In inline mode, how many rows of the terminal are the screen's,
+    shape: ?morse.CursorShape = null,
+    /// Private: the width method the last frame was drawn under.
+    method: ?textmod.Method = null,
+    /// Private: what the last frame's colours were fitted to.
+    colors: ?ColorFit = null,
+    /// Private: whether the next draw writes every cell.
+    repaint_all: bool = false,
+    /// Private: the session configuration requested, including a partially written change.
+    own_entered: ?Entered = null,
+    /// Private.
+    cleanup: ModeCleanup = .{},
+    /// Private.
+    own_written: ModeWrites = .{},
+    /// Private: whether a complete frame has been written through this renderer.
+    drawn: bool = false,
+    /// Private: in inline mode, how many rows of the terminal are the screen's,
     /// counted from the saved origin; null in the alternate screen. The next
     /// repaint takes or gives back rows when this and `size.rows` differ.
-    _region: ?u16 = null,
+    region: ?u16 = null,
 
     /// The requested session configuration; cleanup separately tracks accepted commands.
     pub const Entered = struct {
@@ -373,7 +375,7 @@ pub const Renderer = struct {
         errdefer r.release();
         const cache = try gpa.create(StyleSequenceCache);
         cache.* = .{};
-        r._style_sequences = cache;
+        r.style_sequences = cache;
         return r;
     }
 
@@ -381,14 +383,14 @@ pub const Renderer = struct {
     /// change: what `resize` swaps in.
     fn prepare(gpa: Allocator, size: Size) Allocator.Error!Renderer {
         var r: Renderer = .{
-            ._gpa = gpa,
-            ._size = size,
-            ._prev = &.{},
-            ._force = &.{},
-            ._drifted = &.{},
-            ._untrusted = &.{},
-            ._hashes = &.{},
-            ._buf = &.{},
+            .gpa = gpa,
+            .size = size,
+            .prev = &.{},
+            .force = &.{},
+            .drifted = &.{},
+            .untrusted = &.{},
+            .hashes = &.{},
+            .buf = &.{},
         };
         try r.allocate(size);
         return r;
@@ -409,7 +411,7 @@ pub const Renderer = struct {
     /// at the old size after it had changed -- is its own business, and
     /// nothing about what it now shows is known.
     pub fn resize(r: *Renderer, size: Size) Allocator.Error!void {
-        var prepared = try prepare(r._gpa, size);
+        var prepared = try prepare(r.gpa, size);
         defer prepared.deinit();
         r.resizePrepared(&prepared);
     }
@@ -417,9 +419,9 @@ pub const Renderer = struct {
     // Moves only storage. Terminal mode intent and the renderer's stable
     // address stay with their owner; the prepared value frees the old storage.
     fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
-        std.debug.assert(r._gpa.ptr == prepared._gpa.ptr);
-        std.debug.assert(r._gpa.vtable == prepared._gpa.vtable);
-        inline for (.{ "_size", "_prev", "_force", "_drifted", "_untrusted", "_hashes", "_buf" }) |field| {
+        std.debug.assert(r.gpa.ptr == prepared.gpa.ptr);
+        std.debug.assert(r.gpa.vtable == prepared.gpa.vtable);
+        inline for (.{ "size", "prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
             std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
         }
         r.repaint();
@@ -429,9 +431,9 @@ pub const Renderer = struct {
     /// showing anything: the previous frame is forgotten, so a row the
     /// screen holds blank is erased rather than taken to be blank already.
     pub fn repaint(r: *Renderer) void {
-        r._repaint_all = true;
-        r._cursor = null;
-        @memset(r._prev, unknown);
+        r.repaint_all = true;
+        r.own_cursor = null;
+        @memset(r.prev, unknown);
     }
 
     /// Forgets the cursor's position after a one-off sequence moved it.
@@ -439,16 +441,16 @@ pub const Renderer = struct {
     /// Does not forget cells or pen state; call `repaint` as well after
     /// painting or changing SGR or an open link outside the renderer.
     pub fn untrustCursor(r: *Renderer) void {
-        r._cursor = null;
+        r.own_cursor = null;
     }
 
     /// One row written whole, absolutely positioned, as though the terminal
     /// could be showing anything on it. What a caller that suspects one row
     /// gives it.
     pub fn repaintRow(r: *Renderer, row: u16) void {
-        if (row >= r._force.len) return;
-        r._force[row] = true;
-        @memset(r._prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols], unknown);
+        if (row >= r.force.len) return;
+        r.force[row] = true;
+        @memset(r.prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols], unknown);
     }
 
     /// Writes the difference between the last frame and this one: the grid,
@@ -493,7 +495,7 @@ pub const Renderer = struct {
     /// Outside inline mode there is nowhere above the screen, and this
     /// returns `NotInline` before writing anything.
     pub fn printAbove(r: *Renderer, w: *Writer, lines: *Screen, s: *Screen, layers: ?*Layers, caps: Caps) PrintError!Stats {
-        if (r._region == null) return error.NotInline;
+        if (r.region == null) return error.NotInline;
         if (lines.dimensions().cols != r.dimensions().cols) return error.SizeMismatch;
         return r.drawFrame(w, lines, s, layers, caps);
     }
@@ -510,54 +512,54 @@ pub const Renderer = struct {
 
         // Damage cannot distinguish a reused pool identity from the old
         // bytes it named. Forget the whole baseline before comparing it.
-        if (r._pool_generation) |generation| {
-            if (generation != s._pool_generation) r.repaint();
+        if (r.pool_generation) |generation| {
+            if (generation != s.pool_generation) r.repaint();
         }
-        r._pool_generation = s._pool_generation;
+        r.pool_generation = s.pool_generation;
 
         // A terminal told to measure clusters differently has redrawn
         // everything the two models disagreed about, and the model cannot
         // see it happen.
-        if (r._method) |was| {
+        if (r.method) |was| {
             if (was != caps.width_method) r.forceDrifted();
         }
-        r._method = caps.width_method;
+        r.method = caps.width_method;
 
         // Every colour on the terminal was fitted to what the last frame was
         // drawn under; fitted to something else, any of them may be wrong.
         const colors: ColorFit = .of(caps);
-        if (r._colors) |was| {
-            if (!was.eql(colors)) @memset(r._force, true);
+        if (r.colors) |was| {
+            if (!was.eql(colors)) @memset(r.force, true);
         }
-        r._colors = colors;
+        r.colors = colors;
 
         const printing: ?*Screen = if (above) |lines| (if (lines.dimensions().rows != 0) lines else null) else null;
         if (layers) |l| {
-            l._size.cells = s.dimensions();
-            l._sixel_cursor_right = r._written.sixel_cursor_right;
-            const protocol_changed = l._protocol != null and l._protocol != caps.pictures();
+            l.size.cells = s.dimensions();
+            l.sixel_cursor_right = r.own_written.sixel_cursor_right;
+            const protocol_changed = l.protocol != null and l.protocol != caps.pictures();
             if (caps.pictures() == .sixel or caps.pictures() == .iterm or protocol_changed) {
-                if (protocol_changed or l.inlineChanged() or r._repaint_all or s._damage.any() or r.anyForced() or printing != null) {
+                if (protocol_changed or l.inlineChanged() or r.repaint_all or s.damage.any() or r.anyForced() or printing != null) {
                     // Inline images have no ids. Repaint the old text before
                     // their new placements; damage can erase any image pixel.
-                    if (l.hasFrameWork() or l._inline_dirty) {
-                        @memset(r._force, true);
-                        @memset(r._prev, unknown);
+                    if (l.hasFrameWork() or l.inline_dirty) {
+                        @memset(r.force, true);
+                        @memset(r.prev, unknown);
                         l.repaint();
                     }
                 }
             }
         }
         const pictures = if (layers) |l| l.hasFrameWork() else false;
-        const text = printing != null or r._repaint_all or s._damage.any() or r.anyForced();
+        const text = printing != null or r.repaint_all or s.damage.any() or r.anyForced();
         const body = text or pictures;
         const tail = r.cursorWork(s);
         if (!body and !tail) {
-            s._damage.clear();
+            s.damage.clear();
             return stats;
         }
 
-        var frame: Frame = .init(w, r._buf, caps.sync and !caps.sync_unwanted);
+        var frame: Frame = .init(w, r.buf, caps.sync and !caps.sync_unwanted);
         const out = &frame.writer;
 
         // The text pass is compiled once per colour profile, so a terminal
@@ -569,13 +571,13 @@ pub const Renderer = struct {
                     try r.printLines(fit, out, lines, s, caps, &stats);
                     // The screen moved down; its pictures go with it.
                     if (layers) |l| l.repaint();
-                } else if (r._repaint_all) {
+                } else if (r.repaint_all) {
                     try r.beginRepaint(out, caps);
                     // The terminal's pictures are as unknown as its text.
                     if (layers) |l| l.repaint();
                 }
                 if (text) {
-                    if (caps.scroll_detection and r._region == null) {
+                    if (caps.scroll_detection and r.region == null) {
                         if (try moved_rows.apply(r, fit, out, s, caps)) |moved| stats.scrolled = moved;
                     }
                     try r.drawRows(fit, out, s, caps, &stats);
@@ -593,20 +595,20 @@ pub const Renderer = struct {
         // After the text pass, never inside it: the rule this package exists
         // to keep is that redrawing a cell cannot disturb a picture.
         if (layers) |l| stats.placements = @intCast(try l.emit(out, caps));
-        if (stats.placements != 0) r._cursor = null;
+        if (stats.placements != 0) r.own_cursor = null;
         try r.finishCursor(out, s);
 
         try frame.finish();
         if (text) {
-            s._damage.clear();
-            @memset(r._force, false);
-            r._repaint_all = false;
+            s.damage.clear();
+            @memset(r.force, false);
+            r.repaint_all = false;
         }
         // Retirement goes directly to the accepted writer, after the frame.
         // An empty buffer counts the bytes without delaying a free command.
         var retirement: Frame = .init(w, &.{}, false);
         if (layers) |l| stats.placements += @intCast(try l.commitFrame(&retirement.writer, caps));
-        r._drawn = true;
+        r.drawn = true;
         stats.bytes = frame.n + retirement.n;
         return stats;
     }
@@ -625,21 +627,21 @@ pub const Renderer = struct {
     /// Re-entering after leave repaints every row and picture on its next
     /// draw if a frame was drawn. Use `setCaps` to change caps in place.
     pub fn enter(r: *Renderer, w: *Writer, caps: Caps, mode: Mode, modes: Modes) Error!void {
-        if (r._entered != null) return error.AlreadyEntered;
+        if (r.own_entered != null) return error.AlreadyEntered;
         // Record every mode before it may have reached a partially failing
         // writer. Disabling a mode that never arrived is harmless; omitting
         // one that did arrive leaves the caller's terminal changed.
         errdefer r.repaint();
-        r._cleanup = .init(caps, modes);
-        r._written = .{};
-        r._entered = .{
+        r.cleanup = .init(caps, modes);
+        r.own_written = .{};
+        r.own_entered = .{
             .mode = mode,
             .caps = caps,
             .in_band_resize = caps.in_band_resize,
             .unicode_core = caps.width_method == .unicode,
             .modes = modes,
         };
-        r._region = if (mode == .@"inline") r.dimensions().rows else null;
+        r.region = if (mode == .@"inline") r.dimensions().rows else null;
         if (mode == .alt) try morse.altScreen.set(w, true);
         // After the switch: the alternate screen has a keyboard stack of its
         // own, and this push belongs on it.
@@ -659,17 +661,17 @@ pub const Renderer = struct {
         }
         try morse.cursorVisible.set(w, false);
 
-        @memset(r._prev, .blank(.{}));
-        @memset(r._force, false);
-        @memset(r._drifted, false);
-        @memset(r._untrusted, false);
-        r._style = .{};
-        r._link = .none;
-        r._cursor = .{ .col = 0, .row = 0 };
-        r._shown = false;
-        r._shape = null;
-        r._repaint_all = false;
-        if (r._drawn) r.repaint();
+        @memset(r.prev, .blank(.{}));
+        @memset(r.force, false);
+        @memset(r.drifted, false);
+        @memset(r.untrusted, false);
+        r.style = .{};
+        r.link = .none;
+        r.own_cursor = .{ .col = 0, .row = 0 };
+        r.shown = false;
+        r.shape = null;
+        r.repaint_all = false;
+        if (r.drawn) r.repaint();
     }
 
     /// Anything `setModes` can fail with.
@@ -684,10 +686,10 @@ pub const Renderer = struct {
     /// repaints text and pictures under the new capabilities. `leave`
     /// remembers every mode that may remain enabled after a failed write.
     pub fn setCaps(r: *Renderer, w: *Writer, caps: Caps) ModesError!void {
-        const was = r._entered orelse return error.NotEntered;
-        r._entered.?.caps = caps;
-        r._entered.?.in_band_resize = caps.in_band_resize;
-        r._entered.?.unicode_core = caps.width_method == .unicode;
+        const was = r.own_entered orelse return error.NotEntered;
+        r.own_entered.?.caps = caps;
+        r.own_entered.?.in_band_resize = caps.in_band_resize;
+        r.own_entered.?.unicode_core = caps.width_method == .unicode;
         if (!std.meta.eql(was.caps, caps)) r.repaint();
         try r.writeCaps(w, caps);
     }
@@ -697,11 +699,11 @@ pub const Renderer = struct {
             const name = command[0];
             const which = @field(ModeWrites.Command, name);
             const on = if (comptime std.mem.eql(u8, name, "in_band_resize")) caps.in_band_resize else if (comptime std.mem.eql(u8, name, "unicode_core")) caps.width_method == .unicode else caps.pictures() == .sixel and caps.sixel_cursor_right;
-            if (@field(r._written, name) != on or r._written.uncertain.contains(which)) {
-                r._written.uncertain.insert(which);
-                try ModeCleanup.set(w, &@field(r._cleanup, name), command[1], on);
-                @field(r._written, name) = on;
-                r._written.uncertain.remove(which);
+            if (@field(r.own_written, name) != on or r.own_written.uncertain.contains(which)) {
+                r.own_written.uncertain.insert(which);
+                try ModeCleanup.set(w, &@field(r.cleanup, name), command[1], on);
+                @field(r.own_written, name) = on;
+                r.own_written.uncertain.remove(which);
             }
         }
     }
@@ -709,47 +711,47 @@ pub const Renderer = struct {
     /// Changes the requested input modes and writes commands not yet accepted.
     /// Leave remembers every mode that may remain enabled after a failed write.
     pub fn setModes(r: *Renderer, w: *Writer, modes: Modes) ModesError!void {
-        if (r._entered == null) return error.NotEntered;
-        r._entered.?.modes = modes;
+        if (r.own_entered == null) return error.NotEntered;
+        r.own_entered.?.modes = modes;
         try r.writeModes(w, modes);
     }
 
     fn writeModes(r: *Renderer, w: *Writer, modes: Modes) Writer.Error!void {
-        const was = r._written.modes;
-        if (!std.meta.eql(was.keyboard, modes.keyboard) or r._written.uncertain.contains(.keyboard)) {
-            r._written.uncertain.insert(.keyboard);
+        const was = r.own_written.modes;
+        if (!std.meta.eql(was.keyboard, modes.keyboard) or r.own_written.uncertain.contains(.keyboard)) {
+            r.own_written.uncertain.insert(.keyboard);
             if (was.keyboard != null) {
                 if (modes.keyboard) |new| {
                     try morse.kittyKeyboardSet(w, new, .replace);
                 } else {
                     try morse.kittyKeyboardPop(w);
-                    r._cleanup.keyboard = false;
+                    r.cleanup.keyboard = false;
                 }
             } else if (modes.keyboard) |new| {
-                r._cleanup.keyboard = true;
+                r.cleanup.keyboard = true;
                 try morse.kittyKeyboardPush(w, new);
-            } else if (r._cleanup.keyboard) {
+            } else if (r.cleanup.keyboard) {
                 try morse.kittyKeyboardPop(w);
-                r._cleanup.keyboard = false;
+                r.cleanup.keyboard = false;
             }
-            r._written.modes.keyboard = modes.keyboard;
-            r._written.uncertain.remove(.keyboard);
+            r.own_written.modes.keyboard = modes.keyboard;
+            r.own_written.uncertain.remove(.keyboard);
         }
-        if (!std.meta.eql(was.mouse, modes.mouse) or r._written.uncertain.contains(.mouse)) {
-            r._written.uncertain.insert(.mouse);
-            try r._cleanup.mouseChange(w, was.mouse, modes.mouse);
-            r._written.modes.mouse = modes.mouse;
-            r._written.uncertain.remove(.mouse);
+        if (!std.meta.eql(was.mouse, modes.mouse) or r.own_written.uncertain.contains(.mouse)) {
+            r.own_written.uncertain.insert(.mouse);
+            try r.cleanup.mouseChange(w, was.mouse, modes.mouse);
+            r.own_written.modes.mouse = modes.mouse;
+            r.own_written.uncertain.remove(.mouse);
         }
         inline for (.{ .{ "focus", morse.focusEvents.number }, .{ "paste", morse.bracketedPaste.number }, .{ "color_scheme", morse.colorScheme.number } }) |command| {
             const name = command[0];
             const which = @field(ModeWrites.Command, name);
             const on = @field(modes, name);
-            if (@field(was, name) != on or r._written.uncertain.contains(which)) {
-                r._written.uncertain.insert(which);
-                try ModeCleanup.set(w, &@field(r._cleanup, name), command[1], on);
-                @field(r._written.modes, name) = on;
-                r._written.uncertain.remove(which);
+            if (@field(was, name) != on or r.own_written.uncertain.contains(which)) {
+                r.own_written.uncertain.insert(which);
+                try ModeCleanup.set(w, &@field(r.cleanup, name), command[1], on);
+                @field(r.own_written.modes, name) = on;
+                r.own_written.uncertain.remove(which);
             }
         }
     }
@@ -762,40 +764,40 @@ pub const Renderer = struct {
     /// screen still, and the only way out is to say so.
     pub fn leave(r: *Renderer, w: *Writer) Error!void {
         try morse.syncOutput.set(w, false);
-        const was = r._entered orelse return;
-        if (r._link != .none) {
+        const was = r.own_entered orelse return;
+        if (r.link != .none) {
             try morse.hyperlinkEnd(w);
-            r._link = .none;
+            r.link = .none;
         }
         try morse.resetStyle(w);
-        r._style = .{};
-        if (r._shape) |_| {
+        r.style = .{};
+        if (r.shape) |_| {
             try morse.cursorShape(w, .default);
-            r._shape = null;
+            r.shape = null;
         }
         try morse.cursorVisible.set(w, true);
-        r._shown = true;
-        if (r._cleanup.sixel_cursor_right) try ModeCleanup.set(w, &r._cleanup.sixel_cursor_right, morse.sixelCursorRight.number, false);
-        if (r._cleanup.unicode_core) try ModeCleanup.set(w, &r._cleanup.unicode_core, morse.unicodeCore.number, false);
-        if (r._cleanup.in_band_resize) try ModeCleanup.set(w, &r._cleanup.in_band_resize, morse.inBandResize.number, false);
-        if (r._cleanup.color_scheme) try ModeCleanup.set(w, &r._cleanup.color_scheme, morse.colorScheme.number, false);
-        if (r._cleanup.paste) try ModeCleanup.set(w, &r._cleanup.paste, morse.bracketedPaste.number, false);
-        if (r._cleanup.focus) try ModeCleanup.set(w, &r._cleanup.focus, morse.focusEvents.number, false);
-        var motion = r._cleanup.motion.iterator();
+        r.shown = true;
+        if (r.cleanup.sixel_cursor_right) try ModeCleanup.set(w, &r.cleanup.sixel_cursor_right, morse.sixelCursorRight.number, false);
+        if (r.cleanup.unicode_core) try ModeCleanup.set(w, &r.cleanup.unicode_core, morse.unicodeCore.number, false);
+        if (r.cleanup.in_band_resize) try ModeCleanup.set(w, &r.cleanup.in_band_resize, morse.inBandResize.number, false);
+        if (r.cleanup.color_scheme) try ModeCleanup.set(w, &r.cleanup.color_scheme, morse.colorScheme.number, false);
+        if (r.cleanup.paste) try ModeCleanup.set(w, &r.cleanup.paste, morse.bracketedPaste.number, false);
+        if (r.cleanup.focus) try ModeCleanup.set(w, &r.cleanup.focus, morse.focusEvents.number, false);
+        var motion = r.cleanup.motion.iterator();
         while (motion.next()) |m| {
             try morse.setMode(w, m.number(), false);
-            r._cleanup.motion.remove(m);
+            r.cleanup.motion.remove(m);
         }
-        var encoding = r._cleanup.encoding.iterator();
+        var encoding = r.cleanup.encoding.iterator();
         while (encoding.next()) |e| {
             try morse.setMode(w, e.number(), false);
-            r._cleanup.encoding.remove(e);
+            r.cleanup.encoding.remove(e);
         }
         // Before the switch back: the stack this pops is the alternate
         // screen's own.
-        if (r._cleanup.keyboard) {
+        if (r.cleanup.keyboard) {
             try morse.kittyKeyboardPop(w);
-            r._cleanup.keyboard = false;
+            r.cleanup.keyboard = false;
         }
         switch (was.mode) {
             .alt => try morse.altScreen.set(w, false),
@@ -804,15 +806,15 @@ pub const Renderer = struct {
                 // the screen's rows, and one line feed further, which is the
                 // row below when there is one and a scroll when there is not.
                 try morse.cursorRestore(w);
-                const rows = r._region orelse r.dimensions().rows;
+                const rows = r.region orelse r.dimensions().rows;
                 if (rows > 1) try morse.cursorDown(w, rows - 1);
                 try w.writeByte('\n');
                 try w.writeByte('\r');
             },
         }
-        r._region = null;
-        r._entered = null;
-        r._written = .{};
+        r.region = null;
+        r.own_entered = null;
+        r.own_written = .{};
     }
 
     /// In inline mode, makes the rows from the cursor's row the screen's,
@@ -827,8 +829,8 @@ pub const Renderer = struct {
         }
         try morse.cursorSave(w);
         if (rows > 0) try morse.clearScreen(w, .to_end);
-        r._region = rows;
-        r._cursor = .{ .col = 0, .row = 0 };
+        r.region = rows;
+        r.own_cursor = .{ .col = 0, .row = 0 };
     }
 
     /// The rows of `lines` written from the inline origin down, each ended
@@ -844,8 +846,8 @@ pub const Renderer = struct {
         try r.hideForWrite(out);
         // After a failed write the terminal may hold a link open; the origin
         // restore resets the style but not that.
-        if (r._repaint_all and caps.osc8) try morse.hyperlinkEnd(out);
-        r._link = .none;
+        if (r.repaint_all and caps.osc8) try morse.hyperlinkEnd(out);
+        r.link = .none;
         try r.home(out);
         try morse.clearScreen(out, .to_end);
         var row: u16 = 0;
@@ -853,7 +855,7 @@ pub const Renderer = struct {
             // The cursor is at the start of a row of its own. Every move
             // within the row is along it, which a relative move does without
             // the origin.
-            r._cursor = .{ .col = 0, .row = row };
+            r.own_cursor = .{ .col = 0, .row = row };
             const end = trailingBlank(fit, stored.row(lines, row), caps);
             if (end != 0) {
                 stats.runs += 1;
@@ -867,10 +869,10 @@ pub const Renderer = struct {
             stats.printed += 1;
         }
         try r.reserve(out, r.dimensions().rows);
-        @memset(r._prev, .blank(.{}));
-        @memset(r._untrusted, false);
-        @memset(r._force, false);
-        r._repaint_all = false;
+        @memset(r.prev, .blank(.{}));
+        @memset(r.untrusted, false);
+        @memset(r.force, false);
+        r.repaint_all = false;
         s.damageAll();
     }
 
@@ -878,8 +880,8 @@ pub const Renderer = struct {
     /// default it was saved in.
     fn home(r: *Renderer, out: *Writer) Error!void {
         try morse.cursorRestore(out);
-        r._cursor = .{ .col = 0, .row = 0 };
-        r._style = .{};
+        r.own_cursor = .{ .col = 0, .row = 0 };
+        r.style = .{};
     }
 
     //=====================================================================
@@ -888,7 +890,7 @@ pub const Renderer = struct {
 
     /// One row of the previous frame.
     fn prevRow(r: *const Renderer, row: u16) []const Cell {
-        return r._prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols];
+        return r.prev[@as(usize, row) * r.dimensions().cols ..][0..r.dimensions().cols];
     }
 
     /// Moves the previous frame's rows the way the terminal just moved the
@@ -896,21 +898,21 @@ pub const Renderer = struct {
     fn shiftPrev(r: *Renderer, top: u16, bottom: u16, distance: u16, up: bool) void {
         const cols = r.dimensions().cols;
         const blank: Cell = .blank(.{});
-        const region = r._prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
-        const untrusted = r._untrusted[top .. @as(usize, bottom) + 1];
+        const region = r.prev[@as(usize, top) * cols ..][0 .. @as(usize, bottom - top + 1) * cols];
+        const untrusted = r.untrusted[top .. @as(usize, bottom) + 1];
         const moved = @as(usize, distance) * cols;
         if (up) {
             @memmove(region[0 .. region.len - moved], region[moved..]);
             @memset(region[region.len - moved ..], blank);
             @memmove(untrusted[0 .. untrusted.len - distance], untrusted[distance..]);
             @memset(untrusted[untrusted.len - distance ..], false);
-            for (bottom + 1 - distance..bottom + 1) |row| r._force[row] = true;
+            for (bottom + 1 - distance..bottom + 1) |row| r.force[row] = true;
         } else {
             @memmove(region[moved..], region[0 .. region.len - moved]);
             @memset(region[0..moved], blank);
             @memmove(untrusted[distance..], untrusted[0 .. untrusted.len - distance]);
             @memset(untrusted[0..distance], false);
-            for (top..top + distance) |row| r._force[row] = true;
+            for (top..top + distance) |row| r.force[row] = true;
         }
     }
 
@@ -920,55 +922,55 @@ pub const Renderer = struct {
 
     /// Takes the memory the renderer needs, all of it at once.
     fn allocate(r: *Renderer, size: Size) Allocator.Error!void {
-        const gpa = r._gpa;
-        r._prev = try gpa.alloc(Cell, size.area());
-        errdefer gpa.free(r._prev);
-        @memset(r._prev, .blank(.{}));
-        r._force = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r._force);
-        @memset(r._force, false);
-        r._drifted = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r._drifted);
-        @memset(r._drifted, false);
-        r._untrusted = try gpa.alloc(bool, size.rows);
-        errdefer gpa.free(r._untrusted);
-        @memset(r._untrusted, false);
-        r._hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
-        errdefer gpa.free(r._hashes);
-        r._buf = try gpa.alloc(u8, sync_gate);
+        const gpa = r.gpa;
+        r.prev = try gpa.alloc(Cell, size.area());
+        errdefer gpa.free(r.prev);
+        @memset(r.prev, .blank(.{}));
+        r.force = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r.force);
+        @memset(r.force, false);
+        r.drifted = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r.drifted);
+        @memset(r.drifted, false);
+        r.untrusted = try gpa.alloc(bool, size.rows);
+        errdefer gpa.free(r.untrusted);
+        @memset(r.untrusted, false);
+        r.hashes = try gpa.alloc(u64, @as(usize, size.rows) * 2);
+        errdefer gpa.free(r.hashes);
+        r.buf = try gpa.alloc(u8, sync_gate);
         // The last frame is one cell for each place on the grid; every
         // per-row record is one a row, and the scroll search two.
-        std.debug.assert(r._prev.len == size.area());
-        std.debug.assert(r._force.len == size.rows);
-        std.debug.assert(r._hashes.len == 2 * @as(usize, size.rows));
+        std.debug.assert(r.prev.len == size.area());
+        std.debug.assert(r.force.len == size.rows);
+        std.debug.assert(r.hashes.len == 2 * @as(usize, size.rows));
     }
 
     /// Gives all of it back.
     fn release(r: *Renderer) void {
-        const gpa = r._gpa;
-        gpa.free(r._prev);
-        gpa.free(r._force);
-        gpa.free(r._drifted);
-        gpa.free(r._untrusted);
-        gpa.free(r._hashes);
-        gpa.free(r._buf);
-        if (r._style_sequences) |cache| gpa.destroy(cache);
+        const gpa = r.gpa;
+        gpa.free(r.prev);
+        gpa.free(r.force);
+        gpa.free(r.drifted);
+        gpa.free(r.untrusted);
+        gpa.free(r.hashes);
+        gpa.free(r.buf);
+        if (r.style_sequences) |cache| gpa.destroy(cache);
     }
 
     /// The style cache of a renderer `init` made; only those draw.
     fn styleCache(r: *Renderer) *StyleSequenceCache {
-        return r._style_sequences.?;
+        return r.style_sequences.?;
     }
 
     /// Whether any row carries the renderer's own reason to be written.
     fn anyForced(r: *const Renderer) bool {
-        for (r._force) |f| if (f) return true;
+        for (r.force) |f| if (f) return true;
         return false;
     }
 
     /// Marks every row that has ever drifted to be written whole.
     fn forceDrifted(r: *Renderer) void {
-        for (r._drifted, r._force) |d, *f| {
+        for (r.drifted, r.force) |d, *f| {
             if (d) f.* = true;
         }
     }
@@ -976,12 +978,12 @@ pub const Renderer = struct {
     /// Whether the cursor's place, visibility or shape needs a sequence.
     fn cursorWork(r: *const Renderer, s: *const Screen) bool {
         if (s.cursor.visible) {
-            if (r._shown != true) return true;
-            if (r._shape != s.cursor.shape) return true;
-            const at = r._cursor orelse return true;
+            if (r.shown != true) return true;
+            if (r.shape != s.cursor.shape) return true;
+            const at = r.own_cursor orelse return true;
             return at.col != s.cursor.col or at.row != s.cursor.row;
         }
-        return r._shown != false;
+        return r.shown != false;
     }
 
     /// The cursor is hidden before the first byte a frame writes, and not
@@ -998,9 +1000,9 @@ pub const Renderer = struct {
     /// Called by the render pass, including from the scroll detector; not
     /// part of what a program using this package calls.
     fn hideForWrite(r: *Renderer, out: *Writer) Error!void {
-        if (r._shown == false) return;
+        if (r.shown == false) return;
         try morse.cursorVisible.set(out, false);
-        r._shown = false;
+        r.shown = false;
     }
 
     /// The terminal is in a state the renderer does not know, so it is put
@@ -1016,24 +1018,24 @@ pub const Renderer = struct {
     fn beginRepaint(r: *Renderer, out: *Writer, caps: Caps) Error!void {
         try r.hideForWrite(out);
         if (caps.osc8) try morse.hyperlinkEnd(out);
-        r._link = .none;
+        r.link = .none;
         try morse.resetStyle(out);
-        r._style = .{};
-        r._cursor = null;
-        @memset(r._force, true);
+        r.style = .{};
+        r.own_cursor = null;
+        @memset(r.force, true);
         // Inline, a repaint starts from the origin with the screen's rows
         // taken or given back if the size changed, and everything from the
         // origin down erased: the previous frame is then exactly blank,
         // which is the one state a repaint can be sure of.
-        if (r._region) |had| {
+        if (r.region) |had| {
             try r.home(out);
             if (had != r.dimensions().rows) {
                 try r.reserve(out, r.dimensions().rows);
             } else {
                 try morse.clearScreen(out, .to_end);
             }
-            @memset(r._prev, .blank(.{}));
-            @memset(r._untrusted, false);
+            @memset(r.prev, .blank(.{}));
+            @memset(r.untrusted, false);
         }
     }
 
@@ -1043,8 +1045,8 @@ pub const Renderer = struct {
         if (cols == 0) return;
         var row: u16 = 0;
         while (row < r.dimensions().rows) : (row += 1) {
-            const span = s._damage.row(row);
-            const forced = r._force[row];
+            const span = s.damage.row(row);
+            const forced = r.force[row];
             if (span == null and !forced) continue;
             const first = if (forced) 0 else span.?.first;
             const last = if (forced) cols - 1 else span.?.last;
@@ -1055,11 +1057,11 @@ pub const Renderer = struct {
                 stats.skipped += cols;
                 continue;
             }
-            const scan_first = if (r._untrusted[row]) 0 else first;
-            const scan_last = if (r._untrusted[row]) cols - 1 else last;
+            const scan_first = if (r.untrusted[row]) 0 else first;
+            const scan_last = if (r.untrusted[row]) cols - 1 else last;
             const current_untrusted = rowDrifts(fit, s, caps, row, scan_first, scan_last);
-            const drift = r._untrusted[row] or current_untrusted;
-            if (drift) r._drifted[row] = true;
+            const drift = r.untrusted[row] or current_untrusted;
+            if (drift) r.drifted[row] = true;
             stats.rows += 1;
 
             const whole = forced or drift or try r.paintIsCheaper(fit, s, caps, row, first, last);
@@ -1069,9 +1071,9 @@ pub const Renderer = struct {
             // An over-measured cluster runs past the margin and wraps, so
             // after a drifted row the cursor may be a row low as well as a
             // column off. Nothing but an absolute move is safe.
-            if (drift and !widthsAgree(caps)) r._cursor = null;
+            if (drift and !widthsAgree(caps)) r.own_cursor = null;
             r.commitRow(fit, s, caps, row, first, last);
-            r._untrusted[row] = current_untrusted;
+            r.untrusted[row] = current_untrusted;
         }
     }
 
@@ -1177,7 +1179,7 @@ pub const Renderer = struct {
     fn firstRunEnd(r: *Renderer, comptime fit: Profile, s: *Screen, caps: Caps, row: u16) ?u16 {
         const cols = r.dimensions().cols;
         if (visibleAs(fit, stored.row(s, row)[0], caps).eql(r.prevRow(row)[0])) return null;
-        const state: CostState = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
         return r.runEndCost(fit, state, s, caps, row, 0, cols - 1);
     }
 
@@ -1215,7 +1217,7 @@ pub const Renderer = struct {
     ) ?usize {
         const cells = stored.row(s, row);
         const old = r.prevRow(row);
-        var state: CostState = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        var state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
         var cost: usize = 0;
         var col = first;
         while (col <= last) {
@@ -1274,9 +1276,9 @@ pub const Renderer = struct {
         whole: bool,
     ) Error!u64 {
         var state: CostState = .{
-            .style = r._style,
-            .link = r._link,
-            .cursor = r._cursor,
+            .style = r.style,
+            .link = r.link,
+            .cursor = r.own_cursor,
         };
         return if (whole)
             r.paintRowCost(fit, &state, s, caps, row)
@@ -1723,7 +1725,7 @@ pub const Renderer = struct {
             try morse.unicodeCore.set(out, true);
         } else try out.writeAll(held);
         r.advance(col, row);
-        if (col + c.width() < r.dimensions().cols) try r.moveTo(out, col + c.width(), row, stats) else r._cursor = null;
+        if (col + c.width() < r.dimensions().cols) try r.moveTo(out, col + c.width(), row, stats) else r.own_cursor = null;
         stats.rejoined += 1;
     }
 
@@ -1790,7 +1792,7 @@ pub const Renderer = struct {
         col: u16,
         last: u16,
     ) u16 {
-        const state: CostState = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        const state: CostState = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
         return r.runEndCost(fit, state, s, caps, row, col, last);
     }
 
@@ -1798,7 +1800,7 @@ pub const Renderer = struct {
     fn commitRow(r: *Renderer, comptime fit: Profile, s: *const Screen, caps: Caps, row: u16, first: u16, last: u16) void {
         const cells = stored.row(s, row)[first .. @as(usize, last) + 1];
         const row_start = @as(usize, row) * r.dimensions().cols;
-        const old = r._prev[row_start + first .. row_start + @as(usize, last) + 1];
+        const old = r.prev[row_start + first .. row_start + @as(usize, last) + 1];
         if (heldAs(fit, caps)) {
             @memcpy(old, cells);
             return;
@@ -1820,8 +1822,8 @@ pub const Renderer = struct {
     /// Writes the shortest SGR between the style the terminal is in and the
     /// one it should be in.
     fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
-        if (cellmod.sameBytes(Style, &r._style, &to)) return;
-        const from = r._style;
+        if (cellmod.sameBytes(Style, &r.style, &to)) return;
+        const from = r.style;
         if (r.styleCache().get(from, to)) |sequence| {
             try out.writeAll(sequence);
         } else {
@@ -1829,7 +1831,7 @@ pub const Renderer = struct {
             var fixed: Writer = .fixed(&bytes);
             morse.diffStyle(&fixed, from, to) catch {
                 try morse.diffStyle(out, from, to);
-                r._style = to;
+                r.style = to;
                 stats.styles += 1;
                 return;
             };
@@ -1837,7 +1839,7 @@ pub const Renderer = struct {
             r.styleCache().put(from, to, sequence);
             try out.writeAll(sequence);
         }
-        r._style = to;
+        r.style = to;
         stats.styles += 1;
     }
 
@@ -1850,19 +1852,19 @@ pub const Renderer = struct {
         caps: Caps,
         stats: *Stats,
     ) Error!void {
-        if (!caps.osc8 or r._link == to) return;
+        if (!caps.osc8 or r.link == to) return;
         if (to == .none) {
             try morse.hyperlinkEnd(out);
         } else {
             const t = stored.target(s, to) orelse {
                 try morse.hyperlinkEnd(out);
-                r._link = .none;
+                r.link = .none;
                 stats.links += 1;
                 return;
             };
             try morse.hyperlinkStart(out, t.uri, if (t.params.len == 0) null else t.params);
         }
-        r._link = to;
+        r.link = to;
         stats.links += 1;
     }
 
@@ -1871,9 +1873,9 @@ pub const Renderer = struct {
     /// which is a state no arithmetic should be done from.
     fn advance(r: *Renderer, col: u16, row: u16) void {
         if (col >= r.dimensions().cols) {
-            r._cursor = null;
+            r.own_cursor = null;
         } else {
-            r._cursor = .{ .col = col, .row = row };
+            r.own_cursor = .{ .col = col, .row = row };
         }
     }
 
@@ -1894,7 +1896,7 @@ pub const Renderer = struct {
             if (at.col == col and at.row == row) return 0;
         }
 
-        const cost: usize = if (r._region != null) region: {
+        const cost: usize = if (r.region != null) region: {
             const origin: Point = .{ .col = 0, .row = 0 };
             const from_origin = plan(origin, there, .region);
             const via_origin = morse.cost.cursorRestore() + if (col == 0 and row == 0) 0 else from_origin.cost;
@@ -1915,17 +1917,17 @@ pub const Renderer = struct {
     /// Puts the cursor at a place in the fewest bytes.
     fn moveTo(r: *Renderer, out: *Writer, col: u16, row: u16, stats: *Stats) Error!void {
         const there: Point = .{ .col = col, .row = row };
-        if (r._cursor) |at| {
+        if (r.own_cursor) |at| {
             if (at.col == col and at.row == row) return;
         }
-        if (r._region != null) {
+        if (r.region != null) {
             try r.moveWithin(out, there);
-        } else if (r._cursor) |at| {
+        } else if (r.own_cursor) |at| {
             try writeMove(out, at, there);
         } else {
             try morse.cursorTo(out, row + 1, col + 1);
         }
-        r._cursor = there;
+        r.own_cursor = there;
         stats.moves += 1;
     }
 
@@ -1936,7 +1938,7 @@ pub const Renderer = struct {
         const origin: Point = .{ .col = 0, .row = 0 };
         const from_origin = plan(origin, to, .region);
         const via_origin = morse.cost.cursorRestore() + if (to.col == 0 and to.row == 0) 0 else from_origin.cost;
-        if (r._cursor) |at| {
+        if (r.own_cursor) |at| {
             const direct = plan(at, to, .region);
             if (direct.cost <= via_origin) {
                 try emitMove(out, at, to, direct.choice);
@@ -1953,15 +1955,15 @@ pub const Renderer = struct {
     fn finishCursor(r: *Renderer, out: *Writer, s: *const Screen) Error!void {
         var ignored: Stats = .{};
         if (!s.cursor.visible) {
-            if (r._shown != false) {
+            if (r.shown != false) {
                 try morse.cursorVisible.set(out, false);
-                r._shown = false;
+                r.shown = false;
             }
             return;
         }
-        if (r._shape != s.cursor.shape) {
+        if (r.shape != s.cursor.shape) {
             try morse.cursorShape(out, s.cursor.shape);
-            r._shape = s.cursor.shape;
+            r.shape = s.cursor.shape;
         }
         try r.moveTo(
             out,
@@ -1969,9 +1971,9 @@ pub const Renderer = struct {
             @min(s.cursor.row, r.dimensions().rows -| 1),
             &ignored,
         );
-        if (r._shown != true) {
+        if (r.shown != true) {
             try morse.cursorVisible.set(out, true);
-            r._shown = true;
+            r.shown = true;
         }
     }
 };
@@ -2159,17 +2161,17 @@ fn apartCost(text: []const u8) usize {
 pub const internal = struct {
     // A flush failure leaves cleanup intent available to Tty.restore.
     pub fn leaveFlushed(r: *Renderer, out: *Writer) Renderer.Error!void {
-        const entered = r._entered;
-        const region = r._region;
-        const shape = r._shape;
-        const cleanup = r._cleanup;
-        const written = r._written;
+        const entered = r.own_entered;
+        const region = r.region;
+        const shape = r.shape;
+        const cleanup = r.cleanup;
+        const written = r.own_written;
         errdefer {
-            r._entered = entered;
-            r._region = region;
-            r._shape = shape;
-            r._cleanup = cleanup;
-            r._written = written;
+            r.own_entered = entered;
+            r.region = region;
+            r.shape = shape;
+            r.cleanup = cleanup;
+            r.own_written = written;
         }
         try r.leave(out);
         try out.flush();
@@ -2592,8 +2594,8 @@ const Fixture = struct {
         errdefer r.deinit();
         // The renderer starts where `enter` leaves the terminal: blank,
         // cursor hidden and at the top-left, no style and no link.
-        r._shown = false;
-        r._cursor = .{ .col = 0, .row = 0 };
+        r.shown = false;
+        r.own_cursor = .{ .col = 0, .row = 0 };
         return .{
             .gpa = gpa,
             .screen = s,
@@ -3175,7 +3177,7 @@ test "a repeated run that reaches the margin leaves the cursor untrusted" {
     f.caps.rep = true;
     for (0..10) |i| try f.screen.write(@intCast(i), 0, "x", .{}, .none);
     _ = try f.draw();
-    try testing.expectEqual(@as(?Point, null), f.renderer._cursor);
+    try testing.expectEqual(@as(?Point, null), f.renderer.own_cursor);
     try f.screen.write(0, 1, "y", .{}, .none);
     try f.expectBytes("\x1b[2;1Hy");
 }
@@ -3252,13 +3254,13 @@ test "arithmetic row prices match emitted rows" {
     const Check = struct {
         fn row(fixture: *Fixture, whole: bool) !void {
             const r = &fixture.renderer;
-            const saved = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+            const saved = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
             var emitted: Writer.Discarding = .init(&.{});
             var ignored: Renderer.Stats = .{};
             try r.emitRow(.rgb, &emitted.writer, &fixture.screen, fixture.caps, 0, 0, 39, whole, &ignored);
-            r._style = saved.style;
-            r._link = saved.link;
-            r._cursor = saved.cursor;
+            r.style = saved.style;
+            r.link = saved.link;
+            r.own_cursor = saved.cursor;
 
             const priced = try r.price(.rgb, &fixture.screen, fixture.caps, 0, 0, 39, whole);
             try testing.expectEqual(emitted.fullCount(), priced);
@@ -3267,17 +3269,17 @@ test "arithmetic row prices match emitted rows" {
             } else {
                 try testing.expect(r.isolatedDiffCost(.rgb, &fixture.screen, fixture.caps, 0, 0, 39, std.math.maxInt(usize)).? >= priced);
             }
-            try testing.expectEqual(saved.style, r._style);
-            try testing.expectEqual(saved.link, r._link);
-            try testing.expectEqual(saved.cursor, r._cursor);
+            try testing.expectEqual(saved.style, r.style);
+            try testing.expectEqual(saved.link, r.link);
+            try testing.expectEqual(saved.cursor, r.own_cursor);
         }
     };
 
     try Check.row(&f, false);
     try Check.row(&f, true);
-    f.renderer._region = 2;
-    f.renderer._cursor = .{ .col = 17, .row = 1 };
-    f.renderer._style = .{ .bold = true, .fg = .ansi(.cyan) };
+    f.renderer.region = 2;
+    f.renderer.own_cursor = .{ .col = 17, .row = 1 };
+    f.renderer.style = .{ .bold = true, .fg = .ansi(.cyan) };
     try Check.row(&f, false);
     try Check.row(&f, true);
 }
@@ -3328,9 +3330,9 @@ test "a row the diff writes as one run from the first column is the paint, byte 
         }
 
         const r = &f.renderer;
-        r._style = styles[random.uintLessThan(usize, styles.len)];
-        r._link = if (random.boolean()) @fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(link))))) else .none;
-        r._cursor = switch (random.uintLessThan(u8, 3)) {
+        r.style = styles[random.uintLessThan(usize, styles.len)];
+        r.link = if (random.boolean()) @fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(link))))) else .none;
+        r.own_cursor = switch (random.uintLessThan(u8, 3)) {
             0 => null,
             1 => .{ .col = 0, .row = 0 },
             else => .{ .col = random.uintLessThan(u16, cols), .row = random.uintLessThan(u16, 2) },
@@ -3338,7 +3340,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
         if (!r.diffIsOneRun(.rgb, &f.screen, f.caps, 0)) continue;
         hits += 1;
 
-        const saved = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        const saved = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
         var bytes: [2][]u8 = undefined;
         for ([_]bool{ false, true }, 0..) |whole, i| {
             var emitted: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -3346,9 +3348,9 @@ test "a row the diff writes as one run from the first column is the paint, byte 
             var ignored: Renderer.Stats = .{};
             try r.emitRow(.rgb, &emitted.writer, &f.screen, f.caps, 0, 0, cols - 1, whole, &ignored);
             bytes[i] = try testing.allocator.dupe(u8, emitted.written());
-            r._style = saved.style;
-            r._link = saved.link;
-            r._cursor = saved.cursor;
+            r.style = saved.style;
+            r.link = saved.link;
+            r.own_cursor = saved.cursor;
         }
         defer for (bytes) |b| testing.allocator.free(b);
         const diff = try r.price(.rgb, &f.screen, f.caps, 0, 0, cols - 1, false);
@@ -3396,7 +3398,7 @@ test "a diff that is the paint without its erase is written for fewer bytes, and
                 _ = try f.draw();
                 // Half the time the terminal shows the row blank, as a row
                 // repainted over erased rows is.
-                if (random.boolean()) @memset(f.renderer._prev[0..cols], .blank(.{}));
+                if (random.boolean()) @memset(f.renderer.prev[0..cols], .blank(.{}));
             }
         }
         const r = &f.renderer;
@@ -3407,7 +3409,7 @@ test "a diff that is the paint without its erase is written for fewer bytes, and
         const paint = try r.price(.rgb, &f.screen, f.caps, 0, 0, cols - 1, true);
         try testing.expect(diff < paint);
         try testing.expect(!try r.paintIsCheaper(.rgb, &f.screen, f.caps, 0, 0, cols - 1));
-        const saved = .{ .style = r._style, .link = r._link, .cursor = r._cursor };
+        const saved = .{ .style = r.style, .link = r.link, .cursor = r.own_cursor };
         var lens: [2]usize = undefined;
         for ([_]bool{ false, true }, 0..) |whole, i| {
             var emitted: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -3415,9 +3417,9 @@ test "a diff that is the paint without its erase is written for fewer bytes, and
             var ignored: Renderer.Stats = .{};
             try r.emitRow(.rgb, &emitted.writer, &f.screen, f.caps, 0, 0, cols - 1, whole, &ignored);
             lens[i] = emitted.written().len;
-            r._style = saved.style;
-            r._link = saved.link;
-            r._cursor = saved.cursor;
+            r.style = saved.style;
+            r.link = saved.link;
+            r.own_cursor = saved.cursor;
         }
         try testing.expectEqual(diff, lens[0]);
         try testing.expectEqual(paint, lens[1]);
@@ -3443,11 +3445,11 @@ test "restoring a cell leaves conservative damage but writes nothing" {
 
     try f.screen.write(3, 0, "x", .{}, .none);
     try f.screen.write(3, 0, " ", .{}, .none);
-    try testing.expect(f.screen._damage.any());
+    try testing.expect(f.screen.damage.any());
 
     const stats = try f.draw();
     try testing.expectEqual(@as(usize, 0), stats.bytes);
-    try testing.expect(!f.screen._damage.any());
+    try testing.expect(!f.screen.damage.any());
 }
 
 test "a cluster the two width models disagree about makes its row drift" {
@@ -3461,9 +3463,9 @@ test "a cluster the two width models disagree about makes its row drift" {
     // trusted afterwards.
     try f.screen.write(0, 0, "\u{26a0}\u{fe0f}", .{}, .none);
     _ = try f.draw();
-    try testing.expectEqual(@as(?Point, null), f.renderer._cursor);
-    try testing.expect(f.renderer._drifted[0]);
-    try testing.expect(!f.renderer._drifted[1]);
+    try testing.expectEqual(@as(?Point, null), f.renderer.own_cursor);
+    try testing.expect(f.renderer.drifted[0]);
+    try testing.expect(!f.renderer.drifted[1]);
 }
 
 test "a cluster the models disagree about is written with its width when the terminal takes one" {
@@ -3480,8 +3482,8 @@ test "a cluster the models disagree about is written with its width when the ter
     try testing.expectEqual(@as(u32, 1), stats.told);
     // The row was diffed, not repainted, and the cursor is still trusted.
     try testing.expectEqual(@as(u32, 0), stats.repainted);
-    try testing.expectEqual(Point{ .col = 2, .row = 0 }, f.renderer._cursor.?);
-    try testing.expect(!f.renderer._drifted[0]);
+    try testing.expectEqual(Point{ .col = 2, .row = 0 }, f.renderer.own_cursor.?);
+    try testing.expect(!f.renderer.drifted[0]);
 }
 
 test "told every width, the terminal is told everything but ASCII" {
@@ -3595,16 +3597,16 @@ test "cached row safety follows scrolled previous rows" {
     var f: Fixture = try .init(testing.allocator, 4, 4);
     defer f.deinit();
 
-    f.renderer._untrusted[2] = true;
+    f.renderer.untrusted[2] = true;
     f.renderer.shiftPrev(0, 3, 1, true);
-    try testing.expect(f.renderer._untrusted[1]);
-    try testing.expect(!f.renderer._untrusted[2]);
-    try testing.expect(!f.renderer._untrusted[3]);
+    try testing.expect(f.renderer.untrusted[1]);
+    try testing.expect(!f.renderer.untrusted[2]);
+    try testing.expect(!f.renderer.untrusted[3]);
 
     f.renderer.shiftPrev(0, 3, 2, false);
-    try testing.expect(f.renderer._untrusted[3]);
-    try testing.expect(!f.renderer._untrusted[0]);
-    try testing.expect(!f.renderer._untrusted[1]);
+    try testing.expect(f.renderer.untrusted[3]);
+    try testing.expect(!f.renderer.untrusted[0]);
+    try testing.expect(!f.renderer.untrusted[1]);
 }
 
 test "a screen of the wrong size is refused rather than drawn" {
@@ -3709,7 +3711,7 @@ test "the cursor is moved relative to the saved origin in inline mode" {
     try f.expectBytes("\x1b[4Gw");
     // With the cursor untrusted, the origin is restored and the move made
     // from there.
-    f.renderer._cursor = null;
+    f.renderer.own_cursor = null;
     try f.screen.write(5, 5, "z", .{}, .none);
     try f.expectBytes("\x1b8\x1b[5B\x1b[6Gz");
     try testing.expect(std.mem.find(u8, f.written(), "H") == null);
@@ -4368,7 +4370,7 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     f.out.clearRetainingCapacity();
     try f.renderer.setCaps(&f.out.writer, c);
     try testing.expectEqual(@as(usize, 0), f.out.written().len);
-    try testing.expect(!f.renderer._repaint_all);
+    try testing.expect(!f.renderer.repaint_all);
 }
 
 test "untrustCursor settles a cursor moved between otherwise unchanged frames" {
@@ -4405,8 +4407,8 @@ test "pool compaction repaints reused text and link identities, including throug
             try f.screen.resize(.{ .cols = 9, .rows = 1 });
             try f.screen.resize(f.renderer.dimensions());
         } else try f.screen.compactPool();
-        try testing.expectEqual(previous.text.offset(), f.screen._cells[0].text.offset());
-        try testing.expectEqual(previous.link.index(), f.screen._cells[0].link.index());
+        try testing.expectEqual(previous.text.offset(), f.screen.own_cells[0].text.offset());
+        try testing.expectEqual(previous.link.index(), f.screen.own_cells[0].link.index());
         try testing.expect(!previous.eql(f.screen.readCell(0, 0).?));
         const stats = try f.draw();
         try testing.expectEqual(@as(u32, 1), stats.repainted);
@@ -4430,12 +4432,12 @@ test "a renderer keeps pool identities apart across screens and a reused screen 
         const new_link = try next.link("https://new.invalid", "");
         const new = "b\u{301}\u{302}\u{303}";
         try next.write(0, 0, new, .{}, new_link);
-        try testing.expectEqual(f.renderer._prev[0].text.offset(), next._cells[0].text.offset());
-        try testing.expectEqual(f.renderer._prev[0].link.index(), next._cells[0].link.index());
+        try testing.expectEqual(f.renderer.prev[0].text.offset(), next.own_cells[0].text.offset());
+        try testing.expectEqual(f.renderer.prev[0].link.index(), next.own_cells[0].link.index());
         try testing.expect(!f.screen.readCell(0, 0).?.eql(next.readCell(0, 0).?));
         // Damage belongs to the grid's writes; it says nothing about which
         // grid the terminal was previously shown.
-        next._damage.clear();
+        next.damage.clear();
         f.out.clearRetainingCapacity();
         const screen = if (reuse_address) screen: {
             f.screen.deinit();
@@ -4753,7 +4755,7 @@ test "a renderer is small enough to return and hold by value" {
     try testing.expect(@sizeOf(Renderer) < 2048);
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
-    const cache = r._style_sequences;
+    const cache = r.style_sequences;
     try r.resize(.{ .cols = 6, .rows = 3 });
-    try testing.expectEqual(cache, r._style_sequences);
+    try testing.expectEqual(cache, r.style_sequences);
 }

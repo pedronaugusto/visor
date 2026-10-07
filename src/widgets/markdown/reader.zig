@@ -48,77 +48,84 @@ pub const Document = struct {
     pub const Align = documentAlign;
     pub const TableCell = documentTableCell;
     pub const Table = documentTable;
-    _allocator: std.mem.Allocator,
-    _source: []u8,
-    _text: std.ArrayList(u8) = .empty,
-    _spans: std.ArrayList(Document.Span) = .empty,
-    _blocks: std.ArrayList(Document.Block) = .empty,
-    _cells: std.ArrayList(Document.TableCell) = .empty,
-    _aligns: std.ArrayList(Document.Align) = .empty,
-    /// Link targets in table cells with their escaped pipes taken out.
-    _unescaped: std.ArrayList([]u8) = .empty,
-    /// Whether the inlines being read are a table cell's, where `\|` is a
+    /// Private.
+    allocator: std.mem.Allocator,
+    /// Private.
+    own_source: []u8,
+    /// Private.
+    own_text: std.ArrayList(u8) = .empty,
+    /// Private.
+    own_spans: std.ArrayList(Document.Span) = .empty,
+    /// Private.
+    own_blocks: std.ArrayList(Document.Block) = .empty,
+    /// Private.
+    own_cells: std.ArrayList(Document.TableCell) = .empty,
+    /// Private.
+    aligns: std.ArrayList(Document.Align) = .empty,
+    /// Private: link targets in table cells with their escaped pipes taken out.
+    unescaped: std.ArrayList([]u8) = .empty,
+    /// Private: whether the inlines being read are a table cell's, where `\|` is a
     /// pipe in code spans and link targets too.
-    _in_cell: bool = false,
+    in_cell: bool = false,
 
     /// Source bytes, borrowed until deinit.
     pub fn source(d: *const Document) []const u8 {
-        return d._source;
+        return d.own_source;
     }
     /// Rendered bytes; block and span ranges index this slice. Borrowed until deinit.
     pub fn text(d: *const Document) []const u8 {
-        return d._text.items;
+        return d.own_text.items;
     }
     /// Inline roles and targets, borrowed until deinit.
     pub fn spans(d: *const Document) []const Document.Span {
-        return d._spans.items;
+        return d.own_spans.items;
     }
     /// Structural blocks, borrowed until deinit.
     pub fn blocks(d: *const Document) []const Document.Block {
-        return d._blocks.items;
+        return d.own_blocks.items;
     }
     /// Every table's cells, row by row, borrowed until deinit. A table
     /// block's `table` says where its own begin.
     pub fn cells(d: *const Document) []const Document.TableCell {
-        return d._cells.items;
+        return d.own_cells.items;
     }
     /// Every table's column alignments, borrowed until deinit.
     pub fn alignments(d: *const Document) []const Document.Align {
-        return d._aligns.items;
+        return d.aligns.items;
     }
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
-        var d: Document = .{ ._allocator = allocator, ._source = try allocator.dupe(u8, input) };
+        var d: Document = .{ .allocator = allocator, .own_source = try allocator.dupe(u8, input) };
         errdefer d.deinit();
         // The text is the source with its markup taken out, so it is never
         // longer: one allocation holds it.
-        try d._text.ensureTotalCapacity(allocator, input.len);
+        try d.own_text.ensureTotalCapacity(allocator, input.len);
         try d.read();
         return d;
     }
     pub fn deinit(d: *Document) void {
-        d._allocator.free(d._source);
-        d._text.deinit(d._allocator);
-        d._spans.deinit(d._allocator);
-        d._blocks.deinit(d._allocator);
-        d._cells.deinit(d._allocator);
-        d._aligns.deinit(d._allocator);
-        for (d._unescaped.items) |bytes| d._allocator.free(bytes);
-        d._unescaped.deinit(d._allocator);
+        d.allocator.free(d.own_source);
+        d.own_text.deinit(d.allocator);
+        d.own_spans.deinit(d.allocator);
+        d.own_blocks.deinit(d.allocator);
+        d.own_cells.deinit(d.allocator);
+        d.aligns.deinit(d.allocator);
+        for (d.unescaped.items) |bytes| d.allocator.free(bytes);
+        d.unescaped.deinit(d.allocator);
         d.* = undefined;
     }
 
     fn append(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
         if (bytes.len == 0) return;
-        const start = d._text.items.len;
-        try d._text.appendSlice(d._allocator, bytes);
-        try d._spans.append(d._allocator, .{ .start = start, .end = d._text.items.len, .flags = flags, .uri = uri });
+        const start = d.own_text.items.len;
+        try d.own_text.appendSlice(d.allocator, bytes);
+        try d.own_spans.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
     }
 
     fn read(d: *Document) !void {
-        if (d._source.len == 0) return;
+        if (d.own_source.len == 0) return;
         // A final line break ends the last line rather than beginning one.
-        const lines_of = if (std.mem.endsWith(u8, d._source, "\n")) d._source[0 .. d._source.len - 1] else d._source;
+        const lines_of = if (std.mem.endsWith(u8, d.own_source, "\n")) d.own_source[0 .. d.own_source.len - 1] else d.own_source;
         var lines: Quoted = .init(lines_of);
         var may_join = false;
         while (lines.next()) |q| {
@@ -132,7 +139,7 @@ pub const Document = struct {
             while (indent < body.len and body[indent] == ' ') indent += 1;
             if (indent >= 4 or std.mem.startsWith(u8, body, "\t")) {
                 // A hanging list continuation takes precedence over indented code.
-                const last = if (d._blocks.items.len == 0) null else &d._blocks.items[d._blocks.items.len - 1];
+                const last = if (d.own_blocks.items.len == 0) null else &d.own_blocks.items[d.own_blocks.items.len - 1];
                 if (!(may_join and last != null and last.?.marker.len > 0 and q.depth == last.?.depth and indent >= @as(usize, last.?.indent) + last.?.marker.len)) {
                     body = body[if (indent >= 4) 4 else 1..];
                     try d.block(.{ .kind = .code, .depth = q.depth }, body, true);
@@ -183,12 +190,12 @@ pub const Document = struct {
                 }
             }
             if (may_join) {
-                const last = &d._blocks.items[d._blocks.items.len - 1];
+                const last = &d.own_blocks.items[d.own_blocks.items.len - 1];
                 if (last.depth == q.depth and (last.marker.len == 0 or indent >= @as(usize, last.indent) + last.marker.len)) {
                     try d.append(" ", .{}, "");
                     try d.inlineRead(body, .{}, "", 0);
-                    last.end = d._text.items.len;
-                    last.end_span = d._spans.items.len;
+                    last.end = d.own_text.items.len;
+                    last.end_span = d.own_spans.items.len;
                     continue;
                 }
             }
@@ -198,17 +205,17 @@ pub const Document = struct {
     }
 
     fn table(d: *Document, depth: u16, header: []const u8, delimiter: []const u8, lines: *Quoted) !void {
-        var b: Document.Block = .{ .kind = .table, .depth = depth, .start = d._text.items.len, .first_span = d._spans.items.len };
+        var b: Document.Block = .{ .kind = .table, .depth = depth, .start = d.own_text.items.len, .first_span = d.own_spans.items.len };
         const columns: u16 = @intCast(@min(cellCount(header), std.math.maxInt(u16)));
-        const first_align = d._aligns.items.len;
+        const first_align = d.aligns.items.len;
         var delimiters: Cells = .init(delimiter);
         while (delimiters.next()) |cell| {
             const c = std.mem.trim(u8, cell, " \t");
             const left = c[0] == ':';
             const right = c[c.len - 1] == ':';
-            try d._aligns.append(d._allocator, if (left and right) .center else if (left) .left else if (right) .right else .none);
+            try d.aligns.append(d.allocator, if (left and right) .center else if (left) .left else if (right) .right else .none);
         }
-        const first_cell = d._cells.items.len;
+        const first_cell = d.own_cells.items.len;
         try d.row(header, columns);
         var rows: usize = 1;
         while (true) {
@@ -222,9 +229,9 @@ pub const Document = struct {
             rows += 1;
         }
         b.table = .{ .columns = columns, .rows = rows, .first_cell = first_cell, .first_align = first_align };
-        b.end = d._text.items.len;
-        b.end_span = d._spans.items.len;
-        try d._blocks.append(d._allocator, b);
+        b.end = d.own_text.items.len;
+        b.end_span = d.own_spans.items.len;
+        try d.own_blocks.append(d.allocator, b);
     }
 
     /// One row of a table: exactly `columns` cells, the ones it lacks empty
@@ -234,46 +241,46 @@ pub const Document = struct {
         var n: u16 = 0;
         while (n < columns) : (n += 1) {
             const raw = std.mem.trim(u8, it.next() orelse "", " \t");
-            const start = d._text.items.len;
-            const first_span = d._spans.items.len;
-            d._in_cell = true;
-            defer d._in_cell = false;
+            const start = d.own_text.items.len;
+            const first_span = d.own_spans.items.len;
+            d.in_cell = true;
+            defer d.in_cell = false;
             try d.inlineRead(raw, .{}, "", 0);
-            try d._cells.append(d._allocator, .{ .start = start, .end = d._text.items.len, .first_span = first_span, .end_span = d._spans.items.len });
+            try d.own_cells.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .first_span = first_span, .end_span = d.own_spans.items.len });
         }
     }
 
     fn block(d: *Document, value: Document.Block, body: []const u8, literal: bool) !void {
         var b = value;
-        b.start = d._text.items.len;
-        b.first_span = d._spans.items.len;
+        b.start = d.own_text.items.len;
+        b.first_span = d.own_spans.items.len;
         if (literal) try d.append(body, .{}, "") else try d.inlineRead(body, .{}, "", 0);
-        b.end = d._text.items.len;
-        b.end_span = d._spans.items.len;
-        try d._blocks.append(d._allocator, b);
+        b.end = d.own_text.items.len;
+        b.end_span = d.own_spans.items.len;
+        try d.own_blocks.append(d.allocator, b);
     }
 
     /// Bytes kept as they are, but for a table cell's escaped pipes, which
     /// are pipes even here.
     fn appendLiteral(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
-        if (!d._in_cell or std.mem.find(u8, bytes, "\\|") == null) return d.append(bytes, flags, uri);
-        const start = d._text.items.len;
-        try d._text.ensureUnusedCapacity(d._allocator, bytes.len);
+        if (!d.in_cell or std.mem.find(u8, bytes, "\\|") == null) return d.append(bytes, flags, uri);
+        const start = d.own_text.items.len;
+        try d.own_text.ensureUnusedCapacity(d.allocator, bytes.len);
         var i: usize = 0;
         while (i < bytes.len) : (i += 1) {
             if (bytes[i] == '\\' and i + 1 < bytes.len and bytes[i + 1] == '|') continue;
-            d._text.appendAssumeCapacity(bytes[i]);
+            d.own_text.appendAssumeCapacity(bytes[i]);
         }
-        try d._spans.append(d._allocator, .{ .start = start, .end = d._text.items.len, .flags = flags, .uri = uri });
+        try d.own_spans.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
     }
 
     /// A link target, its escaped pipes taken out in a table cell.
     fn cellTarget(d: *Document, raw: []const u8) ![]const u8 {
-        if (!d._in_cell or std.mem.find(u8, raw, "\\|") == null) return raw;
-        const owned = try d._allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
+        if (!d.in_cell or std.mem.find(u8, raw, "\\|") == null) return raw;
+        const owned = try d.allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
         _ = std.mem.replace(u8, raw, "\\|", "|", owned);
-        d._unescaped.append(d._allocator, owned) catch |err| {
-            d._allocator.free(owned);
+        d.unescaped.append(d.allocator, owned) catch |err| {
+            d.allocator.free(owned);
             return err;
         };
         return owned;
@@ -365,9 +372,10 @@ pub const Document = struct {
 /// code or continue a list item depends on the blocks before, which only
 /// `Document` keeps. Borrows `source`; allocates nothing.
 pub const Quoted = struct {
-    _lines: std.mem.SplitIterator(u8, .scalar),
-    /// The block the lines are in, and the quote depth it opened at.
-    _fence: ?struct { fence: Fence, depth: u16 } = null,
+    /// Private.
+    lines: std.mem.SplitIterator(u8, .scalar),
+    /// Private: the block the lines are in, and the quote depth it opened at.
+    own_fence: ?struct { fence: Fence, depth: u16 } = null,
 
     /// One source line, read.
     pub const Line = struct {
@@ -395,15 +403,15 @@ pub const Quoted = struct {
     /// The lines of `source`, which is split at every `\n`: a source that
     /// ends in one ends in an empty line.
     pub fn init(source: []const u8) Quoted {
-        return .{ ._lines = std.mem.splitScalar(u8, source, '\n') };
+        return .{ .lines = std.mem.splitScalar(u8, source, '\n') };
     }
 
     /// The next line, or null after the last.
     pub fn next(q: *Quoted) ?Line {
-        const raw = q._lines.next() orelse return null;
+        const raw = q.lines.next() orelse return null;
         const text = std.mem.trimEnd(u8, raw, "\r");
         const marked = quote(text);
-        if (q._fence) |open| {
+        if (q.own_fence) |open| {
             const body = stripQuote(text, open.depth);
             const trimmed = std.mem.trimStart(u8, body, " ");
             const closes = if (fence(trimmed)) |run|
@@ -411,7 +419,7 @@ pub const Quoted = struct {
                     std.mem.trim(u8, trimmed[run.count..], " \t").len == 0
             else
                 false;
-            if (closes) q._fence = null;
+            if (closes) q.own_fence = null;
             return .{ .text = text, .body = body, .depth = open.depth, .code = true, .fence = open.fence, .closes = closes };
         }
         const plain: Line = .{ .text = text, .body = marked.rest, .depth = marked.depth, .code = false };
@@ -421,7 +429,7 @@ pub const Quoted = struct {
         const trimmed = std.mem.trim(u8, marked.rest, " \t");
         const run = fence(trimmed) orelse return plain;
         const opened: Fence = .{ .char = run.char, .count = run.count, .info = std.mem.trim(u8, trimmed[run.count..], " \t") };
-        q._fence = .{ .fence = opened, .depth = marked.depth };
+        q.own_fence = .{ .fence = opened, .depth = marked.depth };
         return .{ .text = text, .body = marked.rest, .depth = marked.depth, .code = true, .fence = opened, .opens = true };
     }
 };

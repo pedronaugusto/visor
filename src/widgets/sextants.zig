@@ -160,7 +160,7 @@ test "unavailable pixels do not overflow the declared picture dimensions" {
     for ([_][2]usize{ .{ std.math.maxInt(usize), 2 }, .{ 2, std.math.maxInt(usize) }, .{ 0, std.math.maxInt(usize) } }) |size| {
         try (Sextants{ .pixels = &.{}, .width = size[0], .height = size[1] }).draw(h.window());
     }
-    try testing.expect(!h.screen._damage.any());
+    try testing.expect(!h.screen.damage.any());
 }
 
 test "sextant brightness and foreground include pixel coverage" {

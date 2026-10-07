@@ -259,23 +259,3 @@ test "transmission options have one public name" {
     _ = try layers.transmit(&out.writer, 1, &.{ 0, 0, 0, 255 }, how);
     try std.testing.expectEqual(@as(usize, 1), layers.images().len);
 }
-
-/// Every field of `T` outside `public` is its owner's state, named with a
-/// leading underscore: read through a method, never taken whole. Checked
-/// while the tests compile, naming the field that is neither.
-fn expectOwned(comptime T: type, comptime public: []const []const u8) void {
-    inline for (@typeInfo(T).@"struct".field_names) |field_name| {
-        const listed = for (public) |name| {
-            if (std.mem.eql(u8, name, field_name)) break true;
-        } else false;
-        if (!listed and field_name[0] != '_') @compileError(@typeName(T) ++ "." ++ field_name ++ " is neither public nor underscored");
-    }
-}
-
-test "owned state outside each type's documented fields stays behind its owner" {
-    // What a program sets on the grid each frame.
-    comptime expectOwned(Screen, &.{ "cursor", "pointer", "method" });
-    inline for (.{ Renderer, Session, Term, Tty, Input, Damage, Graphemes, Parts, Caps.Probe, OwnedTarget, Replacement, ImageIds, Window, Layers }) |T| {
-        comptime expectOwned(T, &.{});
-    }
-}

@@ -376,7 +376,7 @@ comparing the meaning are the same answer.
 A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
 `Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
 
-State with a leading underscore belongs to the value that holds it and is
+State documented `Private:` belongs to the value that holds it and is
 read and changed through that value's methods; the doc comments say what
 each lends and for how long. Pooled handles carry the generation of the pool
 that issued them, so a handle that outlived a compaction or came from another

@@ -35,10 +35,10 @@ test "managed screens and renderers use their captured allocator through every o
 test "the grid and renderer store compact cells while exported handles stay checked" {
     var s = try made(3, 1);
     defer s.deinit();
-    try testing.expect(@sizeOf(@TypeOf(s._cells[0])) <= 32);
+    try testing.expect(@sizeOf(@TypeOf(s.own_cells[0])) <= 32);
     var renderer = try Renderer.init(testing.allocator, s.dimensions());
     defer renderer.deinit();
-    try testing.expect(@sizeOf(@TypeOf(renderer._prev[0])) <= 32);
+    try testing.expect(@sizeOf(@TypeOf(renderer.prev[0])) <= 32);
     const glyph = "👩‍🚀";
     try s.write(0, 0, glyph, .{}, try s.link("https://checked.invalid", ""));
     const read: *const fn (*const Screen, u16, u16) ?Cell = &Screen.readCell;
@@ -64,8 +64,8 @@ test "raw pools and renderer storage stay behind the checked boundary" {
     const link = try s.link("https://checked.invalid", "");
     try s.writeOwnedCell(0, 0, .{ .text = text, .link = link });
     const exported = s.readCell(0, 0).?;
-    try testing.expectEqual(s._pool_generation, exported.text.generation());
-    try testing.expectEqual(s._pool_generation, exported.link.generation());
+    try testing.expectEqual(s.pool_generation, exported.text.generation());
+    try testing.expectEqual(s.pool_generation, exported.link.generation());
 }
 
 test "screen and renderer geometry and allocation metadata have one owner" {

@@ -177,26 +177,29 @@ pub const Target = struct {
 /// An independent copy of a link target. `deinit` releases both slices
 /// through the allocator the copy was made with.
 pub const OwnedTarget = struct {
-    _gpa: Allocator,
-    _uri: []const u8,
-    _params: []const u8,
+    /// Private.
+    gpa: Allocator,
+    /// Private.
+    uri: []const u8,
+    /// Private.
+    params: []const u8,
 
     /// Copies both target slices, retaining the allocator that releases them.
     pub fn init(gpa: Allocator, source: Target) Allocator.Error!OwnedTarget {
         const uri = try gpa.dupe(u8, source.uri);
         errdefer gpa.free(uri);
         const params = try gpa.dupe(u8, source.params);
-        return .{ ._gpa = gpa, ._uri = uri, ._params = params };
+        return .{ .gpa = gpa, .uri = uri, .params = params };
     }
 
     /// The target borrowed read-only until deinit. The slice descriptors are copies.
     pub fn target(t: *const OwnedTarget) Target {
-        return .{ .uri = t._uri, .params = t._params };
+        return .{ .uri = t.uri, .params = t.params };
     }
 
     pub fn deinit(t: *OwnedTarget) void {
-        t._gpa.free(t._uri);
-        t._gpa.free(t._params);
+        t.gpa.free(t.uri);
+        t.gpa.free(t.params);
         t.* = undefined;
     }
 };

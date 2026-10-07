@@ -61,7 +61,7 @@ pub fn Rows(comptime render: type) type {
                 try morse.scrollDown(out, found.distance);
             }
             if (!whole) try morse.scrollRegionReset(out);
-            r._cursor = null;
+            r.own_cursor = null;
 
             render.internal.shiftPrev(r, found.top, found.bottom, found.distance, found.up);
             return @as(u32, found.bottom - found.top) + 1;
@@ -71,14 +71,14 @@ pub fn Rows(comptime render: type) type {
         /// band of rows it explains, then checks that band cell by cell.
         fn detect(r: *Renderer, comptime fit: Profile, s: *const Screen, caps: Caps) ?Found {
             const rows = r.dimensions().rows;
-            if (rows < 3 or r._repaint_all) return null;
-            if (s._damage.count() < min_dirty_rows) return null;
-            for (r._force) |f| if (f) return null;
+            if (rows < 3 or r.repaint_all) return null;
+            if (s.damage.count() < min_dirty_rows) return null;
+            for (r.force) |f| if (f) return null;
 
             // Two hashes a row, this frame's and the last one's, sized at resize.
-            assert(r._hashes.len == @as(usize, rows) * 2);
-            const now = r._hashes[0..rows];
-            const was = r._hashes[rows..][0..rows];
+            assert(r.hashes.len == @as(usize, rows) * 2);
+            const now = r.hashes[0..rows];
+            const was = r.hashes[rows..][0..rows];
             for (0..rows) |i| {
                 now[i] = hashRow(fit, screen.internal.row(s, @intCast(i)), caps);
                 was[i] = hashRow(fit, render.internal.prevRow(r, @intCast(i)), caps);

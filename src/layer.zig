@@ -195,24 +195,28 @@ pub const Transmit = struct {
 /// replacements. Skips zero, the probe id and every image still held by
 /// `Layers`, including those awaiting retirement.
 pub const ImageIds = struct {
-    _first: u32,
-    _last: u32,
-    _graphics_id: u32,
-    _next: u32,
+    /// Private.
+    first: u32,
+    /// Private.
+    last: u32,
+    /// Private.
+    graphics_id: u32,
+    /// Private.
+    next: u32,
 
     pub fn init(first: u32, last: u32, graphics_id: u32) error{InvalidIdRange}!ImageIds {
         if (first == 0 or first > last or (first == last and first == graphics_id)) return error.InvalidIdRange;
-        return .{ ._first = first, ._last = last, ._graphics_id = graphics_id, ._next = first };
+        return .{ .first = first, .last = last, .graphics_id = graphics_id, .next = first };
     }
 
     /// A free id, or `NoImageId` while the range is wholly occupied.
     pub fn acquire(ids: *ImageIds, layers: *const Layers) error{NoImageId}!u32 {
-        const start = ids._next;
+        const start = ids.next;
         while (true) {
-            const id = ids._next;
-            ids._next = if (id == ids._last) ids._first else id + 1;
-            if (id != ids._graphics_id and layers.image(id) == null) return id;
-            if (ids._next == start) return error.NoImageId;
+            const id = ids.next;
+            ids.next = if (id == ids.last) ids.first else id + 1;
+            if (id != ids.graphics_id and layers.image(id) == null) return id;
+            if (ids.next == start) return error.NoImageId;
         }
     }
 };
@@ -223,18 +227,21 @@ pub const ImageIds = struct {
 /// One transmit may be in flight. The caller owns the value, its id range,
 /// grace period and any decision about when to produce another picture.
 pub const Replacement = struct {
-    _current: ?u32 = null,
-    _pending: ?u32 = null,
-    _dirty: bool = false,
+    /// Private.
+    own_current: ?u32 = null,
+    /// Private.
+    own_pending: ?u32 = null,
+    /// Private.
+    dirty: bool = false,
 
     /// The usable picture id, by value; retire it through this owner.
     pub fn current(p: *const Replacement) ?u32 {
-        return p._current;
+        return p.own_current;
     }
 
     /// The picture still awaiting settlement, by value.
     pub fn pending(p: *const Replacement) ?u32 {
-        return p._pending;
+        return p.own_pending;
     }
 
     pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId, PayloadTooLarge };
@@ -242,24 +249,24 @@ pub const Replacement = struct {
     /// Whether another picture can be sent. Call `settle` or `declare` to settle a
     /// ready or refused pending picture before sending the next one.
     pub fn canSend(p: *const Replacement) bool {
-        return p._pending == null;
+        return p.own_pending == null;
     }
 
     /// Sends one new picture, returning its id and payload byte count.
     /// On a partial write the recorded image is retired at the next commit
     /// and `takeDirty` asks the owner to produce it again.
     pub fn send(p: *Replacement, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!struct { id: u32, bytes: usize } {
-        const gpa = layers._gpa;
+        const gpa = layers.gpa;
         if (!p.canSend()) return error.Busy;
         const id = try ids.acquire(layers);
         // Reserve cleanup before any command can reach the terminal.
-        try layers._retired.ensureUnusedCapacity(gpa, 1);
+        try layers.retired.ensureUnusedCapacity(gpa, 1);
         const bytes = layers.transmit(w, id, pixels, how) catch |err| {
-            if (layers.image(id) != null) layers._retired.appendAssumeCapacity(id);
-            p._dirty = true;
+            if (layers.image(id) != null) layers.retired.appendAssumeCapacity(id);
+            p.dirty = true;
             return err;
         };
-        p._pending = id;
+        p.own_pending = id;
         return .{ .id = id, .bytes = bytes };
     }
 
@@ -269,31 +276,31 @@ pub const Replacement = struct {
     /// On allocation failure, current and pending ownership stay unchanged.
     pub fn settle(p: *Replacement, layers: *Layers, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
         // Reserve every retirement before changing either ownership slot.
-        const current_failed = if (p._current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
-        const reserve: usize = if (p._pending != null) 1 + @as(usize, @intFromBool(p._current != null)) else @intFromBool(current_failed);
-        try layers._retired.ensureUnusedCapacity(layers._gpa, reserve);
-        if (p._pending) |id| {
+        const current_failed = if (p.own_current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
+        const reserve: usize = if (p.own_pending != null) 1 + @as(usize, @intFromBool(p.own_current != null)) else @intFromBool(current_failed);
+        try layers.retired.ensureUnusedCapacity(layers.gpa, reserve);
+        if (p.own_pending) |id| {
             const ready = layers.ready(id, now_ms, grace_ms);
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
             if (failed) {
                 try layers.retire(id);
-                p._pending = null;
-                p._dirty = true;
+                p.own_pending = null;
+                p.dirty = true;
             } else if (ready) {
-                if (p._current) |old| try layers.retire(old);
-                p._current = id;
-                p._pending = null;
+                if (p.own_current) |old| try layers.retire(old);
+                p.own_current = id;
+                p.own_pending = null;
             }
         }
-        if (p._current) |id| {
+        if (p.own_current) |id| {
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
             if (failed) {
                 try layers.retire(id);
-                p._current = null;
-                p._dirty = true;
+                p.own_current = null;
+                p.dirty = true;
             }
         }
-        return p._pending != null;
+        return p.own_pending != null;
     }
 
     /// Settle and declare at want, overriding its image id. Returns true
@@ -301,11 +308,11 @@ pub const Replacement = struct {
     /// ownership unsettled and makes no declaration; use settle explicitly
     /// to advance hidden pictures.
     pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
-        var at = want orelse return p._pending != null;
+        var at = want orelse return p.own_pending != null;
         // A declaration must be able to commit after ownership changes.
-        try layers._declared.ensureUnusedCapacity(layers._gpa, 1);
+        try layers.declared.ensureUnusedCapacity(layers.gpa, 1);
         const waiting = try p.settle(layers, now_ms, grace_ms);
-        if (p._current) |id| {
+        if (p.own_current) |id| {
             at.image = id;
             try layers.declare(at);
         }
@@ -315,19 +322,19 @@ pub const Replacement = struct {
     /// Whether a refusal or write failure asked for another picture since
     /// last checked. Call `settle` or `declare` after `Layers.ack` to fold refusals in.
     pub fn takeDirty(p: *Replacement) bool {
-        defer p._dirty = false;
-        return p._dirty;
+        defer p.dirty = false;
+        return p.dirty;
     }
 
     /// Retires everything this value owns at the next committed frame.
     pub fn retire(p: *Replacement, layers: *Layers) Allocator.Error!void {
-        const gpa = layers._gpa;
-        try layers._retired.ensureUnusedCapacity(gpa, 2);
-        if (p._current) |id| {
+        const gpa = layers.gpa;
+        try layers.retired.ensureUnusedCapacity(gpa, 2);
+        if (p.own_current) |id| {
             try layers.retire(id);
             layers.undeclareImage(id);
         }
-        if (p._pending) |id| {
+        if (p.own_pending) |id| {
             try layers.retire(id);
             layers.undeclareImage(id);
         }
@@ -364,52 +371,59 @@ const InlineImage = struct {
 
 /// The images this program has sent, and what this frame shows of them.
 pub const Layers = struct {
-    _gpa: Allocator,
+    /// Private.
+    gpa: Allocator,
 
-    // Fields prefixed _ are implementation storage; use metadata accessors.
-    /// The images the terminal holds for this program, one per id. Sending
+    // Fields documented Private: are implementation storage; use metadata accessors.
+    /// Private: the images the terminal holds for this program, one per id. Sending
     /// to an id replaces its entry and freeing one removes it, so the list
     /// is as long as the pictures that are alive.
-    _images: std.ArrayList(Image) = .empty,
-    /// What this frame has declared, in declaration order.
-    _declared: std.ArrayList(Layer) = .empty,
-    /// What the terminal is showing, after the last `emit`.
-    _shown: std.ArrayList(Layer) = .empty,
-    /// Images freed only after a complete frame stopped declaring them.
-    _retired: std.ArrayList(u32) = .empty,
-    /// Whether this terminal answers a transmit: unknown until the first
+    own_images: std.ArrayList(Image) = .empty,
+    /// Private: what this frame has declared, in declaration order.
+    declared: std.ArrayList(Layer) = .empty,
+    /// Private: what the terminal is showing, after the last `emit`.
+    shown: std.ArrayList(Layer) = .empty,
+    /// Private: images freed only after a complete frame stopped declaring them.
+    retired: std.ArrayList(u32) = .empty,
+    /// Private: whether this terminal answers a transmit: unknown until the first
     /// answer (true), or until a grace period runs out with no answer ever
     /// (false), after which direct transmissions are not waited for.
-    _answers: ?bool = null,
-    /// How many images were taken as ready because the grace period ran
+    answers: ?bool = null,
+    /// Private: how many images were taken as ready because the grace period ran
     /// out rather than because the terminal said so.
-    _fallbacks: u32 = 0,
-    /// The deflate window, made the first time a picture is compressed and
+    fallbacks: u32 = 0,
+    /// Private: the deflate window, made the first time a picture is compressed and
     /// kept for the next.
-    _window: []u8 = &.{},
-    /// Where a picture is deflated to, kept and reused for the next, so
+    window: []u8 = &.{},
+    /// Private: where a picture is deflated to, kept and reused for the next, so
     /// sending pictures frame after frame allocates nothing once the buffer
     /// has grown to the largest of them.
-    _deflated: std.ArrayList(u8) = .empty,
-    /// Whether the next `emit` places every declared layer, whatever `shown`
+    deflated: std.ArrayList(u8) = .empty,
+    /// Private: whether the next `emit` places every declared layer, whatever `shown`
     /// says, because the terminal may have moved or dropped any of them.
-    _replace_all: bool = false,
-    /// Pictures through shared memory, where the program allows it (the
+    replace_all: bool = false,
+    /// Private: pictures through shared memory, where the program allows it (the
     /// terminal is on this machine, or may be): null sends every picture
     /// in the escape code.
-    _shared_memory: ?SharedMemory = null,
-    _shared_objects: std.ArrayList(SharedObject) = .empty,
-    _inline: std.ArrayList(InlineImage) = .empty,
-    _size: Winsize = .{},
-    _inline_dirty: bool = false,
-    _sixel_cursor_right: bool = false,
-    _protocol: ?Caps.Pictures = null,
+    shared_memory: ?SharedMemory = null,
+    /// Private.
+    shared_objects: std.ArrayList(SharedObject) = .empty,
+    /// Private.
+    own_inline: std.ArrayList(InlineImage) = .empty,
+    /// Private.
+    size: Winsize = .{},
+    /// Private.
+    inline_dirty: bool = false,
+    /// Private.
+    sixel_cursor_right: bool = false,
+    /// Private.
+    protocol: ?Caps.Pictures = null,
 
     /// Geometry for inline pictures, including the probe's cell size.
     /// Renderer supplies the grid bounds; unknown pixel sizes suppress sixels.
     pub fn configureSize(l: *Layers, size: Winsize) void {
-        if (!std.meta.eql(l._size, size)) l.repaint();
-        l._size = size;
+        if (!std.meta.eql(l.size, size)) l.repaint();
+        l.size = size;
     }
 
     /// Retains a copy of pixels and palette for a sixel picture. No bytes
@@ -428,10 +442,10 @@ pub const Layers = struct {
         if (image_data.pixels == .indexed) for (pixels) |index| {
             if (index >= image_data.palette.len and index != image_data.transparent) return error.InvalidImage;
         };
-        var held: InlineImage = .{ .id = id, .data = try l._gpa.dupe(u8, pixels) };
-        errdefer held.deinit(l._gpa);
-        held.scratch = try l._gpa.alloc(u8, std.math.mul(usize, pixel_count, 4) catch return error.InvalidImage);
-        held.palette = try l._gpa.dupe(morse.Rgb, image_data.palette);
+        var held: InlineImage = .{ .id = id, .data = try l.gpa.dupe(u8, pixels) };
+        errdefer held.deinit(l.gpa);
+        held.scratch = try l.gpa.alloc(u8, std.math.mul(usize, pixel_count, 4) catch return error.InvalidImage);
+        held.palette = try l.gpa.dupe(morse.Rgb, image_data.palette);
         var copied = image_data;
         copied.pixels = if (channels == 4) .{ .rgba = held.data } else .{ .indexed = held.data };
         copied.palette = held.palette;
@@ -444,57 +458,57 @@ pub const Layers = struct {
     /// Files are fitted to the placement's cell rectangle without preserving
     /// aspect ratio. Source cropping belongs to the caller's image decoder.
     pub fn storeIterm(l: *Layers, id: u32, file: []const u8, part_bytes: usize) Allocator.Error!void {
-        const held: InlineImage = .{ .id = id, .data = try l._gpa.dupe(u8, file), .part_bytes = part_bytes };
-        errdefer held.deinit(l._gpa);
+        const held: InlineImage = .{ .id = id, .data = try l.gpa.dupe(u8, file), .part_bytes = part_bytes };
+        errdefer held.deinit(l.gpa);
         try l.storeInline(held, .{ .id = id, .protocol = .iterm });
     }
 
     fn storeInline(l: *Layers, held: InlineImage, metadata: Image) Allocator.Error!void {
-        try l._inline.ensureUnusedCapacity(l._gpa, 1);
+        try l.own_inline.ensureUnusedCapacity(l.gpa, 1);
         try l.record(metadata);
-        l._inline.appendAssumeCapacity(held);
-        l._inline_dirty = true;
+        l.own_inline.appendAssumeCapacity(held);
+        l.inline_dirty = true;
     }
 
     /// Whether an inline picture changed since the last accepted frame.
     /// The diff renderer erases the old footprint before drawing again.
     pub fn inlineChanged(l: *const Layers) bool {
-        if (l._inline_dirty or l._replace_all or l._shown.items.len != l._declared.items.len) return true;
-        for (l._declared.items) |now| {
-            const i = findSameIndex(l._shown.items, now) orelse return true;
-            if (!now.eql(l._shown.items[i])) return true;
+        if (l.inline_dirty or l.replace_all or l.shown.items.len != l.declared.items.len) return true;
+        for (l.declared.items) |now| {
+            const i = findSameIndex(l.shown.items, now) orelse return true;
+            if (!now.eql(l.shown.items[i])) return true;
         }
         return false;
     }
 
     /// Captures the allocator for every image, placement and scratch buffer.
     pub fn init(gpa: Allocator) Layers {
-        return .{ ._gpa = gpa };
+        return .{ .gpa = gpa };
     }
 
     /// Borrowed metadata; expires when images change or Layers is destroyed.
     pub fn images(l: *const Layers) []const Image {
-        return l._images.items;
+        return l.own_images.items;
     }
     /// This frame's declarations, borrowed until a declaration or frame commit.
     pub fn declarations(l: *const Layers) []const Layer {
-        return l._declared.items;
+        return l.declared.items;
     }
     /// The placements last committed, borrowed until the next frame or clear.
     pub fn placements(l: *const Layers) []const Layer {
-        return l._shown.items;
+        return l.shown.items;
     }
     /// Whether a frame must process pictures or retirements.
     pub fn hasFrameWork(l: *const Layers) bool {
-        return l._declared.items.len != 0 or l._shown.items.len != 0 or l._retired.items.len != 0;
+        return l.declared.items.len != 0 or l.shown.items.len != 0 or l.retired.items.len != 0;
     }
     /// The terminal's learned direct-transmission answer policy.
     pub fn answerPolicy(l: *const Layers) ?bool {
-        return l._answers;
+        return l.answers;
     }
     /// Images accepted after their answer grace period.
     pub fn fallbackCount(l: *const Layers) u32 {
-        return l._fallbacks;
+        return l.fallbacks;
     }
 
     /// Allows shared memory through `io`, or disables it with null. This
@@ -504,27 +518,27 @@ pub const Layers = struct {
     /// must outlive every outstanding object, including after configuration changes.
     pub fn configureSharedMemory(l: *Layers, io: ?std.Io) void {
         if (io) |next| {
-            if (l._shared_memory) |current| {
+            if (l.shared_memory) |current| {
                 if (current.io.userdata == next.userdata and current.io.vtable == next.vtable) return;
             }
-            l._shared_memory = .{ .io = next, .generation = shm.nextNamespace() };
-        } else l._shared_memory = null;
+            l.shared_memory = .{ .io = next, .generation = shm.nextNamespace() };
+        } else l.shared_memory = null;
     }
 
     /// Gives the lists and the window back, and unlinks any picture still
     /// in shared memory.
     pub fn deinit(l: *Layers) void {
-        const gpa = l._gpa;
-        for (l._shared_objects.items) |object| object.deinit();
-        l._shared_objects.deinit(gpa);
-        for (l._inline.items) |held| held.deinit(gpa);
-        l._inline.deinit(gpa);
-        l._images.deinit(gpa);
-        l._declared.deinit(gpa);
-        l._shown.deinit(gpa);
-        l._retired.deinit(gpa);
-        gpa.free(l._window);
-        l._deflated.deinit(gpa);
+        const gpa = l.gpa;
+        for (l.shared_objects.items) |object| object.deinit();
+        l.shared_objects.deinit(gpa);
+        for (l.own_inline.items) |held| held.deinit(gpa);
+        l.own_inline.deinit(gpa);
+        l.own_images.deinit(gpa);
+        l.declared.deinit(gpa);
+        l.shown.deinit(gpa);
+        l.retired.deinit(gpa);
+        gpa.free(l.window);
+        l.deflated.deinit(gpa);
         l.* = undefined;
     }
 
@@ -534,7 +548,7 @@ pub const Layers = struct {
     }
 
     fn find(l: *const Layers, id: u32) ?*Image {
-        for (l._images.items) |*held| {
+        for (l.own_images.items) |*held| {
             if (held.id == id) return held;
         }
         return null;
@@ -566,21 +580,21 @@ pub const Layers = struct {
         pixels: []const u8,
         how: Transmit,
     ) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!usize {
-        const gpa = l._gpa;
-        if (l._shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
+        const gpa = l.gpa;
+        if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(w, sm, id, pixels, how)) |n| return n;
         };
-        var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l._deflated);
-        defer l._deflated = packed_pixels.toArrayList();
+        var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l.deflated);
+        defer l.deflated = packed_pixels.toArrayList();
         packed_pixels.clearRetainingCapacity();
         var payload = pixels;
         var compressed = false;
         if (how.compress and how.format != .png and pixels.len > 64) {
-            if (l._window.len == 0) l._window = try gpa.alloc(u8, std.compress.flate.max_window_len);
+            if (l.window.len == 0) l.window = try gpa.alloc(u8, std.compress.flate.max_window_len);
             try packed_pixels.ensureTotalCapacity(pixels.len / 8 + 1024);
             var deflate = std.compress.flate.Compress.init(
                 &packed_pixels.writer,
-                l._window,
+                l.window,
                 .zlib,
                 .fastest,
             ) catch return error.OutOfMemory;
@@ -617,8 +631,8 @@ pub const Layers = struct {
     /// The record of an image sent, replacing the one under its id; the
     /// terminal takes that image's placements down while it lands.
     fn record(l: *Layers, rec: Image) Allocator.Error!void {
-        const gpa = l._gpa;
-        if (l.find(rec.id) == null) try l._images.ensureUnusedCapacity(gpa, 1);
+        const gpa = l.gpa;
+        if (l.find(rec.id) == null) try l.own_images.ensureUnusedCapacity(gpa, 1);
         l.recordReserved(rec);
     }
 
@@ -626,7 +640,7 @@ pub const Layers = struct {
         if (l.find(rec.id)) |held| {
             l.release(held);
             held.* = rec;
-        } else l._images.appendAssumeCapacity(rec);
+        } else l.own_images.appendAssumeCapacity(rec);
         l.forgetShown(rec.id);
     }
 
@@ -635,12 +649,12 @@ pub const Layers = struct {
     /// picture goes in the escape code). While the medium is on trial the
     /// terminal is asked to answer, whatever the caller asked.
     fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!?usize {
-        const gpa = l._gpa;
+        const gpa = l.gpa;
         const size = try sharedSize(pixels.len);
         // Reserve before the OS object exists. Once it does, the image
         // record can take its name without any further allocation.
-        if (l.find(id) == null) try l._images.ensureUnusedCapacity(gpa, 1);
-        if (l.sharedObject(id) == null) try l._shared_objects.ensureUnusedCapacity(gpa, 1);
+        if (l.find(id) == null) try l.own_images.ensureUnusedCapacity(gpa, 1);
+        if (l.sharedObject(id) == null) try l.shared_objects.ensureUnusedCapacity(gpa, 1);
         const object = SharedObject.init(sm.*, id, pixels) catch {
             sm.state = .no;
             return null;
@@ -654,7 +668,7 @@ pub const Layers = struct {
             .sent_ms = how.now_ms,
             .shm = object.name,
         });
-        l._shared_objects.appendAssumeCapacity(object);
+        l.shared_objects.appendAssumeCapacity(object);
         errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
@@ -672,7 +686,7 @@ pub const Layers = struct {
     /// the terminal unlinks what it reads, and what it could not read is
     /// this program's to take away.
     fn sharedObject(l: *const Layers, id: u32) ?SharedObject {
-        for (l._shared_objects.items) |object| {
+        for (l.shared_objects.items) |object| {
             if (object.id == id) return object;
         }
         return null;
@@ -680,15 +694,15 @@ pub const Layers = struct {
 
     fn release(l: *Layers, held: *Image) void {
         held.shm = null;
-        for (l._inline.items, 0..) |inline_image, i| {
+        for (l.own_inline.items, 0..) |inline_image, i| {
             if (inline_image.id != held.id) continue;
-            l._inline.swapRemove(i).deinit(l._gpa);
-            l._inline_dirty = true;
+            l.own_inline.swapRemove(i).deinit(l.gpa);
+            l.inline_dirty = true;
             break;
         }
-        for (l._shared_objects.items, 0..) |object, i| {
+        for (l.shared_objects.items, 0..) |object, i| {
             if (object.id != held.id) continue;
-            const owned = l._shared_objects.swapRemove(i);
+            const owned = l.shared_objects.swapRemove(i);
             owned.deinit();
             return;
         }
@@ -697,7 +711,7 @@ pub const Layers = struct {
     // A reply to an object from an earlier configuration cannot settle the
     // current medium's trial or turn that medium off.
     fn policyFor(l: *Layers, object: SharedObject) ?*SharedMemory {
-        const policy = if (l._shared_memory) |*sm| sm else return null;
+        const policy = if (l.shared_memory) |*sm| sm else return null;
         return if (policy.generation == object.generation) policy else null;
     }
 
@@ -720,7 +734,7 @@ pub const Layers = struct {
                 // Silence permits only bytes sent through the escape code
                 // to be taken on trust. Shared memory needs its own proof.
                 const shared = l.sharedObject(id);
-                if (shared == null and l._answers == false) {
+                if (shared == null and l.answers == false) {
                     held.state = .ready;
                     return true;
                 }
@@ -735,8 +749,8 @@ pub const Layers = struct {
                     return false;
                 }
                 held.state = .ready;
-                l._fallbacks += 1;
-                if (l._answers == null) l._answers = false;
+                l.fallbacks += 1;
+                if (l.answers == null) l.answers = false;
                 return true;
             },
         }
@@ -748,7 +762,7 @@ pub const Layers = struct {
     pub fn ack(l: *Layers, response: morse.GraphicsResponse) void {
         const id = response.id orelse return;
         const held = l.find(id) orelse return;
-        l._answers = true;
+        l.answers = true;
         if (held.state != .failed) held.state = if (response.ok()) .ready else .failed;
         if (l.sharedObject(id)) |object| {
             l.release(held);
@@ -768,18 +782,18 @@ pub const Layers = struct {
     pub fn free(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
         if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
         var i: usize = 0;
-        while (i < l._images.items.len) {
-            if (l._images.items[i].id == id) {
-                l.release(&l._images.items[i]);
-                _ = l._images.swapRemove(i);
+        while (i < l.own_images.items.len) {
+            if (l.own_images.items[i].id == id) {
+                l.release(&l.own_images.items[i]);
+                _ = l.own_images.swapRemove(i);
             } else i += 1;
         }
         l.forgetShown(id);
         l.undeclareImage(id);
         var retired_i: usize = 0;
-        while (retired_i < l._retired.items.len) {
-            if (l._retired.items[retired_i] == id) {
-                _ = l._retired.swapRemove(retired_i);
+        while (retired_i < l.retired.items.len) {
+            if (l.retired.items[retired_i] == id) {
+                _ = l.retired.swapRemove(retired_i);
             } else retired_i += 1;
         }
     }
@@ -787,16 +801,16 @@ pub const Layers = struct {
     /// Frees `id` inside `commitFrame`, after placements and deletions.
     /// A still-declared image is kept until a later frame stops using it.
     pub fn retire(l: *Layers, id: u32) Allocator.Error!void {
-        const gpa = l._gpa;
-        if (std.mem.findScalar(u32, l._retired.items, id) != null) return;
-        try l._retired.append(gpa, id);
+        const gpa = l.gpa;
+        if (std.mem.findScalar(u32, l.retired.items, id) != null) return;
+        try l.retired.append(gpa, id);
     }
 
     /// Frees every image. What a program writes on the way out.
     pub fn freeAll(l: *Layers, w: *Writer) Writer.Error!void {
-        while (l._images.items.len > 0) try l.free(w, l._images.items[l._images.items.len - 1].id);
-        l._shown.clearRetainingCapacity();
-        l._declared.clearRetainingCapacity();
+        while (l.own_images.items.len > 0) try l.free(w, l.own_images.items[l.own_images.items.len - 1].id);
+        l.shown.clearRetainingCapacity();
+        l.declared.clearRetainingCapacity();
     }
 
     /// Shows a layer this frame.
@@ -805,23 +819,23 @@ pub const Layers = struct {
     /// second: that is how a picture is moved, and it costs one command
     /// rather than a delete and a place.
     pub fn declare(l: *Layers, layer: Layer) Allocator.Error!void {
-        const gpa = l._gpa;
-        for (l._declared.items) |*held| {
+        const gpa = l.gpa;
+        for (l.declared.items) |*held| {
             if (held.sameAs(layer)) {
                 held.* = layer;
                 return;
             }
         }
-        try l._declared.append(gpa, layer);
+        try l.declared.append(gpa, layer);
     }
 
     /// Takes a layer off the frame it would otherwise still be in.
     pub fn undeclare(l: *Layers, image_id: u32, placement: u32) void {
         var i: usize = 0;
-        while (i < l._declared.items.len) : (i += 1) {
-            const held = l._declared.items[i];
+        while (i < l.declared.items.len) : (i += 1) {
+            const held = l.declared.items[i];
             if (held.image == image_id and held.placement == placement) {
-                _ = l._declared.orderedRemove(i);
+                _ = l.declared.orderedRemove(i);
                 return;
             }
         }
@@ -829,9 +843,9 @@ pub const Layers = struct {
 
     fn undeclareImage(l: *Layers, id: u32) void {
         var i: usize = 0;
-        while (i < l._declared.items.len) {
-            if (l._declared.items[i].image == id) {
-                _ = l._declared.orderedRemove(i);
+        while (i < l.declared.items.len) {
+            if (l.declared.items[i].image == id) {
+                _ = l.declared.orderedRemove(i);
             } else i += 1;
         }
     }
@@ -840,9 +854,9 @@ pub const Layers = struct {
     /// taken down itself.
     fn forgetShown(l: *Layers, id: u32) void {
         var i: usize = 0;
-        while (i < l._shown.items.len) {
-            if (l._shown.items[i].image == id) {
-                _ = l._shown.orderedRemove(i);
+        while (i < l.shown.items.len) {
+            if (l.shown.items[i].image == id) {
+                _ = l.shown.orderedRemove(i);
             } else i += 1;
         }
     }
@@ -860,7 +874,7 @@ pub const Layers = struct {
     /// it. `Renderer` calls this on every repaint, so a program that
     /// resizes need not.
     pub fn repaint(l: *Layers) void {
-        l._replace_all = true;
+        l.replace_all = true;
     }
 
     /// The placements and the deletions, after the text pass, in one block:
@@ -871,23 +885,23 @@ pub const Layers = struct {
     /// a renderer that calls it for them costs nothing.
     pub fn emit(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
         var removed: usize = 0;
-        if (l._protocol == .kitty and caps.pictures() != .kitty) {
-            for (l._shown.items) |was| {
+        if (l.protocol == .kitty and caps.pictures() != .kitty) {
+            for (l.shown.items) |was| {
                 try writeDelete(w, was);
                 removed += 1;
             }
         }
         if (caps.pictures() == .cells) return removed;
         if (caps.pictures() != .kitty) return removed + try l.emitInline(w, caps);
-        std.mem.sort(Layer, l._declared.items, {}, lessThan);
+        std.mem.sort(Layer, l.declared.items, {}, lessThan);
         var written: usize = 0;
 
         // Here: a placement command, which replaces whatever was at the same
         // image and placement id without flicker.
-        for (l._declared.items, 0..) |now, i| {
+        for (l.declared.items, 0..) |now, i| {
             if (l.image(now.image)) |rec| if (rec.protocol != .kitty) continue;
-            if (!l._replace_all) if (findSameIndex(l._shown.items, now)) |before_i| {
-                const before = l._shown.items[before_i];
+            if (!l.replace_all) if (findSameIndex(l.shown.items, now)) |before_i| {
+                const before = l.shown.items[before_i];
                 if (before.eql(now) and zOf(now, i) == zOf(before, before_i)) continue;
             };
             try writePlace(w, now, zOf(now, i));
@@ -895,8 +909,8 @@ pub const Layers = struct {
         }
         // Gone: name the one placement rather than everything on screen, and
         // keep the image's pixels, because the program may show it again.
-        for (l._shown.items) |was| {
-            if (findSameIndex(l._declared.items, was) != null) continue;
+        for (l.shown.items) |was| {
+            if (findSameIndex(l.declared.items, was) != null) continue;
             try writeDelete(w, was);
             written += 1;
         }
@@ -910,13 +924,13 @@ pub const Layers = struct {
     /// A failed free keeps its record and retirement for the next attempt.
     /// No allocation and no flush. The renderer calls this for its frames.
     pub fn commitFrame(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
-        if (caps.pictures() == .cells) l._declared.clearRetainingCapacity();
+        if (caps.pictures() == .cells) l.declared.clearRetainingCapacity();
         var freed: usize = 0;
         var i: usize = 0;
-        while (i < l._retired.items.len) {
-            const id = l._retired.items[i];
+        while (i < l.retired.items.len) {
+            const id = l.retired.items[i];
             var declared = false;
-            for (l._declared.items) |layer| if (layer.image == id) {
+            for (l.declared.items) |layer| if (layer.image == id) {
                 declared = true;
                 break;
             };
@@ -927,13 +941,13 @@ pub const Layers = struct {
             try l.free(w, id);
             freed += 1;
         }
-        l._replace_all = false;
-        l._inline_dirty = false;
-        l._protocol = caps.pictures();
-        const was_shown = l._shown;
-        l._shown = l._declared;
-        l._declared = was_shown;
-        l._declared.clearRetainingCapacity();
+        l.replace_all = false;
+        l.inline_dirty = false;
+        l.protocol = caps.pictures();
+        const was_shown = l.shown;
+        l.shown = l.declared;
+        l.declared = was_shown;
+        l.declared.clearRetainingCapacity();
         return freed;
     }
 
@@ -941,48 +955,48 @@ pub const Layers = struct {
     /// program writes when it leaves a view it will come back to.
     pub fn clear(l: *Layers, w: *Writer, caps: Caps) Writer.Error!void {
         if (caps.pictures() == .kitty) {
-            for (l._shown.items) |was| try writeDelete(w, was);
+            for (l.shown.items) |was| try writeDelete(w, was);
         } else {
-            for (l._shown.items) |was| {
-                if (was.rect.col >= l._size.cells.cols) continue;
-                const cols = @min(was.rect.cols, l._size.cells.cols - was.rect.col);
+            for (l.shown.items) |was| {
+                if (was.rect.col >= l.size.cells.cols) continue;
+                const cols = @min(was.rect.cols, l.size.cells.cols - was.rect.col);
                 if (cols == 0) continue;
                 var row: u32 = was.rect.row;
-                const bottom = @min(@as(u32, was.rect.row) + was.rect.rows, l._size.cells.rows);
+                const bottom = @min(@as(u32, was.rect.row) + was.rect.rows, l.size.cells.rows);
                 while (row < bottom) : (row += 1) {
                     try morse.cursorTo(w, row + 1, @as(u32, was.rect.col) + 1);
                     try morse.eraseChars(w, cols);
                 }
             }
-            l._inline_dirty = true;
+            l.inline_dirty = true;
         }
-        l._shown.clearRetainingCapacity();
-        l._declared.clearRetainingCapacity();
+        l.shown.clearRetainingCapacity();
+        l.declared.clearRetainingCapacity();
     }
 
     /// How many layers the terminal is showing.
     pub fn count(l: *const Layers) usize {
-        return l._shown.items.len;
+        return l.shown.items.len;
     }
 
     fn emitInline(l: *Layers, w: *Writer, caps: Caps) Writer.Error!usize {
         if (!l.inlineChanged()) return 0;
-        std.mem.sort(Layer, l._declared.items, {}, lessThan);
+        std.mem.sort(Layer, l.declared.items, {}, lessThan);
         var written: usize = 0;
-        for (l._declared.items) |layer| {
+        for (l.declared.items) |layer| {
             const rec = l.image(layer.image) orelse continue;
             if (rec.protocol != caps.pictures()) continue;
-            if (layer.rect.col >= l._size.cells.cols or layer.rect.row >= l._size.cells.rows) continue;
-            const cols = @min(layer.rect.cols, l._size.cells.cols - layer.rect.col);
+            if (layer.rect.col >= l.size.cells.cols or layer.rect.row >= l.size.cells.rows) continue;
+            const cols = @min(layer.rect.cols, l.size.cells.cols - layer.rect.col);
             // Without cursor-right support leave one row for the sixel cursor.
             // iTerm images request doNotMoveCursor.
-            const bottom = l._size.cells.rows -| @as(u16, if (caps.pictures() == .sixel and !l._sixel_cursor_right) 1 else 0);
+            const bottom = l.size.cells.rows -| @as(u16, if (caps.pictures() == .sixel and !l.sixel_cursor_right) 1 else 0);
             const rows = @min(layer.rect.rows, bottom -| layer.rect.row);
             if (cols == 0 or rows == 0) continue;
-            for (l._inline.items) |*held| {
+            for (l.own_inline.items) |*held| {
                 if (held.id != layer.image) continue;
                 if (held.sixel) |original| {
-                    const cell = l._size.cellSize() orelse continue;
+                    const cell = l.size.cellSize() orelse continue;
                     const max_width: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.width) * cols));
                     const max_height: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.height) * rows));
                     const x = @min(layer.source.x, original.width);

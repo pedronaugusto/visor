@@ -580,12 +580,12 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
 fn corrupt(r: *visor.Renderer, dice: *corpus.Dice) void {
     var i: usize = 0;
     const count = dice.valueRangeAtMost(u8, 1, 8);
-    while (i < count and r._prev.len != 0) : (i += 1) {
-        r._prev[dice.index(r._prev.len)] = .blank(styles[dice.index(styles.len)]);
+    while (i < count and r.prev.len != 0) : (i += 1) {
+        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
     }
-    r._style = styles[dice.index(styles.len)];
-    r._cursor = null;
-    r._shown = null;
+    r.style = styles[dice.index(styles.len)];
+    r.own_cursor = null;
+    r.shown = null;
 }
 
 test "the second emulator agrees, measuring by codepoint" {

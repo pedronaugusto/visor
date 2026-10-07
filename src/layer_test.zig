@@ -35,8 +35,8 @@ const Fixture = struct {
         s.method = .unicode;
         var r: Renderer = try .init(gpa, size);
         errdefer r.deinit();
-        r._shown = false;
-        r._cursor = .{ .col = 0, .row = 0 };
+        r.shown = false;
+        r.own_cursor = .{ .col = 0, .row = 0 };
         return .{
             .gpa = gpa,
             .layers = .init(gpa),
@@ -268,7 +268,7 @@ test "an image sent asking for an answer is ready on the word, or when the grace
     try testing.expect(!l.ready(6, 1100, 250));
     l.ack(.{ .id = 6, .message = "OK" });
     try testing.expect(l.ready(6, 1101, 250));
-    try testing.expectEqual(@as(?bool, true), l._answers);
+    try testing.expectEqual(@as(?bool, true), l.answers);
 
     // A refusal: not ready, and the program sends again.
     _ = try l.transmit(&out.writer, 7, &px, .{ .width = 1, .height = 1, .answer = true, .now_ms = 2000 });
@@ -291,12 +291,12 @@ test "a terminal that never answers is given the grace once, and then not waited
     _ = try l.transmit(&out.writer, 2, &px, .{ .width = 1, .height = 1, .answer = true, .now_ms = 1000 });
     try testing.expect(!l.ready(2, 1249, 250));
     try testing.expect(l.ready(2, 1250, 250));
-    try testing.expectEqual(@as(u32, 1), l._fallbacks);
-    try testing.expectEqual(@as(?bool, false), l._answers);
+    try testing.expectEqual(@as(u32, 1), l.fallbacks);
+    try testing.expectEqual(@as(?bool, false), l.answers);
 
     _ = try l.transmit(&out.writer, 3, &px, .{ .width = 1, .height = 1, .answer = true, .now_ms = 2000 });
     try testing.expect(l.ready(3, 2000, 250));
-    try testing.expectEqual(@as(u32, 1), l._fallbacks);
+    try testing.expectEqual(@as(u32, 1), l.fallbacks);
 }
 
 test "sending to an id on screen places it again, and freeing takes it all away" {
@@ -315,7 +315,7 @@ test "sending to an id on screen places it again, and freeing takes it all away"
     // New pixels under the same id: the terminal took the placement down,
     // so the next frame puts it back though the layer did not move.
     _ = try f.layers.transmit(&sent.writer, 8, &px, .{ .width = 1, .height = 1 });
-    try testing.expectEqual(@as(usize, 1), f.layers._images.items.len);
+    try testing.expectEqual(@as(usize, 1), f.layers.own_images.items.len);
     try f.layers.declare(layer);
     const again = try f.draw();
     try testing.expectEqual(@as(u32, 1), again.placements);
@@ -360,9 +360,9 @@ test "the images list is as long as the pictures alive" {
         const id: u32 = @intCast(2 + i % 4);
         _ = try l.transmit(&out.writer, id, &px, .{ .width = 1, .height = 1 });
     }
-    try testing.expectEqual(@as(usize, 4), l._images.items.len);
+    try testing.expectEqual(@as(usize, 4), l.own_images.items.len);
     try l.freeAll(&out.writer);
-    try testing.expectEqual(@as(usize, 0), l._images.items.len);
+    try testing.expectEqual(@as(usize, 0), l.own_images.items.len);
 }
 
 test "layers are stacked in the order their tuples give" {
@@ -544,7 +544,7 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     try testing.expect(!l.ready(5, 0, 1000));
     l.ack(.{ .id = 5, .message = "OK" });
     try testing.expect(l.ready(5, 0, 1000));
-    try testing.expect(l._shared_memory.?.state == .yes);
+    try testing.expect(l.shared_memory.?.state == .yes);
     try testing.expect(l.image(5).?.shm == null);
     // the object was unlinked: its name can be put again
     try shm.put(io, name, &pixels);
@@ -565,7 +565,7 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     defer l.deinit();
     _ = try l.transmit(&out.writer, 7, &pixels, .{ .width = 1, .height = 1 });
     l.ack(.{ .id = 7, .message = "EBADF:no such object" });
-    try testing.expect(l._shared_memory.?.state == .no);
+    try testing.expect(l.shared_memory.?.state == .no);
     try testing.expect(!l.ready(7, 0, 1000));
     out.clearRetainingCapacity();
     _ = try l.transmit(&out.writer, 7, &pixels, .{ .width = 1, .height = 1, .compress = false });
@@ -579,7 +579,7 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     _ = try q.transmit(&out.writer, 8, &pixels, .{ .width = 1, .height = 1, .now_ms = 0 });
     try testing.expect(!q.ready(8, 10, 1000));
     try testing.expect(!q.ready(8, 2000, 1000));
-    try testing.expect(q._shared_memory.?.state == .no);
+    try testing.expect(q.shared_memory.?.state == .no);
     try testing.expect(q.image(8).?.shm == null);
 }
 
@@ -631,7 +631,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     try testing.expect(try p.declare(&f.layers, at, 1249, 250));
     try testing.expect(!try p.declare(&f.layers, at, 1250, 250));
     _ = try f.draw();
-    try testing.expectEqual(@as(u32, 1), f.layers._fallbacks);
+    try testing.expectEqual(@as(u32, 1), f.layers.fallbacks);
     const next = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 2000 });
     f.layers.ack(.{ .id = next.id, .message = "EBADPNG:bad" });
     _ = try p.declare(&f.layers, at, 2001, 250);
@@ -684,8 +684,8 @@ test "a retired first picture is freed even when the frame has no text or placem
     _ = try p.declare(&f.layers, .{ .image = 0, .rect = .{ .cols = 2, .rows = 2 } }, 0, 250);
     try testing.expect(p.takeDirty());
     try testing.expectEqual(@as(usize, 0), f.layers.count());
-    try testing.expectEqual(@as(usize, 0), f.layers._declared.items.len);
-    try testing.expect(!f.screen._damage.any());
+    try testing.expectEqual(@as(usize, 0), f.layers.declared.items.len);
+    try testing.expect(!f.screen.damage.any());
     const drawn = try f.draw();
     try testing.expect(f.layers.image(sent.id) == null);
     try testing.expectEqual(@as(u32, 1), drawn.placements);
@@ -704,7 +704,7 @@ test "shared memory reserves ownership before creating a name" {
     var out: Writer = .fixed(&buf);
     try testing.expectError(error.OutOfMemory, l.transmit(&out, 1, &.{ 1, 2, 3, 4 }, .{ .compress = false }));
     try testing.expectEqual(before, shm.nextSequence());
-    try testing.expectEqual(@as(usize, 0), l._images.items.len);
+    try testing.expectEqual(@as(usize, 0), l.own_images.items.len);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
 
@@ -724,7 +724,7 @@ test "shared memory validates the protocol size before any ownership or output" 
     const pixels = @as([*]const u8, @ptrFromInt(1))[0..oversized];
     try testing.expectError(error.PayloadTooLarge, l.transmit(&out, 1, pixels, .{ .compress = false }));
     try testing.expectEqual(before, shm.nextSequence());
-    try testing.expectEqual(@as(usize, 0), l._images.capacity);
+    try testing.expectEqual(@as(usize, 0), l.own_images.capacity);
 }
 
 test "shared memory keeps its cleanup owner when configuration is cleared" {
@@ -770,19 +770,19 @@ test "shared memory reconfiguration cannot lose owners or accept an old policy r
     defer shm.unlink(testing.io, first);
     l.configureSharedMemory(null);
     l.configureSharedMemory(testing.io);
-    const generation = l._shared_memory.?.generation;
+    const generation = l.shared_memory.?.generation;
     _ = try l.transmit(&sink.writer, 2, "new!", .{ .width = 1, .height = 1 });
     const second = l.image(2).?.shm.?;
     defer shm.unlink(testing.io, second);
     l.ack(.{ .id = 1, .message = "EBADF:old configuration" });
-    try testing.expect(l._shared_memory.?.state == .trying);
+    try testing.expect(l.shared_memory.?.state == .trying);
     try shm.put(testing.io, first, "gone");
     shm.unlink(testing.io, first);
     l.ack(.{ .id = 2, .message = "OK" });
-    try testing.expect(l._shared_memory.?.state == .yes);
+    try testing.expect(l.shared_memory.?.state == .yes);
     l.configureSharedMemory(testing.io);
-    try testing.expectEqual(generation, l._shared_memory.?.generation);
-    try testing.expect(l._shared_memory.?.state == .yes);
+    try testing.expectEqual(generation, l.shared_memory.?.generation);
+    try testing.expect(l.shared_memory.?.state == .yes);
     try shm.put(testing.io, second, "gone");
     shm.unlink(testing.io, second);
 }
@@ -803,7 +803,7 @@ test "shared memory keeps ownership through every allocation and partial output 
             }
             const name = l.image(7).?.shm.?;
             defer shm.unlink(testing.io, name);
-            try testing.expectEqual(@as(usize, 1), l._shared_objects.items.len);
+            try testing.expectEqual(@as(usize, 1), l.shared_objects.items.len);
             try testing.expect(l.image(7).?.state == .failed);
             try testing.expect(!l.ready(7, 1000, 10));
             l.configureSharedMemory(null);
@@ -821,7 +821,7 @@ test "direct transmission silence cannot make an unread shared picture ready" {
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, 1, "png", .{ .format = .png, .answer = true });
     try testing.expect(l.ready(1, 10, 10));
-    try testing.expectEqual(@as(?bool, false), l._answers);
+    try testing.expectEqual(@as(?bool, false), l.answers);
     l.configureSharedMemory(testing.io);
     _ = try l.transmit(&sink.writer, 2, "data", .{ .width = 1, .height = 1, .now_ms = 10 });
     const name = l.image(2).?.shm.?;
@@ -851,7 +851,7 @@ test "picture grace time spans the signed clock range" {
     defer out.deinit();
     _ = try layers.transmit(&out.writer, 1, &.{ 1, 2, 3, 4 }, .{ .width = 1, .height = 1, .answer = true, .now_ms = std.math.minInt(i64) });
     try testing.expect(layers.ready(1, std.math.maxInt(i64), 50));
-    layers._answers = null;
+    layers.answers = null;
     _ = try layers.transmit(&out.writer, 2, &.{ 1, 2, 3, 4 }, .{ .width = 1, .height = 1, .answer = true, .now_ms = std.math.maxInt(i64) });
     try testing.expect(!layers.ready(2, std.math.minInt(i64), 50));
 }

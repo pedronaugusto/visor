@@ -36,31 +36,31 @@ pub fn WindowApi(comptime screen_module: type) type {
 
         /// An offset, clipped view of a `Screen`.
         pub const Window = struct {
-            /// The grid this is a view of.
-            _screen: *Screen,
-            /// Where the view is and how big, in the screen's own coordinates,
+            /// Private: the grid this is a view of.
+            own_screen: *Screen,
+            /// Private: where the view is and how big, in the screen's own coordinates,
             /// already clipped to it.
-            _rect: Rect,
-            /// What every cell written through this window is drawn in, or null
+            own_rect: Rect,
+            /// Private: what every cell written through this window is drawn in, or null
             /// for the style it was written in. Children inherit it. A pointer, so
             /// the window a widget is handed stays three words, and the ink is the
             /// caller's to keep for as long as the window is used.
-            _ink: ?*const Ink = null,
+            own_ink: ?*const Ink = null,
 
             /// The borrowed screen owner. Its lifetime and resize stay with its owner.
             /// Recreate windows after the screen is resized.
             pub fn screen(w: Window) *Screen {
-                return w._screen;
+                return w.own_screen;
             }
 
             /// The rectangle already clipped to that screen, by value.
             pub fn rect(w: Window) Rect {
-                return w._rect;
+                return w.own_rect;
             }
 
             /// The borrowed drawing policy, or null for each cell's own style.
             pub fn ink(w: Window) ?*const Ink {
-                return w._ink;
+                return w.own_ink;
             }
 
             /// A program's look, applied to every cell a window writes: the style a
@@ -98,16 +98,16 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// The same view, drawing in `ink`.
             pub fn inked(w: Window, drawing: ?*const Ink) Window {
                 var out = w;
-                out._ink = drawing;
+                out.own_ink = drawing;
                 return out;
             }
 
             /// The style a cell written at a place of this window is drawn in.
             fn styled(w: Window, col: u16, row: u16, span: u16, text: []const u8, style: Style) Style {
-                const drawing = w._ink orelse return style;
+                const drawing = w.own_ink orelse return style;
                 return drawing.apply(drawing.ctx, .{
-                    .col = w._rect.col + col,
-                    .row = w._rect.row + row,
+                    .col = w.own_rect.col + col,
+                    .row = w.own_rect.row + row,
                     .cols = span,
                     .text = text,
                     .style = style,
@@ -242,17 +242,17 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// How many columns the window is.
             pub fn cols(w: Window) u16 {
-                return w._rect.cols;
+                return w.own_rect.cols;
             }
 
             /// How many rows the window is.
             pub fn rows(w: Window) u16 {
-                return w._rect.rows;
+                return w.own_rect.rows;
             }
 
             /// How big the window is.
             pub fn size(w: Window) Size {
-                return w._rect.size();
+                return w.own_rect.size();
             }
 
             /// A sub-window, clipped to this one, with an optional border drawn as
@@ -265,13 +265,13 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// back empty rather than wrong.
             pub fn child(w: Window, opts: ChildOptions) Window {
                 const asked: Rect = .{
-                    .col = w._rect.col +| opts.col,
-                    .row = w._rect.row +| opts.row,
-                    .cols = opts.cols orelse w._rect.cols -| opts.col,
-                    .rows = opts.rows orelse w._rect.rows -| opts.row,
+                    .col = w.own_rect.col +| opts.col,
+                    .row = w.own_rect.row +| opts.row,
+                    .cols = opts.cols orelse w.own_rect.cols -| opts.col,
+                    .rows = opts.rows orelse w.own_rect.rows -| opts.row,
                 };
-                const outer = asked.intersect(w._rect);
-                var c: Window = .{ ._screen = w._screen, ._rect = outer, ._ink = w._ink };
+                const outer = asked.intersect(w.own_rect);
+                var c: Window = .{ .own_screen = w.own_screen, .own_rect = outer, .own_ink = w.own_ink };
                 if (!opts.border.where.any() or outer.isEmpty()) return c;
 
                 c.drawBorder(opts.border);
@@ -287,7 +287,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                     inner.cols -|= 1;
                 }
                 if (b.right) inner.cols -|= 1;
-                return .{ ._screen = w._screen, ._rect = inner, ._ink = w._ink };
+                return .{ .own_screen = w.own_screen, .own_rect = inner, .own_ink = w.own_ink };
             }
 
             /// The sub-window over `r`, a rectangle in this window's own cells —
@@ -300,22 +300,22 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// One cell, in this window's coordinates, clipped by its whole extent.
             /// Stale or foreign handles return `InvalidHandle`; malformed cells return `InvalidCell`.
             pub fn writeOwnedCell(w: Window, col: u16, row: u16, c: Cell) Screen.CellError!void {
-                const checked = try w._screen.cell(c);
+                const checked = try w.own_screen.cell(c);
                 if (!w.fitsCell(col, row, checked)) return;
                 var drawn = checked;
-                if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try w._screen.textOf(&checked), checked.style));
-                screen_module.internal.placeCell(w._screen, w._rect.col + col, w._rect.row + row, drawn);
+                if (w.own_ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try w.own_screen.textOf(&checked), checked.style));
+                screen_module.internal.placeCell(w.own_screen, w.own_rect.col + col, w.own_rect.row + row, drawn);
             }
 
             /// A source-terminal cell, clipped by its full extent. See Screen's
             /// writeOwnedCellUnchecked preconditions; handles are always checked.
             pub fn writeOwnedCellUnchecked(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
-                _ = try w._screen.textOf(&c);
-                if (c.link != .none and w._screen.target(c.link) == null) return error.InvalidHandle;
+                _ = try w.own_screen.textOf(&c);
+                if (c.link != .none and w.own_screen.target(c.link) == null) return error.InvalidHandle;
                 if (!w.fitsCell(col, row, c)) return;
                 var drawn = c;
-                if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), try w._screen.textOf(&c), c.style));
-                try w._screen.writeOwnedCellUnchecked(w._rect.col + col, w._rect.row + row, drawn);
+                if (w.own_ink != null) drawn.style = cellmod.canonical(w.styled(col, row, c.width(), try w.own_screen.textOf(&c), c.style));
+                try w.own_screen.writeOwnedCellUnchecked(w.own_rect.col + col, w.own_rect.row + row, drawn);
             }
 
             /// Copies a cell from another screen into this window.
@@ -324,14 +324,14 @@ pub fn WindowApi(comptime screen_module: type) type {
                 const checked = try source.cell(c);
                 if (!w.fitsCell(col, row, checked)) return;
                 var drawn = checked;
-                if (w._ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try source.textOf(&checked), checked.style));
-                try w._screen.copyCell(source, w._rect.col + col, w._rect.row + row, drawn);
+                if (w.own_ink != null) drawn.style = cellmod.canonical(w.styled(col, row, checked.width(), try source.textOf(&checked), checked.style));
+                try w.own_screen.copyCell(source, w.own_rect.col + col, w.own_rect.row + row, drawn);
             }
 
             /// What is there, or null outside the window.
             pub fn readCell(w: Window, col: u16, row: u16) ?Cell {
-                if (col >= w._rect.cols or row >= w._rect.rows) return null;
-                return w._screen.readCell(w._rect.col + col, w._rect.row + row);
+                if (col >= w.own_rect.cols or row >= w.own_rect.rows) return null;
+                return w.own_screen.readCell(w.own_rect.col + col, w.own_rect.row + row);
             }
 
             /// A grapheme measured and placed only when its whole extent fits.
@@ -343,12 +343,12 @@ pub fn WindowApi(comptime screen_module: type) type {
                 style: Style,
                 link: Link,
             ) Screen.DrawError!void {
-                if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
-                const valid = (try screen_module.internal.printable(grapheme, w._screen.method)) orelse return;
-                const span = textmod.graphemeWidth(valid, w._screen.method);
+                if (link != .none and w.own_screen.target(link) == null) return error.InvalidHandle;
+                const valid = (try screen_module.internal.printable(grapheme, w.own_screen.method)) orelse return;
+                const span = textmod.graphemeWidth(valid, w.own_screen.method);
                 if (!w.fits(col, row, span, 1)) return;
-                const drawn = if (w._ink == null) style else w.styled(col, row, span, valid, style);
-                try w._screen.write(w._rect.col + col, w._rect.row + row, valid, drawn, link);
+                const drawn = if (w.own_ink == null) style else w.styled(col, row, span, valid, style);
+                try w.own_screen.write(w.own_rect.col + col, w.own_rect.row + row, valid, drawn, link);
             }
 
             // A window owns placement clipping; Screen owns handle checks and tails.
@@ -371,25 +371,25 @@ pub fn WindowApi(comptime screen_module: type) type {
                 link: Link,
                 scale: u3,
             ) Screen.DrawError!bool {
-                if (link != .none and w._screen.target(link) == null) return error.InvalidHandle;
-                const valid = (try screen_module.internal.printable(grapheme, w._screen.method)) orelse return false;
+                if (link != .none and w.own_screen.target(link) == null) return error.InvalidHandle;
+                const valid = (try screen_module.internal.printable(grapheme, w.own_screen.method)) orelse return false;
                 const tall: u16 = @max(scale, 1);
-                const wide: u16 = textmod.graphemeWidth(valid, w._screen.method);
-                if (col >= w._rect.cols or row >= w._rect.rows) return false;
-                if (@as(u32, col) + @as(u32, wide) * tall > w._rect.cols) return false;
-                if (@as(u32, row) + tall > w._rect.rows) return false;
-                const drawn = if (w._ink == null) style else w.styled(col, row, wide * tall, valid, style);
-                return w._screen.writeScaled(w._rect.col + col, w._rect.row + row, valid, drawn, link, scale);
+                const wide: u16 = textmod.graphemeWidth(valid, w.own_screen.method);
+                if (col >= w.own_rect.cols or row >= w.own_rect.rows) return false;
+                if (@as(u32, col) + @as(u32, wide) * tall > w.own_rect.cols) return false;
+                if (@as(u32, row) + tall > w.own_rect.rows) return false;
+                const drawn = if (w.own_ink == null) style else w.styled(col, row, wide * tall, valid, style);
+                return w.own_screen.writeScaled(w.own_rect.col + col, w.own_rect.row + row, valid, drawn, link, scale);
             }
 
             /// A rectangle of one cell, in this window's coordinates. A wide or
             /// scaled cell is laid one whole block after another, as `Screen.fill`.
             /// Stale or foreign handles return `InvalidHandle` before any cell changes.
             pub fn fill(w: Window, area: Rect, c: Cell) Screen.CellError!void {
-                _ = try w._screen.cell(c);
+                _ = try w.own_screen.cell(c);
                 const inside = area.intersect(.fromSize(w.size()));
                 if (inside.isEmpty()) return;
-                if (w._ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
+                if (w.own_ink != null or (!c.isTail() and c.shape.kind != .spacer_head and (c.width() > 1 or c.rows() > 1))) {
                     // Multi-cell fills use the same extent check as direct placement.
                     // The fill's own rectangle is the boundary, not just the window.
                     const bounded = w.sub(inside);
@@ -401,9 +401,9 @@ pub fn WindowApi(comptime screen_module: type) type {
                     }
                     return;
                 }
-                try w._screen.fill(.{
-                    .col = w._rect.col + inside.col,
-                    .row = w._rect.row + inside.row,
+                try w.own_screen.fill(.{
+                    .col = w.own_rect.col + inside.col,
+                    .row = w.own_rect.row + inside.row,
                     .cols = inside.cols,
                     .rows = inside.rows,
                 }, c);
@@ -417,7 +417,7 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// The window's rows moved by `n`, the vacated rows blank. A positive
             /// `n` moves the contents up.
             pub fn scroll(w: Window, n: i32) void {
-                w._screen.scroll(w._rect, n);
+                w.own_screen.scroll(w.own_rect, n);
             }
 
             /// Runs of styled, linked text laid into the window, wrapped.
@@ -429,7 +429,7 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// word split across two segments breaks at the join.
             pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) Screen.DrawError!Print {
                 var at: Print = .{ .col = opts.col, .row = opts.row };
-                if (w._rect.isEmpty()) {
+                if (w.own_rect.isEmpty()) {
                     at.overflow = segments.len != 0;
                     return at;
                 }
@@ -444,7 +444,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// The columns a string takes, by this screen's width method.
             pub fn width(w: Window, str: []const u8) u16 {
-                return textmod.width(str, w._screen.method);
+                return textmod.width(str, w.own_screen.method);
             }
 
             /// A mouse report in this window's own coordinates, or null when it fell
@@ -459,9 +459,9 @@ pub fn WindowApi(comptime screen_module: type) type {
                 if (mouse.x == 0 or mouse.y == 0) return null;
                 const col = mouse.x - 1;
                 const row = mouse.y - 1;
-                if (col < w._rect.col or row < w._rect.row) return null;
-                if (col >= w._rect.right() or row >= w._rect.bottom()) return null;
-                return .{ .col = @intCast(col - w._rect.col), .row = @intCast(row - w._rect.row) };
+                if (col < w.own_rect.col or row < w.own_rect.row) return null;
+                if (col >= w.own_rect.right() or row >= w.own_rect.bottom()) return null;
+                return .{ .col = @intCast(col - w.own_rect.col), .row = @intCast(row - w.own_rect.row) };
             }
 
             /// The OSC 8 target under a cell of the window, or null: what a click
@@ -470,12 +470,12 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// growable link pool: interning links, compaction, resize or destruction
             /// can invalidate its slices. `Screen.dupeTarget` makes a retained copy.
             pub fn linkAt(w: Window, col: u16, row: u16) ?Target {
-                if (col >= w._rect.cols or row >= w._rect.rows) return null;
-                const at_col = w._rect.col + col;
-                const at_row = w._rect.row + row;
-                const head = w._screen.headOf(at_col, at_row) orelse Point{ .col = at_col, .row = at_row };
-                const c = w._screen.readCell(head.col, head.row) orelse return null;
-                return w._screen.target(c.link);
+                if (col >= w.own_rect.cols or row >= w.own_rect.rows) return null;
+                const at_col = w.own_rect.col + col;
+                const at_row = w.own_rect.row + row;
+                const head = w.own_screen.headOf(at_col, at_row) orelse Point{ .col = at_col, .row = at_row };
+                const c = w.own_screen.readCell(head.col, head.row) orelse return null;
+                return w.own_screen.target(c.link);
             }
 
             /// The text of one row of the window from column `from` up to `to`, as
@@ -483,20 +483,20 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// when the range starts on its covered column, and the blanks at the
             /// end left off. What a selection copies.
             pub fn copyText(w: Window, out: *std.Io.Writer, row: u16, from: u16, to: u16) std.Io.Writer.Error!void {
-                if (row >= w._rect.rows) return;
-                const end = @min(to, w._rect.cols);
-                const at_row = w._rect.row + row;
+                if (row >= w.own_rect.rows) return;
+                const end = @min(to, w.own_rect.cols);
+                const at_row = w.own_rect.row + row;
                 var spaces: usize = 0;
                 var col = from;
                 while (col < end) : (col += 1) {
-                    const at_col = w._rect.col + col;
-                    const c = w._screen.readCell(at_col, at_row) orelse break;
+                    const at_col = w.own_rect.col + col;
+                    const c = w.own_screen.readCell(at_col, at_row) orelse break;
                     var text: []const u8 = undefined;
                     if (c.isTail()) {
                         if (col != from) continue;
-                        const head = w._screen.headOf(at_col, at_row) orelse continue;
-                        text = w._screen.textAt(head.col, head.row);
-                    } else text = w._screen.textOf(&c) catch @panic("invalid cell in screen");
+                        const head = w.own_screen.headOf(at_col, at_row) orelse continue;
+                        text = w.own_screen.textAt(head.col, head.row);
+                    } else text = w.own_screen.textOf(&c) catch @panic("invalid cell in screen");
                     if (std.mem.eql(u8, text, " ")) {
                         spaces += 1;
                         continue;
@@ -510,20 +510,20 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// Where the terminal's cursor should end the frame, in this window's
             /// coordinates.
             pub fn showCursor(w: Window, col: u16, row: u16) void {
-                if (col >= w._rect.cols or row >= w._rect.rows) return;
-                w._screen.cursor.col = w._rect.col + col;
-                w._screen.cursor.row = w._rect.row + row;
-                w._screen.cursor.visible = true;
+                if (col >= w.own_rect.cols or row >= w.own_rect.rows) return;
+                w.own_screen.cursor.col = w.own_rect.col + col;
+                w.own_screen.cursor.row = w.own_rect.row + row;
+                w.own_screen.cursor.visible = true;
             }
 
             /// No cursor this frame.
             pub fn hideCursor(w: Window) void {
-                w._screen.cursor.visible = false;
+                w.own_screen.cursor.visible = false;
             }
 
             /// The shape the terminal draws its cursor as.
             pub fn setCursorShape(w: Window, shape: morse.CursorShape) void {
-                w._screen.cursor.shape = shape;
+                w.own_screen.cursor.shape = shape;
             }
 
             //=====================================================================
@@ -538,7 +538,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                 from: Print,
             ) Screen.DrawError!Print {
                 var at = from;
-                if (at.row >= w._rect.rows) {
+                if (at.row >= w.own_rect.rows) {
                     at.overflow = at.overflow or segment.text.len != 0;
                     return at;
                 }
@@ -548,7 +548,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                     if (textmod.isLineBreak(g)) {
                         at.col = 0;
                         at.row += 1;
-                        if (at.row >= w._rect.rows) {
+                        if (at.row >= w.own_rect.rows) {
                             at.overflow = true;
                             return at;
                         }
@@ -557,18 +557,18 @@ pub fn WindowApi(comptime screen_module: type) type {
                     if (opts.wrap == .word and g.len == 1 and g[0] == ' ' and at.col == 0) continue;
                     if (opts.wrap == .word and atWordStart(segment.text, found.start)) {
                         const word = wordWidth(w, segment.text, found.start);
-                        if (@as(u32, at.col) + word > w._rect.cols and word <= w._rect.cols) {
+                        if (@as(u32, at.col) + word > w.own_rect.cols and word <= w.own_rect.cols) {
                             at.col = 0;
                             at.row += 1;
-                            if (at.row >= w._rect.rows) {
+                            if (at.row >= w.own_rect.rows) {
                                 at.overflow = true;
                                 return at;
                             }
                         }
                     }
-                    const cluster = textmod.graphemeWidth(g, w._screen.method);
+                    const cluster = textmod.graphemeWidth(g, w.own_screen.method);
                     if (cluster == 0) continue;
-                    if (@as(u32, at.col) + cluster > w._rect.cols) {
+                    if (@as(u32, at.col) + cluster > w.own_rect.cols) {
                         switch (opts.wrap) {
                             .none => {
                                 at.overflow = true;
@@ -577,7 +577,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                             .grapheme, .word => {
                                 at.col = 0;
                                 at.row += 1;
-                                if (at.row >= w._rect.rows) {
+                                if (at.row >= w.own_rect.rows) {
                                     at.overflow = true;
                                     return at;
                                 }
@@ -602,14 +602,14 @@ pub fn WindowApi(comptime screen_module: type) type {
             fn wordWidth(w: Window, text: []const u8, i: usize) u16 {
                 var end = i;
                 while (end < text.len and text[end] != ' ' and text[end] != '\n') end += 1;
-                return textmod.width(text[i..end], w._screen.method);
+                return textmod.width(text[i..end], w.own_screen.method);
             }
 
             /// The lines and corners a bordered child is framed with.
             fn drawBorder(w: Window, border: Border) void {
                 const b = border.where;
-                const last_col = w._rect.cols -| 1;
-                const last_row = w._rect.rows -| 1;
+                const last_col = w.own_rect.cols -| 1;
+                const last_row = w.own_rect.rows -| 1;
                 const glyphs = border.glyphs;
 
                 if (b.top) w.fillLine(0, glyphs.horizontal, border.style);
@@ -626,20 +626,20 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// A row of one glyph.
             fn fillLine(w: Window, row: u16, glyph: []const u8, style: Style) void {
                 var col: u16 = 0;
-                while (col < w._rect.cols) : (col += 1) w.put(col, row, glyph, style);
+                while (col < w.own_rect.cols) : (col += 1) w.put(col, row, glyph, style);
             }
 
             /// A column of one glyph.
             fn fillColumn(w: Window, col: u16, glyph: []const u8, style: Style) void {
                 var row: u16 = 0;
-                while (row < w._rect.rows) : (row += 1) w.put(col, row, glyph, style);
+                while (row < w.own_rect.rows) : (row += 1) w.put(col, row, glyph, style);
             }
 
             /// One glyph, where a border's glyphs are short enough to live in a cell
             /// and an allocation would be a surprise.
             fn put(w: Window, col: u16, row: u16, glyph: []const u8, style: Style) void {
                 if (glyph.len > Cell.Text.max_inline) return;
-                const cluster = textmod.graphemeWidth(glyph, w._screen.method);
+                const cluster = textmod.graphemeWidth(glyph, w.own_screen.method);
                 if (cluster == 0) return;
                 w.writeOwnedCell(col, row, .{
                     .text = .inlined(glyph),

@@ -248,13 +248,20 @@ pub const VisualRow = struct {
 };
 
 pub const RowIterator = struct {
-    _document: *const reader.Document,
-    _cols: u16,
-    _method: visor.Method,
-    _block: usize = 0,
-    _prose: ?Paragraph.Rows = null,
-    _first: bool = true,
-    _table: ?TableState = null,
+    /// Private.
+    document: *const reader.Document,
+    /// Private.
+    cols: u16,
+    /// Private.
+    method: visor.Method,
+    /// Private.
+    block: usize = 0,
+    /// Private.
+    prose: ?Paragraph.Rows = null,
+    /// Private.
+    first: bool = true,
+    /// Private.
+    table: ?TableState = null,
 
     const TableState = struct {
         block: usize,
@@ -267,13 +274,13 @@ pub const RowIterator = struct {
     };
 
     pub fn init(document: *const reader.Document, cols: u16, method: visor.Method) RowIterator {
-        return .{ ._document = document, ._cols = cols, ._method = method };
+        return .{ .document = document, .cols = cols, .method = method };
     }
 
     /// The widths of the columns of the table the last row belongs to,
     /// borrowed until the next call to `next`. Empty outside a table.
     pub fn columns(it: *const RowIterator) []const u16 {
-        const t = &(it._table orelse return &.{});
+        const t = &(it.table orelse return &.{});
         return t.widths[0..t.shown];
     }
 
@@ -283,16 +290,16 @@ pub const RowIterator = struct {
     /// wrapped.
     fn tableWidths(it: *const RowIterator, b: reader.Block, prefix: u64) TableState {
         const table = b.table.?;
-        const doc = it._document;
-        var state: TableState = .{ .block = it._block, .widths = undefined, .shown = @min(table.columns, Markdown.table_columns) };
+        const doc = it.document;
+        var state: TableState = .{ .block = it.block, .widths = undefined, .shown = @min(table.columns, Markdown.table_columns) };
         const shown = state.shown;
         var natural: [Markdown.table_columns]u32 = @splat(1);
         for (0..table.rows) |r| for (0..shown) |c| {
             const cell = doc.cells()[table.first_cell + r * table.columns + c];
-            natural[c] = @max(natural[c], visor.width(doc.text()[cell.start..cell.end], it._method));
+            natural[c] = @max(natural[c], visor.width(doc.text()[cell.start..cell.end], it.method));
         };
         const separators = 3 * @as(u64, shown -| 1);
-        const room: u64 = @as(u64, it._cols) -| prefix -| separators;
+        const room: u64 = @as(u64, it.cols) -| prefix -| separators;
         var total: u64 = 0;
         for (natural[0..shown]) |n| total += n;
         if (total <= room) {
@@ -328,24 +335,24 @@ pub const RowIterator = struct {
     /// How many lines a table row takes: its tallest cell's.
     fn rowHeight(it: *const RowIterator, b: reader.Block, state: *const TableState, r: usize) usize {
         const table = b.table.?;
-        const doc = it._document;
+        const doc = it.document;
         var tallest: usize = 1;
         for (0..state.shown) |c| {
             const cell = doc.cells()[table.first_cell + r * table.columns + c];
-            tallest = @max(tallest, cellHeight(doc.text()[cell.start..cell.end], state.widths[c], it._method));
+            tallest = @max(tallest, cellHeight(doc.text()[cell.start..cell.end], state.widths[c], it.method));
         }
         return tallest;
     }
 
     fn tableRow(it: *RowIterator, b: reader.Block, prefix: u64) VisualRow {
-        if (it._table == null) {
-            it._table = it.tableWidths(b, prefix);
-            it._table.?.height = it.rowHeight(b, &it._table.?, 0);
+        if (it.table == null) {
+            it.table = it.tableWidths(b, prefix);
+            it.table.?.height = it.rowHeight(b, &it.table.?, 0);
         }
-        const state = &it._table.?;
+        const state = &it.table.?;
         const table = b.table.?;
-        const first = it._document.cells()[table.first_cell + state.row * table.columns];
-        const last = it._document.cells()[table.first_cell + state.row * table.columns + table.columns - 1];
+        const first = it.document.cells()[table.first_cell + state.row * table.columns];
+        const last = it.document.cells()[table.first_cell + state.row * table.columns + table.columns - 1];
         var out = it.row(b, first.start, last.end, state.row == 0 and state.line == 0 and !state.rule);
         out.table = .{ .row = state.row, .line = state.line, .rule = state.rule };
         // Advance: the header's lines, the rule, then each row's lines.
@@ -366,11 +373,11 @@ pub const RowIterator = struct {
             state.height = it.rowHeight(b, state, state.row);
             return out;
         }
-        it._block += 1;
+        it.block += 1;
         return out;
     }
     fn row(it: *const RowIterator, b: reader.Block, start: usize, end: usize, first: bool) VisualRow {
-        const spans = it._document.spans()[b.first_span..b.end_span];
+        const spans = it.document.spans()[b.first_span..b.end_span];
         var low: usize = 0;
         var high = spans.len;
         while (low < high) {
@@ -383,36 +390,36 @@ pub const RowIterator = struct {
             const middle = low + (high - low) / 2;
             if (spans[middle].start < end) low = middle + 1 else high = middle;
         }
-        return .{ .block_index = it._block, .block = b, .start = start, .end = end, .first = first, .text = it._document.text()[start..end], .spans = spans[begin..low] };
+        return .{ .block_index = it.block, .block = b, .start = start, .end = end, .first = first, .text = it.document.text()[start..end], .spans = spans[begin..low] };
     }
 
     pub fn next(it: *RowIterator) ?VisualRow {
-        if (it._cols == 0) return null;
-        while (it._block < it._document.blocks().len) {
-            const b = it._document.blocks()[it._block];
+        if (it.cols == 0) return null;
+        while (it.block < it.document.blocks().len) {
+            const b = it.document.blocks()[it.block];
             // The table the last row was in is kept until a row of another
             // block, so its widths outlive its last row by one call.
-            if (it._table) |t| if (t.block != it._block) {
-                it._table = null;
+            if (it.table) |t| if (t.block != it.block) {
+                it.table = null;
             };
             if (b.kind == .table) return it.tableRow(b, @as(u64, b.depth) * 2);
             const prefix = @as(u64, b.depth) * 2 + b.indent + b.marker.len + @as(u64, if (b.task != null) task_width else 0);
-            if (b.kind != .prose and b.kind != .heading or prefix >= it._cols) {
+            if (b.kind != .prose and b.kind != .heading or prefix >= it.cols) {
                 const r = it.row(b, b.start, b.end, true);
-                it._block += 1;
+                it.block += 1;
                 return r;
             }
-            if (it._prose == null) {
-                it._prose = .init(it._document.text()[b.start..b.end], @intCast(it._cols - prefix), .word, it._method);
-                it._first = true;
+            if (it.prose == null) {
+                it.prose = .init(it.document.text()[b.start..b.end], @intCast(it.cols - prefix), .word, it.method);
+                it.first = true;
             }
-            if (it._prose.?.next()) |r| {
-                const out = it.row(b, b.start + r.start, b.start + r.end, it._first);
-                it._first = false;
+            if (it.prose.?.next()) |r| {
+                const out = it.row(b, b.start + r.start, b.start + r.end, it.first);
+                it.first = false;
                 return out;
             }
-            it._prose = null;
-            it._block += 1;
+            it.prose = null;
+            it.block += 1;
         }
         return null;
     }

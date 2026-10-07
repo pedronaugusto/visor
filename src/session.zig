@@ -40,51 +40,58 @@ pub const ProbeWait = struct {
 /// Drain input through `handle`, call `resize` once, paint `screen()`, then
 /// `draw`. Neither this value nor any of its writes flushes output.
 pub const Session = struct {
-    _gpa: Allocator,
-    _screen: Screen,
-    _renderer: Renderer,
-    _ws: Winsize,
-    _caps: Caps = .{},
-    /// Learned policy waiting for the renderer to accept its mode commands.
-    _pending_caps: ?Caps = null,
-    _probe: Caps.Probe,
-    _layers: Layers,
-    /// Last size of a drained batch, applied by `resize` before painting.
-    _pending: ?Winsize = null,
-    /// An in-band report also confirms a size already seen by a signal.
-    _resize_report: bool = false,
+    /// Private.
+    gpa: Allocator,
+    /// Private.
+    own_screen: Screen,
+    /// Private.
+    own_renderer: Renderer,
+    /// Private.
+    ws: Winsize,
+    /// Private.
+    caps: Caps = .{},
+    /// Private: learned policy waiting for the renderer to accept its mode commands.
+    pending_caps: ?Caps = null,
+    /// Private.
+    own_probe: Caps.Probe,
+    /// Private.
+    own_layers: Layers,
+    /// Private: last size of a drained batch, applied by `resize` before painting.
+    own_pending: ?Winsize = null,
+    /// Private: an in-band report also confirms a size already seen by a signal.
+    resize_report: bool = false,
 
     /// The grid borrowed for painting. Its storage lives until resize or deinit.
     /// Resize this session through resize so both grids follow the same size.
     pub fn screen(s: *Session) *Screen {
-        return &s._screen;
+        return &s.own_screen;
     }
 
     /// The renderer borrowed for terminal entry and mode changes.
     /// Keep its address stable while a Tty holds it; the session owns deinit.
     pub fn renderer(s: *Session) *Renderer {
-        return &s._renderer;
+        return &s.own_renderer;
     }
 
     /// The picture owner borrowed for transmission and frame declarations.
     pub fn layers(s: *Session) *Layers {
-        s._layers.configureSize(s._ws);
-        return &s._layers;
+        s.own_layers.configureSize(s.ws);
+        return &s.own_layers;
     }
 
     /// Current terminal geometry, by value; reports are applied by resize.
     pub fn windowSize(s: *const Session) Winsize {
-        return s._ws;
+        return s.ws;
     }
 
     /// Current capability policy, by value; change it through setCaps.
     pub fn capabilities(s: *const Session) Caps {
-        return s._caps;
+        return s.caps;
     }
 
     /// Probe progress borrowed read-only; handle folds its answers in.
     pub fn probe(s: *const Session) *const Caps.Probe {
-        return &s._probe;
+        return &s.own_probe;
     }
 
     pub const Error = Allocator.Error || Renderer.Error || Renderer.ModesError;
@@ -95,21 +102,21 @@ pub const Session = struct {
         var grid = try Screen.init(gpa, ws.cells);
         errdefer grid.deinit();
         return .{
-            ._gpa = gpa,
-            ._layers = .init(gpa),
-            ._screen = grid,
-            ._renderer = try Renderer.init(gpa, ws.cells),
-            ._ws = ws,
-            ._probe = .init(questions),
+            .gpa = gpa,
+            .own_layers = .init(gpa),
+            .own_screen = grid,
+            .own_renderer = try Renderer.init(gpa, ws.cells),
+            .ws = ws,
+            .own_probe = .init(questions),
         };
     }
 
     /// Gives memory back. Leave the terminal first when this value entered
     /// it; freeing memory writes nothing.
     pub fn deinit(s: *Session) void {
-        s._layers.deinit();
-        s._renderer.deinit();
-        s._screen.deinit();
+        s.own_layers.deinit();
+        s.own_renderer.deinit();
+        s.own_screen.deinit();
         s.* = undefined;
     }
 
@@ -118,14 +125,14 @@ pub const Session = struct {
     /// `handle`), so an override set here outlives a late answer.
     /// Success supersedes pending learned policy; failure keeps it retryable.
     pub fn setCaps(s: *Session, w: *Writer, caps: Caps) Error!bool {
-        const changed = !std.meta.eql(s._caps, caps);
-        if (s._renderer.entered() != null) try s._renderer.setCaps(w, caps) else if (changed) s._renderer.repaint();
+        const changed = !std.meta.eql(s.caps, caps);
+        if (s.own_renderer.entered() != null) try s.own_renderer.setCaps(w, caps) else if (changed) s.own_renderer.repaint();
         // A successful explicit policy also supersedes a queued probe change.
-        s._pending_caps = null;
+        s.pending_caps = null;
         if (!changed) return false;
-        s._caps = caps;
-        s._screen.method = caps.width_method;
-        s._layers.repaint();
+        s.caps = caps;
+        s.own_screen.method = caps.width_method;
+        s.own_layers.repaint();
         return true;
     }
 
@@ -133,17 +140,17 @@ pub const Session = struct {
     /// Raw mode and restoration are the caller's (`Tty.enter` can do them).
     /// A live or partial entry returns `AlreadyEntered` before parser changes.
     pub fn enter(s: *Session, w: *Writer, parser: *morse.KeyParser, mode: render.Mode, modes: render.Modes) Error!void {
-        if (s._renderer.entered() != null) return error.AlreadyEntered;
+        if (s.own_renderer.entered() != null) return error.AlreadyEntered;
         parser.mouse_pixels = pixelMouse(modes);
-        try s._renderer.enter(w, s._caps, mode, modes);
+        try s.own_renderer.enter(w, s.caps, mode, modes);
     }
 
     /// Changes modes and the parser's flag together. Pixel reports are
     /// byte-identical to cell reports; the requested encoding decides.
     pub fn setModes(s: *Session, w: *Writer, parser: *morse.KeyParser, modes: render.Modes) Renderer.ModesError!void {
-        if (s._renderer.entered() == null) return error.NotEntered;
+        if (s.own_renderer.entered() == null) return error.NotEntered;
         parser.mouse_pixels = pixelMouse(modes);
-        try s._renderer.setModes(w, modes);
+        try s.own_renderer.setModes(w, modes);
     }
 
     fn pixelMouse(modes: render.Modes) bool {
@@ -152,8 +159,8 @@ pub const Session = struct {
 
     /// Frees pictures and gives the screen back. Raw mode is the caller's.
     pub fn leave(s: *Session, w: *Writer) Error!void {
-        try s._layers.freeAll(w);
-        try s._renderer.leave(w);
+        try s.own_layers.freeAll(w);
+        try s.own_renderer.leave(w);
     }
 
     /// Folds terminal housekeeping in, returning whether another frame is
@@ -167,41 +174,41 @@ pub const Session = struct {
     /// Housekeeping is retained even when capability output fails; the next
     /// event retries that output without replaying the consumed input.
     pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
-        const was = s._probe.capabilities();
-        s._probe.feed(event, now_ms);
-        const learned = s._probe.capabilities();
-        if (!std.meta.eql(was, learned)) s._pending_caps = merged(s._pending_caps orelse s._caps, was, learned);
+        const was = s.own_probe.capabilities();
+        s.own_probe.feed(event, now_ms);
+        const learned = s.own_probe.capabilities();
+        if (!std.meta.eql(was, learned)) s.pending_caps = merged(s.pending_caps orelse s.caps, was, learned);
         // Consume the input before writing: the terminal cannot replay a
         // resize or acknowledgement when capability output needs a retry.
         var redraw = false;
         switch (event) {
             .resize => {
-                var next = s._pending orelse s._ws;
+                var next = s.own_pending orelse s.ws;
                 _ = next.update(event);
-                s._pending = next;
-                s._resize_report = true;
+                s.own_pending = next;
+                s.resize_report = true;
                 redraw = true;
             },
             .reply => |reply| switch (reply) {
                 .window_size => |report| {
                     if (report.what == .text_area_cells) {
-                        var next = s._pending orelse s._ws;
+                        var next = s.own_pending orelse s.ws;
                         _ = next.update(event);
-                        s._pending = next;
-                        s._resize_report = true;
+                        s.own_pending = next;
+                        s.resize_report = true;
                         redraw = true;
-                    } else if (s._pending) |*next| redraw = next.update(event) or redraw else redraw = s._ws.update(event) or redraw;
+                    } else if (s.own_pending) |*next| redraw = next.update(event) or redraw else redraw = s.ws.update(event) or redraw;
                 },
                 .graphics => |response| {
-                    const held = if (response.id) |id| s._layers.image(id) != null else false;
-                    s._layers.ack(response);
+                    const held = if (response.id) |id| s.own_layers.image(id) != null else false;
+                    s.own_layers.ack(response);
                     redraw = held or redraw;
                 },
                 else => {},
             },
             else => {},
         }
-        const policy_changed = if (s._pending_caps) |caps| try s.setCaps(w, caps) else false;
+        const policy_changed = if (s.pending_caps) |caps| try s.setCaps(w, caps) else false;
         return policy_changed or redraw;
     }
 
@@ -222,36 +229,36 @@ pub const Session = struct {
     /// Ask the cell's pixel size again after either case, since a font
     /// change also looks like a resize. Returns whether a repaint is due.
     pub fn resize(s: *Session, w: *Writer) Error!bool {
-        const next = s._pending orelse return false;
-        const changed = !std.meta.eql(s._ws.cells, next.cells) or !std.meta.eql(s._ws.area, next.area);
-        const confirmed = s._resize_report and s._caps.in_band_resize;
+        const next = s.own_pending orelse return false;
+        const changed = !std.meta.eql(s.ws.cells, next.cells) or !std.meta.eql(s.ws.area, next.area);
+        const confirmed = s.resize_report and s.caps.in_band_resize;
         if (changed) {
             // Reserve the renderer first, then let Screen's atomic resize
             // commit. The remaining storage swap cannot fail, so allocation
             // failure cannot split the two grids or invalidate old borrows.
-            var prepared: ?Renderer = if (!std.meta.eql(s._renderer.dimensions(), next.cells))
-                try render.internal.prepare(s._gpa, next.cells)
+            var prepared: ?Renderer = if (!std.meta.eql(s.own_renderer.dimensions(), next.cells))
+                try render.internal.prepare(s.gpa, next.cells)
             else
                 null;
             defer if (prepared) |*r| r.deinit();
-            if (!std.meta.eql(s._screen.dimensions(), next.cells)) try s._screen.resize(next.cells);
-            if (prepared) |*r| render.internal.resizePrepared(&s._renderer, r);
+            if (!std.meta.eql(s.own_screen.dimensions(), next.cells)) try s.own_screen.resize(next.cells);
+            if (prepared) |*r| render.internal.resizePrepared(&s.own_renderer, r);
         }
         if (changed or confirmed) {
-            s._renderer.repaint();
-            s._layers.repaint();
+            s.own_renderer.repaint();
+            s.own_layers.repaint();
             try morse.queryWindowSize(w, .cell_pixels);
         }
-        s._ws = next;
-        s._pending = null;
-        s._resize_report = false;
+        s.ws = next;
+        s.own_pending = null;
+        s.resize_report = false;
         return changed or confirmed;
     }
 
     /// Writes one frame, after `resize` and application painting. No flush.
     pub fn draw(s: *Session, w: *Writer) Renderer.Error!Renderer.Stats {
-        s._layers.configureSize(s._ws);
-        return s._renderer.draw(w, &s._screen, &s._layers, s._caps);
+        s.own_layers.configureSize(s.ws);
+        return s.own_renderer.draw(w, &s.own_screen, &s.own_layers, s.caps);
     }
 };
 
@@ -264,20 +271,20 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
     defer out.deinit();
     try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 10, .rows = 4 } }, 0));
     try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 12, .rows = 5 } }, 1));
-    try testing.expectEqual(@as(u16, 8), s._screen.dimensions().cols);
+    try testing.expectEqual(@as(u16, 8), s.own_screen.dimensions().cols);
     try testing.expectEqual(@as(usize, 0), out.written().len);
     try testing.expect(try s.resize(&out.writer));
-    try testing.expectEqual(s._ws.cells, s._screen.dimensions());
-    try testing.expectEqual(s._ws.cells, s._renderer.dimensions());
-    try testing.expectEqual(@as(u16, 12), s._ws.cells.cols);
-    try testing.expect(!s._ws.cell.known());
+    try testing.expectEqual(s.ws.cells, s.own_screen.dimensions());
+    try testing.expectEqual(s.ws.cells, s.own_renderer.dimensions());
+    try testing.expectEqual(@as(u16, 12), s.ws.cells.cols);
+    try testing.expect(!s.ws.cell.known());
     try testing.expectEqualStrings("\x1b[16t", out.written());
     try testing.expect(!try s.resize(&out.writer));
     out.clearRetainingCapacity();
     try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[8;6;14t").? }, 2));
     _ = try s.resize(&out.writer);
-    try testing.expectEqual(@as(u16, 14), s._screen.dimensions().cols);
-    try testing.expectEqual(s._screen.dimensions(), s._renderer.dimensions());
+    try testing.expectEqual(@as(u16, 14), s.own_screen.dimensions().cols);
+    try testing.expectEqual(s.own_screen.dimensions(), s.own_renderer.dimensions());
 }
 
 test "a session repaints an unchanged in-band size, including pictures" {
@@ -285,18 +292,18 @@ test "a session repaints an unchanged in-band size, including pictures" {
     defer s.deinit();
     var out: Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    s._probe._caps.in_band_resize = true;
-    s._probe._caps.kitty_graphics = true;
-    _ = try s.setCaps(&out.writer, s._probe.capabilities());
-    try s._screen.write(0, 0, "x", .{}, .none);
+    s.own_probe.caps.in_band_resize = true;
+    s.own_probe.caps.kitty_graphics = true;
+    _ = try s.setCaps(&out.writer, s.own_probe.capabilities());
+    try s.own_screen.write(0, 0, "x", .{}, .none);
     const layer: layer_mod.Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
-    try s._layers.declare(layer);
+    try s.own_layers.declare(layer);
     _ = try s.draw(&out.writer);
     out.clearRetainingCapacity();
     _ = try s.handle(&out.writer, .{ .resize = .{ .cols = 8, .rows = 3 } }, 1);
     try testing.expect(try s.resize(&out.writer));
     try testing.expectEqualStrings("\x1b[16t", out.written());
-    try s._layers.declare(layer);
+    try s.own_layers.declare(layer);
     const drawn = try s.draw(&out.writer);
     try testing.expectEqual(@as(u32, 3), drawn.rows);
     try testing.expectEqual(@as(u32, 1), drawn.placements);
@@ -321,7 +328,7 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
     out.clearRetainingCapacity();
     try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 0));
     try testing.expectEqualStrings("\x1b[?2048h", out.written());
-    try testing.expect(s._renderer.entered().?.in_band_resize);
+    try testing.expect(s.own_renderer.entered().?.in_band_resize);
     try s.leave(&out.writer);
 }
 
@@ -360,9 +367,9 @@ test "the probe wait keeps DA1 quiet time and the overall deadline on caller tim
     probe.feed(.{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 1040);
     try testing.expectEqual(@as(?i64, 40), wait.remaining(&probe, 1050));
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1090));
-    probe._answered = .empty;
+    probe.answered = .empty;
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1500));
-    probe._answered = .full;
+    probe.answered = .full;
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1000));
 }
 
@@ -371,33 +378,33 @@ test "a failed session resize keeps both grids and their borrowed content togeth
         fn run(gpa: Allocator) !void {
             var s = try Session.init(gpa, .{ .cells = .{ .cols = 4, .rows = 1 } }, .{ .graphics_id = 1 });
             defer s.deinit();
-            s._screen.method = .unicode;
-            const link = try s._screen.link("https://kept.invalid", "id=kept");
-            try s._screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, link);
+            s.own_screen.method = .unicode;
+            const link = try s.own_screen.link("https://kept.invalid", "id=kept");
+            try s.own_screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, link);
             var sink: Writer.Discarding = .init(&.{});
             _ = try s.draw(&sink.writer);
             _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, 0);
-            const size = s._screen.dimensions();
-            const generation = s._screen._pool_generation;
-            const cells = s._screen._cells;
-            const prev = s._renderer._prev;
-            const borrowed = s._screen.textAt(0, 0);
-            const pending = s._pending;
+            const size = s.own_screen.dimensions();
+            const generation = s.own_screen.pool_generation;
+            const cells = s.own_screen.own_cells;
+            const prev = s.own_renderer.prev;
+            const borrowed = s.own_screen.textAt(0, 0);
+            const pending = s.own_pending;
             _ = s.resize(&sink.writer) catch |err| {
-                try testing.expectEqual(size, s._screen.dimensions());
-                try testing.expectEqual(size, s._renderer.dimensions());
-                try testing.expectEqual(size, s._ws.cells);
-                try testing.expectEqual(generation, s._screen._pool_generation);
-                try testing.expect(s._screen._cells.ptr == cells.ptr);
-                try testing.expect(s._renderer._prev.ptr == prev.ptr);
-                try testing.expect(s._screen.textAt(0, 0).ptr == borrowed.ptr);
+                try testing.expectEqual(size, s.own_screen.dimensions());
+                try testing.expectEqual(size, s.own_renderer.dimensions());
+                try testing.expectEqual(size, s.ws.cells);
+                try testing.expectEqual(generation, s.own_screen.pool_generation);
+                try testing.expect(s.own_screen.own_cells.ptr == cells.ptr);
+                try testing.expect(s.own_renderer.prev.ptr == prev.ptr);
+                try testing.expect(s.own_screen.textAt(0, 0).ptr == borrowed.ptr);
                 try testing.expectEqualStrings("a\u{301}\u{302}\u{303}", borrowed);
-                try testing.expectEqual(pending, s._pending);
+                try testing.expectEqual(pending, s.own_pending);
                 return err;
             };
-            try testing.expectEqual(s._screen.dimensions(), s._renderer.dimensions());
-            try testing.expectEqual(s._ws.cells, s._screen.dimensions());
-            try testing.expectEqualStrings("https://kept.invalid", s._screen.target(s._screen.readCell(0, 0).?.link).?.uri);
+            try testing.expectEqual(s.own_screen.dimensions(), s.own_renderer.dimensions());
+            try testing.expectEqual(s.ws.cells, s.own_screen.dimensions());
+            try testing.expectEqualStrings("https://kept.invalid", s.own_screen.target(s.own_screen.readCell(0, 0).?.link).?.uri);
             _ = try s.draw(&sink.writer);
         }
     }.run, .{});

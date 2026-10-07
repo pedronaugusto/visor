@@ -14,71 +14,75 @@ pub const Paint = struct {
 
 /// Owned RGBA storage. Borrow pixels until resize or deinit; drawing never reallocates.
 pub const Surface = struct {
-    _allocator: std.mem.Allocator,
-    _width: u32,
-    _height: u32,
-    _pixels: []u8,
+    /// Private.
+    allocator: std.mem.Allocator,
+    /// Private.
+    width: u32,
+    /// Private.
+    height: u32,
+    /// Private.
+    own_pixels: []u8,
 
     pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) (std.mem.Allocator.Error || error{InvalidSize})!Surface {
         if (width == 0 or height == 0 or @as(u64, width) * height > std.math.maxInt(usize) / 4) return error.InvalidSize;
         const storage = try allocator.alloc(u8, @as(usize, width) * height * 4);
         @memset(storage, 0);
-        return .{ ._allocator = allocator, ._width = width, ._height = height, ._pixels = storage };
+        return .{ .allocator = allocator, .width = width, .height = height, .own_pixels = storage };
     }
 
     /// Dimensions copied from the geometry this allocation owns.
     pub fn dimensions(s: *const Surface) visor.Pixels {
-        return .{ .width = s._width, .height = s._height };
+        return .{ .width = s.width, .height = s.height };
     }
 
     /// Straight-alpha RGBA bytes borrowed read-only until resize or deinit.
     pub fn pixels(s: *const Surface) []const u8 {
-        return s._pixels;
+        return s.own_pixels;
     }
 
     /// Straight-alpha RGBA bytes borrowed for editing until resize or deinit.
     /// The slice's descriptor is a copy; storage and bounds stay with Surface.
     pub fn pixelsMut(s: *Surface) []u8 {
-        return s._pixels;
+        return s.own_pixels;
     }
 
     /// Replaces geometry and storage together with a cleared surface.
     /// An unchanged size keeps pixels and borrows; failure leaves them intact.
     pub fn resize(s: *Surface, width: u32, height: u32) (std.mem.Allocator.Error || error{InvalidSize})!void {
-        if (s._width == width and s._height == height) return;
-        const prepared = try Surface.init(s._allocator, width, height);
-        s._allocator.free(s._pixels);
+        if (s.width == width and s.height == height) return;
+        const prepared = try Surface.init(s.allocator, width, height);
+        s.allocator.free(s.own_pixels);
         s.* = prepared;
     }
 
     pub fn deinit(s: *Surface) void {
-        s._allocator.free(s._pixels);
+        s.allocator.free(s.own_pixels);
         s.* = undefined;
     }
 
     pub fn clear(s: *Surface) void {
-        @memset(s._pixels, 0);
+        @memset(s.own_pixels, 0);
     }
 
     fn blend(s: *Surface, x: u32, y: u32, paint: Paint, coverage: f64) void {
         const a = coverage * @as(f64, @floatFromInt(paint.rgba[3])) / 255;
         if (a <= 0) return;
-        const i = (@as(usize, y) * s._width + x) * 4;
-        const old = @as(f64, @floatFromInt(s._pixels[i + 3])) / 255;
+        const i = (@as(usize, y) * s.width + x) * 4;
+        const old = @as(f64, @floatFromInt(s.own_pixels[i + 3])) / 255;
         const alpha = switch (paint.blend) {
             .normal => a + old * (1 - a),
             .additive => @min(1, a + old),
         };
         for (0..3) |k| {
             const src: f64 = @floatFromInt(paint.rgba[k]);
-            const dst: f64 = @floatFromInt(s._pixels[i + k]);
+            const dst: f64 = @floatFromInt(s.own_pixels[i + k]);
             const value = switch (paint.blend) {
                 .normal => (src * a + dst * old * (1 - a)) / alpha,
                 .additive => dst + src * a,
             };
-            s._pixels[i + k] = @intFromFloat(@round(std.math.clamp(value, 0, 255)));
+            s.own_pixels[i + k] = @intFromFloat(@round(std.math.clamp(value, 0, 255)));
         }
-        s._pixels[i + 3] = @intFromFloat(@round(alpha * 255));
+        s.own_pixels[i + 3] = @intFromFloat(@round(alpha * 255));
     }
 
     /// A round-ended stroke, clipped to the output before visiting pixels.
@@ -177,8 +181,8 @@ pub const Surface = struct {
 
     fn box(s: Surface, low: [2]f64, high: [2]f64) [4]u32 {
         return .{
-            edge(@ceil(low[0]), s._width),       edge(@ceil(low[1]), s._height),
-            edge(@floor(high[0]) + 1, s._width), edge(@floor(high[1]) + 1, s._height),
+            edge(@ceil(low[0]), s.width),       edge(@ceil(low[1]), s.height),
+            edge(@floor(high[0]) + 1, s.width), edge(@floor(high[1]) + 1, s.height),
         };
     }
 };

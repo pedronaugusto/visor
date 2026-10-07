@@ -35,21 +35,21 @@ const is_windows = builtin.os.tag == .windows;
 
 /// The terminal's input, read and framed, one event at a time.
 pub const Input = struct {
-    /// The terminal read from.
-    _tty: *Tty,
-    /// The parser, over the caller's buffer.
-    _parser: morse.KeyParser,
-    /// Where each read lands, the caller's.
-    _read_buffer: []u8,
-    /// What was read and not yet handed to the parser.
-    _fresh: []const u8 = &.{},
-    /// How long a lone `ESC` waits for the rest of a sequence before it is
+    /// Private: the terminal read from.
+    tty: *Tty,
+    /// Private: the parser, over the caller's buffer.
+    parser: morse.KeyParser,
+    /// Private: where each read lands, the caller's.
+    read_buffer: []u8,
+    /// Private: what was read and not yet handed to the parser.
+    fresh: []const u8 = &.{},
+    /// Private: how long a lone `ESC` waits for the rest of a sequence before it is
     /// the Escape key.
-    _escape: Io.Duration,
-    /// The stream ended with this call's events still to hand over.
-    _ended: bool = false,
-    /// The resize pipe woke a wait, and the size has not been handed over.
-    _resize_due: bool = false,
+    escape: Io.Duration,
+    /// Private: the stream ended with this call's events still to hand over.
+    ended: bool = false,
+    /// Private: the resize pipe woke a wait, and the size has not been handed over.
+    resize_due: bool = false,
 
     /// The buffers and the one timeout.
     pub const Options = struct {
@@ -77,22 +77,22 @@ pub const Input = struct {
     pub fn init(tty: *Tty, options: Options) error{EmptyReadBuffer}!Input {
         if (options.read_buffer.len == 0) return error.EmptyReadBuffer;
         return .{
-            ._tty = tty,
-            ._parser = .init(options.parser_buffer),
-            ._read_buffer = options.read_buffer,
-            ._escape = options.escape,
+            .tty = tty,
+            .parser = .init(options.parser_buffer),
+            .read_buffer = options.read_buffer,
+            .escape = options.escape,
         };
     }
 
     /// Whether SGR mouse reports are parsed as pixels, copied from the parser.
     pub fn mousePixels(in: *const Input) bool {
-        return in._parser.mouse_pixels;
+        return in.parser.mouse_pixels;
     }
 
     /// Match parsing to the encoding requested from the terminal.
     /// Set this alongside enter or setModes, including a partial mode change.
     pub fn setMousePixels(in: *Input, pixels: bool) void {
-        in._parser.mouse_pixels = pixels;
+        in.parser.mouse_pixels = pixels;
     }
 
     /// The next event, waiting for one as long as it takes.
@@ -115,20 +115,20 @@ pub const Input = struct {
     /// waiting at the caller's deadline stays held for the next call. What
     /// the event borrows is valid until the next call, as with `next`.
     pub fn nextWithin(in: *Input, timeout: Io.Timeout) Error!?morse.Event {
-        const until = timeout.toDeadline(in._tty.ioContext());
+        const until = timeout.toDeadline(in.tty.ioContext());
         while (true) {
             // What was read already comes first, including the repeats a
             // console sequence can stand for.
-            var events = in._parser.feed(in._fresh);
+            var events = in.parser.feed(in.fresh);
             const event = events.next();
-            in._fresh = events.remainder();
+            in.fresh = events.remainder();
             if (event) |e| return e;
 
             // Then a resize, asked of the operating system now rather than
             // when the signal came, because another may have followed it.
-            if (in._resize_due) {
-                in._resize_due = false;
-                if (in._tty.size()) |ws| return .{ .resize = .{
+            if (in.resize_due) {
+                in.resize_due = false;
+                if (in.tty.size()) |ws| return .{ .resize = .{
                     .rows = ws.cells.rows,
                     .cols = ws.cells.cols,
                     .ypixels = ws.area.height,
@@ -136,15 +136,15 @@ pub const Input = struct {
                 } } else |_| {}
             }
 
-            if (in._ended) {
-                if (in._parser.flush()) |e| return e;
+            if (in.ended) {
+                if (in.parser.flush()) |e| return e;
                 return error.EndOfStream;
             }
 
             switch (try in.wait(until)) {
-                .bytes => |n| in._fresh = in._read_buffer[0..n],
-                .ended => in._ended = true,
-                .quiet => if (in._parser.flush()) |e| return e,
+                .bytes => |n| in.fresh = in.read_buffer[0..n],
+                .ended => in.ended = true,
+                .quiet => if (in.parser.flush()) |e| return e,
                 .expired => return null,
                 .resized => {},
             }
@@ -175,12 +175,12 @@ pub const Input = struct {
     const Limit = struct { timeout: Io.Timeout, expires: bool };
 
     fn limit(in: *const Input, until: Io.Timeout) Limit {
-        const left = until.toDurationFromNow(in._tty.ioContext());
+        const left = until.toDurationFromNow(in.tty.ioContext());
         // What the parser holds is a key as well as the start of a
         // sequence: the one case the escape timeout settles, by `flush`.
-        if (in._parser.undecided()) {
-            const escape: Io.Clock.Duration = .{ .raw = in._escape, .clock = .awake };
-            if (left) |l| if (l.raw.nanoseconds < in._escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
+        if (in.parser.undecided()) {
+            const escape: Io.Clock.Duration = .{ .raw = in.escape, .clock = .awake };
+            if (left) |l| if (l.raw.nanoseconds < in.escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
             return .{ .timeout = .{ .duration = escape }, .expires = false };
         }
         const l = left orelse return .{ .timeout = .none, .expires = false };
@@ -195,11 +195,11 @@ pub const Input = struct {
     /// buffer size), so those are taken off the queue and the wait begun
     /// again rather than left to a read that would block on them.
     fn waitWindows(in: *Input, until: Io.Timeout) Error!Woke {
-        const file = in._tty.inputFile();
+        const file = in.tty.inputFile();
         while (true) {
             const lim = in.limit(until);
             if (lim.timeout == .none) return in.readBlocking(file);
-            const woke = console.waitInput(in._tty.ioContext(), file.handle, lim.timeout) catch |err| switch (err) {
+            const woke = console.waitInput(in.tty.ioContext(), file.handle, lim.timeout) catch |err| switch (err) {
                 error.Canceled => return error.Canceled,
                 error.Unexpected => return in.readBlocking(file),
             };
@@ -217,17 +217,17 @@ pub const Input = struct {
     }
 
     fn waitPosix(in: *Input, until: Io.Timeout) Error!Woke {
-        const io = in._tty.ioContext();
-        const tty_file = in._tty.inputFile();
+        const io = in.tty.ioContext();
+        const tty_file = in.tty.inputFile();
         const lim = in.limit(until);
         const timeout = lim.timeout;
-        const resize = in._tty.resizeFile();
+        const resize = in.tty.resizeFile();
 
         if (timeout == .none and resize == null) return in.readBlocking(tty_file);
 
         var storage: [2]Io.Operation.Storage = undefined;
         var batch: Io.Batch = .init(&storage);
-        batch.addAt(0, .{ .file_read_streaming = .{ .file = tty_file, .data = &.{in._read_buffer} } });
+        batch.addAt(0, .{ .file_read_streaming = .{ .file = tty_file, .data = &.{in.read_buffer} } });
         var sink: [64]u8 = undefined;
         if (resize) |file| batch.addAt(1, .{ .file_read_streaming = .{ .file = file, .data = &.{&sink} } });
 
@@ -242,7 +242,7 @@ pub const Input = struct {
 
         if (woke) |w| return w;
         if (failed) |e| return e;
-        if (in._resize_due) return .resized;
+        if (in.resize_due) return .resized;
         outcome catch |err| switch (err) {
             error.Timeout => return if (lim.expires) .expired else .quiet,
             error.Canceled => return error.Canceled,
@@ -261,8 +261,8 @@ pub const Input = struct {
             if (done.index == 1) {
                 // The pipe does not block: whatever this read took, the rest
                 // is taken here so the next wait does not wake for it again.
-                in._tty.drainResize();
-                in._resize_due = true;
+                in.tty.drainResize();
+                in.resize_due = true;
                 continue;
             }
             if (result) |n| {
@@ -277,7 +277,7 @@ pub const Input = struct {
 
     /// One read with nothing beside it.
     fn readBlocking(in: *Input, file: Io.File) Error!Woke {
-        const n = file.readStreaming(in._tty.ioContext(), &.{in._read_buffer}) catch |err| switch (err) {
+        const n = file.readStreaming(in.tty.ioContext(), &.{in.read_buffer}) catch |err| switch (err) {
             error.EndOfStream => return .ended,
             else => |e| return e,
         };
