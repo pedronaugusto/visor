@@ -803,8 +803,12 @@ present, so nothing visor fetches for its CI is needed to build on it.
 
 `zig build test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
-than the process, and CI runs it in Debug, ReleaseSafe, ReleaseFast and
-ReleaseSmall on each of the three platforms.
+than the process. [CI](.github/workflows/ci.yml) runs in tiers. The fast
+tier runs the source checks and the Debug suite on `ubuntu-latest`; the merge
+tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
+`windows-latest`; the release tier, before a cut, runs the suites in Debug
+and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
+and compiles ReleaseSmall.
 
 The headline test is a round trip. Random grid operations are drawn, the bytes
 are fed to the emulator this package ships, and the grid it rebuilt is
@@ -904,7 +908,7 @@ on an Apple M3 Max, best of five passes of a thousand frames each:
 
 ## Requirements
 
-Zig 0.16.0.
+Zig 0.17.0.
 
 ## Licence
 

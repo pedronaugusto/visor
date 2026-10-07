@@ -7,13 +7,14 @@
     // program on `visor` fetches one.
     .dependencies = .{
         .visor = .{ .path = ".." },
-        // The tree at git commit b32f20f3e8d25bb925ec545c54498e93518e7ced.
+        // The head of ghostty's `zig-0.17` branch (ghostty-org/ghostty#14519)
+        // until that port reaches its main; morse's conformance pins the same.
         .ghostty = .{
-            .url = "https://github.com/ghostty-org/ghostty/archive/b32f20f3e8d25bb925ec545c54498e93518e7ced.tar.gz",
-            .hash = "ghostty-1.3.2-dev-5UdBC464cgX-VbPn16E1sGGBjQa8BRM9Eprp1xin7uVV",
+            .url = "git+https://github.com/ghostty-org/ghostty#5147c0a503cdeed7615cce245cdd815ed7a6b692",
+            .hash = "ghostty-1.3.2-dev-5UdBC-lZeAVJbemF7Fz8y5ApP0uA6wTc2uzECn3c6Z_Y",
         },
     },
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0x34e8282c84d67783,
     .paths = .{
         "build.zig",

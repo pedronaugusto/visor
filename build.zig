@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
 
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
-    b.modules.put(b.allocator, b.dupe("morse"), morse.module("morse")) catch @panic("OOM");
+    b.modules.put(b.allocator, b.graph.dupeString("morse"), morse.module("morse")) catch @panic("OOM");
 
     // The inputs the round-trip properties replay. Its own module because
     // the suite inside the package and the conformance build outside it
@@ -78,17 +78,8 @@ pub fn build(b: *std.Build) void {
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
     // test block is what pulls every file in.
-    //
-    // `error_tracing` is off on the test modules because Zig 0.16.0's test
-    // runner cannot build a fuzzing binary with it on: it hands
-    // `@errorReturnTrace()` to `std.debug.writeStackTrace`, and the two
-    // `StackTrace` types do not match. The ordinary suite passes either way;
-    // with it on, `zig build test --fuzz` fails to compile after the suite
-    // has already run, which is a fuzz target nobody can reach. Delete this
-    // the release it is fixed.
     //=====================================================================
 
-    const fuzzable = false;
     const test_filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
     const filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
 
@@ -106,12 +97,11 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .name = "visor-tests",
         .filters = filters,
-        .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
+        .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
-            .error_tracing = fuzzable,
             .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
@@ -140,12 +130,11 @@ pub fn build(b: *std.Build) void {
     const widget_tests = b.addTest(.{
         .name = "visor-widget-tests",
         .filters = filters,
-        .use_llvm = if (thread_sanitizer) true else needsLlvm(target, optimize),
+        .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/widgets_test.zig"),
             .target = target,
             .optimize = optimize,
-            .error_tracing = fuzzable,
             .sanitize_thread = sanitize,
             .imports = &.{
                 .{ .name = "visor", .module = module },
@@ -169,8 +158,7 @@ pub fn build(b: *std.Build) void {
     const examples_step = b.step("examples", "Build and run the examples");
     for (example_sources) |source| {
         const example = b.addExecutable(.{
-            .name = std.fs.path.stem(source),
-            .use_llvm = needsLlvm(target, optimize),
+            .name = std.Io.Dir.path.stem(source),
             .root_module = b.createModule(.{
                 .root_source_file = b.path(source),
                 .target = target,
@@ -242,34 +230,8 @@ pub fn build(b: *std.Build) void {
             .program = b.path("ci/consumer.zig"),
             .modules = &.{ "visor", "visor.widgets" },
             .packages = &.{ morse, conduit, uucode },
-            .use_llvm = "needsLlvm",
         });
     }
-}
-
-/// Whether to hand this compilation to LLVM rather than to Zig's own
-/// backend.
-///
-/// Zig 0.16's self-hosted x86_64 backend dies with SIGSEGV -- no message,
-/// no stack -- compiling this package in Debug. The smallest program that
-/// reproduces it is one `uucode.get` call and nothing else: the tables
-/// uucode generates are three stages of arrays indexed one into the next,
-/// and lowering a read through them is what the backend cannot do. Every
-/// file that reaches `text.zig` goes down with it, which is every file
-/// here. Nothing in this package can avoid it -- measuring a cluster is
-/// what the tables are for. The release modes are unaffected because they
-/// use LLVM already, and so is the aarch64 backend, which compiles the
-/// same call. So the one case that trips takes the other path. Delete this
-/// the release it is fixed.
-///
-/// `conformance/build.zig` builds the same package under the same backend
-/// and calls this too, which is why it is public; so does any program built
-/// on visor in Debug there, `check-consumer`'s among them.
-pub fn needsLlvm(target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) ?bool {
-    if (optimize != .Debug) return null;
-    const result = target.result;
-    if (result.cpu.arch == .x86_64 and result.os.tag == .linux) return true;
-    return null;
 }
 
 /// Every example, listed rather than globbed: a build graph that scans a

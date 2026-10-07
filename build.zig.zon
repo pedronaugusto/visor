@@ -3,24 +3,24 @@
     .version = "0.4.0",
     .dependencies = .{
         .preflight = .{
-            .url = "https://codeload.github.com/pedronaugusto/preflight/tar.gz/3d9e5f165c4e317d3414679b4308a2ebf7c7fec5",
-            .hash = "preflight-0.1.0-LX1Zwjm0AwAi9oFgblqE7NEb2CbnqK-SjMW5fUjJ0Qht",
+            .url = "git+https://github.com/pedronaugusto/preflight#260ed79cf626e7ab8fb05039db476bb680b4a653",
+            .hash = "preflight-0.1.0-LX1ZwjvuBADAj7ukyFSK8YT0EXBlwN8CZkprUGIpFE2u",
             .lazy = true,
         },
         .uucode = .{
-            .url = "git+https://github.com/jacobsandlund/uucode#9d55524551411b493cca41ca06363625d90aff1e",
-            .hash = "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
+            .url = "git+https://github.com/jacobsandlund/uucode#1fb73433bba5d93366c57f23ff2e9d7939746500",
+            .hash = "uucode-0.2.0-ZZjBPm6FVgBcY-79AHV8ckQj86z0JwOyVyj89VeZrEiv",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#8be79c4cef942be1fea17e253a925e397ce3517e",
-            .hash = "morse-0.7.0-OKnGoe2bEgCkaEVGU_BLcxV54IRPH0Bvz-HdcgSBdF6D",
+            .url = "git+https://github.com/pedronaugusto/morse#2f2aad80975ec07445cff44985945bfa1f5582e7",
+            .hash = "morse-0.7.0-OKnGocb4EgAkFdT5rOe4nvNtx4tN-2zAGj03RCo10pZI",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#73b8fdfd260137924463cdd440d6bbbb48fbb7f6",
-            .hash = "conduit-0.5.1-4rIA72bOEwBaPTzyER-nj8RXKPDLIT8iu0qgoVA0bQk5",
+            .url = "git+https://github.com/pedronaugusto/conduit#43751a5cf7bd9359e1016508dbce8120483853b0",
+            .hash = "conduit-0.5.1-4rIA71luEwDzl3f1NGpLRpmpSvwEBuUaw6b7FmnLySCQ",
         },
     },
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0xfc47eb8a53109791,
     .paths = .{
         "build.zig",

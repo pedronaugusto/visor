@@ -6,11 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Requires Zig 0.17.0; Zig 0.16 no longer builds visor. morse, conduit and uucode are pinned at their Zig 0.17 commits.
+
+- `build.zig` no longer exports `needsLlvm`: Zig 0.17's x86_64 backend compiles uucode's tables, so nothing built on visor in Debug on x86_64 Linux has to ask for LLVM.
+
 - `Tty.watchResize` makes its pipe with conduit's `pipe`, close-on-exec in one call where the system has `pipe2`, and on macOS under the lock conduit's spawns take. A child that conduit started at that moment could inherit both ends; on Linux a fork anywhere could. A program gets the macOS half only while it builds the same conduit visor pins.
 
 - On Windows, `Input.nextWithin`, and the wait `Input.next` gives a lone `ESC`, wait on the console for the time left rounded up to a whole millisecond. They rounded down, so a wait with less than a millisecond left ended at once and `nextWithin` could report its timeout passed while it was still ahead.
-
-- conduit is pinned at 73b8fdf.
 
 - `Screen.write`, `writeScaled`, `Window.write`, `print` and every widget draw text as a terminal would instead of refusing it: a control (C0, DEL or C1) and a cluster that takes no column are drawn as nothing, and bytes that are not UTF-8 or a cluster longer than 65535 bytes are the replacement character. `InvalidCell` from text now means only more than one cluster in one `write`. A hand-built cell is checked against the screen's own width method, where it was always checked by codepoint. Markdown, Paragraph, List and TextInput no longer fail on a combining mark that begins a segment, U+0085, or a Hangul vowel.
 
