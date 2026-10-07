@@ -800,6 +800,18 @@ pseudo-terminal conduit opens: the size with its pixels, entering and leaving,
 the panic path's way back, and a resize waking `Input`. The Windows half is
 compiled and not run.
 
+## Built with
+
+- [Zig](https://ziglang.org) 0.17.0 and its standard library.
+- [morse](https://github.com/pedronaugusto/morse) writes every escape sequence and
+  parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
+  `conduit.tty` makes the terminal's own calls;
+  [uucode](https://github.com/jacobsandlund/uucode) segments and measures clusters.
+- [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
+  the tests and CI.
+- [Ghostty](https://github.com/ghostty-org/ghostty)'s `libghostty-vt` is the
+  emulator the conformance build compares against, fetched only for that build.
+
 ## Testing
 
 `zig build check-consumer`, part of the lint `zig build ci` runs first,
@@ -915,18 +927,6 @@ on an Apple M3 Max, best of five passes of a thousand frames each:
 | The same, with `Caps.scroll_detection` | 154 µs | 878 |
 | A page of widgets drawn into a blank grid | 257 µs | 2,445 |
 | Nothing changed | 0 | 0 |
-
-## Built with
-
-- [Zig](https://ziglang.org) 0.17.0 and its standard library.
-- [morse](https://github.com/pedronaugusto/morse) writes every escape sequence and
-  parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
-  `conduit.tty` makes the terminal's own calls;
-  [uucode](https://github.com/jacobsandlund/uucode) segments and measures clusters.
-- [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
-  the tests and CI.
-- [Ghostty](https://github.com/ghostty-org/ghostty)'s `libghostty-vt` is the
-  emulator the conformance build compares against, fetched only for that build.
 
 ## Licence
 
