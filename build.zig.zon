@@ -20,8 +20,8 @@
             .hash = "conduit-0.5.1-4rIA74pUEwCQaKush7TlJgA462c01S9mhUj-__W--VkS",
         },
         .shakedown = .{
-            .url = "git+https://github.com/pedronaugusto/shakedown#4f590164cf91ef9f244ee26b0a20444b9ecdcdae",
-            .hash = "shakedown-0.1.0-BR8U47zBAwCoNKX4gYuShFo5o5tCR_GSyQ3PVjzPDoPw",
+            .url = "git+https://github.com/pedronaugusto/shakedown#1bb13e70ed64563d8bce33ed507ffa450f135769",
+            .hash = "shakedown-0.1.0-BR8U4wZFCADbHwHZYu07dR4hVzc_JjeTiZy8phJDromo",
             .lazy = true,
         },
     },

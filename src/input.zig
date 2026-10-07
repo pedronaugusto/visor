@@ -749,41 +749,16 @@ test "the pump is compiled for every target, the Windows wait included" {
 }
 
 test "a silent deadline submits one read and cancels it with the remaining budget" {
-    // Time is a shakedown Clock's, and the batch never reaches the machine:
-    // its wait looks at what was submitted and times out as the clock's
-    // timer would, and its cancel calls nothing off. No descriptor is read,
-    // on any host. shakedown's Clock would hand a real batch to the base,
-    // where the read of a descriptor that is not one fails at once, so the
-    // two batch slots are a layer of the test's own until a simulated
-    // batch exists.
-    const Batches = struct {
-        const Self = @This();
-        const Layer = shakedown.Layer(Self, .{ .batchAwaitConcurrent = wait, .batchCancel = cancel });
-
-        clock: *shakedown.Clock,
-        reads: usize = 0,
-        budget: Io.Timeout = .none,
-
-        fn wait(userdata: ?*anyopaque, batch: *Io.Batch, timeout: Io.Timeout) Io.Batch.AwaitConcurrentError!void {
-            const self = &Layer.of(userdata).state;
-            self.budget = timeout;
-            var index = batch.submitted.head;
-            while (index != .none) {
-                const submission = batch.storage[index.toIndex()].submission;
-                if (submission.operation == .file_read_streaming) self.reads += 1;
-                index = submission.node.next;
-            }
-            self.clock.advance(timeout.duration.raw);
-            return error.Timeout;
-        }
-
-        fn cancel(_: ?*anyopaque, _: *Io.Batch) void {}
-    };
-    var clock: shakedown.Clock = .init(testing.io, .{});
-    var batches: Batches.Layer = .init(clock.io(), .{ .clock = &clock });
-    const counted = try shakedown.FaultIo.init(testing.allocator, batches.io(), .{});
-    defer counted.deinit();
-    const io = counted.io();
+    // The read stays pending until canceled; the clock fires the wait's
+    // timer as it is armed, without reading a descriptor on any host.
+    var clock: shakedown.Clock = .init(testing.io, .{ .advance = .{ .auto = .{} } });
+    const fio = try shakedown.FaultIo.init(testing.allocator, clock.io(), .{ .plan = &.{.{
+        .at = .{ .nth = .{ .call = .file_read_streaming, .n = 1 } },
+        .fault = .stall,
+        .times = 0,
+    }} });
+    defer fio.deinit();
+    const io = fio.io();
     var tty = Tty.adopt(.{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
     var parser: [64]u8 = undefined;
     var read: [16]u8 = undefined;
@@ -793,11 +768,14 @@ test "a silent deadline submits one read and cancels it with the remaining budge
     // pass between the deadline and the wait.
     const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }).toDeadline(io);
     clock.advance(.fromMilliseconds(10));
+    const remaining = in.limit(clock.io(), until).timeout.duration;
+    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), remaining.raw.nanoseconds);
+    try testing.expectEqual(Io.Clock.awake, remaining.clock);
+    const started = clock.read(.awake);
     try testing.expectEqual(Input.Woke.expired, try in.waitPosix(io, until));
-    try testing.expectEqual(@as(u64, 2), counted.count(.now));
-    try testing.expectEqual(@as(u64, 1), counted.count(.batchAwaitConcurrent));
-    try testing.expectEqual(@as(usize, 1), batches.state.reads);
-    try testing.expectEqual(@as(u64, 1), counted.count(.batchCancel));
-    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), batches.state.budget.duration.raw.nanoseconds);
-    try testing.expectEqual(Io.Clock.awake, batches.state.budget.duration.clock);
+    try testing.expectEqual(Io.Duration.fromMilliseconds(20), started.durationTo(clock.read(.awake)));
+    try testing.expectEqual(@as(u64, 2), fio.count(.now));
+    try testing.expectEqual(@as(u64, 1), fio.count(.batchAwaitConcurrent));
+    try testing.expectEqual(@as(u64, 1), fio.count(.file_read_streaming));
+    try testing.expectEqual(@as(u64, 1), fio.count(.batchCancel));
 }
