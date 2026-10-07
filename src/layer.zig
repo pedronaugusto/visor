@@ -146,28 +146,26 @@ pub const Layer = struct {
 /// error or a grace period with no answer turns the medium off for good,
 /// that picture refused so the caller sends it again, in the escape code.
 const SharedMemory = struct {
-    /// What `/dev/shm` is written through where there is no libc.
-    io: std.Io,
     state: enum { trying, yes, no } = .trying,
     generation: u64,
 };
 
 // This is the owner, not the image snapshot or the current policy. Once
-// created it carries everything cleanup needs, even after reconfiguration.
+// created it carries everything cleanup needs, even after reconfiguration:
+// its name, which is all an unlink takes.
 const SharedObject = struct {
     id: u32,
     name: shm.Name,
-    io: std.Io,
     generation: u64,
 
     fn init(policy: SharedMemory, id: u32, pixels: []const u8) shm.PutError!SharedObject {
         const name = shm.nextName();
-        try shm.put(policy.io, name, pixels);
-        return .{ .id = id, .name = name, .io = policy.io, .generation = policy.generation };
+        try shm.put(name, pixels);
+        return .{ .id = id, .name = name, .generation = policy.generation };
     }
 
     fn deinit(object: SharedObject) void {
-        shm.unlink(object.io, object.name);
+        shm.unlink(object.name);
     }
 };
 
@@ -523,18 +521,18 @@ pub const Layers = struct {
         return l.fallbacks;
     }
 
-    /// Allows shared memory through `io`, or disables it with null. This
-    /// changes future transmissions; live objects keep their own cleanup Io.
-    /// Repeating the same configuration keeps the terminal's learned answer.
-    /// Disable and enable again to retry a refused medium. The supplied Io
-    /// must outlive every outstanding object, including after configuration changes.
-    pub fn configureSharedMemory(l: *Layers, io: ?std.Io) void {
-        if (io) |next| {
-            if (l.shared_memory) |current| {
-                if (current.io.userdata == next.userdata and current.io.vtable == next.vtable) return;
-            }
-            l.shared_memory = .{ .io = next, .generation = shm.nextNamespace() };
-        } else l.shared_memory = null;
+    /// Allows shared memory, or disables it. This changes future
+    /// transmissions; live objects are still unlinked when they are done
+    /// with. Allowing it again while allowed keeps the terminal's learned
+    /// answer; disable and allow again to retry a refused medium. Nothing
+    /// is kept but the choice: an object is memory, put and unlinked
+    /// without a `std.Io`.
+    pub fn configureSharedMemory(l: *Layers, allowed: bool) void {
+        if (!allowed) {
+            l.shared_memory = null;
+            return;
+        }
+        if (l.shared_memory == null) l.shared_memory = .{ .generation = shm.nextNamespace() };
     }
 
     /// Gives the lists and the window back, and unlinks any picture still

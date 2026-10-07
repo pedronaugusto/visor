@@ -44,7 +44,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Style dumps use as many padded base-62 digits per cell as their legend needs, including more than two beyond 3,844 styles.
 - Layers requires init(allocator); deinit, transmit, declare and retire, and Replacement.send, declare and retire, take no allocator, and mutable lists and metadata give way to images(), declarations(), placements(), answerPolicy() and fallbackCount().
 - Cell is forty-eight bytes while grids store thirty-two-byte cells; Screen.cells and rowAtMut are replaced by readCell, rowAt().len()/get() and checked placement operations.
-- Layers.configureSharedMemory replaces mutable shared-memory configuration and the SharedMemory export; private object owners retain their cleanup Io, and names use a process-wide namespace.
+- `Layers.configureSharedMemory(allowed)` replaces mutable shared-memory configuration and the SharedMemory export, and takes a bool, not an Io: nothing in `Layers` keeps a `std.Io`. An object is put and unlinked as `shm_open` and `shm_unlink` do, on Linux without libc too, so `deinit` unlinks what is left without one. Names use a process-wide namespace.
 - Pooled Text and Link handles carry their pool generation; placement, copying, printing, widget drawing and textOf can return InvalidHandle, Link.at, Text.atOffset and Text.slice are removed, and inlineSlice resolves inline text.
 - `Screen.deinit`, `resize`, `compactPool`, `intern` and `link`, and `Renderer.deinit` and `resize`, use their captured allocator without another allocator argument.
 - Image transmission can return `PayloadTooLarge`; shared memory reserves its owner and checks the protocol size before creating an object.

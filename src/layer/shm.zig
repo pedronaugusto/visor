@@ -26,9 +26,9 @@ pub const Name = struct {
 };
 
 /// Whether this build can put a picture in shared memory at all.
-pub const supported = switch (builtin.os.tag) {
+pub const supported = switch (builtin.target.os.tag) {
     .macos, .ios, .freebsd, .netbsd, .openbsd, .dragonfly => builtin.link_libc,
-    .linux => !builtin.abi.isAndroid(),
+    .linux => !builtin.target.abi.isAndroid(),
     else => false,
 };
 
@@ -59,7 +59,7 @@ pub fn nextSequence() u64 {
 /// Hex keeps a full 32-bit pid and 64-bit sequence within macOS's limit.
 fn nameOf(seq: u64) Name {
     var n: Name = .{};
-    const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+    const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.target.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
     comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
     // unreachable: the longest name, a u32 and a u64 in hex, fits, as asserted above
     const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;
@@ -69,68 +69,93 @@ fn nameOf(seq: u64) Name {
 
 /// A new object named `name`, holding `bytes`. Fails when one of the name
 /// exists (never overwritten: it may be one the terminal has not read).
-pub fn put(io: std.Io, name: Name, bytes: []const u8) PutError!void {
+///
+/// The object is memory, mapped and copied into, as `shm_open` makes it,
+/// so it takes no `std.Io`: with libc through `shm_open`, and on Linux
+/// without it through the same calls, on the file under `/dev/shm`.
+pub fn put(name: Name, bytes: []const u8) PutError!void {
     if (!supported) return error.Unsupported;
-    if (builtin.link_libc) return putLibc(name, bytes);
-    return putDevShm(io, name, bytes);
+    var z: [path_max]u8 = undefined;
+    const fd = try create(&z, name);
+    defer closeFd(fd);
+    errdefer unlink(name);
+    // an object is sized once, and a zero-sized one cannot be mapped
+    const size = @max(bytes.len, 1);
+    try truncate(fd, size);
+    const map = std.posix.mmap(null, size, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, 0) catch return error.SharedMemory;
+    defer std.posix.munmap(map);
+    @memcpy(map[0..bytes.len], bytes);
 }
 
 /// Removes the object, if it is still there. What a program does with a
-/// picture the terminal did not read.
-pub fn unlink(io: std.Io, name: Name) void {
+/// picture the terminal did not read. Allocates nothing, takes no `std.Io`
+/// and cannot fail, so a value's `deinit` can do it on any way out.
+pub fn unlink(name: Name) void {
     if (!supported) return;
+    var z: [path_max]u8 = undefined;
     if (builtin.link_libc) {
-        var z: [max_name + 1]u8 = undefined;
         _ = std.c.shm_unlink(zOf(&z, name));
         return;
     }
-    var path: [16 + max_name]u8 = undefined;
-    const p = std.mem.print(&path, "/dev/shm{s}", .{name.slice()}) catch return;
-    // ziglint-ignore: Z026 an object already gone is what is wanted
-    std.Io.Dir.deleteFileAbsolute(io, p) catch {};
+    // an object already gone is what is wanted
+    _ = std.os.linux.unlink(devShmPath(&z, name));
 }
 
-fn zOf(z: *[max_name + 1]u8, name: Name) [*:0]const u8 {
+/// Room for `/dev/shm`, the longest name and its terminator.
+const path_max = "/dev/shm".len + max_name + 1;
+
+fn zOf(z: *[path_max]u8, name: Name) [*:0]const u8 {
     @memcpy(z[0..name.len], name.slice());
     z[name.len] = 0;
     return z[0..name.len :0];
 }
 
-fn putLibc(name: Name, bytes: []const u8) PutError!void {
-    var z: [max_name + 1]u8 = undefined;
-    const pathz = zOf(&z, name);
-    const fd = std.c.shm_open(pathz, @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDWR, .CREAT = true, .EXCL = true })), @as(std.c.mode_t, 0o600));
-    if (fd < 0) return error.SharedMemory;
-    defer _ = std.c.close(fd);
-    errdefer _ = std.c.shm_unlink(pathz);
-    // an object is sized once, and a zero-sized one cannot be mapped
-    const size = @max(bytes.len, 1);
-    if (std.c.ftruncate(fd, @intCast(size)) != 0) return error.SharedMemory;
-    const map = std.posix.mmap(null, size, .{ .READ = true, .WRITE = true }, std.c.MAP{ .TYPE = .SHARED }, fd, 0) catch return error.SharedMemory;
-    defer std.posix.munmap(map);
-    @memcpy(map[0..bytes.len], bytes);
+/// The file `shm_open` names on Linux: the name under `/dev/shm`.
+fn devShmPath(z: *[path_max]u8, name: Name) [*:0]const u8 {
+    const prefix = "/dev/shm";
+    @memcpy(z[0..prefix.len], prefix);
+    @memcpy(z[prefix.len..][0..name.len], name.slice());
+    z[prefix.len + name.len] = 0;
+    return z[0 .. prefix.len + name.len :0];
 }
 
-fn putDevShm(io: std.Io, name: Name, bytes: []const u8) PutError!void {
-    var path: [16 + max_name]u8 = undefined;
-    const p = std.mem.print(&path, "/dev/shm{s}", .{name.slice()}) catch return error.SharedMemory;
-    const file = std.Io.Dir.createFileAbsolute(io, p, .{ .exclusive = true, .permissions = .fromMode(0o600) }) catch return error.SharedMemory;
-    defer file.close(io);
-    errdefer unlink(io, name);
-    file.writeStreamingAll(io, bytes) catch return error.SharedMemory;
+/// Creates the object for reading and writing by this user alone, refusing
+/// one that exists.
+fn create(z: *[path_max]u8, name: Name) PutError!std.posix.fd_t {
+    if (builtin.link_libc) {
+        const fd = std.c.shm_open(zOf(z, name), @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDWR, .CREAT = true, .EXCL = true })), @as(std.c.mode_t, 0o600));
+        if (fd < 0) return error.SharedMemory;
+        return fd;
+    }
+    const linux = std.os.linux;
+    const rc = linux.open(devShmPath(z, name), .{ .ACCMODE = .RDWR, .CREAT = true, .EXCL = true, .NOFOLLOW = true, .CLOEXEC = true }, 0o600);
+    if (linux.errno(rc) != .SUCCESS) return error.SharedMemory;
+    return @intCast(rc);
+}
+
+fn truncate(fd: std.posix.fd_t, size: usize) PutError!void {
+    if (builtin.link_libc) {
+        if (std.c.ftruncate(fd, @intCast(size)) != 0) return error.SharedMemory;
+        return;
+    }
+    const linux = std.os.linux;
+    if (linux.errno(linux.ftruncate(fd, @intCast(size))) != .SUCCESS) return error.SharedMemory;
+}
+
+fn closeFd(fd: std.posix.fd_t) void {
+    if (builtin.link_libc) _ = std.c.close(fd) else _ = std.os.linux.close(fd);
 }
 
 test "a picture put in shared memory reads back whole, and is gone once unlinked" {
     if (!supported) return error.SkipZigTest;
-    const io = std.testing.io;
     const name = nextName();
     const pixels = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    try put(io, name, &pixels);
-    defer unlink(io, name);
+    try put(name, &pixels);
+    defer unlink(name);
     // a second put under the same name is refused, never an overwrite
-    try std.testing.expectError(error.SharedMemory, put(io, name, &pixels));
+    try std.testing.expectError(error.SharedMemory, put(name, &pixels));
     try std.testing.expectEqualSlices(u8, &pixels, try readBack(name, pixels.len));
-    unlink(io, name);
+    unlink(name);
     try std.testing.expectError(error.SharedMemory, readBack(name, pixels.len));
 }
 
@@ -145,7 +170,7 @@ var read_back: [64]u8 = undefined;
 
 fn readBack(name: Name, len: usize) ![]const u8 {
     if (builtin.link_libc) {
-        var z: [max_name + 1]u8 = undefined;
+        var z: [path_max]u8 = undefined;
         const fd = std.c.shm_open(zOf(&z, name), @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), @as(std.c.mode_t, 0));
         if (fd < 0) return error.SharedMemory;
         defer _ = std.c.close(fd);

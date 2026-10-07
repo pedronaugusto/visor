@@ -526,14 +526,13 @@ test "sending pictures again allocates nothing once the buffers have grown" {
 test "a picture through shared memory: the name goes, the terminal's word settles the medium" {
     if (!shm.supported) return error.SkipZigTest;
     const gpa = testing.allocator;
-    const io = testing.io;
     const pixels = [_]u8{ 9, 8, 7, 6 };
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
 
     // tried, and read: the medium is on for good, the object gone
     var l: Layers = .init(testing.allocator);
-    l.configureSharedMemory(io);
+    l.configureSharedMemory(true);
     defer l.deinit();
     const n = try l.transmit(&out.writer, 5, &pixels, .{ .width = 1, .height = 1 });
     try testing.expect(std.mem.find(u8, out.written(), "t=s") != null);
@@ -547,21 +546,20 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     try testing.expect(l.shared_memory.?.state == .yes);
     try testing.expect(l.image(5).?.shm == null);
     // the object was unlinked: its name can be put again
-    try shm.put(io, name, &pixels);
-    shm.unlink(io, name);
+    try shm.put(name, &pixels);
+    shm.unlink(name);
 }
 
 test "a terminal that cannot read shared memory gets the picture again in the escape code" {
     if (!shm.supported) return error.SkipZigTest;
     const gpa = testing.allocator;
-    const io = testing.io;
     const pixels = [_]u8{ 1, 2, 3, 4 };
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
 
     // refused: the medium is off, the picture failed and is sent again
     var l: Layers = .init(testing.allocator);
-    l.configureSharedMemory(io);
+    l.configureSharedMemory(true);
     defer l.deinit();
     _ = try l.transmit(&out.writer, 7, &pixels, .{ .width = 1, .height = 1 });
     l.ack(.{ .id = 7, .message = "EBADF:no such object" });
@@ -574,7 +572,7 @@ test "a terminal that cannot read shared memory gets the picture again in the es
 
     // silence: a terminal that never answers is not trusted with another
     var q: Layers = .init(testing.allocator);
-    q.configureSharedMemory(io);
+    q.configureSharedMemory(true);
     defer q.deinit();
     _ = try q.transmit(&out.writer, 8, &pixels, .{ .width = 1, .height = 1, .now = ms(0) });
     try testing.expect(!q.ready(8, ms(10), .fromMilliseconds(1000)));
@@ -697,7 +695,7 @@ test "a retired first picture is freed even when the frame has no text or placem
 test "shared memory reserves ownership before creating a name" {
     var fail = std.testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     var l: Layers = .init(fail.allocator());
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     defer l.deinit();
     const before = shm.nextSequence();
     var buf: [256]u8 = undefined;
@@ -715,7 +713,7 @@ test "shared memory validates the protocol size before any ownership or output" 
     try testing.expectError(error.PayloadTooLarge, layer_access.sharedSize(oversized));
     var fail = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     var l: Layers = .init(fail.allocator());
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     defer l.deinit();
     const before = shm.nextSequence();
     var out: Writer = .fixed(&.{});
@@ -730,24 +728,24 @@ test "shared memory validates the protocol size before any ownership or output" 
 test "shared memory keeps its cleanup owner when configuration is cleared" {
     if (!shm.supported) return error.SkipZigTest;
     var l: Layers = .init(testing.allocator);
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, 19, "data", .{ .width = 1, .height = 1 });
     const name = l.image(19).?.shm.?;
-    defer shm.unlink(testing.io, name);
-    l.configureSharedMemory(null);
+    defer shm.unlink(name);
+    l.configureSharedMemory(false);
     l.deinit();
     // Cleanup must have removed the object, regardless of current policy.
-    try shm.put(testing.io, name, "data");
+    try shm.put(name, "data");
 }
 
 test "shared memory names belong to the process rather than each Layers" {
     if (!shm.supported) return error.SkipZigTest;
     var a: Layers = .init(testing.allocator);
-    a.configureSharedMemory(testing.io);
+    a.configureSharedMemory(true);
     defer a.deinit();
     var b: Layers = .init(testing.allocator);
-    b.configureSharedMemory(testing.io);
+    b.configureSharedMemory(true);
     defer b.deinit();
     var sink: Writer.Discarding = .init(&.{});
     _ = try a.transmit(&sink.writer, 1, "data", .{ .width = 1, .height = 1 });
@@ -763,28 +761,28 @@ test "shared memory reconfiguration cannot lose owners or accept an old policy r
     if (!shm.supported) return error.SkipZigTest;
     var l: Layers = .init(testing.allocator);
     defer l.deinit();
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, 1, "old!", .{ .width = 1, .height = 1 });
     const first = l.image(1).?.shm.?;
-    defer shm.unlink(testing.io, first);
-    l.configureSharedMemory(null);
-    l.configureSharedMemory(testing.io);
+    defer shm.unlink(first);
+    l.configureSharedMemory(false);
+    l.configureSharedMemory(true);
     const generation = l.shared_memory.?.generation;
     _ = try l.transmit(&sink.writer, 2, "new!", .{ .width = 1, .height = 1 });
     const second = l.image(2).?.shm.?;
-    defer shm.unlink(testing.io, second);
+    defer shm.unlink(second);
     l.ack(.{ .id = 1, .message = "EBADF:old configuration" });
     try testing.expect(l.shared_memory.?.state == .trying);
-    try shm.put(testing.io, first, "gone");
-    shm.unlink(testing.io, first);
+    try shm.put(first, "gone");
+    shm.unlink(first);
     l.ack(.{ .id = 2, .message = "OK" });
     try testing.expect(l.shared_memory.?.state == .yes);
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     try testing.expectEqual(generation, l.shared_memory.?.generation);
     try testing.expect(l.shared_memory.?.state == .yes);
-    try shm.put(testing.io, second, "gone");
-    shm.unlink(testing.io, second);
+    try shm.put(second, "gone");
+    shm.unlink(second);
 }
 
 test "shared memory keeps ownership through every allocation and partial output failure" {
@@ -792,7 +790,7 @@ test "shared memory keeps ownership through every allocation and partial output 
     try testing.checkAllAllocationFailures(testing.allocator, struct {
         fn run(gpa: Allocator) !void {
             var l: Layers = .init(gpa);
-            l.configureSharedMemory(testing.io);
+            l.configureSharedMemory(true);
             var owned = true;
             defer if (owned) l.deinit();
             var out: Writer = .fixed(&.{});
@@ -802,14 +800,14 @@ test "shared memory keeps ownership through every allocation and partial output 
                 else => return err,
             }
             const name = l.image(7).?.shm.?;
-            defer shm.unlink(testing.io, name);
+            defer shm.unlink(name);
             try testing.expectEqual(@as(usize, 1), l.shared_objects.items.len);
             try testing.expect(l.image(7).?.state == .failed);
             try testing.expect(!l.ready(7, ms(1000), .fromMilliseconds(10)));
-            l.configureSharedMemory(null);
+            l.configureSharedMemory(false);
             l.deinit();
             owned = false;
-            try shm.put(testing.io, name, "gone");
+            try shm.put(name, "gone");
         }
     }.run, .{});
 }
@@ -822,15 +820,15 @@ test "direct transmission silence cannot make an unread shared picture ready" {
     _ = try l.transmit(&sink.writer, 1, "png", .{ .format = .png, .answer = true });
     try testing.expect(l.ready(1, ms(10), .fromMilliseconds(10)));
     try testing.expectEqual(@as(?bool, false), l.answers);
-    l.configureSharedMemory(testing.io);
+    l.configureSharedMemory(true);
     _ = try l.transmit(&sink.writer, 2, "data", .{ .width = 1, .height = 1, .now = ms(10) });
     const name = l.image(2).?.shm.?;
-    defer shm.unlink(testing.io, name);
+    defer shm.unlink(name);
     try testing.expect(!l.ready(2, ms(10), .fromMilliseconds(10)));
     try testing.expect(!l.ready(2, ms(20), .fromMilliseconds(10)));
     try testing.expectEqual(Image.State.failed, l.image(2).?.state);
     try testing.expect(l.image(2).?.shm == null);
-    try shm.put(testing.io, name, "gone");
+    try shm.put(name, "gone");
 }
 
 test "a picture placement spells the one-based u16 coordinate edge without overflow" {

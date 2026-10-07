@@ -249,3 +249,38 @@ test "transmission options have one public name" {
     _ = try layers.transmit(&out.writer, 1, &.{ 0, 0, 0, 255 }, how);
     try std.testing.expectEqual(@as(usize, 1), layers.images().len);
 }
+
+/// Whether a value of `T` holds a `std.Io`, looking `depth` levels into its
+/// fields, payloads and what it points at.
+fn keepsIo(comptime T: type, comptime depth: u8) bool {
+    if (T == std.Io) return true;
+    if (depth == 0) return false;
+    return switch (@typeInfo(T)) {
+        .@"struct" => |info| for (info.field_types) |Field| {
+            if (keepsIo(Field, depth - 1)) break true;
+        } else false,
+        .@"union" => |info| for (info.field_types) |Field| {
+            if (keepsIo(Field, depth - 1)) break true;
+        } else false,
+        .optional => |info| keepsIo(info.child, depth - 1),
+        .pointer => |info| keepsIo(info.child, depth - 1),
+        .array => |info| keepsIo(info.child, depth - 1),
+        .error_union => |info| keepsIo(info.payload, depth - 1),
+        else => false,
+    };
+}
+
+const visor = @This();
+
+test "no value of this package keeps a std.Io: a call that waits takes the caller's" {
+    const offenders = comptime blk: {
+        @setEvalBranchQuota(1_000_000);
+        var names: []const u8 = "";
+        for (@typeInfo(visor).@"struct".decl_names) |name| {
+            const decl = @field(visor, name);
+            if (@TypeOf(decl) == type and keepsIo(decl, 6)) names = names ++ " " ++ name;
+        }
+        break :blk names;
+    };
+    try std.testing.expectEqualStrings("", offenders);
+}

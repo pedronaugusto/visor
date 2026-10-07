@@ -234,12 +234,13 @@ compression storage. `transmit`, `declare`, `retire` and `deinit`, and the
 `Replacement` operations using those layers, take no allocator. Metadata
 accessors return borrowed, read-only slices; fields prefixed `_` are internal.
 
-`Layers.configureSharedMemory(io)` allows pictures through shared memory;
-pass null to disable it. The same Io preserves the terminal's learned answer.
-Each outstanding object owns its cleanup Io, so changing configuration cannot
-lose cleanup, and an older object's reply cannot settle a new configuration.
-The Io must outlive those objects. Names come from one atomic process-wide
-namespace and are never reused.
+`Layers.configureSharedMemory(true)` allows pictures through shared memory;
+`false` disables it. Allowing it again while allowed keeps the terminal's
+learned answer. Each outstanding object is unlinked when it is done with,
+whatever the configuration is by then, and an older object's reply cannot
+settle a new configuration. No `std.Io` is kept or needed: an object is
+memory, made and unlinked as `shm_open` and `shm_unlink` do. Names come from
+one atomic process-wide namespace and are never reused.
 
 Window keeps its screen and clipped rectangle together behind `screen()` and
 `rect()`. `ink()` borrows the drawing policy. Construct views through `Screen.window()`, `child` and `sub`, and
@@ -445,7 +446,7 @@ The renderer calls that itself; callers of `emit` call it after their frame
 reaches the writer. Failed writes retain retirement for the next attempt.
 
 **A picture on the same machine goes through shared memory.** With
-`Layers.configureSharedMemory(io)` called, the pixels are put in a shared memory object and
+`Layers.configureSharedMemory(true)` called, the pixels are put in a shared memory object and
 only its name goes through the terminal's input: no deflate, no base64, and a
 picture that cost a frame costs a copy (a full-screen picture on a 4K display,
 from about 15 ms to under 3). The first one asks for an answer; an error, or no
