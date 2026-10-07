@@ -1,7 +1,7 @@
 //! visor's benchmark pass: `visor-draw` and `visor-ops` over every workload,
 //! checked and then timed.
 //!
-//! `zig build bench -Doptimize=ReleaseFast` installs the three programs under
+//! `zig build bench -Doptimize=fast` installs the three programs under
 //! zig-out/bench; run this one from there. It generates the inputs, then
 //! checks every workload untimed at 8x4, 80x24, 120x40 and 200x60: every
 //! drawing-core frame replayed by the decoder in `terminal.zig`, every

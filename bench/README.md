@@ -5,7 +5,7 @@ never in CI; CI only compiles them (`zig build check`). They build on Linux
 and macOS.
 
 ```sh
-zig build bench -Doptimize=ReleaseFast
+zig build bench -Doptimize=fast
 zig-out/bench/visor-bench --smoke
 zig-out/bench/visor-bench --runs 7
 ```

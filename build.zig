@@ -175,7 +175,7 @@ pub fn build(b: *std.Build) void {
     // Benchmarks.
     //
     // visor's own measurements, in bench/: `zig build bench
-    // -Doptimize=ReleaseFast` installs `visor-draw` and `visor-ops`, which
+    // -Doptimize=fast` installs `visor-draw` and `visor-ops`, which
     // run one workload each call, and `visor-bench`, which generates their
     // inputs, checks every frame and every grid they print, and times them.
     // `zig build check` compiles all three, so they keep up with the API;

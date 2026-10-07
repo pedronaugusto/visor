@@ -31,7 +31,7 @@ const tty_mod = @import("tty.zig");
 const Tty = tty_mod.Tty;
 
 const Io = std.Io;
-const is_windows = builtin.os.tag == .windows;
+const is_windows = builtin.target.os.tag == .windows;
 
 /// The terminal's input, read and framed, one event at a time.
 pub const Input = struct {
