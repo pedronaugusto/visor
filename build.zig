@@ -172,6 +172,58 @@ pub fn build(b: *std.Build) void {
     if (test_filter == null) test_step.dependOn(examples_step);
 
     //=====================================================================
+    // Benchmarks.
+    //
+    // visor's own measurements, in bench/: `zig build bench
+    // -Doptimize=ReleaseFast` installs `visor-draw` and `visor-ops`, which
+    // run one workload each call, and `visor-bench`, which generates their
+    // inputs, checks every frame and every grid they print, and times them.
+    // `zig build check` compiles all three, so they keep up with the API;
+    // nothing runs them in CI. The checks read Unicode properties of their
+    // own from uucode, independent of the rule visor measures by. Only in
+    // visor's own tree: a package fetched by a consumer has no bench/.
+    //=====================================================================
+
+    if (b.pkg_hash.len == 0 and target.result.os.tag != .windows) {
+        const bench_step = b.step("bench", "Build the benchmarks into zig-out/bench");
+        for (bench_programs) |program| {
+            const bench = b.addExecutable(.{
+                .name = program[0],
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(program[1]),
+                    .target = target,
+                    .optimize = optimize,
+                    .link_libc = true,
+                    .imports = &.{
+                        .{ .name = "visor", .module = module },
+                        .{ .name = "visor.widgets", .module = widgets },
+                    },
+                }),
+            });
+            const install = b.addInstallArtifact(bench, .{ .dest_dir = .{ .override = .{ .custom = "bench" } } });
+            bench_step.dependOn(&install.step);
+            check_step.dependOn(&bench.step);
+        }
+        const properties = b.dependency("uucode", .{
+            .target = target,
+            .optimize = optimize,
+            .fields = @as([]const []const u8, &.{ "east_asian_width", "general_category", "canonical_combining_class" }),
+        });
+        const runner = b.addExecutable(.{
+            .name = "visor-bench",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("bench/run.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "uucode", .module = properties.module("uucode") }},
+            }),
+        });
+        const install = b.addInstallArtifact(runner, .{ .dest_dir = .{ .override = .{ .custom = "bench" } } });
+        bench_step.dependOn(&install.step);
+        check_step.dependOn(&runner.step);
+    }
+
+    //=====================================================================
     // Conformance against an emulator that is not ours.
     //
     // `Term` ships with this package, so a property that compares the
@@ -233,6 +285,12 @@ const example_sources = [_][]const u8{
     "examples/gallery.zig",
     "examples/progress.zig",
     "examples/live.zig",
+};
+
+/// The benchmark programs, by name and root source.
+const bench_programs = [_][2][]const u8{
+    .{ "visor-draw", "bench/draw.zig" },
+    .{ "visor-ops", "bench/ops.zig" },
 };
 
 /// The `uucode` fields this package builds into its tables.
