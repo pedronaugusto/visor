@@ -21,6 +21,7 @@
 //!   first.
 //! - Cells that cannot be divided evenly go to the earlier parts.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const visor = @import("visor");
 
@@ -174,7 +175,7 @@ pub const Layout = struct {
         // What is left, shared among the parts that asked for a share.
         l.shareOut(l.constraints[0..n], out[0..n], @intCast(total - taken));
         // The parts never take more than the axis holds after the gaps.
-        if (std.debug.runtime_safety) {
+        if (builtin.optimize.runtimeSafety()) {
             var sum: u128 = 0;
             for (out[0..n]) |r| sum += l.axisOf(r);
             std.debug.assert(sum <= total);

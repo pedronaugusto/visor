@@ -1214,7 +1214,7 @@ test "rows printed above an inline screen go up into the second emulator's scrol
         for (0..9) |round| {
             screen.clear();
             var buf: [32]u8 = undefined;
-            _ = try screen.window().printSegment(.{ .text = try std.fmt.bufPrint(&buf, "working {d}", .{round}) }, .{ .wrap = .none });
+            _ = try screen.window().printSegment(.{ .text = try std.mem.print(&buf, "working {d}", .{round}) }, .{ .wrap = .none });
             _ = try screen.window().printSegment(.{ .text = "\u{2588}\u{2588}\u{2591}", .style = .{ .fg = .ansi(.green) } }, .{ .row = 1, .wrap = .none });
 
             const count: u16 = @intCast(round % 3);
@@ -1222,7 +1222,7 @@ test "rows printed above an inline screen go up into the second emulator's scrol
             defer lines.deinit();
             lines.method = method;
             for (0..count) |k| {
-                const text = try std.fmt.bufPrint(&buf, "done {d}.{d} \u{4e2d}", .{ round, k });
+                const text = try std.mem.print(&buf, "done {d}.{d} \u{4e2d}", .{ round, k });
                 _ = try lines.window().printSegment(.{ .text = text, .style = .{ .bold = k == 0 } }, .{ .row = @intCast(k), .wrap = .none });
                 try want.append(gpa, try gpa.dupe(u8, text));
             }

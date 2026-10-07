@@ -166,13 +166,13 @@ pub const Spread = struct {
 /// `pattern` written `count` times over, as a comptime string: what `**` spelled
 /// before Zig 0.17 removed it.
 pub fn repeat(comptime pattern: []const u8, comptime count: usize) *const [pattern.len * count]u8 {
-    comptime {
+    const final = comptime blk: {
         @setEvalBranchQuota(count + 1000);
         var bytes: [pattern.len * count]u8 = undefined;
         for (0..count) |i| @memcpy(bytes[i * pattern.len ..][0..pattern.len], pattern);
-        const final = bytes;
-        return &final;
-    }
+        break :blk bytes;
+    };
+    return &final;
 }
 
 const testing = std.testing;

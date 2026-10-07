@@ -243,7 +243,7 @@ pub const Caps = struct {
         /// What the answers have said so far.
         _caps: Caps = .{},
         /// Which questions have been answered.
-        _answered: std.EnumSet(morse.Probe.Question) = .initEmpty(),
+        _answered: std.EnumSet(morse.Probe.Question) = .empty,
         /// When the last answer came, on the caller's clock, in
         /// milliseconds; null before the first.
         _last_ms: ?i64 = null,
@@ -411,10 +411,10 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     for ([_][]const u8{ "1", "2", "3" }) |state| {
         var p: Caps.Probe = .init(.{ .graphics_id = 1 });
         var buf: [4][32]u8 = undefined;
-        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
         try testing.expect(p._caps.sync);
         try testing.expectEqual(textmod.Method.unicode, p._caps.width_method);
         try testing.expect(p._caps.in_band_resize);
@@ -424,10 +424,10 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
         var p: Caps.Probe = .init(.{ .graphics_id = 1 });
         p._caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true, .sgr_pixels = true };
         var buf: [4][32]u8 = undefined;
-        p.feed(answer(try std.fmt.bufPrint(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
-        p.feed(answer(try std.fmt.bufPrint(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
         try testing.expect(!p._caps.sync);
         try testing.expectEqual(textmod.Method.wcwidth, p._caps.width_method);
         try testing.expect(!p._caps.in_band_resize);

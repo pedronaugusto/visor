@@ -387,11 +387,11 @@ test "interning survives the pool being grown under it" {
     var kept: [64]Text = undefined;
     var buf: [16]u8 = undefined;
     for (0..64) |i| {
-        const g = try std.fmt.bufPrint(&buf, "long-{d:0>8}", .{i});
+        const g = try std.mem.print(&buf, "long-{d:0>8}", .{i});
         kept[i] = try p.intern(testing.allocator, g);
     }
     for (0..64) |i| {
-        const g = try std.fmt.bufPrint(&buf, "long-{d:0>8}", .{i});
+        const g = try std.mem.print(&buf, "long-{d:0>8}", .{i});
         try testing.expectEqualStrings(g, try p.slice(&kept[i]));
         try testing.expect(Text.eql(kept[i], try p.intern(testing.allocator, g)));
     }
@@ -462,7 +462,7 @@ test "the pool gives its memory back under a failing allocator" {
             defer l.deinit(gpa);
             var buf: [24]u8 = undefined;
             for (0..24) |i| {
-                const g = try std.fmt.bufPrint(&buf, "grapheme-{d:0>6}", .{i});
+                const g = try std.mem.print(&buf, "grapheme-{d:0>6}", .{i});
                 _ = try p.intern(gpa, g);
                 _ = try l.intern(gpa, g, "id=x");
             }

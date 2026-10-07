@@ -209,9 +209,9 @@ pub const Session = struct {
     /// taken from `learned`, and every other field left as the policy has it.
     fn merged(policy: Caps, was: Caps, learned: Caps) Caps {
         var next = policy;
-        inline for (std.meta.fields(Caps)) |field| {
-            if (!std.meta.eql(@field(was, field.name), @field(learned, field.name)))
-                @field(next, field.name) = @field(learned, field.name);
+        inline for (@typeInfo(Caps).@"struct".field_names) |name| {
+            if (!std.meta.eql(@field(was, name), @field(learned, name)))
+                @field(next, name) = @field(learned, name);
         }
         return next;
     }
@@ -360,9 +360,9 @@ test "the probe wait keeps DA1 quiet time and the overall deadline on caller tim
     probe.feed(.{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 1040);
     try testing.expectEqual(@as(?i64, 40), wait.remaining(&probe, 1050));
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1090));
-    probe._answered = .initEmpty();
+    probe._answered = .empty;
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1500));
-    probe._answered = .initFull();
+    probe._answered = .full;
     try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1000));
 }
 

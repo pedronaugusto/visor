@@ -1579,7 +1579,7 @@ test "compacting the pool keeps what is on screen and drops what is not" {
 
     var buf: [24]u8 = undefined;
     for (0..64) |i| {
-        const long = try std.fmt.bufPrint(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
+        const long = try std.mem.print(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
         try s.write(0, 0, long, .{}, .none);
         _ = try s.link(long, "");
     }
@@ -1618,7 +1618,7 @@ test "a resize rebuilds the pool rather than growing it forever" {
 
     var buf: [24]u8 = undefined;
     for (0..32) |i| {
-        const long = try std.fmt.bufPrint(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
+        const long = try std.mem.print(&buf, "a\u{301}\u{302}{u}", .{@as(u21, @intCast(0x300 + i))});
         try s.write(0, 0, long, .{}, .none);
     }
     const before = s._graphemes.len();
@@ -1661,7 +1661,7 @@ test "owned text and targets survive drawing, compaction, resize and destruction
     try testing.expect((try s.dupeTarget(testing.allocator, .none)) == null);
     var buf: [64]u8 = undefined;
     for (0..128) |i| {
-        const unrelated = try std.fmt.bufPrint(&buf, "unrelated-{d}", .{i});
+        const unrelated = try std.mem.print(&buf, "unrelated-{d}", .{i});
         _ = try s.intern(unrelated);
         _ = try s.link(unrelated, "");
     }

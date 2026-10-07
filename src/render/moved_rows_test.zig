@@ -66,7 +66,7 @@ const Fixture = struct {
         var row: u16 = 0;
         while (row < f.screen.dimensions().rows) : (row += 1) {
             var buf: [8]u8 = undefined;
-            const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
+            const text = try std.mem.print(&buf, "r{d:0>2}", .{row});
             for (text, 0..) |c, i| try f.screen.write(@intCast(i), row, &.{c}, .{}, .none);
         }
     }

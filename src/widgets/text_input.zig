@@ -21,6 +21,7 @@
 //! where, or deletes what, is the program's; this says where "up a row" or
 //! "a word back" lands, and does the edit.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const visor = @import("visor");
 
@@ -601,7 +602,7 @@ pub const TextInput = struct {
             std.debug.assert(b._cursor <= b._text.items.len);
             if (b._anchor) |a| std.debug.assert(a <= b._text.items.len);
             std.debug.assert(b._done <= b._edits.items.len);
-            if (!std.debug.runtime_safety) return;
+            if (!builtin.optimize.runtimeSafety()) return;
             var end: usize = 0;
             for (b._edits.items) |e| {
                 std.debug.assert(e.bytes == end);

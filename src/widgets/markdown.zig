@@ -420,14 +420,15 @@ pub const RowIterator = struct {
 
 fn overlay(base: visor.Style, role: visor.Style) visor.Style {
     var out = base;
-    inline for (@typeInfo(visor.Style).@"struct".fields) |field| {
-        const value = @field(role, field.name);
-        if (comptime field.type == bool) {
-            @field(out, field.name) = @field(base, field.name) or value;
-        } else if (comptime field.type == visor.Color) {
-            if (!value.eql(.default)) @field(out, field.name) = value;
+    const info = @typeInfo(visor.Style).@"struct";
+    inline for (info.field_names, info.field_types) |name, Field| {
+        const value = @field(role, name);
+        if (comptime Field == bool) {
+            @field(out, name) = @field(base, name) or value;
+        } else if (comptime Field == visor.Color) {
+            if (!value.eql(.default)) @field(out, name) = value;
         } else {
-            if (value != @field(@as(visor.Style, .{}), field.name)) @field(out, field.name) = value;
+            if (value != @field(@as(visor.Style, .{}), name)) @field(out, name) = value;
         }
     }
     return out;

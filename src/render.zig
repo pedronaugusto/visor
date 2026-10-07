@@ -196,7 +196,7 @@ const ModeWrites = struct {
     in_band_resize: bool = false,
     unicode_core: bool = false,
     sixel_cursor_right: bool = false,
-    uncertain: std.EnumSet(Command) = .initEmpty(),
+    uncertain: std.EnumSet(Command) = .empty,
 
     const Command = enum { keyboard, mouse, focus, paste, color_scheme, in_band_resize, unicode_core, sixel_cursor_right };
 };
@@ -3627,7 +3627,7 @@ fn promptedTerm(cols: u16, rows: u16, lines: u16) !Term {
     var i: u16 = 0;
     while (i < lines) : (i += 1) {
         var buf: [16]u8 = undefined;
-        try t.feed(try std.fmt.bufPrint(&buf, "line {d}\r\n", .{i}));
+        try t.feed(try std.mem.print(&buf, "line {d}\r\n", .{i}));
     }
     return t;
 }
@@ -3851,7 +3851,7 @@ test "inline mode never writes a scrolling region" {
     try f.renderer.enter(&f.out.writer, f.caps, .@"inline", .{});
     for (0..12) |row| {
         var buf: [8]u8 = undefined;
-        const text = try std.fmt.bufPrint(&buf, "r{d:0>2}", .{row});
+        const text = try std.mem.print(&buf, "r{d:0>2}", .{row});
         for (text, 0..) |c, i| try f.screen.write(@intCast(i), @intCast(row), &.{c}, .{}, .none);
     }
     _ = try f.draw();
@@ -4240,7 +4240,7 @@ test "a cell a clustering terminal would join to the one beside it goes out with
         const bytes = f.written();
         try testing.expectEqual(bytes.len, stats.bytes);
         var want: [32]u8 = undefined;
-        const around = try std.fmt.bufPrint(&want, "\x1b[?2027l{s}\x1b[?2027h", .{pair[1]});
+        const around = try std.mem.print(&want, "\x1b[?2027l{s}\x1b[?2027h", .{pair[1]});
         try testing.expect(std.mem.find(u8, bytes, around) != null);
         try testing.expectEqual(@as(usize, 1), std.mem.count(u8, bytes, "2027l"));
     }

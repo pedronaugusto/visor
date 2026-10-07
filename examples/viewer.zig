@@ -166,7 +166,7 @@ const Viewer = struct {
     fn drawStatus(v: *Viewer, win: visor.Window) !void {
         const shown = @min(v.scroll + v.page, v.rows);
         var buf: [64]u8 = undefined;
-        const label = std.fmt.bufPrint(&buf, "{s} {d}/{d}", .{
+        const label = std.mem.print(&buf, "{s} {d}/{d}", .{
             v.current().name,
             shown,
             v.rows,
@@ -189,9 +189,9 @@ const Viewer = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
+    var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer _ = safe_allocator.deinit();
+    const gpa = safe_allocator.allocator();
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const report = &stdout.interface;

@@ -140,7 +140,7 @@ pub const BarChart = struct {
     /// What a bar says about itself, on the bar.
     fn drawValue(c: BarChart, win: visor.Window, b: Bar, col: u16, row: u16) visor.DrawError!void {
         var digits: [20]u8 = undefined;
-        const text = b.text orelse std.fmt.bufPrint(&digits, "{d}", .{b.value}) catch return;
+        const text = b.text orelse std.mem.print(&digits, "{d}", .{b.value}) catch return;
         if (text.len == 0) return;
         _ = try win.printSegment(
             .{ .text = text, .style = c.text_style },

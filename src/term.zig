@@ -1066,7 +1066,13 @@ fn firstCodepoint(grapheme: []const u8) ?u21 {
     if (grapheme.len == 0) return null;
     const len = std.unicode.utf8ByteSequenceLength(grapheme[0]) catch return 0xfffd;
     if (len > grapheme.len) return 0xfffd;
-    return std.unicode.utf8Decode(grapheme[0..len]) catch 0xfffd;
+    const decoded = switch (len) {
+        1 => grapheme[0],
+        2 => std.unicode.utf8Decode2(grapheme[0..2].*),
+        3 => std.unicode.utf8Decode3(grapheme[0..3].*),
+        else => std.unicode.utf8Decode4(grapheme[0..4].*),
+    };
+    return decoded catch 0xfffd;
 }
 
 /// How many copies of `copy` a repeat of `count` prints (`Term.repeat`).
@@ -1284,7 +1290,7 @@ test "a scroll region scrolls and the rest of the screen stays" {
     for (0..6) |r| {
         try t.feed("\x1b[");
         var buf: [8]u8 = undefined;
-        try t.feed(try std.fmt.bufPrint(&buf, "{d};1H", .{r + 1}));
+        try t.feed(try std.mem.print(&buf, "{d};1H", .{r + 1}));
         try t.feed(&.{'a' + @as(u8, @intCast(r))});
     }
     try t.feed("\x1b[2;5r\x1b[1S\x1b[r");
@@ -1949,7 +1955,7 @@ test "a repeat count in the billions ends as the whole count would" {
         try cut.feed(glyph);
         for (0..count) |_| try whole.feed(glyph);
         var seq: [16]u8 = undefined;
-        try cut.feed(try std.fmt.bufPrint(&seq, "\x1b[{d}b", .{count}));
+        try cut.feed(try std.mem.print(&seq, "\x1b[{d}b", .{count}));
         try expectScreensEqual(whole.screen(), cut.screen());
         try testing.expectEqual(whole._col, cut._col);
         try testing.expectEqual(whole._row, cut._row);

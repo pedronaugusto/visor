@@ -14,6 +14,7 @@
 //! This file never allocates on the write path: the spans are sized once, at
 //! `init` and at `resize`.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -114,7 +115,7 @@ pub const Damage = struct {
         if (d._dirty == 0) {
             // The count is kept with the spans, so none dirty is every row
             // clean, and there is nothing to write.
-            if (std.debug.runtime_safety) for (d._rows) |e| assert(e.first > e.last);
+            if (builtin.optimize.runtimeSafety()) for (d._rows) |e| assert(e.first > e.last);
             return;
         }
         @memset(d._rows, .{});

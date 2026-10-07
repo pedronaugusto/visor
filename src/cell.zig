@@ -280,8 +280,8 @@ fn CellType(comptime checked: bool) type {
 
         inline fn equalValue(a: Self, b: Self) bool {
             if (!checked) return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
-            const aw: [6]u64 = @bitCast(a);
-            const bw: [6]u64 = @bitCast(b);
+            const aw: *const [6]u64 = @ptrCast(&a); // safe: a checked cell is six aligned words, no padding (asserted below)
+            const bw: *const [6]u64 = @ptrCast(&b); // safe: as above
             inline for (aw, bw) |av, bv| if (av != bv) return false;
             return true;
         }
@@ -385,7 +385,7 @@ pub const internal = struct {
             const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
             std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation), .little);
         }
-        return @bitCast(bytes);
+        return std.mem.bytesToValue(Cell, &bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: u64) Link {
         return if (link == .none) .none else @fromBackingInt(@intCast((generation << 16) | @backingInt(link)));
@@ -399,14 +399,22 @@ pub fn rowsEqual(a: []const Cell, b: []const Cell) bool {
     return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
 }
 
+/// The bytes a struct's fields take laid end to end: its size exactly when
+/// the layout leaves no padding between or after them.
+fn fieldBytes(comptime T: type) usize {
+    var sum: usize = 0;
+    inline for (@typeInfo(T).@"struct".field_types) |F| sum += @sizeOf(F);
+    return sum;
+}
+
 comptime {
     // The whole point of the two-tier grapheme and morse's defined style
     // layout: a value carrying checked handles, compared without reading
     // a byte no one wrote.
     std.debug.assert(@sizeOf(internal.StoredCell) == 32);
-    std.debug.assert(@bitSizeOf(internal.StoredCell) == 256);
+    std.debug.assert(fieldBytes(internal.StoredCell) == 32);
     std.debug.assert(@sizeOf(Cell) == 48);
-    std.debug.assert(@bitSizeOf(Cell) == 48 * 8);
+    std.debug.assert(fieldBytes(Cell) == 48);
     std.debug.assert(@sizeOf(Cell.Text) == 13);
     std.debug.assert(@sizeOf(internal.StoredCell.Text) == 7);
     std.debug.assert(@sizeOf(Style) == 22);
@@ -417,7 +425,7 @@ const testing = std.testing;
 
 test "a cell is forty-eight bytes with no padding in it" {
     try testing.expectEqual(@as(usize, 48), @sizeOf(Cell));
-    try testing.expectEqual(@as(usize, 48 * 8), @bitSizeOf(Cell));
+    try testing.expectEqual(@as(usize, 48), fieldBytes(Cell));
 }
 
 test "two cells built the same way are the same memory" {

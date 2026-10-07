@@ -10,9 +10,9 @@ const std = @import("std");
 const visor = @import("visor");
 
 pub fn main(init: std.process.Init) !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
+    var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer _ = safe_allocator.deinit();
+    const gpa = safe_allocator.allocator();
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const report = &stdout.interface;

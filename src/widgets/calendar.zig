@@ -142,7 +142,7 @@ pub const Calendar = struct {
 
         if (c.show_header) {
             var buf: [32]u8 = undefined;
-            const text = std.fmt.bufPrint(&buf, "{s} {d}", .{
+            const text = std.mem.print(&buf, "{s} {d}", .{
                 month_names[c.month - 1],
                 c.year,
             }) catch return;
@@ -179,7 +179,7 @@ pub const Calendar = struct {
             const date = Date.init(c.year, c.month, day) catch unreachable;
             var buf: [2]u8 = undefined;
             // unreachable: a day is at most 31, two digits
-            const text = std.fmt.bufPrint(&buf, "{d:>2}", .{day}) catch unreachable;
+            const text = std.mem.print(&buf, "{d:>2}", .{day}) catch unreachable;
             _ = try win.printSegment(
                 .{ .text = text, .style = c.styleOf(date) },
                 .{ .col = @intCast(column * 3), .row = row, .wrap = .none },

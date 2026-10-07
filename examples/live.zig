@@ -80,7 +80,7 @@ fn paint(session: *visor.Session, count: usize) !void {
     const win = session.screen().window();
     win.clear();
     var line: [128]u8 = undefined;
-    const text = try std.fmt.bufPrint(&line, "Input events: {d}\nResize the terminal. q, Escape or Ctrl+C leaves.", .{count});
+    const text = try std.mem.print(&line, "Input events: {d}\nResize the terminal. q, Escape or Ctrl+C leaves.", .{count});
     _ = try win.printSegment(.{ .text = text }, .{});
 }
 

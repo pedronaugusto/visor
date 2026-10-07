@@ -947,26 +947,35 @@ test "a resize pipe is not made while conduit is starting a child" {
     // between would inherit both ends. conduit keeps its spawns out of that
     // gap only for pipes made under its lock.
     if (is_windows or !terminal.opening_is_two_calls) return error.SkipZigTest;
-    terminal.ForkGap.startingAChild();
-    var starting = true;
-    defer if (starting) terminal.ForkGap.release();
 
-    var t: Tty = .adopt(testing.io, undefined);
-    var watched: std.atomic.Value(bool) = .init(false);
-    var result: error{ SystemResources, Unexpected }!void = {};
-    const watcher = try std.Thread.spawn(.{}, struct {
+    const Watch = struct {
         fn run(tty: *Tty, outcome: *error{ SystemResources, Unexpected }!void, done: *std.atomic.Value(bool)) void {
             outcome.* = tty.watchResize();
             done.store(true, .release);
         }
-    }.run, .{ &t, &result, &watched });
 
-    // Ample time for a pipe made outside the lock to be made.
-    try Io.sleep(testing.io, .fromMilliseconds(50), .awake);
-    const made_while_starting = watched.load(.acquire);
-    terminal.ForkGap.release();
-    starting = false;
+        /// In the lock, as a child being started is: the watch asked for on
+        /// another thread meanwhile, and whether its pipe was made. Ample
+        /// time for a pipe made outside the lock to be made; the watcher can
+        /// only be joined once the lock is left, so the wait's own result
+        /// comes back with it.
+        fn whileStarting(
+            tty: *Tty,
+            outcome: *error{ SystemResources, Unexpected }!void,
+            done: *std.atomic.Value(bool),
+        ) std.Thread.SpawnError!struct { std.Thread, bool, Io.Cancelable!void } {
+            const watcher = try std.Thread.spawn(.{}, run, .{ tty, outcome, done });
+            const waited = Io.sleep(testing.io, .fromMilliseconds(50), .awake);
+            return .{ watcher, done.load(.acquire), waited };
+        }
+    };
+
+    var t: Tty = .adopt(testing.io, undefined);
+    var watched: std.atomic.Value(bool) = .init(false);
+    var result: error{ SystemResources, Unexpected }!void = {};
+    const watcher, const made_while_starting, const waited = try terminal.ForkGap.hold(Watch.whileStarting, .{ &t, &result, &watched });
     watcher.join();
+    try waited;
     try result;
     t.unwatchResize();
     try testing.expect(!made_while_starting);

@@ -62,7 +62,7 @@ fn nameOf(seq: u64) Name {
     const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
     comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
     // unreachable: the longest name, a u32 and a u64 in hex, fits, as asserted above
-    const s = std.fmt.bufPrint(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;
+    const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;
     n.len = @intCast(s.len);
     return n;
 }
@@ -85,7 +85,7 @@ pub fn unlink(io: std.Io, name: Name) void {
         return;
     }
     var path: [16 + max_name]u8 = undefined;
-    const p = std.fmt.bufPrint(&path, "/dev/shm{s}", .{name.slice()}) catch return;
+    const p = std.mem.print(&path, "/dev/shm{s}", .{name.slice()}) catch return;
     // ziglint-ignore: Z026 an object already gone is what is wanted
     std.Io.Dir.deleteFileAbsolute(io, p) catch {};
 }
@@ -113,7 +113,7 @@ fn putLibc(name: Name, bytes: []const u8) PutError!void {
 
 fn putDevShm(io: std.Io, name: Name, bytes: []const u8) PutError!void {
     var path: [16 + max_name]u8 = undefined;
-    const p = std.fmt.bufPrint(&path, "/dev/shm{s}", .{name.slice()}) catch return error.SharedMemory;
+    const p = std.mem.print(&path, "/dev/shm{s}", .{name.slice()}) catch return error.SharedMemory;
     const file = std.Io.Dir.createFileAbsolute(io, p, .{ .exclusive = true, .permissions = .fromMode(0o600) }) catch return error.SharedMemory;
     defer file.close(io);
     errdefer unlink(io, name);
@@ -155,7 +155,7 @@ fn readBack(name: Name, len: usize) ![]const u8 {
         return read_back[0..len];
     }
     var path: [16 + max_name]u8 = undefined;
-    const p = try std.fmt.bufPrint(&path, "/dev/shm{s}", .{name.slice()});
+    const p = try std.mem.print(&path, "/dev/shm{s}", .{name.slice()});
     const file = std.Io.Dir.openFileAbsolute(std.testing.io, p, .{}) catch return error.SharedMemory;
     defer file.close(std.testing.io);
     const n = try file.readPositionalAll(std.testing.io, read_back[0..len], 0);
