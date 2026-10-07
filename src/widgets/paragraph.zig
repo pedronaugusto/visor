@@ -109,21 +109,21 @@ pub const Paragraph = struct {
 /// absolute ranges. A paragraph of ten thousand rows therefore costs the
 /// same thirty-two rows of stack as a paragraph of two.
 pub const RowIterator = struct {
-    /// Private.
+    /// Private: the text broken into rows.
     own_text: []const u8,
-    /// Private.
+    /// Private: the width the rows are wrapped to.
     cols: u16,
-    /// Private.
+    /// Private: where a row may break.
     mode: visor.Wrap,
-    /// Private.
+    /// Private: the width method clusters are measured by.
     method: visor.Method,
-    /// Private.
+    /// Private: where in the text the buffered rows start.
     base: usize = 0,
-    /// Private.
+    /// Private: the rows of the last refill, relative to `base`.
     buf: [32]visor.Row = undefined,
-    /// Private.
+    /// Private: how many buffered rows can be handed out.
     have: usize = 0,
-    /// Private.
+    /// Private: the next buffered row to hand out.
     own_at: usize = 0,
     /// Private: whether the last refill saw the end of the text.
     last: bool = false,

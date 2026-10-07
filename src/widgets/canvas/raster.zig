@@ -14,13 +14,13 @@ pub const Paint = struct {
 
 /// Owned RGBA storage. Borrow pixels until resize or deinit; drawing never reallocates.
 pub const Surface = struct {
-    /// Private.
+    /// Private: the allocator the pixels come from.
     gpa: std.mem.Allocator,
-    /// Private.
+    /// Private: the width in pixels.
     width: u32,
-    /// Private.
+    /// Private: the height in pixels.
     height: u32,
-    /// Private.
+    /// Private: the RGBA bytes, four a pixel, row after row.
     own_pixels: []u8,
 
     /// What `init` and `resize` fail with: memory, or a size that is zero or

@@ -188,11 +188,11 @@ pub const Target = struct {
 /// An independent copy of a link target. `deinit` releases both slices
 /// through the allocator the copy was made with.
 pub const OwnedTarget = struct {
-    /// Private.
+    /// Private: the allocator the copies were made with, which frees them.
     gpa: Allocator,
-    /// Private.
+    /// Private: the copied URI.
     uri: []const u8,
-    /// Private.
+    /// Private: the copied parameters.
     params: []const u8,
 
     /// Copies both target slices, retaining the allocator that releases them.

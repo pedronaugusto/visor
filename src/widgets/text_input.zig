@@ -78,15 +78,15 @@ pub const TextInput = struct {
     /// The rows of a text at a width, one at a time. Never empty: an empty
     /// text is one empty row.
     pub const Rows = struct {
-        /// Private.
+        /// Private: the text the rows are taken from.
         own_text: []const u8,
-        /// Private.
+        /// Private: the width the rows are wrapped to.
         cols: u16,
-        /// Private.
+        /// Private: the width method clusters are measured by.
         method: visor.Method,
-        /// Private.
+        /// Private: where the next row starts.
         own_at: usize = 0,
-        /// Private.
+        /// Private: whether the last row was handed out.
         done: bool = false,
 
         /// The next row, or null after the last.
@@ -314,19 +314,19 @@ pub const TextInput = struct {
     /// `seal` ends it for a program that wants its own boundary -- on a
     /// pause, say, which needs a clock this does not have.
     pub const Buffer = struct {
-        /// Private.
+        /// Private: the allocator `init` was given.
         gpa: std.mem.Allocator,
-        /// Private.
+        /// Private: the text being edited.
         own_text: std.ArrayList(u8) = .empty,
-        /// Private.
+        /// Private: the cursor's byte offset.
         own_cursor: usize = 0,
-        /// Private.
+        /// Private: the other end of the selection, when there is one.
         anchor: ?usize = null,
         /// Private: the column vertical moves keep to, set by the first of them.
         goal: ?usize = null,
         /// Private: removed and inserted bytes of every edit kept, in order.
         bytes: std.ArrayList(u8) = .empty,
-        /// Private.
+        /// Private: every edit kept, in order, for undo and redo.
         edits: std.ArrayList(Edit) = .empty,
         /// Private: how many edits are applied; the ones after are for redo.
         done: usize = 0,

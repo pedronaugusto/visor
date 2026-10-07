@@ -340,13 +340,13 @@ pub const Screen = struct {
     }
 
     pub const Diff = struct {
-        /// Private.
+        /// Private: the first screen compared.
         a: *const Screen,
-        /// Private.
+        /// Private: the second screen compared.
         b: *const Screen,
-        /// Private.
+        /// Private: the row the walk is on.
         own_row: u16 = 0,
-        /// Private.
+        /// Private: the column the walk is on.
         col: u16 = 0,
 
         pub fn next(d: *Diff) ?Point {
@@ -852,9 +852,9 @@ pub const Screen = struct {
     }
 
     pub const Row = struct {
-        /// Private.
+        /// Private: the row's cells, borrowed from its screen.
         own_cells: []const StoredCell,
-        /// Private.
+        /// Private: the screen's pool generation the cells belong to.
         generation: u64,
 
         /// Cell.eql over the row, including its length and checked pool
@@ -875,11 +875,11 @@ pub const Screen = struct {
         }
 
         pub const Diff = struct {
-            /// Private.
+            /// Private: the first row compared.
             a: Row,
-            /// Private.
+            /// Private: the second row compared.
             b: Row,
-            /// Private.
+            /// Private: the column the walk is on.
             col: usize = 0,
 
             pub fn next(d: *Row.Diff) ?usize {

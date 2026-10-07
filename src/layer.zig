@@ -193,13 +193,13 @@ pub const Transmit = struct {
 /// replacements. Skips zero, the probe id and every image still held by
 /// `Layers`, including those awaiting retirement.
 pub const ImageIds = struct {
-    /// Private.
+    /// Private: the lowest id handed out.
     first: u32,
-    /// Private.
+    /// Private: the highest id handed out.
     last: u32,
-    /// Private.
+    /// Private: the probe's id, never handed out.
     graphics_id: u32,
-    /// Private.
+    /// Private: where the search for a free id starts.
     next: u32,
 
     /// What `init` refuses: a range that is empty, starts at zero, or is
@@ -233,11 +233,11 @@ pub const ImageIds = struct {
 /// One transmit may be in flight. The caller owns the value, its id range,
 /// grace period and any decision about when to produce another picture.
 pub const Replacement = struct {
-    /// Private.
+    /// Private: the picture shown, once it is ready.
     own_current: ?u32 = null,
-    /// Private.
+    /// Private: the picture sent and not yet settled.
     own_pending: ?u32 = null,
-    /// Private.
+    /// Private: whether a refusal or a failed write asks for a new picture.
     dirty: bool = false,
 
     /// The usable picture id, by value; retire it through this owner.
@@ -377,7 +377,7 @@ const InlineImage = struct {
 
 /// The images this program has sent, and what this frame shows of them.
 pub const Layers = struct {
-    /// Private.
+    /// Private: the allocator `init` was given, for every list here.
     gpa: Allocator,
 
     // Fields documented Private: are implementation storage; use metadata accessors.
@@ -412,17 +412,17 @@ pub const Layers = struct {
     /// terminal is on this machine, or may be): null sends every picture
     /// in the escape code.
     shared_memory: ?SharedMemory = null,
-    /// Private.
+    /// Private: the shared memory objects still to unlink, one per picture sent that way.
     shared_objects: std.ArrayList(SharedObject) = .empty,
-    /// Private.
+    /// Private: the sixel and iTerm2 pictures kept to draw again.
     own_inline: std.ArrayList(InlineImage) = .empty,
-    /// Private.
+    /// Private: the grid and cell size inline pictures are clipped to.
     size: Winsize = .{},
-    /// Private.
+    /// Private: whether an inline picture changed since the last frame.
     inline_dirty: bool = false,
-    /// Private.
+    /// Private: whether the terminal leaves the cursor right of a sixel, so the bottom row can take one.
     sixel_cursor_right: bool = false,
-    /// Private.
+    /// Private: the picture protocol the last frame was emitted under.
     protocol: ?Caps.Pictures = null,
 
     /// Geometry for inline pictures, including the probe's cell size.

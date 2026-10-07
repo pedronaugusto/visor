@@ -48,19 +48,19 @@ pub const Document = struct {
     pub const Align = documentAlign;
     pub const TableCell = documentTableCell;
     pub const Table = documentTable;
-    /// Private.
+    /// Private: the allocator `init` was given.
     gpa: std.mem.Allocator,
-    /// Private.
+    /// Private: the copy of the source the document was read from.
     own_source: []u8,
-    /// Private.
+    /// Private: the text of every block, its markers taken off.
     own_text: std.ArrayList(u8) = .empty,
-    /// Private.
+    /// Private: the styled spans of the text.
     own_spans: std.ArrayList(Document.Span) = .empty,
-    /// Private.
+    /// Private: the blocks, in order.
     own_blocks: std.ArrayList(Document.Block) = .empty,
-    /// Private.
+    /// Private: the cells of every table, row after row.
     own_cells: std.ArrayList(Document.TableCell) = .empty,
-    /// Private.
+    /// Private: each table column's alignment.
     aligns: std.ArrayList(Document.Align) = .empty,
     /// Private: link targets in table cells with their escaped pipes taken out.
     unescaped: std.ArrayList([]u8) = .empty,
@@ -372,7 +372,7 @@ pub const Document = struct {
 /// code or continue a list item depends on the blocks before, which only
 /// `Document` keeps. Borrows `source`; allocates nothing.
 pub const Quoted = struct {
-    /// Private.
+    /// Private: the source lines still to read.
     lines: std.mem.SplitIterator(u8, .scalar),
     /// Private: the block the lines are in, and the quote depth it opened at.
     own_fence: ?struct { fence: Fence, depth: u16 } = null,

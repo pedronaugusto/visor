@@ -296,9 +296,9 @@ pub const Renderer = struct {
     repaint_all: bool = false,
     /// Private: the session configuration requested, including a partially written change.
     own_entered: ?Entered = null,
-    /// Private.
+    /// Private: the modes a command may have turned on, which the way out turns off.
     cleanup: ModeCleanup = .{},
-    /// Private.
+    /// Private: the mode commands the writer accepted.
     own_written: ModeWrites = .{},
     /// Private: whether a complete frame has been written through this renderer.
     drawn: bool = false,

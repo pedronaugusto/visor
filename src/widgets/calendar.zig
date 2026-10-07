@@ -14,11 +14,11 @@ const Style = visor.Style;
 /// A day, as a calendar counts them.
 pub const Date = struct {
     // Internal representation; dates are constructed through init.
-    /// Private.
+    /// Private: the year.
     own_year: i32,
-    /// Private.
+    /// Private: the month, 1 to 12.
     own_month: u8,
-    /// Private.
+    /// Private: the day of the month, from 1.
     own_day: u8,
 
     /// What `init` refuses: a month or day that does not exist.

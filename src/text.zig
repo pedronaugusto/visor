@@ -107,11 +107,11 @@ const Utf8 = struct {
 /// Bytes that are not UTF-8 are clusters of their own, one a maximal
 /// subpart, which is what a terminal draws a replacement character for.
 pub const Graphemes = struct {
-    /// Private.
+    /// Private: the string walked.
     bytes: []const u8,
-    /// Private.
+    /// Private: the cluster iterator for text that is not plain ASCII.
     inner: uucode.grapheme.Iterator(Utf8),
-    /// Private.
+    /// Private: for printable ASCII, the next byte, each one a cluster.
     ascii_at: ?usize = null,
 
     /// The clusters of `bytes`, in order.
@@ -214,7 +214,7 @@ fn standsAlone(grapheme: []const u8, whole: u16) bool {
 /// take none go with it. A cluster of one such codepoint, which is nearly
 /// every cluster, is one part.
 pub const Parts = struct {
-    /// Private.
+    /// Private: the codepoints of the cluster.
     it: Utf8,
 
     /// The parts of `grapheme`, in order.

@@ -248,19 +248,19 @@ pub const VisualRow = struct {
 };
 
 pub const RowIterator = struct {
-    /// Private.
+    /// Private: the document the rows come from.
     document: *const reader.Document,
-    /// Private.
+    /// Private: the width the rows are wrapped to.
     cols: u16,
-    /// Private.
+    /// Private: the width method clusters are measured by.
     method: visor.Method,
-    /// Private.
+    /// Private: the block the next row comes from.
     block: usize = 0,
-    /// Private.
+    /// Private: the rows of the paragraph being wrapped.
     prose: ?Paragraph.Rows = null,
-    /// Private.
+    /// Private: whether the next row is its block's first.
     first: bool = true,
-    /// Private.
+    /// Private: the table being laid out, its column widths and where it is.
     table: ?TableState = null,
 
     const TableState = struct {

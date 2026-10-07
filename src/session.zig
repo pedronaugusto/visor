@@ -48,21 +48,21 @@ pub const ProbeWait = struct {
 /// Drain input through `handle`, call `resize` once, paint `screen()`, then
 /// `draw`. Neither this value nor any of its writes flushes output.
 pub const Session = struct {
-    /// Private.
+    /// Private: the allocator `init` was given.
     gpa: Allocator,
-    /// Private.
+    /// Private: the grid the program paints.
     own_screen: Screen,
-    /// Private.
+    /// Private: the renderer that writes the grid's changes.
     own_renderer: Renderer,
-    /// Private.
+    /// Private: the size the screen and renderer are at.
     ws: Winsize,
-    /// Private.
+    /// Private: the capability policy in force.
     caps: Caps = .{},
     /// Private: learned policy waiting for the renderer to accept its mode commands.
     pending_caps: ?Caps = null,
-    /// Private.
+    /// Private: the questions put to the terminal and the answers so far.
     own_probe: Caps.Probe,
-    /// Private.
+    /// Private: the pictures and what each frame shows of them.
     own_layers: Layers,
     /// Private: last size of a drained batch, applied by `resize` before painting.
     own_pending: ?Winsize = null,
