@@ -662,7 +662,7 @@ pub const Layers = struct {
     /// could not be put there (the medium is then off, and the caller's
     /// picture goes in the escape code). While the medium is on trial the
     /// terminal is asked to answer, whatever the caller asked.
-    fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!?usize {
+    fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) TransmitError!?usize {
         const gpa = l.gpa;
         const size = try sharedSize(pixels.len);
         // Reserve before the OS object exists. Once it does, the image

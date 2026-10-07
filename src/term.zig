@@ -787,8 +787,12 @@ pub const Term = struct {
         try dumpScreen(&t.scr, w, .{});
     }
 
+    /// What `dumpStyles` and `dumpScreenStyles` fail with: the writer, or
+    /// memory for telling the styles apart.
+    pub const DumpStylesError = Writer.Error || std.mem.Allocator.Error;
+
     /// The styles as one identifier a cell, with the legend above.
-    pub fn dumpStyles(t: *const Term, w: *Writer) (Writer.Error || std.mem.Allocator.Error)!void {
+    pub fn dumpStyles(t: *const Term, w: *Writer) DumpStylesError!void {
         try dumpScreenStyles(&t.scr, w);
     }
 
@@ -850,7 +854,7 @@ pub fn dumpScreen(s: *const Screen, w: *Writer, options: DumpOptions) Writer.Err
 ///
 /// Allocates, on the screen's own allocator, what it needs to tell any
 /// number of styles apart; nothing survives the call.
-pub fn dumpScreenStyles(s: *const Screen, w: *Writer) (Writer.Error || std.mem.Allocator.Error)!void {
+pub fn dumpScreenStyles(s: *const Screen, w: *Writer) Term.DumpStylesError!void {
     const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
     defer arena_state.deinit();
