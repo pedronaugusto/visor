@@ -571,9 +571,9 @@ const State = struct {
     var tree_state: w.Tree.State = undefined;
 };
 
-/// The shape of the file tree the `tree` workload draws, shared with the
-/// ratatui side: groups of ten, a folder (open), a folder (open in even
-/// groups) of four files, a folder (open) of three files.
+/// The shape of the file tree the `tree` workload draws, fixed so another
+/// program can draw the same tree: groups of ten, a folder (open), a folder
+/// (open in even groups) of four files, a folder (open) of three files.
 const tree_depths = [_]u16{ 0, 1, 2, 2, 2, 2, 1, 2, 2, 2 };
 fn treeOpen(i: usize) ?bool {
     return switch (i % 10) {
