@@ -6,137 +6,123 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking
+
 - Requires Zig 0.17.0; Zig 0.16 no longer builds visor. morse, conduit and uucode are pinned at their Zig 0.17 commits.
-
 - `build.zig` no longer exports `needsLlvm`: Zig 0.17's x86_64 backend compiles uucode's tables, so nothing built on visor in Debug on x86_64 Linux has to ask for LLVM.
-
-- `Tty.watchResize` makes its pipe with conduit's `pipe`, close-on-exec in one call where the system has `pipe2`, and on macOS under the lock conduit's spawns take. A child that conduit started at that moment could inherit both ends; on Linux a fork anywhere could. A program gets the macOS half only while it builds the same conduit visor pins.
-
-- On Windows, `Input.nextWithin`, and the wait `Input.next` gives a lone `ESC`, wait on the console for the time left rounded up to a whole millisecond. They rounded down, so a wait with less than a millisecond left ended at once and `nextWithin` could report its timeout passed while it was still ahead.
-
-- `Screen.write`, `writeScaled`, `Window.write`, `print` and every widget draw text as a terminal would instead of refusing it: a control (C0, DEL or C1) and a cluster that takes no column are drawn as nothing, and bytes that are not UTF-8 or a cluster longer than 65535 bytes are the replacement character. `InvalidCell` from text now means only more than one cluster in one `write`. A hand-built cell is checked against the screen's own width method, where it was always checked by codepoint. Markdown, Paragraph, List and TextInput no longer fail on a combining mark that begins a segment, U+0085, or a Hangul vowel.
-
-- Measured whole (`Method.unicode`), a cluster that begins with a combining mark takes no column: a terminal measuring clusters puts it in the cell to its left, and no order of writing keeps it apart. `graphemeWidth`, `width`, wrapping and every widget measure it so.
-
-- `Term.feed` takes any bytes: a byte that is not UTF-8 is a replacement character, where it panicked, and a C1 control draws nothing. `REP` with a count past a screenful prints only as many copies as change the result, so `ESC [ 4294967295 b` no longer hangs it.
-
-- `Screen.fill` and `Window.fill` with a wide or scaled cell lay whole blocks side by side; each head used to clear the one before it, leaving one glyph.
-
-- `Session.handle` folds a probe answer into the current policy field by field, so overrides set through `setCaps` (`osc8`, `rep`, a colour guess) survive a late answer. It used to replace the whole policy with the probe's.
-
-- The renderer's style cache is on the heap, so `Renderer` is a few hundred bytes instead of 176 KiB, and `resize` keeps the cache.
-
-- `CellError` and `DrawError` name what checked cells and drawing fail with, in `Screen`, `visor` and `widgets`, and every signature uses them. `Markdown.draw` returns `DrawError` where its error set was inferred.
-
+- `Tty` keeps no `std.Io`: `adopt(file)` takes only the file, and `close(io)`, `enter(io, …)`, `leave(io)`, `writer(io, buffer)` and `read(io, buffer)` take the caller's, as `Input.next(io)` and `Input.nextWithin(io, timeout)` do. `Tty.ioContext` is gone.
+- Time is a `std.Io.Timestamp` on the caller's clock and a span a `std.Io.Duration`, not milliseconds: `Caps.Probe.feed(event, now)`, `settled(now, quiet)` and `lastAnswer()` (was `lastAnswerMs`), `ProbeWait.init(now, timeout, quiet)` and `remaining(probe, now)`, which returns a `Duration`, `Session.handle(w, event, now)`, `Layers.ready(id, now, grace)`, `Replacement.settle` and `declare(…, now, grace)`, `Transmit.now` (was `now_ms`) and `Image.sent` (was `sent_ms`).
+- `dumpScreenWith` folds into `dumpScreen(screen, writer, options)`; `dumpScreen(screen, writer, .{})` is the old `dumpScreen`.
+- `Layers.free` and `freeAll` are `deleteImage` and `deleteAll`, morse's word for the same command.
+- `Damage` keeps the allocator `init` was given: `deinit()` and `resize(rows)` take none.
+- `visor.version` and `visor.widgets.version` are gone: no other package in the family exports one, and the manifest says it.
+- visor no longer publishes a `corpus` module. It is the round trips' test data, not API; the conformance build makes its own module from `src/testing/corpus.zig`.
 - `Screen.intern` returns `TooLong` for more than 65535 bytes, and `Screen.link` for a target or parameters that long (`Screen.LinkError`); both returned `OutOfMemory`. `Term` and `Markdown` leave such a link out, and `Markdown` interns a span's link once rather than once a cluster.
+- Input.init returns error.EmptyReadBuffer for empty read storage; callers must handle its error union.
+- Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.
+- Window keeps its clipped screen, rectangle and ink internal; screen() borrows the owner, rect() returns a copy, ink() borrows the drawing policy, and child, sub and inked construct views.
+- TextInput.Rows keeps borrowed text and iteration progress internal; construct through TextInput.rows and advance with next.
+- Markdown.Rows keeps document, wrapping configuration and block progress internal; use init and next.
+- Paragraph.Rows keeps borrowed text, wrapping configuration and refill state internal; use init and next.
+- Graphemes and Parts keep borrowed source and iteration progress internal; construct with init and advance through next or nextAt.
+- Damage row storage is internal; rowCount() returns its extent and marking, clearing and resize own its mutations.
+- OwnedTarget keeps its allocator and retained slices internal; init owns copying and target() lends the target read-only.
+- ImageIds keeps its validated range, excluded probe id and allocation cursor internal; use init and acquire.
+- Replacement picture ownership and refusal state are internal; current() and pending() return copied ids.
+- Caps.Probe owns its questions and answer progress internally; init and const queries replace literals and mutable fields.
+- Input framing, parser and buffer state are internal; use mousePixels() and setMousePixels() to match requested mouse encoding.
+- Tty descriptors, saved modes, renderer association and resize watcher are internal.
+- Canvas.Surface owns allocation and geometry internally; dimensions() copies its size, pixels() and pixelsMut() borrow its bytes, and resize commits cleared storage atomically.
+- Term allocation, grid and stream state are internal; screen(), position(), savedCursor() and graphics() provide const views or values.
+- Session allocation and coordinated state are internal; screen(), renderer() and layers() borrow components, while windowSize(), capabilities() and probe() query state.
+- Renderer terminal state is internal; entered() returns the requested configuration by value, and mutations go through its methods.
+- Screen pools, allocation, geometry, pool identity and damage, and Renderer allocation, geometry, work buffers and baseline/link storage are internal; use dimensions(), resize and checked cell access.
+- Canvas.Picture borrows Surface and Layers without a redundant allocator field.
+- Markdown.Document owns internal parsing storage and exposes source, text, spans and blocks as borrowed const slices.
+- Screen.cell, placement, copying, printing and widget drawing check glyphs and shapes with InvalidCell; terminal bridges use explicitly unchecked placement while pool handles remain checked.
+- Date uses checked init(year, month, day) construction and component accessors instead of mutable calendar literals.
+- Style dumps use as many padded base-62 digits per cell as their legend needs, including more than two beyond 3,844 styles.
+- Layers requires init(allocator); deinit, transmit, declare and retire, and Replacement.send, declare and retire, take no allocator, and mutable lists and metadata give way to images(), declarations(), placements(), answerPolicy() and fallbackCount().
+- Cell is forty-eight bytes while grids store thirty-two-byte cells; Screen.cells and rowAtMut are replaced by readCell, rowAt().len()/get() and checked placement operations.
+- Layers.configureSharedMemory replaces mutable shared-memory configuration and the SharedMemory export; private object owners retain their cleanup Io, and names use a process-wide namespace.
+- Pooled Text and Link handles carry their pool generation; placement, copying, printing, widget drawing and textOf can return InvalidHandle, Link.at, Text.atOffset and Text.slice are removed, and inlineSlice resolves inline text.
+- `Screen.deinit`, `resize`, `compactPool`, `intern` and `link`, and `Renderer.deinit` and `resize`, use their captured allocator without another allocator argument.
+- Image transmission can return `PayloadTooLarge`; shared memory reserves its owner and checks the protocol size before creating an object.
+- Tty.leave() releases its own renderer without an argument; Tty.enter can return AlreadyEntered, and raw terminals must stay at a stable address until restored, with their renderer alive.
 
-- A project that depends on visor builds: `build.zig` reaches preflight through `lazyImport`, in visor's own tree only.
+### Added
 
-- `Screen.index` asserts its column and row are on the grid, and the grid, renderer, pools, emulator, damage map, layout and `TextInput.Buffer` assert the invariants they rely on: storage sized to the grid, pool handles that read back what was written, the emulator's cursor and scrolling region on the grid, and an undo history whose bytes are its edits' own, in order.
-
-- `expectScreensEqual` reports the cell that differs and both grids through `std.log` at the error level under the `visor` scope, which the program's log handler writes or drops, instead of printing to standard error. The examples write their output to standard output.
-
-- `Renderer.Error` names what `draw`, `enter` and `leave` fail with, and `Session.draw` and `Tty.leave` return it. The set was declared beside `Renderer` rather than in it, where no caller of `visor` could name it.
-
+- Every public function that returned an unnamed or inferred error set returns a named one: `Input.InitError`, `ImageIds.InitError` and `AcquireError`, `Layers.StoreSixelError` and `TransmitError`, `Screen.HandleError`, `InternError`, `DupeTextError` and `PrintableError`, `Tty.WatchResizeError`, `Date.InitError`, `Canvas.Surface.InitError` and `ResizeError`, `Canvas.DrawError` and `ExpectError`. `Canvas.Painter`'s `points`, `map`, `circle` and `disc` return `visor.DrawError`.
+- `zig build bench` runs visor's own benchmarks, in `bench/`; `zig build check`, and so CI, compiles them and never runs them.
 - `Caps.Probe` learns `colors` from morse's `Co` question, counting answers and refusals in the same waiting window as the other capabilities.
-
 - Pictures choose kitty, iTerm2, sixel, then cells, with a caller override: the probe reads DA1, XTSMGRAPHICS and XTVERSION, and callers can supply TERM_PROGRAM. `Layers.storeSixel` and `storeIterm` retain pictures for redraw after damage, movement, scrolling and removal, clipped to their cell rectangle; morse writes the bytes. Canvas can retain its raster as sixel pixels with a caller palette.
-
-- The renderer draws every colour in what the terminal shows, `Caps.colorProfile`: direct colour with `truecolor`, the 256-colour palette or the sixteen slots by the `Co` count, none under `no_color`, or the caller's `color_profile`; with nothing known, the 256-colour palette, where it drew direct colour before. Each colour is fitted with `morse.Color.fit` before the diff, so colours the terminal shows alike are no change, and against the slots `slot_colors` points at, which `Palette.slots` gives from the terminal's answers. `Caps.guessColor` reads `COLORTERM` and `NO_COLOR` values the caller passes in, and a `Co` answer the program asked for is folded in.
-
-- `Markdown.Document` reserves its text once, at the source's length, which it never exceeds, and reads a table cell's escaped pipes in place instead of copying the cell.
-
-- A row whose diff is one run up to its trailing blanks, over a tail the terminal already shows, is written as the diff without pricing the paint: the paint would write the same run and erase the rest. The bytes are unchanged; a screen redrawn over blank rows, as after `printAbove`, takes about half the time.
-
 - `TextInput.Buffer` owns text being edited, with no key bound: insertion, deletion by the motions the cursor moves by (a cluster, a word, to the line's ends, to the text's ends), up and down rows keeping their column, a selection that typing replaces, and undo and redo a word of typing or a run of deletions at a time, within a byte limit. `TextInput` draws a selection in `selected_style`. `TextInput.wordEnd` is new, and `wordStart` now lands on a cluster boundary where a mark on a space used to put it inside the cluster.
-
 - `Markdown` reads GFM tables and task lists. A table draws its columns side by side with a rule under the header, each cell aligned by its delimiter row; a table wider than the window shares the room out and wraps its cells. A task item draws its `[ ]` or `[x]` mark in its own style. The GFM spec's table and task list examples are in the suite.
-
 - `Renderer.printAbove` prints the rows of a grid above an inline screen and draws the screen under them in one frame: rows that reach the bottom of the terminal scroll it into its scrollback, and the screen is drawn against the blank rows it moved to, priced as any frame. `Renderer.Stats.printed` counts the rows; outside inline mode it returns `NotInline`.
-
 - `Tree` draws nodes under nodes from a slice in reading order, each with its depth and whether it is open as the program keeps it: guides joining a node to its parent and siblings, a symbol for open, closed and leaf, each row drawn as a list item, and a `State` with the selection and the scroll that walks only the rows shown.
-
-- `Tty.open` takes the pollable macOS terminal from conduit's `openControlling` instead of finding the device itself.
-
-- `Term` reads the bodies of OSC 8 and OSC 66 with `morse.parseHyperlink` and `morse.parseTextSize`, and its own parsing of them is gone. Sized text whose metadata morse does not read (a key twice, a value out of its range, a pair outside the grammar) is now dropped like any other sequence `Term` does not recognise, instead of drawn with the pairs it could read.
-
-- `wrap`, and so `Paragraph.Rows`, no longer ends a row before it starts when a break swallows spaces the scan had not reached: indentation wider than the width is a row of the spaces that fit, and the first word starts the next. A word that does not fit beside a wide cluster after a break is broken again instead of overflowing its row; a space a mark combines with is no longer split by the spaces a break swallows.
-
-- `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
-
 - `Markdown.Quoted` reads a source line by line by the reader's own quote and fence rules: each line's body with its quote markers off, its depth, and whether it belongs to a fenced block. `Markdown.Document` reads its fences through it.
+- Replacement.settle advances acknowledgements and grace without creating a placement.
+- visor.Transmit names the transmission options accepted by Layers and Replacement.
+- Markdown.Rows exposes the same borrowed visual ranges as drawing, with inline spans, block structure and opening fence metadata.
+- Markdown reads a documented subset into an owned document and renders themed prose, quotes, lists, verbatim code and screen links to width.
+- Canvas draws shared plotting shapes into antialiased RGBA pictures with normal or additive blending, or into terminal cells.
+- Borrowed text and target slices state their pool lifetime; `dupeTextAt`, `dupeTextOf` and `dupeTarget` make independent copies for retention.
+- `zig build test -Dtest-filter=…` runs only matching tests.
 
+### Changed
+
+- Fields that belong to their owner drop their leading `_` and say `Private:` in their doc comments, as the standard library's do; one whose name an accessor takes is `own_` and the name.
+- Styles and stored cells compare as unaligned words in line. Under Zig 0.17 `std.mem.eql` over a style became a call the renderer made for every cell it styled: a 200 by 60 frame that restyles every cell took 686 µs where Zig 0.16 took 444, and takes 442 now.
+- `Input` waits on the Windows console through conduit's `console.waitInput(io, handle, timeout)`, which rounds the time left up itself and is a cancelation point: a cancelled wait returns `Canceled`.
+- `Screen.write`, `writeScaled`, `Window.write`, `print` and every widget draw text as a terminal would instead of refusing it: a control (C0, DEL or C1) and a cluster that takes no column are drawn as nothing, and bytes that are not UTF-8 or a cluster longer than 65535 bytes are the replacement character. `InvalidCell` from text now means only more than one cluster in one `write`. A hand-built cell is checked against the screen's own width method, where it was always checked by codepoint. Markdown, Paragraph, List and TextInput no longer fail on a combining mark that begins a segment, U+0085, or a Hangul vowel.
+- The renderer's style cache is on the heap, so `Renderer` is a few hundred bytes instead of 176 KiB, and `resize` keeps the cache.
+- `CellError` and `DrawError` name what checked cells and drawing fail with, in `Screen`, `visor` and `widgets`, and every signature uses them. `Markdown.draw` returns `DrawError` where its error set was inferred.
+- `Screen.index` asserts its column and row are on the grid, and the grid, renderer, pools, emulator, damage map, layout and `TextInput.Buffer` assert the invariants they rely on: storage sized to the grid, pool handles that read back what was written, the emulator's cursor and scrolling region on the grid, and an undo history whose bytes are its edits' own, in order.
+- `expectScreensEqual` reports the cell that differs and both grids through `std.log` at the error level under the `visor` scope, which the program's log handler writes or drops, instead of printing to standard error. The examples write their output to standard output.
+- `Renderer.Error` names what `draw`, `enter` and `leave` fail with, and `Session.draw` and `Tty.leave` return it. The set was declared beside `Renderer` rather than in it, where no caller of `visor` could name it.
+- The renderer draws every colour in what the terminal shows, `Caps.colorProfile`: direct colour with `truecolor`, the 256-colour palette or the sixteen slots by the `Co` count, none under `no_color`, or the caller's `color_profile`; with nothing known, the 256-colour palette, where it drew direct colour before. Each colour is fitted with `morse.Color.fit` before the diff, so colours the terminal shows alike are no change, and against the slots `slot_colors` points at, which `Palette.slots` gives from the terminal's answers. `Caps.guessColor` reads `COLORTERM` and `NO_COLOR` values the caller passes in, and a `Co` answer the program asked for is folded in.
+- `Markdown.Document` reserves its text once, at the source's length, which it never exceeds, and reads a table cell's escaped pipes in place instead of copying the cell.
+- A row whose diff is one run up to its trailing blanks, over a tail the terminal already shows, is written as the diff without pricing the paint: the paint would write the same run and erase the rest. The bytes are unchanged; a screen redrawn over blank rows, as after `printAbove`, takes about half the time.
+- `Tty.open` takes the pollable macOS terminal from conduit's `openControlling` instead of finding the device itself.
+- `Term` reads the bodies of OSC 8 and OSC 66 with `morse.parseHyperlink` and `morse.parseTextSize`, and its own parsing of them is gone. Sized text whose metadata morse does not read (a key twice, a value out of its range, a pair outside the grammar) is now dropped like any other sequence `Term` does not recognise, instead of drawn with the pairs it could read.
+- `Tty.open` opens the terminal with `conduit.tty.openControlling`, and panic restoration writes to a Windows console through `conduit.tty.console.WriteFile`; the console declarations here are gone. The resize signal handler stays here.
 - `Palette.resolve` takes the colour cube and grey ramp from `morse.paletteRgb`.
-
 - `Winsize.locate` places a mouse report with `morse.toCellsAt` rather than its own division; the cell and fraction are unchanged.
-
 - `Input` waits under the escape timeout while `morse.KeyParser.undecided` says so, instead of restating the parser's rule for which pending bytes are a key.
-
 - `Term` reads sequences with morse: control sequences and strings are framed by `morse.parseCsi` and `morse.parseControlString`, style changes are applied by `morse.applySgr`, and modes and cursor shapes are matched by morse's numbers. Superscript and subscript (SGR 73, 74, 75) now survive the round trip, the round-trip generator draws them, and `dumpScreenStyles` names them; a cursor shape morse does not name leaves the cursor as it was.
-
 - Price style changes, cursor moves, repeats, erases, links, sized text and mode brackets with `morse.cost` instead of renderer copies of morse spellings, and price a rejoined cluster by its actual moves; the bytes written are unchanged.
-
 - Keep recurring style transitions together in the SGR cache so RGB frames need less formatting.
-
 - Compare screens and rows through borrowed changed-position iterators without exporting checked cells.
-
 - Skip the text pass when a frame only updates pictures or the cursor.
-
 - Keep dirty row counts with their spans so clean frames need no damage scan or clear.
-
 - Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
+- List selection finds its visible suffix in one backward height scan instead of repeatedly rescanning the range.
 
-- Resolve Markdown document types without importing their own file.
-- Give terminal and Unicode dependencies one source owner.
+### Fixed
 
-- Pin conduit at confirmed per-child scope completion and fallible private-scope release.
-
-- The root restoreGlobal documentation names every registered terminal it restores.
+- A fetched visor carries its `LICENSE`, `README.md` and `CHANGELOG.md`: the manifest's `.paths` left all three out.
+- `Tty.watchResize` makes its pipe with conduit's `pipe`, close-on-exec in one call where the system has `pipe2`, and on macOS under the lock conduit's spawns take. A child that conduit started at that moment could inherit both ends; on Linux a fork anywhere could. A program gets the macOS half only while it builds the same conduit visor pins.
+- On Windows, `Input.nextWithin`, and the wait `Input.next` gives a lone `ESC`, wait on the console for the time left rounded up to a whole millisecond. They rounded down, so a wait with less than a millisecond left ended at once and `nextWithin` could report its timeout passed while it was still ahead.
+- Measured whole (`Method.unicode`), a cluster that begins with a combining mark takes no column: a terminal measuring clusters puts it in the cell to its left, and no order of writing keeps it apart. `graphemeWidth`, `width`, wrapping and every widget measure it so.
+- `Term.feed` takes any bytes: a byte that is not UTF-8 is a replacement character, where it panicked, and a C1 control draws nothing. `REP` with a count past a screenful prints only as many copies as change the result, so `ESC [ 4294967295 b` no longer hangs it.
+- `Screen.fill` and `Window.fill` with a wide or scaled cell lay whole blocks side by side; each head used to clear the one before it, leaving one glyph.
+- `Session.handle` folds a probe answer into the current policy field by field, so overrides set through `setCaps` (`osc8`, `rep`, a colour guess) survive a late answer. It used to replace the whole policy with the probe's.
+- A project that depends on visor builds: `build.zig` reaches preflight through `lazyImport`, in visor's own tree only.
+- `wrap`, and so `Paragraph.Rows`, no longer ends a row before it starts when a break swallows spaces the scan had not reached: indentation wider than the width is a row of the spaces that fit, and the first word starts the next. A word that does not fit beside a wide cluster after a break is broken again instead of overflowing its row; a space a mark combines with is no longer split by the spaces a break swallows.
 - Session retains size reports and graphics acknowledgements before retrying capability output that can fail.
-- Morse is pinned at 904d3a5, with timing tests on bench and astral AltGr text decoded by the same modifier rule.
-- Breaking: Input.init returns error.EmptyReadBuffer for empty read storage; callers must handle its error union.
-- Terminal documentation distinguishes Tty ownership from the descriptor use of shared-memory pictures.
-- Window documents the screen-owned allocations that committed printing can make.
 - Winsize owns cell-pixel invalidation for changed geometry from size replies as well as resize events.
 - Resize handlers preserve the interrupted thread's errno when a libc pipe write fails.
-- The root documentation scopes signal-free drawing to the core and names Tty.watchResize as the explicit signal-handler opt-in.
 - Resize watching withdraws handler borrows before closing either pipe end so teardown cannot write to a closed or reused descriptor.
 - Block titles keep whole glyphs between the frame sides, including when clipped.
 - Late graphics replies cannot make failed images ready before retransmission.
-- Breaking: Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.
 - Session retains learned capabilities across failed output and retries them on the next event until accepted or superseded by caller policy.
 - Retrying failed Renderer mode or capability changes resumes commands not yet accepted without repeating an accepted keyboard push.
-- Breaking: Window keeps its clipped screen, rectangle and ink internal; screen() borrows the owner, rect() returns a copy, ink() borrows the drawing policy, and child, sub and inked construct views.
-- Breaking: TextInput.Rows keeps borrowed text and iteration progress internal; construct through TextInput.rows and advance with next.
-- Breaking: Markdown.Rows keeps document, wrapping configuration and block progress internal; use init and next.
-- Breaking: Paragraph.Rows keeps borrowed text, wrapping configuration and refill state internal; use init and next.
-- Breaking: Graphemes and Parts keep borrowed source and iteration progress internal; construct with init and advance through next or nextAt.
-- Breaking: Damage row storage is internal; rowCount() returns its extent and marking, clearing and resize own its mutations.
-- Breaking: OwnedTarget keeps its allocator and retained slices internal; init owns copying and target() lends the target read-only.
-- Breaking: ImageIds keeps its validated range, excluded probe id and allocation cursor internal; use init and acquire.
-- Breaking: Replacement picture ownership and refusal state are internal; current() and pending() return copied ids.
-- Breaking: Caps.Probe owns its questions and answer progress internally; init and const queries replace literals and mutable fields.
-- Breaking: Input framing, parser and buffer state are internal; use mousePixels() and setMousePixels() to match requested mouse encoding.
-- Breaking: Tty descriptors, saved modes, renderer association and resize watcher are internal; ioContext() returns its captured Io by value.
-- Breaking: Canvas.Surface owns allocation and geometry internally; dimensions() copies its size, pixels() and pixelsMut() borrow its bytes, and resize commits cleared storage atomically.
-- Breaking: Term allocation, grid and stream state are internal; screen(), position(), savedCursor() and graphics() provide const views or values.
-- Breaking: Session allocation and coordinated state are internal; screen(), renderer() and layers() borrow components, while windowSize(), capabilities() and probe() query state.
-- Breaking: Renderer terminal state is internal; entered() returns the requested configuration by value, and mutations go through its methods.
-- List selection finds its visible suffix in one backward height scan instead of repeatedly rescanning the range.
 - Terminal mode cleanup remembers partially written changes and avoids repeating an accepted keyboard pop.
 - Failed image transmissions remain refused and freeable instead of becoming ready through silence or grace.
 - Custom border drawing refuses malformed glyphs through checked placement instead of treating caller input as unreachable.
-- The allocation-free drawing test observes the allocators captured by both owners and refuses new allocations and resizes after warmup.
 - Screen fills and Window placement share whole-cell clipping so a wide or scaled fill stays inside its requested rectangle.
 - List and Table bound visible ranges even when the viewport has no body rows.
 - Wrapping and Window printing treat CRLF as one hard line break, including when clipping the rest of a line.
-- Input deadline tests count reads, cancellation and the supplied budget on a synthetic clock instead of asserting wall-clock elapsed time.
-- Breaking: Screen pools, allocation, geometry, pool identity and damage, and Renderer allocation, geometry, work buffers and baseline/link storage are internal; use dimensions(), resize and checked cell access.
-- Replacement.settle advances acknowledgements and grace without creating a placement.
-- Breaking: Canvas.Picture borrows Surface and Layers without a redundant allocator field.
-- visor.Transmit names the transmission options accepted by Layers and Replacement.
-- Markdown.Rows exposes the same borrowed visual ranges as drawing, with inline spans, block structure and opening fence metadata.
-- Breaking: Markdown.Document owns internal parsing storage and exposes source, text, spans and blocks as borrowed const slices.
 - ASCII batching checks its first cell against the Unicode neighbour so a prepend cannot join across grid cells.
 - Codepoint measurement gives Unicode prepend characters their standalone column rather than dropping them as combining marks.
 - Terminal scroll margins share zero-default parsing and check their order after clipping to the grid.
@@ -144,17 +130,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - List and Table share bounded navigation so moving backward also clamps selections after items disappear.
 - Resize rebuilds pools from the clipped and repaired grid so discarded cells retain no text or links.
 - Raster strokes and ellipses keep finite extreme coordinates and tiny radii through their distance calculations.
-- Breaking: Screen.cell, placement, copying, printing and widget drawing check glyphs and shapes with InvalidCell; terminal bridges use explicitly unchecked placement while pool handles remain checked.
-- Breaking: Date uses checked init(year, month, day) construction and component accessors instead of mutable calendar literals.
-- Breaking: Style dumps use as many padded base-62 digits per cell as their legend needs, including more than two beyond 3,844 styles.
-- Breaking: Layers requires init(allocator); deinit, transmit, declare and retire, and Replacement.send, declare and retire, take no allocator, and mutable lists and metadata give way to images(), declarations(), placements(), answerPolicy() and fallbackCount().
-- Breaking: Cell is forty-eight bytes while grids store thirty-two-byte cells; Screen.cells and rowAtMut are replaced by readCell, rowAt().len()/get() and checked placement operations.
 - Window checks complete text and cell extents before placement, copying or multi-cell fills can cross a child boundary.
 - Sextants weights RGBA brightness and cell colour by alpha so transparent pixels leave cells alone.
-- Markdown reads a documented subset into an owned document and renders themed prose, quotes, lists, verbatim code and screen links to width.
-- Canvas draws shared plotting shapes into antialiased RGBA pictures with normal or additive blending, or into terminal cells.
-- Conformance properties use checked cell placement and support focused test selection through the package build.
-- Documentation names the state owners and distinguishes inline text from pooled handle lifetimes.
 - Restoring the terminal emulator's saved cursor clamps it to the resized grid.
 - Growing terminal clusters and scaled text compare wide extents before narrowing at the u16 edge.
 - The terminal emulator normalizes zero coordinates and clips line counts before narrowing them.
@@ -175,28 +152,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A failed session resize preserves both grids, pool handles and borrowed content until their new storage is ready.
 - Silence to a direct image transmission never makes an unread shared-memory picture ready.
 - Resizing the terminal emulator retains its open OSC 8 target, including before a cell uses it.
-- Breaking: Layers.configureSharedMemory replaces mutable shared-memory configuration and the SharedMemory export; private object owners retain their cleanup Io, and names use a process-wide namespace.
-- Breaking: pooled Text and Link handles carry their pool generation; placement, copying, printing, widget drawing and textOf can return InvalidHandle, Link.at, Text.atOffset and Text.slice are removed, and inlineSlice resolves inline text.
 - Probe replies to disabled questions leave capabilities and the quiet period unchanged.
 - Cell placement and printing compare wide extents before narrowing at the u16 coordinate edge.
 - A failed terminal leave or flush keeps the mode intent for restoration through the saved descriptor.
 - Rendering a different screen repaints even when its pooled cell IDs coincide, including when a screen address is reused.
 - A failed resize preserves the screen, its pool identities, borrowed slices and damage.
-- Printing documents its allocation rule: measurement allocates nothing; committing can allocate for unseen graphemes longer than six bytes.
-- Breaking: `Screen.deinit`, `resize`, `compactPool`, `intern` and `link`, and `Renderer.deinit` and `resize`, use their captured allocator without another allocator argument.
-- Borrowed text and target slices state their pool lifetime; `dupeTextAt`, `dupeTextOf` and `dupeTarget` make independent copies for retention.
-- Breaking: image transmission can return `PayloadTooLarge`; shared memory reserves its owner and checks the protocol size before creating an object.
-- Breaking: Tty.leave() releases its own renderer without an argument; Tty.enter can return AlreadyEntered, and raw terminals must stay at a stable address until restored, with their renderer alive.
 - Pool compaction repaints text and pictures, including when resize compacts the pools.
-- `zig build test -Dtest-filter=…` runs only matching tests.
-
-### Breaking
-
-- visor no longer publishes a `corpus` module. It is the round trips' test data, not API; the conformance build makes its own module from `src/testing/corpus.zig`.
-
-### Fixed
-
-- A fetched visor carries its `LICENSE`, `README.md` and `CHANGELOG.md`: the manifest's `.paths` left all three out.
 
 ## [0.4.0] - 2026-09-30
 
@@ -843,3 +804,10 @@ checks them with, and a second module of widgets drawn on the grid.
   parts with three cells between them in a rectangle two cells tall charged
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
+
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.4.0
+[0.3.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.3.0
+[0.2.1]: https://github.com/pedronaugusto/visor/releases/tag/v0.2.1
+[0.2.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.2.0
+[0.1.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.1.0

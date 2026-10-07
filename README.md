@@ -8,6 +8,62 @@ the terminal from the frame it is showing to the one it should be showing. A
 second module, `visor.widgets`, holds a layout solver and twenty widgets
 drawn on that grid, and the base never imports it.
 
+## Install
+
+Requires Zig 0.17.0.
+
+```sh
+zig fetch --save git+https://github.com/pedronaugusto/visor
+```
+
+```zig
+const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("visor", visor_dep.module("visor"));
+exe.root_module.addImport("visor.widgets", visor_dep.module("visor.widgets"));
+```
+
+One fetch, three modules. `visor` is the grid and the renderer;
+`visor.widgets` is the layout solver and the widgets, and a program that wants
+only the base leaves the second line out. `morse` comes with it, re-exported
+as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
+program that wants the writers on their own.
+
+Three dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
+every escape sequence written and every reply parsed,
+[`conduit`](https://github.com/pedronaugusto/conduit) for the terminal's own
+calls — raw mode and the way back, the size, the device's name — of which only
+its `conduit.tty` module is imported, which on Linux links no C library, and
+`uucode` for grapheme segmentation and width. All are pinned by commit. `uucode` builds its tables
+at build time, and visor asks for six fields and no more — `grapheme_break`
+and `grapheme_break_no_control` for where one cluster ends and the next begins,
+`wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
+worth on its own and inside a cluster, and `is_emoji_modifier_base` and
+`is_emoji_vs_base` for skin tone and the presentation selector. That is one
+slow first build and then a cached table. A program that configures `uucode`
+itself should keep these six and add its own, or the two configurations build
+two sets of tables.
+
+**Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
+`draw` allocates nothing. With `commit = false`, `print` only measures and
+allocates nothing. Committed printing and `Screen.write` can allocate for a
+grapheme longer than six bytes the screen has not seen before, and say so
+with a `try`. Interning new links, pool compaction and resizing can allocate.
+The owned-copy helpers allocate through the copy's allocator.
+
+**Compaction.** The pools keep every grapheme and link ever interned until
+`compactPool`, or a resize to a new size, sweeps out what no cell uses; a
+resize to the same size only damages the grid. A program showing endless
+new text calls `compactPool` now and then, and pays for it: the pools'
+identity changes, so the next `draw` repaints every cell.
+
+Text and link targets returned by the screen are borrowed. Inline text
+lives in its cell; pooled text and targets live in growable pools, so
+interning unrelated text or links can invalidate their slices even when the
+cell is unchanged. Compaction, resize and deinitialization can invalidate
+pool slices too. `dupeTextAt` and `dupeTextOf` make copies the caller frees
+with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
+`target()` lends const URI and params and `deinit` frees them. These copies survive later drawing.
+
 ## Usage
 
 The block below is a region of [`examples/usage.zig`](examples/usage.zig),
@@ -119,240 +175,6 @@ a sidebar, a scrollbar, a status line and a resize —
 [`examples/progress.zig`](examples/progress.zig) is a screen of two rows at
 the prompt, in inline mode, that prints finished steps above itself, grows
 to three and leaves its last frame in the history.
-
-## Install
-
-```sh
-zig fetch --save git+https://github.com/pedronaugusto/visor
-```
-
-```zig
-const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimize });
-exe.root_module.addImport("visor", visor_dep.module("visor"));
-exe.root_module.addImport("visor.widgets", visor_dep.module("visor.widgets"));
-```
-
-One fetch, three modules. `visor` is the grid and the renderer;
-`visor.widgets` is the layout solver and the widgets, and a program that wants
-only the base leaves the second line out. `morse` comes with it, re-exported
-as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
-program that wants the writers on their own.
-
-Three dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
-every escape sequence written and every reply parsed,
-[`conduit`](https://github.com/pedronaugusto/conduit) for the terminal's own
-calls — raw mode and the way back, the size, the device's name — of which only
-its `conduit.tty` module is imported, which on Linux links no C library, and
-`uucode` for grapheme segmentation and width. All are pinned by commit. `uucode` builds its tables
-at build time, and visor asks for six fields and no more — `grapheme_break`
-and `grapheme_break_no_control` for where one cluster ends and the next begins,
-`wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
-worth on its own and inside a cluster, and `is_emoji_modifier_base` and
-`is_emoji_vs_base` for skin tone and the presentation selector. That is one
-slow first build and then a cached table. A program that configures `uucode`
-itself should keep these six and add its own, or the two configurations build
-two sets of tables.
-
-**Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
-`draw` allocates nothing. With `commit = false`, `print` only measures and
-allocates nothing. Committed printing and `Screen.write` can allocate for a
-grapheme longer than six bytes the screen has not seen before, and say so
-with a `try`. Interning new links, pool compaction and resizing can allocate.
-The owned-copy helpers allocate through the copy's allocator.
-
-**Compaction.** The pools keep every grapheme and link ever interned until
-`compactPool`, or a resize to a new size, sweeps out what no cell uses; a
-resize to the same size only damages the grid. A program showing endless
-new text calls `compactPool` now and then, and pays for it: the pools'
-identity changes, so the next `draw` repaints every cell.
-
-Text and link targets returned by the screen are borrowed. Inline text
-lives in its cell; pooled text and targets live in growable pools, so
-interning unrelated text or links can invalidate their slices even when the
-cell is unchanged. Compaction, resize and deinitialization can invalidate
-pool slices too. `dupeTextAt` and `dupeTextOf` make copies the caller frees
-with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
-`target()` lends const URI and params and `deinit` frees them. These copies survive later drawing.
-
-## The API
-
-| | |
-|---|---|
-| The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
-| Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
-| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`, `CellError`, `DrawError`. |
-| The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
-| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
-| The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
-| What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswer`, `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `deleteImage`, `deleteAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
-| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
-| Everything under it | `visor.morse`, whole. |
-
-### `visor.widgets`
-
-| | |
-|---|---|
-| Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
-| Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
-| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports, and `DrawError`, what every `draw` fails with. |
-
-### Canvas
-
-`Canvas` draws points, lines, rectangle outlines, circles, discs, polylines
-and maps in plot coordinates. A map is a slice of separate contours supplied
-by the caller; there is no bundled geographic dataset. The existing
-`painter(window)` writes cells immediately, with braille, sextants, blocks,
-half blocks, dots or bars. Its y bounds name the bottom and top.
-
-```zig
-const widgets = @import("visor.widgets");
-const canvas: widgets.Canvas = .{
-    .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 }, .marker = .sextant,
-};
-const shapes: []const widgets.Canvas.Shape = &.{
-    .{ .geometry = .{ .circle = .{ 50, 50, 30 } },
-       .paint = .{ .rgba = .{ 255, 200, 0, 255 } } },
-    .{ .geometry = .{ .line = .{ 0, 0, 100, 100 } },
-       .paint = .{ .blend = .additive } },
-};
-try canvas.draw(window, shapes, .{}); // cells
-
-var surface = try widgets.Canvas.Surface.init(gpa, 640, 320);
-defer surface.deinit();
-try canvas.draw(window, shapes, .{
-    .caps = caps,
-    .picture = .{ .surface = &surface, .layers = &layers,
-                 .writer = writer, .image = image_id },
-});
-```
-
-With kitty or sixel graphics and picture resources, `draw` clears the surface,
-rasterizes antialiased shapes and transmits and declares a picture beneath
-text through `Layers`. Without them it draws the same shapes as cells.
-Paint width is in output pixels; cell marks remain binary and use paint's
-RGB foreground. Pixel blending is straight-alpha source-over (`normal`)
-or saturated RGB light and alpha sums (`additive`). No glow or colour
-policy is built in. Invalid coordinates draw nothing; strokes are clipped
-before pixel iteration, including coverage just outside the plot.
-
-The caller owns the surface, image ids and retirement. For repeated frames,
-`canvas.raster(&surface)` paints without clearing or sending: pass its RGBA
-`pixels()` and `dimensions().width` / `dimensions().height` through
-`Replacement.send` and declare the replacement as usual. This keeps picture acknowledgements and swaps with
-the same owner as every other picture. Surface owns its allocator, dimensions
-and storage; `pixels()` lends const bytes
-and `pixelsMut()` lends bytes for editing. `resize(width, height)` prepares a
-cleared allocation before changing dimensions. Surface pixels stay borrowed
-until `resize` or `deinit`; no painter reallocates them. `Sextants` weights picture brightness
-and foreground RGB by alpha when showing an RGBA picture in cells. `examples/gallery.zig` draws cells
-and rasterizes pixels with these primitives.
-
-### Markdown
-
-`Markdown.Rows.init(&document, cols, method)` iterates the exact rows used
-by drawing and `rowCount`. Each row carries `start`/`end` ranges into
-`document.text()`, borrowed `text` and overlapping `spans`, `block_index`,
-`first`, and a `block` value describing its kind, quote `depth`, list
-`marker`, `indent`, `task`, heading level, `table` and optional opening
-`fence` (character, count and info string). Borrows live until the Document is deinitialized;
-iteration allocates nothing. Code rows remain verbatim and unwrapped.
-
-`Markdown.Document` reads text once and owns its source and runs. Its
-`source()`, `text()`, `spans()` and `blocks()` return const slices borrowed
-until `deinit`; span and block ranges index `text()`. A widget
-borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
-method)` uses the same rows as `draw`, without allocation. Keep the document
-until its widgets are finished, then call `deinit`. Drawing can allocate for
-screen links and long graphemes, but never for parsing or layout.
-
-`Markdown.Quoted.init(source)` reads a source line by line by the same quote
-and fence rules, for a program that shows it line by line: `next()` gives each
-line's `text`, its `body` with the quote markers off, its quote `depth`, and
-whether it is `code` in a fenced block (with the `fence`, and whether the line
-`opens` or `closes` it). It borrows the source and allocates nothing.
-
-```zig
-var document = try widgets.Markdown.Document.init(gpa,
-    "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n"
-    ++ "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
-);
-defer document.deinit();
-const markdown: widgets.Markdown = .{
-    .document = &document,
-    .theme = .{
-        .heading = @splat(.{ .bold = true }),
-        .strong = .{ .bold = true }, .emphasis = .{ .italic = true },
-        .code = .{ .dim = true }, .inline_code = .{ .reverse = true },
-        .link = .{ .underline = .single }, .quote = .{ .dim = true },
-    },
-    .scroll = 0,
-};
-try markdown.draw(window);
-const rows = markdown.rowCount(window.cols(), screen.method);
-```
-
-The reader accepts the following subset; it is not CommonMark:
-
-- Paragraphs join adjacent source lines with a space and wrap at words,
-  splitting long words only between grapheme clusters. Blank lines keep a
-  blank row. Inline markup is read within each source line.
-- One to six leading `#` characters followed by a space or end of line make
-  a heading.
-- Repeated `>` prefixes, after at most three spaces, make nested quotes.
-  Each level draws a bar and a space, including on wrapped rows. At narrow
-  widths bars clip and leave no room for text.
-- `-`, `+`, `*`, or up to nine digits followed by `.` or `)`, then a space,
-  make list items. Space indentation nests them; wrapped and indented
-  continuation lines use the marker's hanging indent. Markers keep their
-  spelling. Four spaces or a leading tab otherwise start indented code.
-- Three or more backticks or tildes open fenced code. A closing fence uses
-  the same character, at least the opening length, and only spaces after
-  it. Fence lines and language labels are hidden; unfinished fences keep
-  reading code. In a quoted fence only its container prefixes are removed.
-- Code is verbatim and clipped, never wrapped or parsed as prose. Tabs draw
-  to four-column stops. `scroll_columns` scrolls code between whole clusters.
-- Paired `*` or `_` give emphasis; doubled markers give strong emphasis.
-  These may nest, up to 32 levels. Underscores inside words stay literal.
-  Backtick spans use matching run lengths and keep their content literal.
-  Backslash escapes ASCII punctuation. Unmatched markers remain text.
-- `[label](target)` links accept balanced target parentheses and no whitespace
-  or title; labels can carry inline styles. `<http://…>` and `<https://…>`
-  are autolinks. They become OSC 8 links through `Screen.link`. Targets with
-  terminal control bytes remain unlinked text.
-- Three or more matching `-`, `*` or `_` characters, with optional spaces
-  between them, draw a horizontal rule.
-- A list item whose text begins `[ ]`, `[x]` or `[X]` and a space is a task;
-  the block's `task` says whether it is done, and the mark draws as `[ ]` or
-  `[x]` in the `task` or `task_done` style, wrapped text hanging under the
-  item's text.
-- A row with a pipe in it and under it a delimiter row of as many cells (at
-  least one hyphen each, a colon at either end for the alignment) begin a GFM
-  table. Every line after them is a row up to a blank line or the start of a
-  heading, rule, list item, quote level or fence; a row with fewer cells gets
-  empty ones and one with more loses the extra. `\|` is a pipe in a cell,
-  inside a code span too. The reader keeps the cells in `Document.cells()`
-  and the alignments in `Document.alignments()`; a `table` block says where
-  its own begin. The spec's table and task list examples (GFM 0.29,
-  198–205 and 279–280) are part of the suite.
-- A table draws its columns side by side, `│` between them and a `─┼─` rule
-  under the header, in the `table_header` and `table_border` styles. Each
-  column is as wide as its widest cell when they all fit; otherwise columns
-  narrower than an even share keep their width and the rest share what is
-  left, their cells wrapped at words and every row as tall as its tallest
-  cell. Rows carry a `table` line saying which row and which of its lines
-  they are, and `Rows.columns()` the widths. The first `table_columns` (64)
-  columns are drawn.
-
-There are no images, HTML, reference links, setext headings, footnotes,
-strikethrough, autolinks without angle brackets, syntax highlighting or
-filesystem link resolution.
-Unsupported syntax stays text. The caller supplies every style; the default
-roles are neutral. Inline roles add enabled attributes to their block's
-style and replace colours they set. Quote, marker and rule roles style their
-own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Design
 
@@ -765,6 +587,186 @@ the constraints, with no allocation and no cache; splits nest because a part
 is a rectangle like any other. A general constraint solver is a package of
 its own.
 
+## API
+
+| | |
+|---|---|
+| The grid's contents | `Cell`, `Cell.Text`, `Cell.Kind`, `Cell.Shape`, `Style`, `Color`, `Underline`, `Link`, `Target`. |
+| Colours as the terminal shows them | `Palette` — `ask`, `update`, `resolve`, `known` — `Rgb`, `mix`. |
+| The grid | `Screen` — `init`, `deinit`, `dimensions`, `resize`, `copyCell`, `readCell`, `rowAt`, `diff`, `cell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `intern`, `link`, `compactPool`, `damageAll`, `window`, `textAt`, `textOf`, `target`, `dupeTextAt`, `dupeTextOf`, `dupeTarget`, `headOf`, and the fields `cursor`, `pointer`, `method`. `Cursor`, `Damage`, `Span`, `CellError`, `DrawError`. |
+| The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
+| Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
+| The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
+| What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswer`, `write`, `feed`, `complete`, `settled`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `deleteImage`, `deleteAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
+| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
+| Everything under it | `visor.morse`, whole. |
+
+### `visor.widgets`
+
+| | |
+|---|---|
+| Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
+| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports, and `DrawError`, what every `draw` fails with. |
+
+### Canvas
+
+`Canvas` draws points, lines, rectangle outlines, circles, discs, polylines
+and maps in plot coordinates. A map is a slice of separate contours supplied
+by the caller; there is no bundled geographic dataset. The existing
+`painter(window)` writes cells immediately, with braille, sextants, blocks,
+half blocks, dots or bars. Its y bounds name the bottom and top.
+
+```zig
+const widgets = @import("visor.widgets");
+const canvas: widgets.Canvas = .{
+    .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 }, .marker = .sextant,
+};
+const shapes: []const widgets.Canvas.Shape = &.{
+    .{ .geometry = .{ .circle = .{ 50, 50, 30 } },
+       .paint = .{ .rgba = .{ 255, 200, 0, 255 } } },
+    .{ .geometry = .{ .line = .{ 0, 0, 100, 100 } },
+       .paint = .{ .blend = .additive } },
+};
+try canvas.draw(window, shapes, .{}); // cells
+
+var surface = try widgets.Canvas.Surface.init(gpa, 640, 320);
+defer surface.deinit();
+try canvas.draw(window, shapes, .{
+    .caps = caps,
+    .picture = .{ .surface = &surface, .layers = &layers,
+                 .writer = writer, .image = image_id },
+});
+```
+
+With kitty or sixel graphics and picture resources, `draw` clears the surface,
+rasterizes antialiased shapes and transmits and declares a picture beneath
+text through `Layers`. Without them it draws the same shapes as cells.
+Paint width is in output pixels; cell marks remain binary and use paint's
+RGB foreground. Pixel blending is straight-alpha source-over (`normal`)
+or saturated RGB light and alpha sums (`additive`). No glow or colour
+policy is built in. Invalid coordinates draw nothing; strokes are clipped
+before pixel iteration, including coverage just outside the plot.
+
+The caller owns the surface, image ids and retirement. For repeated frames,
+`canvas.raster(&surface)` paints without clearing or sending: pass its RGBA
+`pixels()` and `dimensions().width` / `dimensions().height` through
+`Replacement.send` and declare the replacement as usual. This keeps picture acknowledgements and swaps with
+the same owner as every other picture. Surface owns its allocator, dimensions
+and storage; `pixels()` lends const bytes
+and `pixelsMut()` lends bytes for editing. `resize(width, height)` prepares a
+cleared allocation before changing dimensions. Surface pixels stay borrowed
+until `resize` or `deinit`; no painter reallocates them. `Sextants` weights picture brightness
+and foreground RGB by alpha when showing an RGBA picture in cells. `examples/gallery.zig` draws cells
+and rasterizes pixels with these primitives.
+
+### Markdown
+
+`Markdown.Rows.init(&document, cols, method)` iterates the exact rows used
+by drawing and `rowCount`. Each row carries `start`/`end` ranges into
+`document.text()`, borrowed `text` and overlapping `spans`, `block_index`,
+`first`, and a `block` value describing its kind, quote `depth`, list
+`marker`, `indent`, `task`, heading level, `table` and optional opening
+`fence` (character, count and info string). Borrows live until the Document is deinitialized;
+iteration allocates nothing. Code rows remain verbatim and unwrapped.
+
+`Markdown.Document` reads text once and owns its source and runs. Its
+`source()`, `text()`, `spans()` and `blocks()` return const slices borrowed
+until `deinit`; span and block ranges index `text()`. A widget
+borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
+method)` uses the same rows as `draw`, without allocation. Keep the document
+until its widgets are finished, then call `deinit`. Drawing can allocate for
+screen links and long graphemes, but never for parsing or layout.
+
+`Markdown.Quoted.init(source)` reads a source line by line by the same quote
+and fence rules, for a program that shows it line by line: `next()` gives each
+line's `text`, its `body` with the quote markers off, its quote `depth`, and
+whether it is `code` in a fenced block (with the `fence`, and whether the line
+`opens` or `closes` it). It borrows the source and allocates nothing.
+
+```zig
+var document = try widgets.Markdown.Document.init(gpa,
+    "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n"
+    ++ "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
+);
+defer document.deinit();
+const markdown: widgets.Markdown = .{
+    .document = &document,
+    .theme = .{
+        .heading = @splat(.{ .bold = true }),
+        .strong = .{ .bold = true }, .emphasis = .{ .italic = true },
+        .code = .{ .dim = true }, .inline_code = .{ .reverse = true },
+        .link = .{ .underline = .single }, .quote = .{ .dim = true },
+    },
+    .scroll = 0,
+};
+try markdown.draw(window);
+const rows = markdown.rowCount(window.cols(), screen.method);
+```
+
+The reader accepts the following subset; it is not CommonMark:
+
+- Paragraphs join adjacent source lines with a space and wrap at words,
+  splitting long words only between grapheme clusters. Blank lines keep a
+  blank row. Inline markup is read within each source line.
+- One to six leading `#` characters followed by a space or end of line make
+  a heading.
+- Repeated `>` prefixes, after at most three spaces, make nested quotes.
+  Each level draws a bar and a space, including on wrapped rows. At narrow
+  widths bars clip and leave no room for text.
+- `-`, `+`, `*`, or up to nine digits followed by `.` or `)`, then a space,
+  make list items. Space indentation nests them; wrapped and indented
+  continuation lines use the marker's hanging indent. Markers keep their
+  spelling. Four spaces or a leading tab otherwise start indented code.
+- Three or more backticks or tildes open fenced code. A closing fence uses
+  the same character, at least the opening length, and only spaces after
+  it. Fence lines and language labels are hidden; unfinished fences keep
+  reading code. In a quoted fence only its container prefixes are removed.
+- Code is verbatim and clipped, never wrapped or parsed as prose. Tabs draw
+  to four-column stops. `scroll_columns` scrolls code between whole clusters.
+- Paired `*` or `_` give emphasis; doubled markers give strong emphasis.
+  These may nest, up to 32 levels. Underscores inside words stay literal.
+  Backtick spans use matching run lengths and keep their content literal.
+  Backslash escapes ASCII punctuation. Unmatched markers remain text.
+- `[label](target)` links accept balanced target parentheses and no whitespace
+  or title; labels can carry inline styles. `<http://…>` and `<https://…>`
+  are autolinks. They become OSC 8 links through `Screen.link`. Targets with
+  terminal control bytes remain unlinked text.
+- Three or more matching `-`, `*` or `_` characters, with optional spaces
+  between them, draw a horizontal rule.
+- A list item whose text begins `[ ]`, `[x]` or `[X]` and a space is a task;
+  the block's `task` says whether it is done, and the mark draws as `[ ]` or
+  `[x]` in the `task` or `task_done` style, wrapped text hanging under the
+  item's text.
+- A row with a pipe in it and under it a delimiter row of as many cells (at
+  least one hyphen each, a colon at either end for the alignment) begin a GFM
+  table. Every line after them is a row up to a blank line or the start of a
+  heading, rule, list item, quote level or fence; a row with fewer cells gets
+  empty ones and one with more loses the extra. `\|` is a pipe in a cell,
+  inside a code span too. The reader keeps the cells in `Document.cells()`
+  and the alignments in `Document.alignments()`; a `table` block says where
+  its own begin. The spec's table and task list examples (GFM 0.29,
+  198–205 and 279–280) are part of the suite.
+- A table draws its columns side by side, `│` between them and a `─┼─` rule
+  under the header, in the `table_header` and `table_border` styles. Each
+  column is as wide as its widest cell when they all fit; otherwise columns
+  narrower than an even share keep their width and the rest share what is
+  left, their cells wrapped at words and every row as tall as its tallest
+  cell. Rows carry a `table` line saying which row and which of its lines
+  they are, and `Rows.columns()` the widths. The first `table_columns` (64)
+  columns are drawn.
+
+There are no images, HTML, reference links, setext headings, footnotes,
+strikethrough, autolinks without angle brackets, syntax highlighting or
+filesystem link resolution.
+Unsupported syntax stays text. The caller supplies every style; the default
+roles are neutral. Inline roles add enabled attributes to their block's
+style and replace colours they set. Quote, marker and rule roles style their
+own structural marks. `examples/gallery.zig` includes a themed document.
+
 ## Scope
 
 - **No widgets in the base.** They are a second module, which `visor` never imports.
@@ -779,9 +781,9 @@ its own.
 
 | Platform | Tested |
 | --- | --- |
-| Linux | `ubuntu-latest` in CI, four optimize modes |
-| macOS | `macos-latest` in CI, four optimize modes |
-| Windows | `windows-latest` in CI, four optimize modes |
+| Linux | `ubuntu-latest` in CI, every tier |
+| macOS | `macos-latest` in CI, the merge and release tiers |
+| Windows | `windows-latest` in CI, the merge and release tiers |
 
 Everything but `tty` is arithmetic and bytes, so the same source builds
 wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
@@ -811,6 +813,11 @@ tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
 `windows-latest`; the release tier, before a cut, runs the suites in Debug
 and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
 and compiles ReleaseSmall.
+
+`zig build bench` builds visor's own benchmarks in `bench/`: every
+drawing-core workload and every public operation, checked by an independent
+decoder before they are timed. [`bench/README.md`](bench/README.md) says how
+to run them; CI compiles them and never runs them.
 
 The headline test is a round trip. Random grid operations are drawn, the bytes
 are fed to the emulator this package ships, and the grid it rebuilt is
@@ -908,9 +915,17 @@ on an Apple M3 Max, best of five passes of a thousand frames each:
 | A page of widgets drawn into a blank grid | 257 µs | 2,445 |
 | Nothing changed | 0 | 0 |
 
-## Requirements
+## Built with
 
-Zig 0.17.0.
+- [Zig](https://ziglang.org) 0.17.0 and its standard library.
+- [morse](https://github.com/pedronaugusto/morse) writes every escape sequence and
+  parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
+  `conduit.tty` makes the terminal's own calls;
+  [uucode](https://github.com/jacobsandlund/uucode) segments and measures clusters.
+- [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
+  the tests and CI.
+- [Ghostty](https://github.com/ghostty-org/ghostty)'s `libghostty-vt` is the
+  emulator the conformance build compares against, fetched only for that build.
 
 ## Licence
 

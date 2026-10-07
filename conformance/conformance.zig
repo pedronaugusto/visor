@@ -1043,7 +1043,7 @@ test "the probe finds what the second emulator has, reset modes included" {
         // Every answer is read as one: nothing the probe asked comes back
         // as bytes for it to parse.
         try testing.expect(ev != .unhandled);
-        probe.feed(ev, 0);
+        probe.feed(ev, .zero);
     }
 
     // The emulator as it runs here leaves some questions unanswered -- the
@@ -1051,8 +1051,8 @@ test "the probe finds what the second emulator has, reset modes included" {
     // does not install -- so the probe is settled by the device attributes
     // and a quiet period after the last answer, not at once.
     try testing.expect(probe.hasAnswered(.device_attributes));
-    try testing.expect(!probe.settled(0, 50));
-    try testing.expect(probe.settled(50, 50));
+    try testing.expect(!probe.settled(.zero, .fromMilliseconds(50)));
+    try testing.expect(probe.settled(.{ .nanoseconds = 50 * std.time.ns_per_ms }, .fromMilliseconds(50)));
     try testing.expect(probe.capabilities().truecolor);
     // Neither mode is on when the probe asks -- the emulator answers
     // reset -- and both are there to be used.
