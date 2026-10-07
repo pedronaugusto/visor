@@ -71,6 +71,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- morse is pinned at a commit whose manifest no longer names the terminal emulator its conformance build feeds, so a program that depends on visor never fetches or compiles that emulator, with `--fetch=all` too, and a Zig the emulator's build script refuses no longer fails its build once the emulator is in the package cache.
 - Fields that belong to their owner drop their leading `_` and say `Private:` in their doc comments, as the standard library's do; one whose name an accessor takes is `own_` and the name.
 - Styles and stored cells compare as unaligned words in line. Under Zig 0.17 `std.mem.eql` over a style became a call the renderer made for every cell it styled: a 200 by 60 frame that restyles every cell took 686 µs where Zig 0.16 took 444, and takes 442 now.
 - `Input` waits on the Windows console through conduit's `console.waitInput(io, handle, timeout)`, which rounds the time left up itself and is a cancelation point: a cancelled wait returns `Canceled`.

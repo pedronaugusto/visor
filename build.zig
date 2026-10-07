@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -8,30 +8,24 @@ pub fn build(b: *std.Build) void {
     // Dependencies.
     //
     // `morse` writes every escape sequence this package emits and parses
-    // every reply it reads. `uucode` is configured here with the six fields
-    // this package uses and no others: the field list is printed in the
-    // README so a consumer who configures uucode themselves knows which to
-    // keep.
+    // every reply it reads. `conduit` owns the terminal's own calls -- raw
+    // mode and the way back, the size, the device's name -- for this package
+    // and for programs that run a child on a pseudo-terminal alike. Only its
+    // `conduit.tty` module is imported, which on Linux links no C library;
+    // the suite also takes `conduit` whole for the pseudo-terminal it tests
+    // against. `uucode` is configured with the six fields this package uses
+    // and no others: the field list is printed in the README so a consumer
+    // who configures uucode themselves knows which to keep.
     //=====================================================================
 
     const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
-    // `conduit` owns the terminal's own calls -- raw mode and the way back,
-    // the size, the device's name -- for this package and for programs that
-    // run a child on a pseudo-terminal alike. Only its `conduit.tty` module
-    // is imported, which on Linux links no C library; the suite also takes
-    // `conduit` whole for the pseudo-terminal it tests against.
     const conduit = b.dependency("conduit", .{ .target = target, .optimize = optimize });
     const uucode = b.dependency("uucode", .{
         .target = target,
         .optimize = optimize,
         .fields = @as([]const []const u8, &uucode_fields),
     });
-
-    const imports = [_]std.Build.Module.Import{
-        .{ .name = "morse", .module = morse.module("morse") },
-        .{ .name = "uucode", .module = uucode.module("uucode") },
-        .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
-    };
+    const imports = dependencies(morse, conduit, uucode);
 
     //=====================================================================
     // The modules.
@@ -58,6 +52,10 @@ pub fn build(b: *std.Build) void {
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
     b.modules.put(b.allocator, b.graph.dupeString("morse"), morse.module("morse")) catch @panic("OOM");
+
+    // Everything below is visor's own tree: a program that depends on visor
+    // builds the modules above and nothing else, and fetches nothing for it.
+    if (b.pkg_hash.len != 0) return;
 
     // The inputs the round-trip properties replay. Its own module because
     // the suite inside the package and the conformance build outside it
@@ -136,16 +134,20 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(widget_tests).step);
     check_step.dependOn(&widget_tests.step);
 
-    // Both suites' clocks, fault plans and allocators come from shakedown,
-    // a lazy, test-only dependency asked for only in visor's own tree: a
-    // program that depends on visor neither builds these tests nor fetches
-    // it.
-    if (b.pkg_hash.len == 0) {
-        if (b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })) |shakedown| {
-            tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
-            widget_tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
-        } else |_| {}
-    }
+    // The benchmark's checks hold visor to a decoder, a corpus and a plan
+    // of their own, and those have tests of their own.
+    const bench_tests = b.addTest(.{
+        .name = "visor-bench-tests",
+        .filters = filters,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/run.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = benchImports(b, target, optimize),
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(bench_tests).step);
+    check_step.dependOn(&bench_tests.step);
 
     //=====================================================================
     // Examples
@@ -183,58 +185,6 @@ pub fn build(b: *std.Build) void {
     if (test_filter == null) test_step.dependOn(examples_step);
 
     //=====================================================================
-    // Benchmarks.
-    //
-    // visor's own measurements, in bench/: `zig build bench
-    // -Doptimize=fast` installs `visor-draw` and `visor-ops`, which
-    // run one workload each call, and `visor-bench`, which generates their
-    // inputs, checks every frame and every grid they print, and times them.
-    // `zig build check` compiles all three, so they keep up with the API;
-    // nothing runs them in CI. The checks read Unicode properties of their
-    // own from uucode, independent of the rule visor measures by. Only in
-    // visor's own tree: a package fetched by a consumer has no bench/.
-    //=====================================================================
-
-    if (b.pkg_hash.len == 0 and target.result.os.tag != .windows) {
-        const bench_step = b.step("bench", "Build the benchmarks into zig-out/bench");
-        for (bench_programs) |program| {
-            const bench = b.addExecutable(.{
-                .name = program[0],
-                .root_module = b.createModule(.{
-                    .root_source_file = b.path(program[1]),
-                    .target = target,
-                    .optimize = optimize,
-                    .link_libc = true,
-                    .imports = &.{
-                        .{ .name = "visor", .module = module },
-                        .{ .name = "visor.widgets", .module = widgets },
-                    },
-                }),
-            });
-            const install = b.addInstallArtifact(bench, .{ .dest_dir = .{ .override = .{ .custom = "bench" } } });
-            bench_step.dependOn(&install.step);
-            check_step.dependOn(&bench.step);
-        }
-        const properties = b.dependency("uucode", .{
-            .target = target,
-            .optimize = optimize,
-            .fields = @as([]const []const u8, &.{ "east_asian_width", "general_category", "canonical_combining_class" }),
-        });
-        const runner = b.addExecutable(.{
-            .name = "visor-bench",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("bench/run.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{.{ .name = "uucode", .module = properties.module("uucode") }},
-            }),
-        });
-        const install = b.addInstallArtifact(runner, .{ .dest_dir = .{ .override = .{ .custom = "bench" } } });
-        bench_step.dependOn(&install.step);
-        check_step.dependOn(&runner.step);
-    }
-
-    //=====================================================================
     // Conformance against an emulator that is not ours.
     //
     // `Term` ships with this package, so a property that compares the
@@ -245,11 +195,11 @@ pub fn build(b: *std.Build) void {
     // right.
     //
     // The emulator is a build of its own, under `conformance/`, with its
-    // own manifest pinning it by commit. It is out of this package's
-    // dependency tree entirely, so a consumer of `visor` never fetches a
-    // terminal emulator to build a program -- which a lazy dependency here
-    // would not achieve, because a lazy dependency named in this file is
-    // fetched by whoever builds this file.
+    // own manifest pinning it by commit. Zig compiles the build script of
+    // every package a manifest names once it is in the package cache, asked
+    // for or not, so an emulator named in this package's manifest, even
+    // lazily, would be compiled by every build of a program on visor whose
+    // cache holds it.
     //=====================================================================
 
     const conformance_step = b.step(
@@ -264,17 +214,34 @@ pub fn build(b: *std.Build) void {
     conformance_step.dependOn(&conformance.step);
 
     //=====================================================================
-    // CI wiring
+    // CI wiring, and the test doubles
     //
-    // Only in visor's own tree. preflight is a lazy dependency, and a lazy
-    // package's build.zig can only be reached through `lazyImport`: a plain
-    // `@import` of it fails to compile in any project that depends on visor
-    // and has not fetched preflight, which is every such project.
+    // preflight and shakedown are lazy, and only visor's own tree asks for
+    // them, both in one configure pass. A lazy package's build.zig can only
+    // be reached through `lazyImport`: a plain `@import` of it fails to
+    // compile in any project that depends on visor and has not fetched
+    // preflight, which is every such project.
     //=====================================================================
 
-    if (b.pkg_hash.len != 0) return;
-    if (b.lazyImport(@This(), "preflight")) |preflight| {
-        preflight.addCi(b, .{ .tests = test_step, .portable_tests = true });
+    const ci = b.lazyImport(@This(), "preflight");
+    // Both suites' clocks, fault plans and allocators.
+    const shakedown = (try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })).module("shakedown");
+    tests.root_module.addImport("shakedown", shakedown);
+    widget_tests.root_module.addImport("shakedown", shakedown);
+    if (ci) |preflight| {
+        preflight.addCi(b, .{
+            .tests = test_step,
+            .portable_tests = true,
+            // visor's own measurements, in bench/: `zig build bench` builds
+            // the pass in ReleaseFast under zig-out/bench and runs it, and
+            // `zig build test` runs it once with `--smoke`.
+            .bench = .{
+                .programs = &.{.{ .name = "visor-bench", .source = "bench/run.zig" }},
+                .imports = benchImports,
+                .target = target,
+                .optimize = optimize,
+            },
+        });
         // A project that depends on visor by path, built with fetching off
         // and only morse, conduit and uucode beside it, so nothing visor
         // fetches for its own CI can be reached. It is the build a consumer
@@ -288,6 +255,49 @@ pub fn build(b: *std.Build) void {
     }
 }
 
+/// The modules visor imports.
+fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency) [3]std.Build.Module.Import {
+    return .{
+        .{ .name = "morse", .module = morse.module("morse") },
+        .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
+    };
+}
+
+/// visor, its widgets and the Unicode properties the checks read, in the
+/// mode a benchmark builds in: an imported module keeps its own mode, so a
+/// ReleaseFast benchmark over the Debug module would time the Debug module.
+/// The checks read properties of their own, independent of the rule visor
+/// measures by, from a second uucode table: one program holds one uucode,
+/// and visor's table is the one a consumer builds, field for field.
+fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
+    const uucode = b.dependency("uucode", .{
+        .target = target,
+        .optimize = optimize,
+        .fields_0 = @as([]const []const u8, &uucode_fields),
+        .fields_1 = @as([]const []const u8, &.{ "east_asian_width", "general_category", "canonical_combining_class" }),
+    });
+    const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
+    const conduit = b.dependency("conduit", .{ .target = target, .optimize = optimize });
+    const visor = b.createModule(.{
+        .root_source_file = b.path("src/visor.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &dependencies(morse, conduit, uucode),
+    });
+    const widgets = b.createModule(.{
+        .root_source_file = b.path("src/widgets.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "visor", .module = visor }},
+    });
+    return b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "visor", .module = visor },
+        .{ .name = "visor.widgets", .module = widgets },
+        .{ .name = "uucode", .module = uucode.module("uucode") },
+    }) catch @panic("OOM");
+}
+
 /// Every example, listed rather than globbed: a build graph that scans a
 /// directory is not reproducible from the manifest alone.
 const example_sources = [_][]const u8{
@@ -296,12 +306,6 @@ const example_sources = [_][]const u8{
     "examples/gallery.zig",
     "examples/progress.zig",
     "examples/live.zig",
-};
-
-/// The benchmark programs, by name and root source.
-const bench_programs = [_][2][]const u8{
-    .{ "visor-draw", "bench/draw.zig" },
-    .{ "visor-ops", "bench/ops.zig" },
 };
 
 /// The `uucode` fields this package builds into its tables.
@@ -317,5 +321,3 @@ const uucode_fields = [_][]const u8{
     "is_emoji_modifier_base",
     "is_emoji_vs_base",
 };
-
-// Build-only tooling belongs to a root invocation, never a consumer's dependency graph.

@@ -1,15 +1,16 @@
+//! The drawing core, one workload a run: `visor-bench draw <task>
+//! <check|smoke|full> <cols> <rows> <iterations>`, check lines first, then
+//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `run.zig` invokes it.
 const std = @import("std");
 const v = @import("visor");
-extern "c" fn write(c_int, [*]const u8, usize) isize;
+
+/// The Io the lines go out through, set once by `run`: unbuffered, so every
+/// line a check prints is out before anything that stops the program.
+var stdout_io: std.Io = undefined;
 fn emit(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const s = std.mem.print(&buf, fmt, args) catch @panic("report too long");
-    var n: usize = 0;
-    while (n < s.len) {
-        const got = write(1, s.ptr + n, s.len - n);
-        if (got <= 0) @panic("write failed");
-        n += @intCast(got);
-    }
+    std.Io.File.stdout().writeStreamingAll(stdout_io, s) catch @panic("write failed");
 }
 fn hex(bytes: []const u8) void {
     for (bytes) |b| emit("{x:0>2}", .{b});
@@ -40,15 +41,45 @@ fn restyle(s: *v.Screen, cols: u16, rows: u16, salt: usize) !void {
 fn equal(a: v.Cell, b: v.Cell) bool {
     return v.Cell.eql(a, b);
 }
-pub fn main(init: std.process.Init) !void {
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len != 6) return error.Arguments;
-    const task = args[1];
-    const check = std.mem.eql(u8, args[2], "check");
-    const timed = std.mem.eql(u8, args[2], "full");
-    const cols = try std.fmt.parseInt(u16, args[3], 10);
-    const rows = try std.fmt.parseInt(u16, args[4], 10);
-    const iterations = try std.fmt.parseInt(usize, args[5], 10);
+
+// The two diff workloads' frames, each a function of its own that is never
+// inlined: what the compiler makes of the timed loop then depends on visor
+// and on nothing in this harness around it.
+
+/// One `buffer_diff` frame: the cells `Screen.diff` reports changed.
+noinline fn diffCells(screens: *const [2]v.Screen) usize {
+    var changed: usize = 0;
+    var changes = screens[0].diff(&screens[1]);
+    while (changes.next()) |point| {
+        std.mem.doNotOptimizeAway(point);
+        changed += 1;
+    }
+    std.mem.doNotOptimizeAway(changed);
+    return changed;
+}
+
+/// One `cell_reads` frame: every cell of both screens read and compared.
+noinline fn readCells(screens: *const [2]v.Screen) usize {
+    var changed: usize = 0;
+    const size = screens[0].dimensions();
+    for (0..size.rows) |y| for (0..size.cols) |x| {
+        const a = screens[0].readCell(@intCast(x), @intCast(y)).?;
+        const b = screens[1].readCell(@intCast(x), @intCast(y)).?;
+        if (!equal(a, b)) changed += 1;
+    };
+    std.mem.doNotOptimizeAway(changed);
+    return changed;
+}
+/// One workload: `args` are `<task> <check|smoke|full> <cols> <rows> <iterations>`.
+pub fn run(init: std.process.Init, args: []const []const u8) !void {
+    stdout_io = init.io;
+    if (args.len != 5) return error.Arguments;
+    const task = args[0];
+    const check = std.mem.eql(u8, args[1], "check");
+    const timed = std.mem.eql(u8, args[1], "full");
+    const cols = try std.fmt.parseInt(u16, args[2], 10);
+    const rows = try std.fmt.parseInt(u16, args[3], 10);
+    const iterations = try std.fmt.parseInt(usize, args[4], 10);
     if (cols < 4 or rows < 4 or iterations == 0) return error.InvalidSize;
     const gpa = init.gpa;
     const size: v.Size = .{ .cols = cols, .rows = rows };
@@ -92,20 +123,7 @@ pub fn main(init: std.process.Init) !void {
     const start = if (timed and !heavy) std.Io.Clock.now(.awake, init.io).toNanoseconds() else 0;
     for (0..iterations) |n| {
         if (diff) {
-            var changed: usize = 0;
-            if (!cell_reads) {
-                var changes = screens[0].diff(&screens[1]);
-                while (changes.next()) |point| {
-                    std.mem.doNotOptimizeAway(point);
-                    changed += 1;
-                }
-            } else for (0..rows) |y| for (0..cols) |x| {
-                const a = screens[0].readCell(@intCast(x), @intCast(y)).?;
-                const b = screens[1].readCell(@intCast(x), @intCast(y)).?;
-                if (!equal(a, b)) changed += 1;
-            };
-            std.mem.doNotOptimizeAway(changed);
-            count += changed;
+            count += if (cell_reads) readCells(&screens) else diffCells(&screens);
         } else {
             const s = &screens[0];
             // Keep one screen owner: switching unrelated screens invalidates

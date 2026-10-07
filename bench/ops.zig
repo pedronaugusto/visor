@@ -1,15 +1,19 @@
-//! Every other public visor operation, one workload each. Same protocol as
-//! visor.zig: `<task> <check|smoke|full> <cols> <rows> <iterations>`, check
-//! lines first, then `result\t<units>\t<native count>\t<bytes>\t<ns>`.
+//! Every other public visor operation, one workload a run: `visor-bench ops
+//! <task> <check|smoke|full> <cols> <rows> <iterations>`, the protocol of
+//! `draw.zig`: check lines first, then
+//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `visor-bench ops
+//! list-tasks` names them.
 //! Text inputs come from the generated corpus directory in
 //! VISOR_BENCH_CORPUS, identical for every library. Builds, corpus reads,
 //! fixture construction and reporting stay outside the timed interval.
 const std = @import("std");
 const v = @import("visor");
 const w = @import("visor.widgets");
+const plan = @import("plan.zig");
 
-extern "c" fn write(c_int, [*]const u8, usize) isize;
-extern "c" fn lseek(c_int, i64, c_int) i64;
+/// The Io the lines go out through, set once by `run`: unbuffered, so every
+/// line a check prints is out before anything that stops the program.
+var stdout_io: std.Io = undefined;
 
 fn emit(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
@@ -17,12 +21,7 @@ fn emit(comptime fmt: []const u8, args: anytype) void {
     raw(s);
 }
 fn raw(s: []const u8) void {
-    var n: usize = 0;
-    while (n < s.len) {
-        const got = write(1, s.ptr + n, s.len - n);
-        if (got <= 0) @panic("write failed");
-        n += @intCast(got);
-    }
+    std.Io.File.stdout().writeStreamingAll(stdout_io, s) catch @panic("write failed");
 }
 fn line(tag: []const u8, bytes: []const u8) void {
     raw(tag);
@@ -960,7 +959,9 @@ fn inputEvents(c: *Ctx) void {
     var events: usize = 0;
     c.clock.start();
     for (0..c.iterations) |_| {
-        _ = lseek(file.handle, 0, 0);
+        // Back to the start of the input, as lseek does: the descriptor's own
+        // offset, which is what the Tty reads from.
+        c.io.vtable.fileSeekTo(c.io.userdata, file, 0) catch @panic("rewind");
         var in = must(v.Input.init(&tty, .{ .parser_buffer = parser_buffer, .read_buffer = read_buffer, .escape = .fromMilliseconds(50) }));
         events = 0;
         kinds = @splat(0);
@@ -1155,13 +1156,19 @@ fn canvasRaster(c: *Ctx) void {
     }
 }
 
-pub fn main(init: std.process.Init) !void {
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len != 6) return error.Arguments;
-    const task = args[1];
-    const cols = try std.fmt.parseInt(u16, args[3], 10);
-    const rows = try std.fmt.parseInt(u16, args[4], 10);
-    const iterations = try std.fmt.parseInt(usize, args[5], 10);
+/// One workload: `args` are `<task> <check|smoke|full> <cols> <rows>
+/// <iterations>`, or `list-tasks`.
+pub fn run(init: std.process.Init, args: []const []const u8) !void {
+    stdout_io = init.io;
+    if (args.len == 1 and std.mem.eql(u8, args[0], "list-tasks")) {
+        for (plan.ops) |name| emit("{s}\n", .{name});
+        return;
+    }
+    if (args.len != 5) return error.Arguments;
+    const task = args[0];
+    const cols = try std.fmt.parseInt(u16, args[2], 10);
+    const rows = try std.fmt.parseInt(u16, args[3], 10);
+    const iterations = try std.fmt.parseInt(usize, args[4], 10);
     if (cols < 8 or rows < 4 or iterations == 0) return error.InvalidSize;
     var c: Ctx = .{
         .gpa = init.gpa,
@@ -1169,8 +1176,8 @@ pub fn main(init: std.process.Init) !void {
         .cols = cols,
         .rows = rows,
         .iterations = iterations,
-        .check = std.mem.eql(u8, args[2], "check"),
-        .clock = .{ .io = init.io, .timed = std.mem.eql(u8, args[2], "full") },
+        .check = std.mem.eql(u8, args[1], "check"),
+        .clock = .{ .io = init.io, .timed = std.mem.eql(u8, args[1], "full") },
         .corpus = init.environ_map.get("VISOR_BENCH_CORPUS") orelse return error.NoCorpus,
     };
     // Fixture construction for widgets happens here, before any clock.
@@ -1282,10 +1289,6 @@ pub fn main(init: std.process.Init) !void {
         }.run },
         .{ .name = "picture_replace", .run = pictureReplace },
     };
-    if (std.mem.eql(u8, task, "list-tasks")) {
-        inline for (runs) |r| emit("{s}\n", .{r.name});
-        return;
-    }
     inline for (runs) |r| {
         if (std.mem.eql(u8, task, r.name)) {
             r.run(&c);

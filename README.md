@@ -827,10 +827,11 @@ tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
 and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
 and compiles ReleaseSmall.
 
-`zig build bench` builds visor's own benchmarks in `bench/`: every
-drawing-core workload and every public operation, checked by an independent
-decoder before they are timed. [`bench/README.md`](bench/README.md) says how
-to run them; CI compiles them and never runs them.
+`zig build bench` builds visor's own benchmarks in `bench/` in ReleaseFast and
+runs them: every drawing-core workload and every public operation, checked by
+an independent decoder before they are timed. `zig build test` checks and runs
+each once on the smallest grid, and runs the decoder's own tests.
+[`bench/README.md`](bench/README.md) says how to run them by hand.
 
 The headline test is a round trip. Random grid operations are drawn, the bytes
 are fed to the emulator this package ships, and the grid it rebuilt is
@@ -860,8 +861,8 @@ compares the renderer with the terminal inside a shipping emulator, read
 through its own grid — every column's grapheme, its width, its style and its
 link, with two links that differ only by their `id` being two links. It is a
 build of its own under `conformance/`, with its own manifest pinning that
-emulator by commit, so nothing that builds a program on this package fetches
-one. The resize property runs there too, against the emulator's own resize,
+emulator by commit, so no build of a program on this package fetches or
+compiles one. The resize property runs there too, against the emulator's own resize,
 with pictures placed and moved across it and checked where the emulator has
 them; and the probe's questions go to the emulator and its answers back. CI
 runs it on Linux and macOS.
