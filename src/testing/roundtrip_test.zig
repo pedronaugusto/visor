@@ -858,7 +858,12 @@ const PictureRun = struct {
             // terminal takes down while they land.
             0 => {
                 const id = dice.valueRangeAtMost(u32, 1, 4);
-                const px = [_]u8{ 0, 0, 0, 255 } ** 4;
+                const px = [_]u8{
+                    0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255,
+                };
                 _ = try layers.transmit(&run.side.writer, id, &px, .{
                     .width = 2,
                     .height = 2,

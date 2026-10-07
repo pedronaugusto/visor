@@ -589,7 +589,7 @@ test "a replacement lands over the old picture, placed before dropped before fre
     var ids = try ImageIds.init(6, 9, 8);
     var p: Replacement = .{};
     var sink: Writer.Discarding = .init(&.{});
-    const pixels = [_]u8{0} ** 16;
+    const pixels: [16]u8 = @splat(0);
     const at: Layer = .{ .image = 0, .rect = .{ .col = 2, .row = 1, .cols = 8, .rows = 4 } };
     const first = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .width = 2, .height = 2, .answer = true, .now_ms = 1000 });
     try testing.expectEqual(@as(u32, 6), first.id);
@@ -626,7 +626,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     var p: Replacement = .{};
     var sink: Writer.Discarding = .init(&.{});
     const at: Layer = .{ .image = 0, .rect = .{ .cols = 2, .rows = 2 } };
-    const pixels = [_]u8{0} ** 16;
+    const pixels: [16]u8 = @splat(0);
     _ = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now_ms = 1000 });
     try testing.expect(try p.declare(&f.layers, at, 1249, 250));
     try testing.expect(!try p.declare(&f.layers, at, 1250, 250));

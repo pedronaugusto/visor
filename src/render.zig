@@ -3163,7 +3163,7 @@ test "a repeat never stands for a cluster of more than one codepoint" {
     f.caps.rep = true;
     // What a terminal repeats after a base and a mark is the mark.
     for (0..8) |i| try f.screen.write(@intCast(i), 0, "e\u{301}", .{}, .none);
-    try f.expectBytes("e\u{301}" ** 8);
+    try f.expectBytes(corpus.repeat("e\u{301}", 8));
     // A single non-ASCII codepoint is repeated like any other glyph. The
     // first row filled its last column, so the move is an absolute one.
     for (0..8) |i| try f.screen.write(@intCast(i), 0, "\u{2500}", .{}, .none);

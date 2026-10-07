@@ -644,7 +644,7 @@ fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
 }
 
 test "a split of anything by anything stays inside what it was given" {
-    try std.testing.fuzz(void{}, struct {
+    try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
             try splitHolds(smith, null);
         }

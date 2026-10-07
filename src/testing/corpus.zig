@@ -163,7 +163,25 @@ pub const Spread = struct {
     }
 };
 
+/// `pattern` written `count` times over, as a comptime string: what `**` spelled
+/// before Zig 0.17 removed it.
+pub fn repeat(comptime pattern: []const u8, comptime count: usize) *const [pattern.len * count]u8 {
+    comptime {
+        @setEvalBranchQuota(count + 1000);
+        var bytes: [pattern.len * count]u8 = undefined;
+        for (0..count) |i| @memcpy(bytes[i * pattern.len ..][0..pattern.len], pattern);
+        const final = bytes;
+        return &final;
+    }
+}
+
 const testing = std.testing;
+
+test "a repeated pattern is the pattern count times over" {
+    try testing.expectEqualStrings("e\u{301}e\u{301}", repeat("e\u{301}", 2));
+    try testing.expectEqualStrings("", repeat("ab", 0));
+    try testing.expectEqual(@as(usize, 65535), repeat("x", 65535).len);
+}
 
 test "a replayed entry is answered over the whole range, not at its lowest" {
     var cols: Spread = .{};

@@ -12,6 +12,7 @@
 //! cells does not need them, and a terminal that does has its own.
 
 const std = @import("std");
+const corpus = @import("corpus");
 const uucode = @import("dependencies.zig").uucode;
 
 /// How the terminal measures text.
@@ -693,12 +694,12 @@ test "fit keeps what fits and leaves room for the ellipsis" {
 }
 
 test "width never overflows on a very long string" {
-    const long = "a" ** 1024;
+    const long = corpus.repeat("a", 1024);
     try testing.expectEqual(@as(u16, 1024), width(long, .wcwidth));
 }
 
 test "saturated width does not make fit or wrap accept an overlong string" {
-    const long = "a" ** 65536;
+    const long = corpus.repeat("a", 65536);
     try testing.expectEqual(std.math.maxInt(u16), width(long, .unicode));
     try testing.expectEqual(@as(usize, 65534), fit(long, std.math.maxInt(u16), "…", .unicode).len);
 

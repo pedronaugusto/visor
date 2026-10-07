@@ -5,6 +5,7 @@
 //! and working that out twice in two places is how the two drift apart.
 
 const std = @import("std");
+const corpus = @import("corpus");
 const visor = @import("visor");
 
 const Style = visor.Style;
@@ -198,7 +199,7 @@ test "tabs share wide span arithmetic between drawing and hit testing" {
     try t.draw(h.window());
     try h.expectFrame("\n");
     try testing.expect(h.styleAt(0, 0).reverse);
-    const crossing: Tabs = .{ .titles = &.{ "a" ** (edge - 1), "b" }, .padding = 0, .divider = "||" };
+    const crossing: Tabs = .{ .titles = &.{ corpus.repeat("a", edge - 1), "b" }, .padding = 0, .divider = "||" };
     try testing.expectEqual(@as(?usize, null), crossing.indexAt(edge, .unicode));
     try testing.expectEqual(@as(u16, 0), crossing.spanOf(1, .unicode).cols);
 }

@@ -6,6 +6,7 @@
 //! what each bar is.
 
 const std = @import("std");
+const corpus = @import("corpus");
 const visor = @import("visor");
 
 const layout = @import("layout.zig");
@@ -273,7 +274,7 @@ const sign = "\u{26a0}\u{fe0f}";
 test "a lying bar chart refuses a label gutter wider than the window" {
     var h = try Harness.init(testing.allocator, 2, 1);
     defer h.deinit();
-    try (BarChart{ .direction = .horizontal, .bars = &.{.{ .label = "x" ** std.math.maxInt(u16), .value = 1 }} }).draw(h.window());
+    try (BarChart{ .direction = .horizontal, .bars = &.{.{ .label = corpus.repeat("x", std.math.maxInt(u16)), .value = 1 }} }).draw(h.window());
     try testing.expect(!h.screen._damage.any());
 }
 

@@ -11,6 +11,7 @@
 //! `Window.print` does.
 
 const std = @import("std");
+const corpus = @import("corpus");
 const visor = @import("visor");
 
 const layout = @import("layout.zig");
@@ -260,7 +261,7 @@ test "a line keeps its own style and its own link" {
 test "the rows of a long line come out in order whatever the buffer holds" {
     // Longer than the thirty-two rows the iterator refills from, so the
     // refill path is the one under test.
-    const text = "a " ** 200;
+    const text = corpus.repeat("a ", 200);
     var it: Paragraph.Rows = .init(text, 4, .word, .unicode);
     var count: usize = 0;
     var last_end: usize = 0;
@@ -320,7 +321,7 @@ test "a paragraph scrolled by n shows what the whole one shows n rows down" {
 }
 
 test "horizontal scrolling skips a wide cluster crossing the u16 edge" {
-    const text = "a" ** (std.math.maxInt(u16) - 1) ++ "一x";
+    const text = corpus.repeat("a", std.math.maxInt(u16) - 1) ++ "一x";
     try testing.expectEqualStrings("x", skipColumns(text, std.math.maxInt(u16), .unicode));
     var h = try Harness.init(testing.allocator, 2, 1);
     defer h.deinit();

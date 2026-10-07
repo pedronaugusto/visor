@@ -1,4 +1,5 @@
 const std = @import("std");
+const corpus = @import("corpus");
 const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");
@@ -98,7 +99,7 @@ test "a border on one side takes one row from that side only" {
     const inside = s.window().child(.{ .border = .{ .where = .{ .top = true } } });
     try testing.expectEqual(Rect{ .col = 0, .row = 1, .cols = 6, .rows = 3 }, inside.rect());
     var buf: [64]u8 = undefined;
-    try testing.expectEqualStrings("\u{2500}" ** 6, rowText(&s, 0, &buf));
+    try testing.expectEqualStrings(corpus.repeat("\u{2500}", 6), rowText(&s, 0, &buf));
 }
 
 test "print lays text out and says where it stopped" {

@@ -10,6 +10,7 @@
 //! file to have an opinion about them.
 
 const std = @import("std");
+const corpus = @import("corpus");
 const visor = @import("visor");
 
 const canvas_mod = @import("canvas.zig");
@@ -318,7 +319,7 @@ const sign = "\u{26a0}\u{fe0f}";
 test "chart labels reserve their margins before narrowing the width" {
     var h = try Harness.init(testing.allocator, 8, 4);
     defer h.deinit();
-    const long = "x" ** std.math.maxInt(u16);
+    const long = corpus.repeat("x", std.math.maxInt(u16));
     try (Chart{ .datasets = &.{}, .y = .{ .labels = &.{long} } }).draw(h.window());
     try testing.expect(!h.screen._damage.any());
     try (Chart{ .datasets = &.{.{ .name = long, .points = &.{} }} }).draw(h.window());
