@@ -1,5 +1,4 @@
 const std = @import("std");
-const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -28,18 +27,10 @@ pub fn build(b: *std.Build) void {
         .fields = @as([]const []const u8, &uucode_fields),
     });
 
-    // The manifest's version, handed to the module so `visor.version` is
-    // the manifest's and cannot drift from it: there is no second literal to
-    // forget at a release.
-    const manifest_options = b.addOptions();
-    manifest_options.addOption([]const u8, "version", manifest.version);
-    const manifest_module = manifest_options.createModule();
-
     const imports = [_]std.Build.Module.Import{
         .{ .name = "morse", .module = morse.module("morse") },
         .{ .name = "uucode", .module = uucode.module("uucode") },
         .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
-        .{ .name = "manifest", .module = manifest_module },
     };
 
     //=====================================================================

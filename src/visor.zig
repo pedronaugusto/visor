@@ -49,12 +49,6 @@ const winsize_mod = @import("winsize.zig");
 /// adding a second dependency.
 pub const morse = @import("dependencies.zig").morse;
 
-/// The version of the last release this source is, or descends from, as the
-/// manifest states it: a tree with changes under `[Unreleased]` in the
-/// changelog is that release and those changes. Read from `build.zig.zon`
-/// at build time, so there is no second copy to fall behind it.
-pub const version = @import("manifest").version;
-
 //=========================================================================
 // The grid's contents.
 //=========================================================================
@@ -207,13 +201,13 @@ pub const Panic = tty_mod.Panic;
 pub const Term = term_mod.Term;
 /// Two screens compared cell by cell, naming the first that differs.
 pub const expectScreensEqual = term_mod.expectScreensEqual;
+/// What `expectScreensEqual` fails with when the screens differ.
+pub const ExpectError = term_mod.ExpectError;
 /// The first cell two screens disagree about, read by column, or null.
 pub const firstDifference = term_mod.firstDifference;
 /// A screen as text, one row a line.
 pub const dumpScreen = term_mod.dumpScreen;
-/// A screen as text, with a filler written for a wide cluster's covered column.
-pub const dumpScreenWith = term_mod.dumpScreenWith;
-/// What `dumpScreenWith` writes for a covered column.
+/// What `dumpScreen` writes for a covered column.
 pub const DumpOptions = term_mod.DumpOptions;
 /// A screen's styles as one identifier a cell, with the legend above.
 pub const dumpScreenStyles = term_mod.dumpScreenStyles;
@@ -243,10 +237,6 @@ test {
     _ = @import("testing/roundtrip_test.zig");
     _ = @import("corpus");
     _ = @import("testing/render_budget_test.zig");
-}
-
-test "the exported version is a semantic version" {
-    _ = try std.SemanticVersion.parse(version);
 }
 
 test "transmission options have one public name" {

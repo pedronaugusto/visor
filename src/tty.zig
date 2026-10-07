@@ -157,8 +157,6 @@ const Saved = if (is_windows) struct {
 pub const Tty = struct {
     /// Private: the terminal itself.
     file: Io.File,
-    /// Private: the `Io` it was opened with, and the one its reads and writes use.
-    io: Io,
     /// Private: on Windows, the input handle, which is a second descriptor.
     input: if (is_windows) Io.File else void,
     /// Private: what the terminal was before `raw`, or null when it has not been
@@ -171,11 +169,6 @@ pub const Tty = struct {
     /// Private: this terminal's resize pipe, read end first, while it watches for a
     /// resize; `-1` otherwise.
     resize_pipe: [2]Fd = .{ -1, -1 },
-
-    /// The Io captured at open or adopt, by value, for caller-owned waits.
-    pub fn ioContext(t: *const Tty) Io {
-        return t.io;
-    }
 
     /// Anything opening the terminal can fail with.
     pub const OpenError = terminal.OpenControllingError;
@@ -193,23 +186,23 @@ pub const Tty = struct {
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
         const own = try terminal.openControlling(io);
-        if (is_windows) return .{ .file = own.output, .io = io, .input = own.input };
-        return .{ .file = own.output, .io = io, .input = {} };
+        if (is_windows) return .{ .file = own.output, .input = own.input };
+        return .{ .file = own.output, .input = {} };
     }
 
     /// A terminal the program already has open: a descriptor it was handed,
     /// or the far end of a pseudo-terminal it made. Everything `open` gives
     /// works on it, and `close` closes the file.
-    pub fn adopt(io: Io, file: Io.File) Tty {
-        return .{ .file = file, .io = io, .input = if (is_windows) file else {} };
+    pub fn adopt(file: Io.File) Tty {
+        return .{ .file = file, .input = if (is_windows) file else {} };
     }
 
     /// Gives the terminal back, restoring its mode first if it was changed.
-    pub fn close(t: *Tty) void {
+    pub fn close(t: *Tty, io: Io) void {
         t.restore();
         t.unwatchResize();
-        t.file.close(t.io);
-        if (is_windows and t.input.handle != t.file.handle) t.input.close(t.io);
+        t.file.close(io);
+        if (is_windows and t.input.handle != t.file.handle) t.input.close(io);
         t.* = undefined;
     }
 
@@ -282,6 +275,7 @@ pub const Tty = struct {
     /// or renderer returns `AlreadyEntered` before raw mode changes.
     pub fn enter(
         t: *Tty,
+        io: Io,
         r: *Renderer,
         caps: Caps,
         mode: render.Mode,
@@ -291,14 +285,14 @@ pub const Tty = struct {
         try t.raw();
         t.own_renderer = r;
         var buffer: [256]u8 = undefined;
-        var out = t.writer(&buffer);
+        var out = t.writer(io, &buffer);
         try r.enter(&out.interface, caps, mode, modes);
         try out.interface.flush();
     }
 
     /// Gives the screen back: everything `Renderer.leave` writes, flushed,
     /// and then the terminal's mode as it was found.
-    pub fn leave(t: *Tty) Renderer.Error!void {
+    pub fn leave(t: *Tty, io: Io) Renderer.Error!void {
         const r = t.own_renderer orelse {
             t.restore();
             return;
@@ -308,7 +302,7 @@ pub const Tty = struct {
         // bytes, including the flush. On failure `restore` retries through
         // the saved descriptor using the still-entered renderer.
         var buffer: [256]u8 = undefined;
-        var out = t.writer(&buffer);
+        var out = t.writer(io, &buffer);
         try render.internal.leaveFlushed(r, &out.interface);
     }
 
@@ -337,18 +331,21 @@ pub const Tty = struct {
     /// A frame should reach the terminal in one write, so the buffer wants
     /// to be at least as large as `Renderer.Stats.bytes` says a frame is.
     /// Nothing in this package flushes it.
-    pub fn writer(t: *Tty, buf: []u8) Io.File.Writer {
-        return .initStreaming(t.file, t.io, buf);
+    pub fn writer(t: *Tty, io: Io, buf: []u8) Io.File.Writer {
+        return .initStreaming(t.file, io, buf);
     }
 
     /// Anything reading from the terminal can fail with.
     pub const ReadError = Io.File.ReadStreamingError;
 
     /// Reads whatever is there, into a buffer the caller owns.
-    pub fn read(t: *Tty, buf: []u8) ReadError!usize {
+    pub fn read(t: *Tty, io: Io, buf: []u8) ReadError!usize {
         const file = if (is_windows) t.input else t.file;
-        return file.readStreaming(t.io, &.{buf});
+        return file.readStreaming(io, &.{buf});
     }
+
+    /// What `watchResize` fails with: no pipe or handler could be had.
+    pub const WatchResizeError = error{ SystemResources, Unexpected };
 
     /// Has a resize wake the reader: a handler for `SIGWINCH` that writes a
     /// byte into this terminal's own pipe, which `Input.next` waits on beside
@@ -368,7 +365,7 @@ pub const Tty = struct {
     /// A terminal that answers for mode 2048 makes this unnecessary: the
     /// resize arrives on the input stream, in step with everything else. On
     /// Windows there is no signal and this does nothing.
-    pub fn watchResize(t: *Tty) error{ SystemResources, Unexpected }!void {
+    pub fn watchResize(t: *Tty) WatchResizeError!void {
         if (is_windows) return;
         if (t.resize_pipe[0] != -1) return;
         if (watching == max_watchers) return error.SystemResources;
@@ -580,7 +577,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
     const before = try std.posix.tcgetattr(t.file.handle);
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
@@ -590,7 +587,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
         .mouse = .{ .motion = .press },
         .paste = true,
     };
-    try t.enter(&r, .{}, .alt, modes);
+    try t.enter(testing.io, &r, .{}, .alt, modes);
     try testing.expect(t.own_renderer == &r);
     try testing.expect(t.saved != null);
 
@@ -631,16 +628,16 @@ test "leaving through the terminal releases its renderer before destruction" {
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
-    try t.enter(&r, .{}, .alt, .{ .paste = true });
+    try t.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
     var seen: [256]u8 = undefined;
     const bytes = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?2004h");
     try testing.expect(std.mem.find(u8, bytes, "\x1b[?2004h") != null);
 
     // left with nothing reading the master: the way out must not wait on it
-    try t.leave();
+    try t.leave(testing.io);
     try testing.expect(t.own_renderer == null);
     try testing.expect(t.saved == null);
     const undone = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?1049l");
@@ -655,7 +652,7 @@ test "opening this program's terminal compiles and fails cleanly without one" {
     // suite calls it: a platform it did not compile on went unnoticed.
     if (Tty.open(testing.io)) |opened| {
         var t = opened;
-        t.close();
+        t.close(testing.io);
     } else |_| {}
 }
 
@@ -664,7 +661,7 @@ test "the size carries the text area in pixels where the terminal set it" {
     var pair = try conduit.Pty.open(testing.allocator, .{ .rows = 40, .cols = 132, .x_pixel = 1188, .y_pixel = 800 });
     defer pair.close(testing.io);
 
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
     const ws = try t.size();
     try testing.expectEqual(@as(u16, 132), ws.cells.cols);
     try testing.expectEqual(@as(u16, 40), ws.cells.rows);
@@ -682,7 +679,7 @@ test "a file that is not a terminal has no size" {
         _ = std.posix.system.close(fds[0]);
         _ = std.posix.system.close(fds[1]);
     }
-    var t: Tty = .adopt(testing.io, .{ .handle = fds[0], .flags = .{ .nonblocking = false } });
+    var t: Tty = .adopt(.{ .handle = fds[0], .flags = .{ .nonblocking = false } });
     try testing.expectError(error.NotATerminal, t.size());
 }
 
@@ -690,8 +687,11 @@ test "a file that is not a terminal has no size" {
 /// terminal primitives are.
 const conduit = @import("dependencies.zig").conduit;
 
+/// What `pipe` fails with.
+pub const PipeError = error{Unexpected};
+
 /// A pipe, for a test that wants a file that is not a terminal.
-pub fn pipe() ![2]std.posix.fd_t {
+pub fn pipe() PipeError![2]std.posix.fd_t {
     var fds: [2]std.posix.fd_t = undefined;
     if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
     return fds;
@@ -703,14 +703,14 @@ test "two terminals cannot borrow the same entered renderer" {
     defer first.close(testing.io);
     var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
-    var a: Tty = .adopt(testing.io, first.slaveFile());
-    var b: Tty = .adopt(testing.io, second.slaveFile());
+    var a: Tty = .adopt(first.slaveFile());
+    var b: Tty = .adopt(second.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
     defer a.restore();
     defer b.restore();
-    try a.enter(&r, .{}, .alt, .{ .paste = true });
-    try testing.expectError(error.AlreadyEntered, b.enter(&r, .{}, .alt, .{ .focus = true }));
+    try a.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
+    try testing.expectError(error.AlreadyEntered, b.enter(testing.io, &r, .{}, .alt, .{ .focus = true }));
     try testing.expect(b.saved == null);
     try testing.expect(r.own_entered.?.modes.paste);
     try testing.expect(!r.own_entered.?.modes.focus);
@@ -722,16 +722,16 @@ test "restoring one entered terminal leaves the other renderer armed" {
     defer first.close(testing.io);
     var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
-    var a: Tty = .adopt(testing.io, first.slaveFile());
-    var b: Tty = .adopt(testing.io, second.slaveFile());
+    var a: Tty = .adopt(first.slaveFile());
+    var b: Tty = .adopt(second.slaveFile());
     var ra = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer ra.deinit();
     var rb = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer rb.deinit();
     defer a.restore();
     defer b.restore();
-    try a.enter(&ra, .{}, .alt, .{ .paste = true });
-    try b.enter(&rb, .{}, .alt, .{ .focus = true });
+    try a.enter(testing.io, &ra, .{}, .alt, .{ .paste = true });
+    try b.enter(testing.io, &rb, .{}, .alt, .{ .focus = true });
     var seen: [1024]u8 = undefined;
     _ = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?2004h");
     _ = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1004h");
@@ -754,8 +754,8 @@ test "panic restoration restores every raw terminal and clears its registration"
     defer first.close(testing.io);
     var second = try conduit.Pty.open(testing.allocator, .{});
     defer second.close(testing.io);
-    var a: Tty = .adopt(testing.io, first.slaveFile());
-    var b: Tty = .adopt(testing.io, second.slaveFile());
+    var a: Tty = .adopt(first.slaveFile());
+    var b: Tty = .adopt(second.slaveFile());
     defer a.restore();
     defer b.restore();
     try a.raw();
@@ -769,12 +769,12 @@ test "an entered terminal refuses to replace its renderer association" {
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
     defer t.restore();
-    try t.enter(&r, .{}, .alt, .{ .paste = true });
-    try testing.expectError(error.AlreadyEntered, t.enter(&r, .{}, .alt, .{ .focus = true }));
+    try t.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
+    try testing.expectError(error.AlreadyEntered, t.enter(testing.io, &r, .{}, .alt, .{ .focus = true }));
     try testing.expect(r.own_entered.?.modes.paste);
     try testing.expect(!r.own_entered.?.modes.focus);
 }
@@ -783,11 +783,11 @@ test "a failed leave flush still restores the entered modes on the saved termina
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
     defer t.restore();
-    try t.enter(&r, .{}, .alt, .{ .paste = true });
+    try t.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
     var seen: [1024]u8 = undefined;
     _ = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?25l");
     // Fail the buffered writer, while the saved terminal remains usable by
@@ -795,7 +795,7 @@ test "a failed leave flush still restores the entered modes on the saved termina
     const file = t.file;
     t.file.handle = -1;
     defer t.file = file;
-    try testing.expectError(error.WriteFailed, t.leave());
+    try testing.expectError(error.WriteFailed, t.leave(testing.io));
     try testing.expect(t.saved == null);
     try testing.expect(r.own_entered == null);
     const master = pair.readFile().handle;
@@ -868,7 +868,7 @@ const ResizePause = struct {
 
 test "resize teardown waits for a handler that has borrowed its descriptor" {
     if (is_windows) return error.SkipZigTest;
-    var t: Tty = .adopt(testing.io, undefined);
+    var t: Tty = .adopt(undefined);
     try t.watchResize();
     defer t.unwatchResize();
     const fds = t.resize_pipe;
@@ -909,7 +909,7 @@ test "a resize handler preserves errno when its pipe is full" {
     const errno_ptr = std.c._errno();
     const saved = errno_ptr.*;
     defer errno_ptr.* = saved;
-    var t: Tty = .adopt(testing.io, undefined);
+    var t: Tty = .adopt(undefined);
     try t.watchResize();
     defer t.unwatchResize();
     const bytes: [4096]u8 = @splat('x');
@@ -928,7 +928,7 @@ test "a resize handler preserves errno when its pipe is full" {
 
 test "a resize pipe is close-on-exec and nonblocking at both ends" {
     if (is_windows) return error.SkipZigTest;
-    var t: Tty = .adopt(testing.io, undefined);
+    var t: Tty = .adopt(undefined);
     try t.watchResize();
     defer t.unwatchResize();
     for (t.resize_pipe) |fd| {
@@ -970,7 +970,7 @@ test "a resize pipe is not made while conduit is starting a child" {
         }
     };
 
-    var t: Tty = .adopt(testing.io, undefined);
+    var t: Tty = .adopt(undefined);
     var watched: std.atomic.Value(bool) = .init(false);
     var result: error{ SystemResources, Unexpected }!void = {};
     const watcher, const made_while_starting, const waited = try terminal.ForkGap.hold(Watch.whileStarting, .{ &t, &result, &watched });

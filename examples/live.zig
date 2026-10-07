@@ -12,15 +12,15 @@ pub fn main(init: std.process.Init) !void {
     if (args.next()) |arg| if (std.mem.eql(u8, arg, "--check")) return check(init.gpa);
     const io = init.io;
     var tty = try visor.Tty.open(io);
-    defer tty.close();
+    defer tty.close(io);
     var session = try visor.Session.init(init.gpa, try tty.size(), .{ .graphics_id = 1 });
     defer session.deinit();
     // Register the way out before entry, including a partial entry.
-    defer tty.leave() catch {};
-    try tty.enter(session.renderer(), session.capabilities(), .alt, .{ .paste = true });
+    defer tty.leave(io) catch {};
+    try tty.enter(io, session.renderer(), session.capabilities(), .alt, .{ .paste = true });
     try tty.watchResize();
     var output_buffer: [16 * 1024]u8 = undefined;
-    var output = tty.writer(&output_buffer);
+    var output = tty.writer(io, &output_buffer);
     const w = &output.interface;
     var parser_buffer: [4096]u8 = undefined;
     var read_buffer: [4096]u8 = undefined;
@@ -31,16 +31,16 @@ pub fn main(init: std.process.Init) !void {
     });
     try session.probe().write(w);
     try w.flush();
-    const wait = visor.ProbeWait.init(nowMs(io), 500, 50);
+    const wait = visor.ProbeWait.init(now(io), .fromMilliseconds(500), .fromMilliseconds(50));
     var count: usize = 0;
-    while (wait.remaining(session.probe(), nowMs(io))) |budget| {
-        const event = (try input.nextWithin(.{ .duration = .{
-            .raw = .fromMilliseconds(budget),
+    while (wait.remaining(session.probe(), now(io))) |budget| {
+        const event = (try input.nextWithin(io, .{ .duration = .{
+            .raw = budget,
             .clock = .awake,
         } })) orelse continue;
         if (quit(event)) return;
         if (event == .key or event == .text) count += 1;
-        _ = try session.handle(w, event, nowMs(io));
+        _ = try session.handle(w, event, now(io));
         try w.flush();
     }
     input.setMousePixels(false);
@@ -53,12 +53,12 @@ pub fn main(init: std.process.Init) !void {
         try paint(&session, count);
         _ = try session.draw(w);
         try w.flush();
-        var event = try input.next();
+        var event = try input.next(io);
         while (true) {
             if (quit(event)) return;
             if (event == .key or event == .text) count += 1;
-            _ = try session.handle(w, event, nowMs(io));
-            event = (try input.nextWithin(.{ .duration = .{
+            _ = try session.handle(w, event, now(io));
+            event = (try input.nextWithin(io, .{ .duration = .{
                 .raw = .fromMilliseconds(0),
                 .clock = .awake,
             } })) orelse break;
@@ -72,8 +72,8 @@ fn quit(event: morse.Event) bool {
         event.key.matches(.{ .char = 'c' }, .{ .ctrl = true });
 }
 
-fn nowMs(io: std.Io) i64 {
-    return @intCast(@divTrunc(std.Io.Timestamp.now(io, .awake).nanoseconds, std.time.ns_per_ms));
+fn now(io: std.Io) std.Io.Timestamp {
+    return .now(io, .awake);
 }
 
 fn paint(session: *visor.Session, count: usize) !void {
@@ -89,7 +89,7 @@ fn check(gpa: std.mem.Allocator) !void {
     defer session.deinit();
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
-    _ = try session.handle(&out.writer, .{ .resize = .{ .cols = 50, .rows = 4 } }, 0);
+    _ = try session.handle(&out.writer, .{ .resize = .{ .cols = 50, .rows = 4 } }, .zero);
     _ = try session.resize(&out.writer);
     try paint(&session, 3);
     _ = try session.draw(&out.writer);

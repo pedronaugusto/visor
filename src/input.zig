@@ -72,9 +72,12 @@ pub const Input = struct {
     /// `error.EndOfStream` is the terminal gone.
     pub const Error = Io.File.ReadStreamingError;
 
+    /// What `init` refuses.
+    pub const InitError = error{EmptyReadBuffer};
+
     /// A reader over `tty`, with the caller's buffers and timeout.
     /// An empty read buffer is refused with `error.EmptyReadBuffer`.
-    pub fn init(tty: *Tty, options: Options) error{EmptyReadBuffer}!Input {
+    pub fn init(tty: *Tty, options: Options) InitError!Input {
         if (options.read_buffer.len == 0) return error.EmptyReadBuffer;
         return .{
             .tty = tty,
@@ -103,8 +106,8 @@ pub const Input = struct {
     /// for them sets through `setMousePixels`. A resize, when `Tty.watchResize` is on, comes back as the
     /// same `resize` event an in-band report is, with the size and the
     /// pixels the operating system has now.
-    pub fn next(in: *Input) Error!morse.Event {
-        return (try in.nextWithin(.none)).?;
+    pub fn next(in: *Input, io: Io) Error!morse.Event {
+        return (try in.nextWithin(io, .none)).?;
     }
 
     /// The next event, or null when `timeout` passes before one is framed.
@@ -114,8 +117,8 @@ pub const Input = struct {
     /// `ESC` whose own timeout ends first is the key it also is; one still
     /// waiting at the caller's deadline stays held for the next call. What
     /// the event borrows is valid until the next call, as with `next`.
-    pub fn nextWithin(in: *Input, timeout: Io.Timeout) Error!?morse.Event {
-        const until = timeout.toDeadline(in.tty.ioContext());
+    pub fn nextWithin(in: *Input, io: Io, timeout: Io.Timeout) Error!?morse.Event {
+        const until = timeout.toDeadline(io);
         while (true) {
             // What was read already comes first, including the repeats a
             // console sequence can stand for.
@@ -141,7 +144,7 @@ pub const Input = struct {
                 return error.EndOfStream;
             }
 
-            switch (try in.wait(until)) {
+            switch (try in.wait(io, until)) {
                 .bytes => |n| in.fresh = in.read_buffer[0..n],
                 .ended => in.ended = true,
                 .quiet => if (in.parser.flush()) |e| return e,
@@ -174,8 +177,8 @@ pub const Input = struct {
     /// says a timeout is the caller's deadline, not the escape's.
     const Limit = struct { timeout: Io.Timeout, expires: bool };
 
-    fn limit(in: *const Input, until: Io.Timeout) Limit {
-        const left = until.toDurationFromNow(in.tty.ioContext());
+    fn limit(in: *const Input, io: Io, until: Io.Timeout) Limit {
+        const left = until.toDurationFromNow(io);
         // What the parser holds is a key as well as the start of a
         // sequence: the one case the escape timeout settles, by `flush`.
         if (in.parser.undecided()) {
@@ -194,36 +197,35 @@ pub const Input = struct {
     /// input mode passes over the ones that are not keys (focus, menu,
     /// buffer size), so those are taken off the queue and the wait begun
     /// again rather than left to a read that would block on them.
-    fn waitWindows(in: *Input, until: Io.Timeout) Error!Woke {
+    fn waitWindows(in: *Input, io: Io, until: Io.Timeout) Error!Woke {
         const file = in.tty.inputFile();
         while (true) {
-            const lim = in.limit(until);
-            if (lim.timeout == .none) return in.readBlocking(file);
-            const woke = console.waitInput(in.tty.ioContext(), file.handle, lim.timeout) catch |err| switch (err) {
+            const lim = in.limit(io, until);
+            if (lim.timeout == .none) return in.readBlocking(io, file);
+            const woke = console.waitInput(io, file.handle, lim.timeout) catch |err| switch (err) {
                 error.Canceled => return error.Canceled,
-                error.Unexpected => return in.readBlocking(file),
+                error.Unexpected => return in.readBlocking(io, file),
             };
             switch (woke) {
                 .ready => {},
                 .timed_out => return if (lim.expires) .expired else .quiet,
             }
             var records: [16]console.InputRecord = undefined;
-            const n = console.peekInput(file.handle, &records) catch return in.readBlocking(file);
-            if (keyWaiting(records[0..n])) return in.readBlocking(file);
+            const n = console.peekInput(file.handle, &records) catch return in.readBlocking(io, file);
+            if (keyWaiting(records[0..n])) return in.readBlocking(io, file);
             // Nothing a read would return: take those records off and wait
             // again. A queue that cannot be drained is left to the read.
-            _ = console.readInput(file.handle, records[0..n]) catch return in.readBlocking(file);
+            _ = console.readInput(file.handle, records[0..n]) catch return in.readBlocking(io, file);
         }
     }
 
-    fn waitPosix(in: *Input, until: Io.Timeout) Error!Woke {
-        const io = in.tty.ioContext();
+    fn waitPosix(in: *Input, io: Io, until: Io.Timeout) Error!Woke {
         const tty_file = in.tty.inputFile();
-        const lim = in.limit(until);
+        const lim = in.limit(io, until);
         const timeout = lim.timeout;
         const resize = in.tty.resizeFile();
 
-        if (timeout == .none and resize == null) return in.readBlocking(tty_file);
+        if (timeout == .none and resize == null) return in.readBlocking(io, tty_file);
 
         var storage: [2]Io.Operation.Storage = undefined;
         var batch: Io.Batch = .init(&storage);
@@ -247,7 +249,7 @@ pub const Input = struct {
             error.Timeout => return if (lim.expires) .expired else .quiet,
             error.Canceled => return error.Canceled,
             // An `Io` that cannot wait on two things at once still reads.
-            error.ConcurrencyUnavailable => return in.readBlocking(tty_file),
+            error.ConcurrencyUnavailable => return in.readBlocking(io, tty_file),
         };
         return .quiet;
     }
@@ -276,8 +278,8 @@ pub const Input = struct {
     }
 
     /// One read with nothing beside it.
-    fn readBlocking(in: *Input, file: Io.File) Error!Woke {
-        const n = file.readStreaming(in.tty.ioContext(), &.{in.read_buffer}) catch |err| switch (err) {
+    fn readBlocking(in: *Input, io: Io, file: Io.File) Error!Woke {
+        const n = file.readStreaming(io, &.{in.read_buffer}) catch |err| switch (err) {
             error.EndOfStream => return .ended,
             else => |e| return e,
         };
@@ -308,14 +310,14 @@ const Piped = struct {
     fn init() !Piped {
         const fds = try tty_mod.pipe();
         return .{
-            .tty = .adopt(testing.io, .{ .handle = fds[0], .flags = .{ .nonblocking = false } }),
+            .tty = .adopt(.{ .handle = fds[0], .flags = .{ .nonblocking = false } }),
             .write_end = fds[1],
         };
     }
 
     fn deinit(p: *Piped) void {
         p.hangUp();
-        p.tty.close();
+        p.tty.close(testing.io);
         p.* = undefined;
     }
 
@@ -344,7 +346,7 @@ fn inputOver(tty: *Tty, parser: []u8, read: []u8, escape_ms: i64) error{EmptyRea
 }
 
 test "input refuses an empty read buffer before reading the terminal" {
-    var tty = Tty.adopt(testing.io, .{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
+    var tty = Tty.adopt(.{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
     var parser: [morse.KeyParser.min_buffer]u8 = undefined;
     const result: error{EmptyReadBuffer}!Input = Input.init(&tty, .{
         .parser_buffer = &parser,
@@ -367,8 +369,8 @@ test "input accepts a single byte of read storage" {
     });
     p.send("\x1b[A");
     p.hangUp();
-    try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
-    try testing.expectError(error.EndOfStream, in.next());
+    try testing.expectEqual(morse.Key.up, (try in.next(testing.io)).key.key);
+    try testing.expectError(error.EndOfStream, in.next(testing.io));
 }
 
 test "keys, text and replies come through as the parser makes them" {
@@ -382,16 +384,16 @@ test "keys, text and replies come through as the parser makes them" {
     p.send("a\x1b[A\x1b_Gi=5;OK\x1b\\hello\x1b[I");
     p.hangUp();
 
-    const a = try in.next();
+    const a = try in.next(testing.io);
     try testing.expectEqual(morse.Key{ .char = 'a' }, a.key.key);
-    try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
+    try testing.expectEqual(morse.Key.up, (try in.next(testing.io)).key.key);
     // A reply is handed over read.
-    const reply = (try in.next()).reply.graphics;
+    const reply = (try in.next(testing.io)).reply.graphics;
     try testing.expectEqual(@as(?u32, 5), reply.id);
     try testing.expect(reply.ok());
-    try testing.expectEqualStrings("hello", (try in.next()).text);
-    try testing.expect((try in.next()) == .focus_in);
-    try testing.expectError(error.EndOfStream, in.next());
+    try testing.expectEqualStrings("hello", (try in.next(testing.io)).text);
+    try testing.expect((try in.next(testing.io)) == .focus_in);
+    try testing.expectError(error.EndOfStream, in.next(testing.io));
 }
 
 test "a lone escape is the Escape key once the caller's timeout has passed" {
@@ -403,11 +405,11 @@ test "a lone escape is the Escape key once the caller's timeout has passed" {
     var in = try inputOver(&p.tty, &parser, &read, 10);
 
     p.send("\x1b");
-    const e = try in.next();
+    const e = try in.next(testing.io);
     try testing.expectEqual(morse.Key.escape, e.key.key);
     // And `ESC [` is alt and a bracket, the other string that is both.
     p.send("\x1b[");
-    const b = try in.next();
+    const b = try in.next(testing.io);
     try testing.expectEqual(morse.Key{ .char = '[' }, b.key.key);
     try testing.expect(b.key.mods.alt);
 }
@@ -430,7 +432,7 @@ test "an escape followed within the timeout is the start of a sequence" {
         }
     }.run, .{&p});
     defer later.join();
-    try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
+    try testing.expectEqual(morse.Key.up, (try in.next(testing.io)).key.key);
 }
 
 test "the end of the stream settles what was pending, then says so" {
@@ -443,10 +445,10 @@ test "the end of the stream settles what was pending, then says so" {
 
     p.send("x\x1b");
     p.hangUp();
-    try testing.expectEqual(morse.Key{ .char = 'x' }, (try in.next()).key.key);
-    try testing.expectEqual(morse.Key.escape, (try in.next()).key.key);
-    try testing.expectError(error.EndOfStream, in.next());
-    try testing.expectError(error.EndOfStream, in.next());
+    try testing.expectEqual(morse.Key{ .char = 'x' }, (try in.next(testing.io)).key.key);
+    try testing.expectEqual(morse.Key.escape, (try in.next(testing.io)).key.key);
+    try testing.expectError(error.EndOfStream, in.next(testing.io));
+    try testing.expectError(error.EndOfStream, in.next(testing.io));
 }
 
 test "a read within a deadline hands over what came, and null once the deadline passes in silence" {
@@ -458,33 +460,33 @@ test "a read within a deadline hands over what came, and null once the deadline 
     var in = try inputOver(&p.tty, &parser, &read, 5_000);
 
     // Nothing typed: the deadline ends the wait, and nothing is lost.
-    try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }));
+    try testing.expectEqual(null, try in.nextWithin(testing.io, .{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }));
 
     // What is typed is handed over, and what is buffered comes first even
     // with a deadline already gone by.
     p.send("a\x1b[B");
-    try testing.expectEqual(morse.Key{ .char = 'a' }, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(1_000), .clock = .awake } })).?.key.key);
-    try testing.expectEqual(morse.Key.down, (try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(-1), .clock = .awake } })).?.key.key);
+    try testing.expectEqual(morse.Key{ .char = 'a' }, (try in.nextWithin(testing.io, .{ .duration = .{ .raw = .fromMilliseconds(1_000), .clock = .awake } })).?.key.key);
+    try testing.expectEqual(morse.Key.down, (try in.nextWithin(testing.io, .{ .duration = .{ .raw = .fromMilliseconds(-1), .clock = .awake } })).?.key.key);
 
     // A lone escape with a long timeout of its own is still held at a
     // short deadline, and the rest of its sequence makes it the key it
     // starts on the next read.
     p.send("\x1b");
-    try testing.expectEqual(null, try in.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(20), .clock = .awake } }));
+    try testing.expectEqual(null, try in.nextWithin(testing.io, .{ .duration = .{ .raw = .fromMilliseconds(20), .clock = .awake } }));
     p.send("[A");
-    try testing.expectEqual(morse.Key.up, (try in.next()).key.key);
+    try testing.expectEqual(morse.Key.up, (try in.next(testing.io)).key.key);
 
     // And one whose own timeout ends first is the Escape key.
     var quick = try inputOver(&p.tty, &parser, &read, 10);
     p.send("\x1b");
-    try testing.expectEqual(morse.Key.escape, (try quick.nextWithin(.{ .duration = .{ .raw = .fromMilliseconds(2_000), .clock = .awake } })).?.key.key);
+    try testing.expectEqual(morse.Key.escape, (try quick.nextWithin(testing.io, .{ .duration = .{ .raw = .fromMilliseconds(2_000), .clock = .awake } })).?.key.key);
 }
 
 test "a resize wakes the wait and carries the size and pixels the system has now" {
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{ .rows = 30, .cols = 100, .x_pixel = 900, .y_pixel = 600 });
     defer pair.close(testing.io);
-    var t: Tty = .adopt(testing.io, pair.slaveFile());
+    var t: Tty = .adopt(pair.slaveFile());
     try t.watchResize();
     defer t.unwatchResize();
 
@@ -493,7 +495,7 @@ test "a resize wakes the wait and carries the size and pixels the system has now
     var in = try inputOver(&t, &parser, &read, 25);
 
     try std.posix.raise(.WINCH);
-    const e = try in.next();
+    const e = try in.next(testing.io);
     try testing.expectEqual(morse.Resize{ .rows = 30, .cols = 100, .ypixels = 600, .xpixels = 900 }, e.resize);
 
     // Several signals before the reader looks are one wake and one event,
@@ -501,7 +503,7 @@ test "a resize wakes the wait and carries the size and pixels the system has now
     try pair.resize(.{ .rows = 20, .cols = 80, .x_pixel = 720, .y_pixel = 400 });
     try std.posix.raise(.WINCH);
     try std.posix.raise(.WINCH);
-    const again = try in.next();
+    const again = try in.next(testing.io);
     try testing.expectEqual(@as(u32, 80), again.resize.cols);
     try testing.expectEqual(@as(u32, 720), again.resize.xpixels);
     try testing.expect(!t.resized());
@@ -565,14 +567,14 @@ test "cancelling the task that reads stops the wait, with nothing written to wak
     var read: [16]u8 = undefined;
     var in = try inputOver(&p.tty, &parser, &read, 25);
 
-    var task = try testing.io.concurrent(Input.next, .{&in});
+    var task = try testing.io.concurrent(Input.next, .{ &in, testing.io });
     try std.Io.sleep(testing.io, .fromMilliseconds(20), .awake);
     try testing.expectError(error.Canceled, task.cancel(testing.io));
 
     // The same with a lone escape held, where the wait has a timeout.
     p.send("\x1b");
     var slow = try inputOver(&p.tty, &parser, &read, 60_000);
-    var held = try testing.io.concurrent(Input.next, .{&slow});
+    var held = try testing.io.concurrent(Input.next, .{ &slow, testing.io });
     try std.Io.sleep(testing.io, .fromMilliseconds(20), .awake);
     try testing.expectError(error.Canceled, held.cancel(testing.io));
 }
@@ -685,7 +687,7 @@ fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?
         var read: [32]u8 = undefined;
         var in = try inputOver(&p.tty, &parser, read[0..read_len], 1);
         while (true) {
-            const e = in.next() catch |err| switch (err) {
+            const e = in.next(testing.io) catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => return err,
             };
@@ -785,14 +787,14 @@ test "a silent deadline submits one read and cancels it with the remaining budge
     vtable.batchAwaitConcurrent = Clocked.wait;
     vtable.batchCancel = Clocked.cancel;
     const io: Io = .{ .userdata = &clocked, .vtable = &vtable };
-    var tty = Tty.adopt(io, .{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
+    var tty = Tty.adopt(.{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
     var parser: [64]u8 = undefined;
     var read: [16]u8 = undefined;
     var in = try inputOver(&tty, &parser, &read, 5_000);
     // Exercise the Io wait on every host, including Windows where the
     // real console wait has its own integration tests.
     const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }).toDeadline(io);
-    try testing.expectEqual(Input.Woke.expired, try in.waitPosix(until));
+    try testing.expectEqual(Input.Woke.expired, try in.waitPosix(io, until));
     try testing.expectEqual(@as(usize, 2), clocked.ticks);
     try testing.expectEqual(@as(usize, 1), clocked.waits);
     try testing.expectEqual(@as(usize, 1), clocked.reads);

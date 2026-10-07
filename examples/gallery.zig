@@ -68,7 +68,7 @@ pub fn main(init: std.process.Init) !void {
     try term.feed(out.written());
     try visor.expectScreensEqual(&screen, term.screen());
 
-    try visor.dumpScreen(term.screen(), report);
+    try visor.dumpScreen(term.screen(), report, .{});
     try report.print("\nthe page: {d} bytes, {d} cells in {d} runs\n", .{ stats.bytes, stats.cells, stats.runs });
     try report.flush();
 }

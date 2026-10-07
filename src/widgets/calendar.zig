@@ -21,8 +21,11 @@ pub const Date = struct {
     /// Private.
     own_day: u8,
 
+    /// What `init` refuses: a month or day that does not exist.
+    pub const InitError = error{InvalidDate};
+
     /// A Gregorian date, or InvalidDate when its month or day does not exist.
-    pub fn init(year_number: i32, month_number: u8, day_number: u8) error{InvalidDate}!Date {
+    pub fn init(year_number: i32, month_number: u8, day_number: u8) InitError!Date {
         const last = daysInMonth(year_number, month_number);
         if (day_number == 0 or day_number > last) return error.InvalidDate;
         return .{ .own_year = year_number, .own_month = month_number, .own_day = day_number };

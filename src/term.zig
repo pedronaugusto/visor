@@ -784,7 +784,7 @@ pub const Term = struct {
 
     /// The grid as text, one row a line.
     pub fn dump(t: *const Term, w: *Writer) Writer.Error!void {
-        try dumpScreen(&t.scr, w);
+        try dumpScreen(&t.scr, w, .{});
     }
 
     /// The styles as one identifier a cell, with the legend above.
@@ -793,18 +793,12 @@ pub const Term = struct {
     }
 
     /// A comparison that names the first cell that differs.
-    pub fn expectEqual(want: *const Screen, got: *const Screen) !void {
+    pub fn expectEqual(want: *const Screen, got: *const Screen) ExpectError!void {
         return expectScreensEqual(want, got);
     }
 };
 
-/// The grid as text, one row a line, each cluster once: a wide cluster's
-/// covered column writes nothing (`dumpScreenWith` writes a filler there).
-pub fn dumpScreen(s: *const Screen, w: *Writer) Writer.Error!void {
-    return dumpScreenWith(s, w, .{});
-}
-
-/// How `dumpScreenWith` writes a grid as text.
+/// How `dumpScreen` writes a grid as text.
 pub const DumpOptions = struct {
     /// What a wide cluster's covered column is written as. Nothing, the
     /// default, holds each cluster once; a space makes every line as many
@@ -814,14 +808,15 @@ pub const DumpOptions = struct {
 };
 
 /// The grid as text, one row a line, a wide cluster's covered column
-/// written as `opts.tail`.
-pub fn dumpScreenWith(s: *const Screen, w: *Writer, opts: DumpOptions) Writer.Error!void {
+/// written as `options.tail`: nothing by default, so each cluster is
+/// written once.
+pub fn dumpScreen(s: *const Screen, w: *Writer, options: DumpOptions) Writer.Error!void {
     var row: u16 = 0;
     while (row < s.dimensions().rows) : (row += 1) {
         var col: u16 = 0;
         while (col < s.dimensions().cols) : (col += 1) {
             const c = &s.own_cells[s.index(col, row)];
-            try w.writeAll(if (c.isTail()) opts.tail else screen_internal.textOf(s, c));
+            try w.writeAll(if (c.isTail()) options.tail else screen_internal.textOf(s, c));
         }
         try w.writeByte('\n');
     }
@@ -957,10 +952,14 @@ fn stylesEqual(a: Style, b: Style) bool {
     return cellmod.sameBytes(Style, &ca, &cb);
 }
 
+/// What `expectScreensEqual` fails with when the two screens differ, the
+/// error `std.testing.expectEqual` uses.
+pub const ExpectError = error{TestExpectedEqual};
+
 /// Two screens compared cell by cell, naming the first that differs and
 /// logging both grids as errors under the `visor` scope, which the program's
 /// `std.log` handler writes or drops.
-pub fn expectScreensEqual(want: *const Screen, got: *const Screen) !void {
+pub fn expectScreensEqual(want: *const Screen, got: *const Screen) ExpectError!void {
     if (!std.meta.eql(want.dimensions(), got.dimensions())) {
         log.err(
             "screen size: want {d}x{d}, have {d}x{d}",
@@ -1389,9 +1388,11 @@ test "a hyperlink allocation failure is reported and can be retried" {
     const failed_gpa = failing.allocator();
     t.gpa = failed_gpa;
     t.scr.gpa = failed_gpa;
+    t.scr.links.gpa = failed_gpa;
     try testing.expectError(error.OutOfMemory, t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\"));
     t.gpa = testing.allocator;
     t.scr.gpa = testing.allocator;
+    t.scr.links.gpa = testing.allocator;
     try testing.expectEqual(Link.none, t.link);
 
     try t.feed("\x1b]8;id=7;https://ziglang.org\x1b\\x");
@@ -1759,12 +1760,12 @@ test "the dumps a program keeps its goldens in are these bytes" {
 
     var glyphs: std.Io.Writer.Allocating = .init(testing.allocator);
     defer glyphs.deinit();
-    try dumpScreen(&screen, &glyphs.writer);
+    try dumpScreen(&screen, &glyphs.writer, .{});
     try testing.expectEqualStrings("ab\u{4E2D}l \nr     \n", glyphs.written());
 
     // and with a filler for the covered column, a line a column a character
     glyphs.clearRetainingCapacity();
-    try dumpScreenWith(&screen, &glyphs.writer, .{ .tail = " " });
+    try dumpScreen(&screen, &glyphs.writer, .{ .tail = " " });
     try testing.expectEqualStrings("ab\u{4E2D} l \nr     \n", glyphs.written());
 }
 

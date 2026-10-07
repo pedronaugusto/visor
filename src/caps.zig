@@ -244,9 +244,9 @@ pub const Caps = struct {
         caps: Caps = .{},
         /// Private: which questions have been answered.
         answered: std.EnumSet(morse.Probe.Question) = .empty,
-        /// Private: when the last answer came, on the caller's clock, in
-        /// milliseconds; null before the first.
-        last_ms: ?i64 = null,
+        /// Private: when the last answer came, on the caller's clock; null
+        /// before the first.
+        last_answer: ?std.Io.Timestamp = null,
 
         /// A fresh probe for these questions. Feed is the only answer writer.
         pub fn init(asked: morse.Probe) Caps.Probe {
@@ -269,8 +269,8 @@ pub const Caps = struct {
         }
 
         /// Last answer on the caller's clock, or null before the first.
-        pub fn lastAnswerMs(p: *const Probe) ?i64 {
-            return p.last_ms;
+        pub fn lastAnswer(p: *const Probe) ?std.Io.Timestamp {
+            return p.last_answer;
         }
 
         /// Asks every question, in one write.
@@ -281,14 +281,14 @@ pub const Caps = struct {
         /// Folds one event from the input in: the answers to the questions,
         /// read. Anything else is ignored, because a terminal answering a
         /// question nobody asked is not this package's problem to diagnose.
-        pub fn feed(p: *Probe, event: morse.Event, now_ms: i64) void {
+        pub fn feed(p: *Probe, event: morse.Event, now: std.Io.Timestamp) void {
             const question = morse.probeAnswered(event) orelse return;
             if (!p.own_questions.asks(question)) return;
             // A graphics answer about one of the program's pictures answers
             // nothing here.
             if (question == .graphics and event.reply.graphics.id != p.own_questions.graphics_id) return;
             p.answered.insert(question);
-            p.last_ms = now_ms;
+            p.last_answer = now;
             const reply = switch (event) {
                 .reply => |r| r,
                 else => return,
@@ -364,13 +364,14 @@ pub const Caps = struct {
         }
 
         /// Whether to stop waiting: every question answered, or the device
-        /// attributes answered and nothing more for `quiet_ms` since the
-        /// last answer, on the caller's clock. The caller's overall timeout
-        /// still ends a probe the terminal never answers at all.
-        pub fn settled(p: *const Probe, now_ms: i64, quiet_ms: i64) bool {
+        /// attributes answered and nothing more for `quiet` since the last
+        /// answer, on the caller's clock. The caller's overall timeout still
+        /// ends a probe the terminal never answers at all.
+        pub fn settled(p: *const Probe, now: std.Io.Timestamp, quiet: std.Io.Duration) bool {
             if (p.complete()) return true;
             if (!p.answered.contains(.device_attributes)) return false;
-            return now_ms -| (p.last_ms orelse now_ms) >= quiet_ms;
+            const last = p.last_answer orelse now;
+            return now.nanoseconds -| last.nanoseconds >= quiet.nanoseconds;
         }
     };
 };
@@ -411,10 +412,10 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     for ([_][]const u8{ "1", "2", "3" }) |state| {
         var p: Caps.Probe = .init(.{ .graphics_id = 1 });
         var buf: [4][32]u8 = undefined;
-        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), ms(0));
         try testing.expect(p.caps.sync);
         try testing.expectEqual(textmod.Method.unicode, p.caps.width_method);
         try testing.expect(p.caps.in_band_resize);
@@ -424,10 +425,10 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
         var p: Caps.Probe = .init(.{ .graphics_id = 1 });
         p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true, .sgr_pixels = true };
         var buf: [4][32]u8 = undefined;
-        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), 0);
-        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), 0);
+        p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[2], "\x1b[?2048;{s}$y", .{state})), ms(0));
+        p.feed(answer(try std.mem.print(&buf[3], "\x1b[?1016;{s}$y", .{state})), ms(0));
         try testing.expect(!p.caps.sync);
         try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
         try testing.expect(!p.caps.in_band_resize);
@@ -440,20 +441,20 @@ test "the device attributes answer does not settle the probe while a forwarded a
     // forwarded is still on its way: the probe waits for the caller's quiet
     // period after the last answer, on the caller's clock.
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1b[?2026;1$y"), 100);
-    try testing.expect(!p.settled(100, 50));
-    p.feed(answer("\x1b[?62;4;22c"), 110);
-    try testing.expect(!p.settled(120, 50));
+    p.feed(answer("\x1b[?2026;1$y"), ms(100));
+    try testing.expect(!p.settled(ms(100), .fromMilliseconds(50)));
+    p.feed(answer("\x1b[?62;4;22c"), ms(110));
+    try testing.expect(!p.settled(ms(120), .fromMilliseconds(50)));
     // The forwarded answer lands, and the quiet period starts again.
-    p.feed(answer("\x1b]11;rgb:1e1e/1e1e/2e2e\x07"), 150);
-    try testing.expect(!p.settled(180, 50));
-    try testing.expect(p.settled(200, 50));
+    p.feed(answer("\x1b]11;rgb:1e1e/1e1e/2e2e\x07"), ms(150));
+    try testing.expect(!p.settled(ms(180), .fromMilliseconds(50)));
+    try testing.expect(p.settled(ms(200), .fromMilliseconds(50)));
     // Without the device attributes no quiet period settles it: silence
     // there is a terminal that has not answered yet, for the caller's own
     // timeout to end.
     var q: Caps.Probe = .init(.{ .graphics_id = 1 });
-    q.feed(answer("\x1b[?2026;1$y"), 0);
-    try testing.expect(!q.settled(10_000, 50));
+    q.feed(answer("\x1b[?2026;1$y"), ms(0));
+    try testing.expect(!q.settled(ms(10_000), .fromMilliseconds(50)));
 }
 
 test "a probe answered in full is settled at once" {
@@ -481,35 +482,35 @@ test "a probe answered in full is settled at once" {
         .sixel_registers = false,
         .sixel_geometry = false,
     });
-    p.feed(answer("\x1b[?62;4;22c"), 5);
+    p.feed(answer("\x1b[?62;4;22c"), ms(5));
     try testing.expect(!p.complete());
-    p.feed(answer("\x1b[?2026;2$y"), 6);
-    try testing.expect(p.complete() and p.settled(6, 1000));
+    p.feed(answer("\x1b[?2026;2$y"), ms(6));
+    try testing.expect(p.complete() and p.settled(ms(6), .fromMilliseconds(1000)));
     try testing.expect(p.caps.sync);
 }
 
 test "an unrecognised reply changes nothing" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
     const before = p.caps;
-    p.feed(answer("nonsense"), 0);
-    p.feed(answer("\x1b["), 0);
-    p.feed(answer(""), 0);
+    p.feed(answer("nonsense"), ms(0));
+    p.feed(answer("\x1b["), ms(0));
+    p.feed(answer(""), ms(0));
     try testing.expectEqual(before, p.caps);
-    try testing.expect(!p.settled(1000, 0));
+    try testing.expect(!p.settled(ms(1000), .fromMilliseconds(0)));
 }
 
 test "a 256-colour count is not evidence of truecolor" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
-    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
+    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), ms(0));
     try testing.expect(!p.caps.truecolor);
 }
 
 test "a colour count is folded in, and picks the profile" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), 0);
+    p.feed(answer("\x1bP1+r436f=323536\x1b\\"), ms(0));
     try testing.expect(p.hasAnswered(.color_count));
-    try testing.expectEqual(@as(?i64, 0), p.lastAnswerMs());
+    try testing.expectEqual(@as(?std.Io.Timestamp, ms(0)), p.lastAnswer());
     try testing.expectEqual(@as(?u32, 256), p.caps.colors);
     try testing.expectEqual(morse.Color.Profile.palette, p.caps.colorProfile());
 }
@@ -545,17 +546,17 @@ test "COLORTERM and NO_COLOR say what they say and no more" {
 
 test "a truecolor-specific capability enables truecolor" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1bP1+r5463\x1b\\"), 0);
+    p.feed(answer("\x1bP1+r5463\x1b\\"), ms(0));
     try testing.expect(p.caps.truecolor);
 }
 
 test "the graphics answer is the one carrying the id the program chose" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
     // An answer about a picture is not an answer to the question.
-    p.feed(answer("\x1b_Gi=31;OK\x1b\\"), 0);
+    p.feed(answer("\x1b_Gi=31;OK\x1b\\"), ms(0));
     try testing.expect(!p.caps.kitty_graphics);
     // A refusal of the question still says the protocol is there.
-    p.feed(answer("\x1b_Gi=1;EINVAL:dimensions required\x1b\\"), 0);
+    p.feed(answer("\x1b_Gi=1;EINVAL:dimensions required\x1b\\"), ms(0));
     try testing.expect(p.caps.kitty_graphics);
 }
 
@@ -568,23 +569,23 @@ fn answer(bytes: []const u8) morse.Event {
 
 test "a probe ignores disabled questions without extending its quiet period" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1, .sync_output = false, .unicode_core = false });
-    p.feed(answer("\x1b[?62;4;22c"), 100);
-    p.feed(answer("\x1b[?2026;1$y"), 140);
-    p.feed(answer("\x1b[?2027;1$y"), 145);
+    p.feed(answer("\x1b[?62;4;22c"), ms(100));
+    p.feed(answer("\x1b[?2026;1$y"), ms(140));
+    p.feed(answer("\x1b[?2027;1$y"), ms(145));
     try testing.expect(!p.caps.sync);
     try testing.expectEqual(textmod.Method.wcwidth, p.caps.width_method);
     try testing.expect(!p.answered.contains(.sync_output));
     try testing.expect(!p.answered.contains(.unicode_core));
-    try testing.expectEqual(@as(?i64, 100), p.last_ms);
-    try testing.expect(p.settled(150, 50));
+    try testing.expectEqual(@as(?std.Io.Timestamp, ms(100)), p.last_answer);
+    try testing.expect(p.settled(ms(150), .fromMilliseconds(50)));
 }
 
 test "probe quiet time spans the signed clock range" {
     var probe: Caps.Probe = .init(.{ .graphics_id = 1 });
-    probe.feed(answer("\x1b[?62;4;22c"), std.math.minInt(i64));
-    try testing.expect(probe.settled(std.math.maxInt(i64), 50));
-    probe.last_ms = std.math.maxInt(i64);
-    try testing.expect(!probe.settled(std.math.minInt(i64), 50));
+    probe.feed(answer("\x1b[?62;4;22c"), ms(std.math.minInt(i64)));
+    try testing.expect(probe.settled(ms(std.math.maxInt(i64)), .fromMilliseconds(50)));
+    probe.last_answer = ms(std.math.maxInt(i64));
+    try testing.expect(!probe.settled(ms(std.math.minInt(i64)), .fromMilliseconds(50)));
 }
 
 test "the picture protocol is kitty, then iTerm2, then sixel, then cells, unless the caller chose" {
@@ -600,39 +601,39 @@ test "the picture protocol is kitty, then iTerm2, then sixel, then cells, unless
 
 test "sixels are the device attributes' attribute 4, and their registers and size are XTSMGRAPHICS's" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1b[?62;22c"), 0);
+    p.feed(answer("\x1b[?62;22c"), ms(0));
     try testing.expect(!p.caps.sixel);
-    p.feed(answer("\x1b[?65;4;6;22c"), 0);
+    p.feed(answer("\x1b[?65;4;6;22c"), ms(0));
     try testing.expect(p.caps.sixel);
     try testing.expectEqual(Caps.Pictures.sixel, p.caps.pictures());
 
     try testing.expectEqual(@as(u16, 256), p.caps.sixel_registers);
-    p.feed(answer("\x1b[?1;0;16S"), 0);
+    p.feed(answer("\x1b[?1;0;16S"), ms(0));
     try testing.expectEqual(@as(u16, 16), p.caps.sixel_registers);
     // More than one image can define is as many as it can.
-    p.feed(answer("\x1b[?1;0;1024S"), 0);
+    p.feed(answer("\x1b[?1;0;1024S"), ms(0));
     try testing.expectEqual(@as(u16, 256), p.caps.sixel_registers);
     // A refusal says nothing about the number.
-    p.feed(answer("\x1b[?1;3;0S"), 0);
+    p.feed(answer("\x1b[?1;3;0S"), ms(0));
     try testing.expectEqual(@as(u16, 256), p.caps.sixel_registers);
-    p.feed(answer("\x1b[?2;0;1000;800S"), 0);
+    p.feed(answer("\x1b[?2;0;1000;800S"), ms(0));
     try testing.expectEqual(@as(u32, 1000), p.caps.sixel_max_width);
     try testing.expectEqual(@as(u32, 800), p.caps.sixel_max_height);
     try testing.expect(p.hasAnswered(.sixel_registers) and p.hasAnswered(.sixel_geometry));
 
-    p.feed(answer("\x1b[?8452;2$y"), 0);
+    p.feed(answer("\x1b[?8452;2$y"), ms(0));
     try testing.expect(p.caps.sixel_cursor_right);
-    p.feed(answer("\x1b[?8452;0$y"), 0);
+    p.feed(answer("\x1b[?8452;0$y"), ms(0));
     try testing.expect(!p.caps.sixel_cursor_right);
 }
 
 test "iTerm2's images are a terminal calling itself iTerm2, and nothing else" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1bP>|WezTerm 20240203-110809-5046fc22\x1b\\"), 0);
+    p.feed(answer("\x1bP>|WezTerm 20240203-110809-5046fc22\x1b\\"), ms(0));
     try testing.expect(!p.caps.iterm_images);
-    p.feed(answer("\x1bP>|iTerm2X 1.0\x1b\\"), 0);
+    p.feed(answer("\x1bP>|iTerm2X 1.0\x1b\\"), ms(0));
     try testing.expect(!p.caps.iterm_images);
-    p.feed(answer("\x1bP>|iTerm2 3.5.4\x1b\\"), 0);
+    p.feed(answer("\x1bP>|iTerm2 3.5.4\x1b\\"), ms(0));
     try testing.expect(p.caps.iterm_images);
     try testing.expectEqual(Caps.Pictures.iterm, p.caps.pictures());
 }
@@ -653,7 +654,7 @@ test "picture probe replies stay within the register bound under arbitrary input
             var p: Caps.Probe = .init(.{ .graphics_id = 1 });
             var bytes: [512]u8 = undefined;
             const n = smith.slice(&bytes);
-            p.feed(answer(bytes[0..n]), 0);
+            p.feed(answer(bytes[0..n]), ms(0));
             const caps = p.capabilities();
             try testing.expect(caps.sixel_registers >= 2 and caps.sixel_registers <= morse.sixel_palette_max);
             // The reply parser and question ownership stay with morse;
@@ -665,13 +666,13 @@ test "picture probe replies stay within the register bound under arbitrary input
 
 test "a colour count arriving after DA1 extends the quiet period" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-    p.feed(answer("\x1b[?62;4;22c"), 100);
-    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), 140);
+    p.feed(answer("\x1b[?62;4;22c"), ms(100));
+    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), ms(140));
     try testing.expect(p.hasAnswered(.color_count));
     try testing.expectEqual(@as(?u32, 16), p.capabilities().colors);
     try testing.expectEqual(morse.Color.Profile.ansi, p.capabilities().colorProfile());
-    try testing.expect(!p.settled(150, 50));
-    try testing.expect(p.settled(190, 50));
+    try testing.expect(!p.settled(ms(150), .fromMilliseconds(50)));
+    try testing.expect(p.settled(ms(190), .fromMilliseconds(50)));
 }
 
 test "a refused or invalid colour count leaves the count unknown" {
@@ -682,19 +683,24 @@ test "a refused or invalid colour count leaves the count unknown" {
         "\x1bP1+r436f=34323934393637323936\x1b\\",
     }) |bytes| {
         var p: Caps.Probe = .init(.{ .graphics_id = 1 });
-        p.feed(answer(bytes), 10);
+        p.feed(answer(bytes), ms(10));
         try testing.expect(p.hasAnswered(.color_count));
         try testing.expectEqual(@as(?u32, null), p.capabilities().colors);
-        try testing.expectEqual(@as(?i64, 10), p.lastAnswerMs());
+        try testing.expectEqual(@as(?std.Io.Timestamp, ms(10)), p.lastAnswer());
     }
 }
 
 test "a disabled colour count changes neither caps nor quiet time" {
     var p: Caps.Probe = .init(.{ .graphics_id = 1, .color_count = false });
-    p.feed(answer("\x1b[?62;4;22c"), 100);
-    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), 140);
+    p.feed(answer("\x1b[?62;4;22c"), ms(100));
+    p.feed(answer("\x1bP1+r436f=3136\x1b\\"), ms(140));
     try testing.expect(!p.hasAnswered(.color_count));
     try testing.expectEqual(@as(?u32, null), p.capabilities().colors);
-    try testing.expectEqual(@as(?i64, 100), p.lastAnswerMs());
-    try testing.expect(p.settled(150, 50));
+    try testing.expectEqual(@as(?std.Io.Timestamp, ms(100)), p.lastAnswer());
+    try testing.expect(p.settled(ms(150), .fromMilliseconds(50)));
+}
+
+/// A test's clock reading, in milliseconds.
+fn ms(n: i64) std.Io.Timestamp {
+    return .{ .nanoseconds = @as(i96, n) * std.time.ns_per_ms };
 }

@@ -21,9 +21,6 @@
 /// widgets has the grid, the window and the styles without a second import.
 pub const visor = @import("visor");
 
-/// The version of this module, which is the version of the package.
-pub const version = visor.version;
-
 /// What every widget's `draw` can fail with, `visor.DrawError`.
 pub const DrawError = visor.DrawError;
 

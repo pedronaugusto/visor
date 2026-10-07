@@ -27,8 +27,9 @@ pub const Span = struct {
 };
 
 /// The dirty map: per row, the first and last column touched.
-/// Unmanaged allocation: pass the init allocator to resize and deinit.
 pub const Damage = struct {
+    /// Private: the allocator `init` was given, which `resize` and `deinit` use.
+    gpa: std.mem.Allocator,
     /// Private: one entry a row. `first > last` means the row is clean.
     rows: []Entry,
     /// Private: dirty rows, kept by the same operations that widen their spans.
@@ -50,21 +51,21 @@ pub const Damage = struct {
     pub fn init(gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!Damage {
         const entries = try gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        return .{ .rows = entries };
+        return .{ .gpa = gpa, .rows = entries };
     }
 
     /// Gives the map back.
-    pub fn deinit(d: *Damage, gpa: std.mem.Allocator) void {
-        gpa.free(d.rows);
+    pub fn deinit(d: *Damage) void {
+        d.gpa.free(d.rows);
         d.* = undefined;
     }
 
     /// A map for a new number of rows. Everything becomes clean; the caller
     /// damages what it means to keep.
-    pub fn resize(d: *Damage, gpa: std.mem.Allocator, rows: u16) std.mem.Allocator.Error!void {
-        const entries = try gpa.alloc(Entry, rows);
+    pub fn resize(d: *Damage, rows: u16) std.mem.Allocator.Error!void {
+        const entries = try d.gpa.alloc(Entry, rows);
         @memset(entries, .{});
-        gpa.free(d.rows);
+        d.gpa.free(d.rows);
         d.rows = entries;
         d.dirty = 0;
     }
@@ -137,7 +138,7 @@ const testing = std.testing;
 
 test "a fresh map is clean" {
     var d: Damage = try .init(testing.allocator, 4);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     for (0..4) |r| try testing.expectEqual(@as(?Span, null), d.row(@intCast(r)));
     try testing.expect(!d.any());
     try testing.expectEqual(@as(usize, 0), d.count());
@@ -145,7 +146,7 @@ test "a fresh map is clean" {
 
 test "a mark widens the span in both directions" {
     var d: Damage = try .init(testing.allocator, 4);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
 
     d.mark(7, 1);
     try testing.expectEqual(Span{ .first = 7, .last = 7 }, d.row(1).?);
@@ -159,7 +160,7 @@ test "a mark widens the span in both directions" {
 
 test "a mark at column zero is not mistaken for a clean row" {
     var d: Damage = try .init(testing.allocator, 2);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.mark(0, 0);
     try testing.expectEqual(Span{ .first = 0, .last = 0 }, d.row(0).?);
     try testing.expect(d.any());
@@ -167,7 +168,7 @@ test "a mark at column zero is not mistaken for a clean row" {
 
 test "a span marks both ends at once" {
     var d: Damage = try .init(testing.allocator, 2);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.markSpan(3, 5, 0);
     try testing.expectEqual(Span{ .first = 3, .last = 5 }, d.row(0).?);
     d.markSpan(9, 2, 0);
@@ -176,7 +177,7 @@ test "a span marks both ends at once" {
 
 test "everything, then nothing" {
     var d: Damage = try .init(testing.allocator, 3);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.markAll(10);
     try testing.expectEqual(@as(usize, 3), d.count());
     try testing.expectEqual(Span{ .first = 0, .last = 9 }, d.row(2).?);
@@ -186,7 +187,7 @@ test "everything, then nothing" {
 
 test "a mark outside the map is dropped rather than a crash" {
     var d: Damage = try .init(testing.allocator, 2);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.mark(0, 9);
     d.markSpan(0, 1, 9);
     try testing.expect(!d.any());
@@ -195,16 +196,16 @@ test "a mark outside the map is dropped rather than a crash" {
 
 test "a resized map is clean and the right length" {
     var d: Damage = try .init(testing.allocator, 2);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.markAll(4);
-    try d.resize(testing.allocator, 5);
+    try d.resize(5);
     try testing.expectEqual(@as(usize, 5), d.rowCount());
     try testing.expect(!d.any());
 }
 
 test "dirty counts follow repeated marks, clears and resizes" {
     var d: Damage = try .init(testing.allocator, 4);
-    defer d.deinit(testing.allocator);
+    defer d.deinit();
     d.mark(std.math.maxInt(u16), 3);
     d.mark(1, 3);
     d.markSpan(2, 7, 3);
@@ -223,10 +224,10 @@ test "dirty counts follow repeated marks, clears and resizes" {
     try testing.expect(!d.any());
     for (0..4) |row_n| try testing.expect(d.row(@intCast(row_n)) == null);
     d.mark(0, 0);
-    try d.resize(testing.allocator, 0);
+    try d.resize(0);
     d.markAll(8);
     try testing.expectEqual(@as(usize, 0), d.count());
-    try d.resize(testing.allocator, 2);
+    try d.resize(2);
     d.markAll(8);
     d.markAll(0);
     try testing.expect(!d.any());

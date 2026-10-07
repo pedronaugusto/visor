@@ -15,7 +15,7 @@ pub const Paint = struct {
 /// Owned RGBA storage. Borrow pixels until resize or deinit; drawing never reallocates.
 pub const Surface = struct {
     /// Private.
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     /// Private.
     width: u32,
     /// Private.
@@ -23,11 +23,17 @@ pub const Surface = struct {
     /// Private.
     own_pixels: []u8,
 
-    pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) (std.mem.Allocator.Error || error{InvalidSize})!Surface {
+    /// What `init` and `resize` fail with: memory, or a size that is zero or
+    /// too many bytes to address.
+    pub const InitError = std.mem.Allocator.Error || error{InvalidSize};
+    /// The same as `InitError`.
+    pub const ResizeError = InitError;
+
+    pub fn init(gpa: std.mem.Allocator, width: u32, height: u32) InitError!Surface {
         if (width == 0 or height == 0 or @as(u64, width) * height > std.math.maxInt(usize) / 4) return error.InvalidSize;
-        const storage = try allocator.alloc(u8, @as(usize, width) * height * 4);
+        const storage = try gpa.alloc(u8, @as(usize, width) * height * 4);
         @memset(storage, 0);
-        return .{ .allocator = allocator, .width = width, .height = height, .own_pixels = storage };
+        return .{ .gpa = gpa, .width = width, .height = height, .own_pixels = storage };
     }
 
     /// Dimensions copied from the geometry this allocation owns.
@@ -48,15 +54,15 @@ pub const Surface = struct {
 
     /// Replaces geometry and storage together with a cleared surface.
     /// An unchanged size keeps pixels and borrows; failure leaves them intact.
-    pub fn resize(s: *Surface, width: u32, height: u32) (std.mem.Allocator.Error || error{InvalidSize})!void {
+    pub fn resize(s: *Surface, width: u32, height: u32) ResizeError!void {
         if (s.width == width and s.height == height) return;
-        const prepared = try Surface.init(s.allocator, width, height);
-        s.allocator.free(s.own_pixels);
+        const prepared = try Surface.init(s.gpa, width, height);
+        s.gpa.free(s.own_pixels);
         s.* = prepared;
     }
 
     pub fn deinit(s: *Surface) void {
-        s.allocator.free(s.own_pixels);
+        s.gpa.free(s.own_pixels);
         s.* = undefined;
     }
 

@@ -279,5 +279,5 @@ fn show(
     try visor.expectScreensEqual(screen, term.screen());
 
     try report.print("\n{s} — {d} bytes, {d} cells in {d} runs\n", .{ what, stats.bytes, stats.cells, stats.runs });
-    try visor.dumpScreen(term.screen(), report);
+    try visor.dumpScreen(term.screen(), report, .{});
 }

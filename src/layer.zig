@@ -58,8 +58,8 @@ pub const Image = struct {
     height: u32 = 0,
     /// Whether the terminal has it.
     state: State = .ready,
-    /// When it was sent, on the caller's clock, in milliseconds.
-    sent_ms: i64 = 0,
+    /// When it was sent, on the caller's clock.
+    sent: std.Io.Timestamp = .zero,
     /// The name it was sent through, until the terminal answers. This is
     /// diagnostic metadata; Layers keeps the cleanup owner privately.
     shm: ?shm.Name = null,
@@ -187,8 +187,8 @@ pub const Transmit = struct {
     /// for the word rather than assume it. Off, the image is sent quietly
     /// and is ready at once.
     answer: bool = false,
-    /// The caller's clock, in milliseconds, for `ready`'s grace period.
-    now_ms: i64 = 0,
+    /// The caller's clock, for `ready`'s grace period.
+    now: std.Io.Timestamp = .zero,
 };
 
 /// Rotating image ids in an inclusive range, shared by any number of
@@ -204,13 +204,21 @@ pub const ImageIds = struct {
     /// Private.
     next: u32,
 
-    pub fn init(first: u32, last: u32, graphics_id: u32) error{InvalidIdRange}!ImageIds {
+    /// What `init` refuses: a range that is empty, starts at zero, or is
+    /// only the graphics id.
+    pub const InitError = error{InvalidIdRange};
+
+    /// Ids from `first` to `last`, never handing out `graphics_id`.
+    pub fn init(first: u32, last: u32, graphics_id: u32) InitError!ImageIds {
         if (first == 0 or first > last or (first == last and first == graphics_id)) return error.InvalidIdRange;
         return .{ .first = first, .last = last, .graphics_id = graphics_id, .next = first };
     }
 
+    /// What `acquire` fails with: every id in the range is taken.
+    pub const AcquireError = error{NoImageId};
+
     /// A free id, or `NoImageId` while the range is wholly occupied.
-    pub fn acquire(ids: *ImageIds, layers: *const Layers) error{NoImageId}!u32 {
+    pub fn acquire(ids: *ImageIds, layers: *const Layers) AcquireError!u32 {
         const start = ids.next;
         while (true) {
             const id = ids.next;
@@ -274,13 +282,13 @@ pub const Replacement = struct {
     /// placement. Returns true while a pending image still needs a reply.
     /// Refusals retain a usable current picture and set takeDirty.
     /// On allocation failure, current and pending ownership stay unchanged.
-    pub fn settle(p: *Replacement, layers: *Layers, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
+    pub fn settle(p: *Replacement, layers: *Layers, now: std.Io.Timestamp, grace: std.Io.Duration) Allocator.Error!bool {
         // Reserve every retirement before changing either ownership slot.
         const current_failed = if (p.own_current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
         const reserve: usize = if (p.own_pending != null) 1 + @as(usize, @intFromBool(p.own_current != null)) else @intFromBool(current_failed);
         try layers.retired.ensureUnusedCapacity(layers.gpa, reserve);
         if (p.own_pending) |id| {
-            const ready = layers.ready(id, now_ms, grace_ms);
+            const ready = layers.ready(id, now, grace);
             const failed = if (layers.image(id)) |img| img.state == .failed else true;
             if (failed) {
                 try layers.retire(id);
@@ -307,11 +315,11 @@ pub const Replacement = struct {
     /// while a pending image needs another frame. A null want leaves
     /// ownership unsettled and makes no declaration; use settle explicitly
     /// to advance hidden pictures.
-    pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now_ms: i64, grace_ms: i64) Allocator.Error!bool {
+    pub fn declare(p: *Replacement, layers: *Layers, want: ?Layer, now: std.Io.Timestamp, grace: std.Io.Duration) Allocator.Error!bool {
         var at = want orelse return p.own_pending != null;
         // A declaration must be able to commit after ownership changes.
         try layers.declared.ensureUnusedCapacity(layers.gpa, 1);
-        const waiting = try p.settle(layers, now_ms, grace_ms);
+        const waiting = try p.settle(layers, now, grace);
         if (p.own_current) |id| {
             at.image = id;
             try layers.declare(at);
@@ -426,11 +434,15 @@ pub const Layers = struct {
         l.size = size;
     }
 
+    /// What `storeSixel` fails with: memory, or pixels that do not fit
+    /// their size or name no palette entry.
+    pub const StoreSixelError = Allocator.Error || error{InvalidImage};
+
     /// Retains a copy of pixels and palette for a sixel picture. No bytes
     /// are written until the frame places it. Indexed pixels must name a
     /// palette entry (or the transparent index). Invalid input is rejected
     /// before changing the image. The palette is the caller's, as in morse.
-    pub fn storeSixel(l: *Layers, id: u32, image_data: morse.Sixel) (Allocator.Error || error{InvalidImage})!void {
+    pub fn storeSixel(l: *Layers, id: u32, image_data: morse.Sixel) StoreSixelError!void {
         const pixel_count = std.math.mul(usize, image_data.width, image_data.height) catch return error.InvalidImage;
         const channels: usize = if (image_data.pixels == .rgba) 4 else 1;
         const len = std.math.mul(usize, pixel_count, channels) catch return error.InvalidImage;
@@ -554,6 +566,10 @@ pub const Layers = struct {
         return null;
     }
 
+    /// What `transmit` fails with: the writer, memory, or a shared-memory
+    /// payload past the protocol's u32 size.
+    pub const TransmitError = Writer.Error || Allocator.Error || error{PayloadTooLarge};
+
     /// Sends an image under `id`: through shared memory where that is
     /// allowed and the terminal takes it (`configureSharedMemory`), else chunked
     /// in the escape code, deflated when that helps; quiet unless an
@@ -579,7 +595,7 @@ pub const Layers = struct {
         id: u32,
         pixels: []const u8,
         how: Transmit,
-    ) (Writer.Error || Allocator.Error || error{PayloadTooLarge})!usize {
+    ) TransmitError!usize {
         const gpa = l.gpa;
         if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(w, sm, id, pixels, how)) |n| return n;
@@ -613,7 +629,7 @@ pub const Layers = struct {
             .width = how.width,
             .height = how.height,
             .state = if (how.answer) .loading else .ready,
-            .sent_ms = how.now_ms,
+            .sent = how.now,
         });
 
         errdefer l.find(id).?.state = .failed;
@@ -665,7 +681,7 @@ pub const Layers = struct {
             .width = how.width,
             .height = how.height,
             .state = if (how.answer or trying) .loading else .ready,
-            .sent_ms = how.now_ms,
+            .sent = how.now,
             .shm = object.name,
         });
         l.shared_objects.appendAssumeCapacity(object);
@@ -718,14 +734,14 @@ pub const Layers = struct {
     /// Whether the terminal has the image, so a layer can show it.
     ///
     /// An image sent quietly is ready at once. A direct transmission asking for an answer
-    /// is ready when the answer says so, or when `grace_ms` has passed on
+    /// is ready when the answer says so, or when `grace` has passed on
     /// the caller's clock since it went — and a terminal that lets the grace
     /// period run out without ever having answered is taken to be one that
     /// never answers, so later direct transmissions are not waited for.
     /// A shared-memory trial needs its own answer: silence refuses the image
     /// and releases its object. A refused image is
     /// not ready; send it again.
-    pub fn ready(l: *Layers, id: u32, now_ms: i64, grace_ms: i64) bool {
+    pub fn ready(l: *Layers, id: u32, now: std.Io.Timestamp, grace: std.Io.Duration) bool {
         const held = l.find(id) orelse return false;
         switch (held.state) {
             .ready => return true,
@@ -738,7 +754,7 @@ pub const Layers = struct {
                     held.state = .ready;
                     return true;
                 }
-                if (now_ms -| held.sent_ms < grace_ms) return false;
+                if (now.nanoseconds -| held.sent.nanoseconds < grace.nanoseconds) return false;
                 // A picture in shared memory is not taken on trust: a
                 // terminal that never said it read one is one that is
                 // not given another, and this one is sent again.
@@ -775,11 +791,11 @@ pub const Layers = struct {
         }
     }
 
-    /// Frees an image: its pixels and every placement of it, in the
+    /// Deletes an image: its pixels and every placement of it, in the
     /// terminal and here. What a program does with a picture it is finished
     /// with, so the terminal's memory and this list stay as small as what
     /// is alive.
-    pub fn free(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
+    pub fn deleteImage(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
         if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
         var i: usize = 0;
         while (i < l.own_images.items.len) {
@@ -806,9 +822,9 @@ pub const Layers = struct {
         try l.retired.append(gpa, id);
     }
 
-    /// Frees every image. What a program writes on the way out.
-    pub fn freeAll(l: *Layers, w: *Writer) Writer.Error!void {
-        while (l.own_images.items.len > 0) try l.free(w, l.own_images.items[l.own_images.items.len - 1].id);
+    /// Deletes every image. What a program writes on the way out.
+    pub fn deleteAll(l: *Layers, w: *Writer) Writer.Error!void {
+        while (l.own_images.items.len > 0) try l.deleteImage(w, l.own_images.items[l.own_images.items.len - 1].id);
         l.shown.clearRetainingCapacity();
         l.declared.clearRetainingCapacity();
     }
@@ -938,7 +954,7 @@ pub const Layers = struct {
                 i += 1;
                 continue;
             }
-            try l.free(w, id);
+            try l.deleteImage(w, id);
             freed += 1;
         }
         l.replace_all = false;

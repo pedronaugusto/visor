@@ -868,7 +868,7 @@ const PictureRun = struct {
                     .width = 2,
                     .height = 2,
                     .answer = dice.value(bool),
-                    .now_ms = @intCast(run.frames * 16),
+                    .now = ms(@intCast(run.frames * 16)),
                 });
                 try run.resent.append(run.gpa, id);
             },
@@ -881,7 +881,7 @@ const PictureRun = struct {
             // left for the frame to delete.
             2 => {
                 const id = dice.valueRangeAtMost(u32, 1, 4);
-                try layers.free(&run.side.writer, id);
+                try layers.deleteImage(&run.side.writer, id);
                 try run.resent.append(run.gpa, id);
                 var i: usize = 0;
                 while (i < run.showing.items.len) {
@@ -1107,4 +1107,9 @@ test "a frame the damage map named but nothing changed in writes nothing at all"
     h.out.clearRetainingCapacity();
     const after = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
     try testing.expectEqual(@as(usize, 0), after.bytes);
+}
+
+/// A test's clock reading, in milliseconds.
+fn ms(n: i64) std.Io.Timestamp {
+    return .{ .nanoseconds = @as(i96, n) * std.time.ns_per_ms };
 }

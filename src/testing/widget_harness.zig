@@ -86,7 +86,7 @@ pub const Harness = struct {
         try testing.expectEqual(@as(usize, 0), again.bytes);
 
         h.text.clearRetainingCapacity();
-        try visor.dumpScreen(h.term.screen(), &h.text.writer);
+        try visor.dumpScreen(h.term.screen(), &h.text.writer, .{});
         return h.text.written();
     }
 

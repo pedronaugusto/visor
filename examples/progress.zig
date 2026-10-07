@@ -140,7 +140,7 @@ fn frame(
 fn show(gpa: std.mem.Allocator, report: *std.Io.Writer, term: *const visor.Term, what: []const u8, stats: ?visor.Renderer.Stats) !void {
     var text: std.Io.Writer.Allocating = .init(gpa);
     defer text.deinit();
-    try visor.dumpScreen(term.screen(), &text.writer);
+    try visor.dumpScreen(term.screen(), &text.writer, .{});
     if (stats) |s| {
         try report.print("\n{s} — {d} bytes, {d} cells in {d} runs, {d} repeated\n", .{
             what, s.bytes, s.cells, s.runs, s.repeated,

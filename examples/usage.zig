@@ -102,7 +102,7 @@ pub fn main(init: std.process.Init) !void {
 
     // The grid as text, one row a line, for a golden file or a failing
     // test to be read from.
-    try visor.dumpScreen(term.screen(), report);
+    try visor.dumpScreen(term.screen(), report, .{});
 
     // Every sequence visor writes comes from morse, which it re-exports
     // whole: one fetch, and everything under the grid is reachable.

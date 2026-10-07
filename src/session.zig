@@ -12,27 +12,35 @@ const winsize = @import("winsize.zig");
 const Winsize = winsize.Winsize;
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const Io = std.Io;
 
-/// A probe's wait budget on the caller's clock, in milliseconds. No read,
-/// clock or queue is owned here. Hand early input to the application, and
-/// fold answers into the session before asking for the next wait.
+/// A probe's wait budget on the caller's clock. No read, clock or queue is
+/// owned here. Hand early input to the application, and fold answers into
+/// the session before asking for the next wait.
 pub const ProbeWait = struct {
-    end_ms: i64,
-    quiet_ms: i64,
+    /// Private: when the whole probe gives up.
+    end: Io.Timestamp,
+    /// Private: how long after the last answer the probe counts as settled.
+    quiet: Io.Duration,
 
-    pub fn init(now_ms: i64, timeout_ms: i64, quiet_ms: i64) ProbeWait {
-        return .{ .end_ms = now_ms +| @max(timeout_ms, 0), .quiet_ms = @max(quiet_ms, 0) };
+    /// A wait from `now` that gives up after `timeout`, and settles once the
+    /// device attributes are in and `quiet` passes with nothing more.
+    pub fn init(now: Io.Timestamp, timeout: Io.Duration, quiet: Io.Duration) ProbeWait {
+        return .{
+            .end = .{ .nanoseconds = now.nanoseconds +| @max(timeout.nanoseconds, 0) },
+            .quiet = .{ .nanoseconds = @max(quiet.nanoseconds, 0) },
+        };
     }
 
     /// The next read's budget, or null once complete, quiet after DA1, or
     /// at the overall deadline. DA1 alone does not end the probe.
-    pub fn remaining(wait: ProbeWait, probe: *const Caps.Probe, now_ms: i64) ?i64 {
-        if (now_ms >= wait.end_ms or probe.settled(now_ms, wait.quiet_ms)) return null;
+    pub fn remaining(wait: ProbeWait, probe: *const Caps.Probe, now: Io.Timestamp) ?Io.Duration {
+        if (now.nanoseconds >= wait.end.nanoseconds or probe.settled(now, wait.quiet)) return null;
         const until = if (probe.hasAnswered(.device_attributes))
-            @min(wait.end_ms, (probe.lastAnswerMs() orelse now_ms) +| wait.quiet_ms)
+            @min(wait.end.nanoseconds, (probe.lastAnswer() orelse now).nanoseconds +| wait.quiet.nanoseconds)
         else
-            wait.end_ms;
-        return @max(until -| now_ms, 0);
+            wait.end.nanoseconds;
+        return .{ .nanoseconds = @max(until -| now.nanoseconds, 0) };
     }
 };
 
@@ -159,23 +167,23 @@ pub const Session = struct {
 
     /// Frees pictures and gives the screen back. Raw mode is the caller's.
     pub fn leave(s: *Session, w: *Writer) Error!void {
-        try s.own_layers.freeAll(w);
+        try s.own_layers.deleteAll(w);
         try s.own_renderer.leave(w);
     }
 
     /// Folds terminal housekeeping in, returning whether another frame is
     /// due. Size reports are coalesced until `resize`; caps and graphics
     /// replies are applied now. Keys, text and application policy stay with
-    /// the caller. `now_ms` comes from the caller's clock for the probe.
+    /// the caller. `now` comes from the caller's clock for the probe.
     /// A probe answer changes only the capabilities it changed in the probe:
     /// every other field of the policy -- whatever the caller set through
     /// `setCaps`, such as `osc8` or a colour guess -- is kept, however late
     /// the answer arrives.
     /// Housekeeping is retained even when capability output fails; the next
     /// event retries that output without replaying the consumed input.
-    pub fn handle(s: *Session, w: *Writer, event: morse.Event, now_ms: i64) Error!bool {
+    pub fn handle(s: *Session, w: *Writer, event: morse.Event, now: Io.Timestamp) Error!bool {
         const was = s.own_probe.capabilities();
-        s.own_probe.feed(event, now_ms);
+        s.own_probe.feed(event, now);
         const learned = s.own_probe.capabilities();
         if (!std.meta.eql(was, learned)) s.pending_caps = merged(s.pending_caps orelse s.caps, was, learned);
         // Consume the input before writing: the terminal cannot replay a
@@ -269,8 +277,8 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
     defer s.deinit();
     var out: Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 10, .rows = 4 } }, 0));
-    try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 12, .rows = 5 } }, 1));
+    try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 10, .rows = 4 } }, ms(0)));
+    try testing.expect(try s.handle(&out.writer, .{ .resize = .{ .cols = 12, .rows = 5 } }, ms(1)));
     try testing.expectEqual(@as(u16, 8), s.own_screen.dimensions().cols);
     try testing.expectEqual(@as(usize, 0), out.written().len);
     try testing.expect(try s.resize(&out.writer));
@@ -281,7 +289,7 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
     try testing.expectEqualStrings("\x1b[16t", out.written());
     try testing.expect(!try s.resize(&out.writer));
     out.clearRetainingCapacity();
-    try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[8;6;14t").? }, 2));
+    try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[8;6;14t").? }, ms(2)));
     _ = try s.resize(&out.writer);
     try testing.expectEqual(@as(u16, 14), s.own_screen.dimensions().cols);
     try testing.expectEqual(s.own_screen.dimensions(), s.own_renderer.dimensions());
@@ -300,7 +308,7 @@ test "a session repaints an unchanged in-band size, including pictures" {
     try s.own_layers.declare(layer);
     _ = try s.draw(&out.writer);
     out.clearRetainingCapacity();
-    _ = try s.handle(&out.writer, .{ .resize = .{ .cols = 8, .rows = 3 } }, 1);
+    _ = try s.handle(&out.writer, .{ .resize = .{ .cols = 8, .rows = 3 } }, ms(1));
     try testing.expect(try s.resize(&out.writer));
     try testing.expectEqualStrings("\x1b[16t", out.written());
     try s.own_layers.declare(layer);
@@ -326,7 +334,7 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
     try s.setModes(&out.writer, &parser, .{});
     try testing.expect(!parser.mouse_pixels);
     out.clearRetainingCapacity();
-    try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 0));
+    try testing.expect(try s.handle(&out.writer, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, ms(0)));
     try testing.expectEqualStrings("\x1b[?2048h", out.written());
     try testing.expect(s.own_renderer.entered().?.in_band_resize);
     try s.leave(&out.writer);
@@ -360,17 +368,17 @@ test "a second session entry preserves pixel mouse parsing" {
 
 test "the probe wait keeps DA1 quiet time and the overall deadline on caller time" {
     var probe: Caps.Probe = .init(.{ .graphics_id = 1 });
-    const wait = ProbeWait.init(1000, 500, 50);
-    try testing.expectEqual(@as(?i64, 500), wait.remaining(&probe, 1000));
-    probe.feed(.{ .reply = morse.Reply.parse("\x1b[?62c").? }, 1010);
-    try testing.expectEqual(@as(?i64, 40), wait.remaining(&probe, 1020));
-    probe.feed(.{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 1040);
-    try testing.expectEqual(@as(?i64, 40), wait.remaining(&probe, 1050));
-    try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1090));
+    const wait = ProbeWait.init(ms(1000), .fromMilliseconds(500), .fromMilliseconds(50));
+    try testing.expectEqual(@as(?std.Io.Duration, .fromMilliseconds(500)), wait.remaining(&probe, ms(1000)));
+    probe.feed(.{ .reply = morse.Reply.parse("\x1b[?62c").? }, ms(1010));
+    try testing.expectEqual(@as(?std.Io.Duration, .fromMilliseconds(40)), wait.remaining(&probe, ms(1020)));
+    probe.feed(.{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, ms(1040));
+    try testing.expectEqual(@as(?std.Io.Duration, .fromMilliseconds(40)), wait.remaining(&probe, ms(1050)));
+    try testing.expectEqual(@as(?std.Io.Duration, null), wait.remaining(&probe, ms(1090)));
     probe.answered = .empty;
-    try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1500));
+    try testing.expectEqual(@as(?std.Io.Duration, null), wait.remaining(&probe, ms(1500)));
     probe.answered = .full;
-    try testing.expectEqual(@as(?i64, null), wait.remaining(&probe, 1000));
+    try testing.expectEqual(@as(?std.Io.Duration, null), wait.remaining(&probe, ms(1000)));
 }
 
 test "a failed session resize keeps both grids and their borrowed content together" {
@@ -383,7 +391,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
             try s.own_screen.write(0, 0, "a\u{301}\u{302}\u{303}", .{}, link);
             var sink: Writer.Discarding = .init(&.{});
             _ = try s.draw(&sink.writer);
-            _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, 0);
+            _ = try s.handle(&sink.writer, .{ .resize = .{ .cols = 5, .rows = 2 } }, ms(0));
             const size = s.own_screen.dimensions();
             const generation = s.own_screen.pool_generation;
             const cells = s.own_screen.own_cells;
@@ -434,18 +442,18 @@ test "a session retries learned capabilities after failed output" {
     try s.renderer().enter(&out, .{}, .alt, .{});
     var refused: Writer = .fixed(&.{});
     const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
-    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
+    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, ms(10)));
     try testing.expect(s.probe().capabilities().in_band_resize);
     try testing.expect(!s.capabilities().in_band_resize);
     out.end = 0;
-    try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, 11));
+    try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, ms(11)));
     try testing.expect(s.capabilities().in_band_resize);
     try testing.expectEqualStrings("\x1b[?2048h", out.buffered());
     var policy = s.capabilities();
     policy.osc8 = true;
     _ = try s.setCaps(&out, policy);
     out.end = 0;
-    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 12));
+    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, ms(12)));
     try testing.expect(s.capabilities().osc8);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
@@ -467,12 +475,12 @@ test "session housekeeping survives failed capability output" {
         _ = try s.layers().transmit(&out, 2, &.{ 0, 0, 0, 255 }, .{ .width = 1, .height = 1, .answer = true });
         var refused: Writer = .fixed(&.{});
         const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
-        try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
-        try testing.expectError(error.WriteFailed, s.handle(&refused, event, 11));
+        try testing.expectError(error.WriteFailed, s.handle(&refused, answer, ms(10)));
+        try testing.expectError(error.WriteFailed, s.handle(&refused, event, ms(11)));
 
         // Output recovers on another event; the consumed input is not replayed.
         out.end = 0;
-        try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, 12));
+        try testing.expect(try s.handle(&out, .{ .key = .{ .key = .escape } }, ms(12)));
         _ = try s.resize(&out);
         switch (event) {
             .resize => {
@@ -503,12 +511,12 @@ test "session policy can cancel pending learned capabilities at the current valu
     try s.renderer().enter(&out, .{}, .alt, .{});
     var refused: Writer = .fixed(&.{});
     const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
-    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, 10));
+    try testing.expectError(error.WriteFailed, s.handle(&refused, answer, ms(10)));
     out.end = 0;
     try testing.expect(!try s.setCaps(&out, s.capabilities()));
     try testing.expectEqualStrings("\x1b[?2048l", out.buffered());
     out.end = 0;
-    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, 11));
+    try testing.expect(!try s.handle(&out, .{ .key = .{ .key = .escape } }, ms(11)));
     try testing.expect(!s.renderer().entered().?.caps.in_band_resize);
     try testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
@@ -524,7 +532,7 @@ test "a late probe answer keeps the caller's capability overrides" {
     policy.rep = true;
     _ = try s.setCaps(&out, policy);
     const answer: morse.Event = .{ .reply = morse.Reply.parse("\x1b[?2026;1$y").? };
-    try testing.expect(try s.handle(&out, answer, 5));
+    try testing.expect(try s.handle(&out, answer, ms(5)));
     const caps = s.capabilities();
     try testing.expect(caps.sync);
     try testing.expect(caps.osc8);
@@ -535,9 +543,9 @@ test "a late probe answer keeps the caller's capability overrides" {
     policy = s.capabilities();
     policy.sync = false;
     _ = try s.setCaps(&out, policy);
-    try testing.expect(!try s.handle(&out, answer, 6));
+    try testing.expect(!try s.handle(&out, answer, ms(6)));
     try testing.expect(!s.capabilities().sync);
-    try testing.expect(try s.handle(&out, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, 7));
+    try testing.expect(try s.handle(&out, .{ .reply = morse.Reply.parse("\x1b[?2048;2$y").? }, ms(7)));
     try testing.expect(s.capabilities().in_band_resize);
     try testing.expect(!s.capabilities().sync);
     try testing.expect(s.capabilities().osc8);
@@ -545,4 +553,9 @@ test "a late probe answer keeps the caller's capability overrides" {
 
 test "a session is small enough to return and hold by value" {
     try testing.expect(@sizeOf(Session) < 4096);
+}
+
+/// A test's clock reading, in milliseconds.
+fn ms(n: i64) std.Io.Timestamp {
+    return .{ .nanoseconds = @as(i96, n) * std.time.ns_per_ms };
 }

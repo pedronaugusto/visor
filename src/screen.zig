@@ -59,7 +59,7 @@ pub const Cursor = struct {
 
 // Cooperation inside the package; this namespace is not exported by visor.
 pub const internal = struct {
-    pub fn printable(text: []const u8, method: textmod.Method) error{InvalidCell}!?[]const u8 {
+    pub fn printable(text: []const u8, method: textmod.Method) Screen.PrintableError!?[]const u8 {
         return Screen.printable(text, method);
     }
     pub fn placeCell(s: *Screen, col: u16, row_n: u16, checked: Cell) void {
@@ -113,6 +113,16 @@ pub const Screen = struct {
     /// What drawing into a screen, or into a window of one, can fail with:
     /// `CellError`, and the allocation interning a new grapheme can need.
     pub const DrawError = Allocator.Error || CellError;
+    /// A pooled handle this screen's pools did not issue, or one a
+    /// compaction or resize has since invalidated.
+    pub const HandleError = error{InvalidHandle};
+    /// Text that is more than one cluster where one cell was asked for.
+    pub const PrintableError = error{InvalidCell};
+    /// What `intern` fails with: memory, or more than 65535 bytes.
+    pub const InternError = Allocator.Error || error{TooLong};
+    /// What `dupeTextOf` fails with.
+    pub const DupeTextError = Allocator.Error || HandleError;
+
     /// What interning a link target can fail with.
     pub const LinkError = Allocator.Error || error{ ControlInText, TooLong };
 
@@ -151,13 +161,13 @@ pub const Screen = struct {
         errdefer gpa.free(cells);
         @memset(cells, .blank(.{}));
         var dmg: Damage = try .init(gpa, size.rows);
-        errdefer dmg.deinit(gpa);
+        errdefer dmg.deinit();
         return .{
             .gpa = gpa,
             .size = size,
             .own_cells = cells,
-            .graphemes = .{},
-            .links = .{},
+            .graphemes = .init(gpa),
+            .links = .init(gpa),
             .pool_generation = pool.nextGeneration(),
             .damage = dmg,
         };
@@ -167,9 +177,9 @@ pub const Screen = struct {
     pub fn deinit(s: *Screen) void {
         const gpa = s.gpa;
         gpa.free(s.own_cells);
-        s.graphemes.deinit(gpa);
-        s.links.deinit(gpa);
-        s.damage.deinit(gpa);
+        s.graphemes.deinit();
+        s.links.deinit();
+        s.damage.deinit();
         s.* = undefined;
     }
 
@@ -197,7 +207,7 @@ pub const Screen = struct {
         errdefer gpa.free(cells);
         @memset(cells, .blank(.{}));
         var damage = try Damage.init(gpa, size.rows);
-        errdefer damage.deinit(gpa);
+        errdefer damage.deinit();
         const rows = @min(s.dimensions().rows, size.rows);
         const cols = @min(s.dimensions().cols, size.cols);
         for (0..rows) |r| {
@@ -210,8 +220,8 @@ pub const Screen = struct {
             .gpa = gpa,
             .size = size,
             .own_cells = cells,
-            .graphemes = .{},
-            .links = .{},
+            .graphemes = .init(gpa),
+            .links = .init(gpa),
             .damage = damage,
         };
         if (size.rows > 0) resized.heal(0, size.rows - 1);
@@ -219,7 +229,7 @@ pub const Screen = struct {
         s.commitPools(cells, prepared, retained);
         gpa.free(s.own_cells);
         s.own_cells = cells;
-        s.damage.deinit(gpa);
+        s.damage.deinit();
         s.damage = resized.damage;
         s.size = size;
         // One cell and one damage span for every place on the new grid.
@@ -262,17 +272,17 @@ pub const Screen = struct {
 
     fn preparePools(s: *const Screen, cells: []const StoredCell, retained: ?*Link) Allocator.Error!PreparedPools {
         const gpa = s.gpa;
-        var graphemes: pool.Graphemes = .{};
-        errdefer graphemes.deinit(gpa);
-        var links: pool.Links = .{};
-        errdefer links.deinit(gpa);
+        var graphemes: pool.Graphemes = .init(gpa);
+        errdefer graphemes.deinit();
+        var links: pool.Links = .init(gpa);
+        errdefer links.deinit();
 
         // Everything the grid still shows, into the new pools. Nothing is
         // written back until this has succeeded, so a failure here leaves
         // the screen exactly as it was.
         for (cells) |*c| {
-            if (c.text.isPooled()) _ = try graphemes.intern(gpa, internal.textOf(s, c));
-            if (internal.target(s, c.link)) |t| _ = try links.intern(gpa, t.uri, t.params);
+            if (c.text.isPooled()) _ = try graphemes.intern(internal.textOf(s, c));
+            if (internal.target(s, c.link)) |t| _ = try links.intern(t.uri, t.params);
         }
         // The emulator's open OSC 8 target is live even before any cell
         // uses it. Prepare its new handle with the grid's, so neither an
@@ -280,13 +290,12 @@ pub const Screen = struct {
         const kept: @TypeOf(@as(StoredCell, .{}).link) = if (retained) |slot| kept: {
             if (slot.* == .none) break :kept .none;
             const link_target = s.target(slot.*) orelse @panic("invalid retained link");
-            break :kept try links.intern(gpa, link_target.uri, link_target.params);
+            break :kept try links.intern(link_target.uri, link_target.params);
         } else .none;
         return .{ .graphemes = graphemes, .links = links, .kept = kept };
     }
 
     fn commitPools(s: *Screen, cells: []StoredCell, prepared: PreparedPools, retained: ?*Link) void {
-        const gpa = s.gpa;
         var graphemes = prepared.graphemes;
         var links = prepared.links;
         // And now the cells, which cannot fail: everything they name is
@@ -294,15 +303,15 @@ pub const Screen = struct {
         for (cells) |*c| {
             if (c.text.isPooled()) {
                 // unreachable: preparePools interned it, so this finds it and allocates nothing
-                c.text = graphemes.intern(gpa, internal.textOf(s, c)) catch unreachable;
+                c.text = graphemes.intern(internal.textOf(s, c)) catch unreachable;
             }
             if (internal.target(s, c.link)) |t| {
                 // unreachable: preparePools interned it, so this finds it and allocates nothing
-                c.link = links.intern(gpa, t.uri, t.params) catch unreachable;
+                c.link = links.intern(t.uri, t.params) catch unreachable;
             }
         }
-        s.graphemes.deinit(gpa);
-        s.links.deinit(gpa);
+        s.graphemes.deinit();
+        s.links.deinit();
         s.graphemes = graphemes;
         s.links = links;
         s.pool_generation = pool.nextGeneration();
@@ -409,7 +418,7 @@ pub const Screen = struct {
     /// checked. The caller guarantees one printable UTF-8 cluster, a valid
     /// shape and canonical text bytes; its width may differ from Screen.method.
     /// Used by terminal bridges that must retain the source terminal's width.
-    pub fn writeOwnedCellUnchecked(s: *Screen, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+    pub fn writeOwnedCellUnchecked(s: *Screen, col: u16, row: u16, c: Cell) HandleError!void {
         _ = try s.textOf(&c);
         if (c.link != .none and s.target(c.link) == null) return error.InvalidHandle;
         s.placeOwnedCell(col, row, cellmod.internal.store(c));
@@ -444,7 +453,7 @@ pub const Screen = struct {
     /// takes no column under `method` -- a combining mark that begins a
     /// segment, a zero-width space -- are skipped. Only text that is more
     /// than one cluster is the caller's mistake, and returns `InvalidCell`.
-    fn printable(text: []const u8, method: textmod.Method) error{InvalidCell}!?[]const u8 {
+    fn printable(text: []const u8, method: textmod.Method) PrintableError!?[]const u8 {
         if (text.len == 0 or text[0] < 0x20 or text[0] == 0x7f) return null;
         const grapheme = valid(text);
         if (grapheme.len == 1 and grapheme[0] < 0x80) return grapheme;
@@ -513,7 +522,7 @@ pub const Screen = struct {
         var put = try validateCell(checked, try source.textOf(&c), s.method);
         if (c.text.isPooled()) put.text = try s.internShort(try source.textOf(&c));
         if (source.target(c.link)) |link_target| {
-            put.link = cellmod.internal.exportLink(try s.links.intern(s.gpa, link_target.uri, link_target.params), s.pool_generation);
+            put.link = cellmod.internal.exportLink(try s.links.intern(link_target.uri, link_target.params), s.pool_generation);
         } else {
             put.link = .none;
         }
@@ -709,13 +718,13 @@ pub const Screen = struct {
     /// A cell using them is validated by `cell` or checked placement.
     /// Pooled handles belong to this generation; compaction and resize invalidate them.
     /// More than 65535 bytes return `TooLong`: a pooled length is sixteen bits.
-    pub fn intern(s: *Screen, bytes: []const u8) (Allocator.Error || error{TooLong})!Cell.Text {
+    pub fn intern(s: *Screen, bytes: []const u8) InternError!Cell.Text {
         if (bytes.len > pool.max_len) return error.TooLong;
         return s.internShort(bytes);
     }
 
     fn internShort(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
-        const t = try s.graphemes.intern(s.gpa, bytes);
+        const t = try s.graphemes.intern(bytes);
         return cellmod.internal.exportCell(&.{ .text = t }, s.pool_generation).text;
     }
 
@@ -734,7 +743,7 @@ pub const Screen = struct {
         try morse.checkText(uri);
         try morse.checkText(params);
         if (uri.len > pool.max_len or params.len > pool.max_len) return error.TooLong;
-        return cellmod.internal.exportLink(try s.links.intern(s.gpa, uri, params), s.pool_generation);
+        return cellmod.internal.exportLink(try s.links.intern(uri, params), s.pool_generation);
     }
 
     /// The bytes of a cell's grapheme, or `InvalidHandle` for stale or foreign text.
@@ -747,7 +756,7 @@ pub const Screen = struct {
     /// them even when this cell is unchanged. Compaction, resize and
     /// deinitialization can also invalidate them. Use `dupeTextOf` to retain
     /// the bytes across drawing.
-    pub fn textOf(s: *const Screen, c: *const Cell) error{InvalidHandle}![]const u8 {
+    pub fn textOf(s: *const Screen, c: *const Cell) HandleError![]const u8 {
         if (!c.text.isPooled()) return c.text.inlineSlice() orelse error.InvalidHandle;
         if (c.text.generation() != s.pool_generation) return error.InvalidHandle;
         const t: StoredCell.Text = .{ .buf = c.text.buf, .len = c.text.len };
@@ -775,7 +784,7 @@ pub const Screen = struct {
 
     /// Copies a cell's text for retention. The caller owns the result and
     /// frees it with `gpa`, which belongs to the copy, not to this screen.
-    pub fn dupeTextOf(s: *const Screen, gpa: Allocator, c: *const Cell) (Allocator.Error || error{InvalidHandle})![]u8 {
+    pub fn dupeTextOf(s: *const Screen, gpa: Allocator, c: *const Cell) DupeTextError![]u8 {
         return gpa.dupe(u8, try s.textOf(c));
     }
 

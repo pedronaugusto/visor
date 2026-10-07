@@ -96,10 +96,15 @@ pub const Canvas = struct {
         picture: ?Picture = null,
     };
 
+    /// What `draw` fails with: drawing into the window, or sending a
+    /// picture -- the writer, memory, a payload too large for shared memory,
+    /// pixels that do not fit their size.
+    pub const DrawError = visor.DrawError || visor.Layers.TransmitError || visor.Layers.StoreSixelError;
+
     /// Paint to pictures when supported and supplied; otherwise use marker.
     /// A picture surface is cleared and fitted to the window. Pixels use
     /// straight alpha; empty cell marks leave the window's contents alone.
-    pub fn draw(c: Canvas, win: visor.Window, shapes: []const Shape, options: DrawOptions) !void {
+    pub fn draw(c: Canvas, win: visor.Window, shapes: []const Shape, options: DrawOptions) DrawError!void {
         if (win.rect().isEmpty()) return;
         const protocol = options.caps.pictures();
         if (protocol == .kitty or protocol == .sixel) {
@@ -226,24 +231,24 @@ pub const Painter = struct {
     }
 
     /// Every point independently, for a scatter plot.
-    pub fn points(p: Painter, coords: []const [2]f64, style: visor.Style) !void {
+    pub fn points(p: Painter, coords: []const [2]f64, style: visor.Style) visor.DrawError!void {
         for (coords) |at| try p.point(at[0], at[1], style);
     }
 
     /// Separate contours, with no line joining one contour to the next.
-    pub fn map(p: Painter, contours: []const []const [2]f64, style: visor.Style) !void {
+    pub fn map(p: Painter, contours: []const []const [2]f64, style: visor.Style) visor.DrawError!void {
         for (contours) |path| try p.polyline(path, style);
     }
 
-    pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) !void {
+    pub fn circle(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) visor.DrawError!void {
         try p.round(x, y, radius, false, style);
     }
 
-    pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) !void {
+    pub fn disc(p: Painter, x: f64, y: f64, radius: f64, style: visor.Style) visor.DrawError!void {
         try p.round(x, y, radius, true, style);
     }
 
-    fn round(p: Painter, x: f64, y: f64, radius: f64, filled: bool, style: visor.Style) !void {
+    fn round(p: Painter, x: f64, y: f64, radius: f64, filled: bool, style: visor.Style) visor.DrawError!void {
         if (!std.math.isFinite(x) or !std.math.isFinite(y) or !std.math.isFinite(radius) or radius < 0) return;
         if (radius == 0) return p.point(x, y, style);
         const across = @as(u32, p.win.cols()) * p.canvas.marker.across();
@@ -378,7 +383,7 @@ pub const Raster = struct {
     }
 };
 
-fn drawShape(p: anytype, geometry: @FieldType(Canvas.Shape, "geometry"), paint: anytype) if (@TypeOf(p) == Raster) void else anyerror!void {
+fn drawShape(p: anytype, geometry: @FieldType(Canvas.Shape, "geometry"), paint: anytype) if (@TypeOf(p) == Raster) void else visor.DrawError!void {
     switch (geometry) {
         .point => |v| return p.point(v[0], v[1], paint),
         .line => |v| return p.line(v[0], v[1], v[2], v[3], paint),

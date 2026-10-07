@@ -263,19 +263,19 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// into the child without knowing whether there is a frame around it.
             /// Everything is clipped: a child asked for outside the parent comes
             /// back empty rather than wrong.
-            pub fn child(w: Window, opts: ChildOptions) Window {
+            pub fn child(w: Window, options: ChildOptions) Window {
                 const asked: Rect = .{
-                    .col = w.own_rect.col +| opts.col,
-                    .row = w.own_rect.row +| opts.row,
-                    .cols = opts.cols orelse w.own_rect.cols -| opts.col,
-                    .rows = opts.rows orelse w.own_rect.rows -| opts.row,
+                    .col = w.own_rect.col +| options.col,
+                    .row = w.own_rect.row +| options.row,
+                    .cols = options.cols orelse w.own_rect.cols -| options.col,
+                    .rows = options.rows orelse w.own_rect.rows -| options.row,
                 };
                 const outer = asked.intersect(w.own_rect);
                 var c: Window = .{ .own_screen = w.own_screen, .own_rect = outer, .own_ink = w.own_ink };
-                if (!opts.border.where.any() or outer.isEmpty()) return c;
+                if (!options.border.where.any() or outer.isEmpty()) return c;
 
-                c.drawBorder(opts.border);
-                const b = opts.border.where;
+                c.drawBorder(options.border);
+                const b = options.border.where;
                 var inner = outer;
                 if (b.top) {
                     inner.row +|= 1;
@@ -309,7 +309,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// A source-terminal cell, clipped by its full extent. See Screen's
             /// writeOwnedCellUnchecked preconditions; handles are always checked.
-            pub fn writeOwnedCellUnchecked(w: Window, col: u16, row: u16, c: Cell) error{InvalidHandle}!void {
+            pub fn writeOwnedCellUnchecked(w: Window, col: u16, row: u16, c: Cell) Screen.HandleError!void {
                 _ = try w.own_screen.textOf(&c);
                 if (c.link != .none and w.own_screen.target(c.link) == null) return error.InvalidHandle;
                 if (!w.fitsCell(col, row, c)) return;
@@ -427,19 +427,19 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// longer than six bytes, by the same rule as `Screen.write`. A newline
             /// always ends a row; a word break looks ahead within one segment, so a
             /// word split across two segments breaks at the join.
-            pub fn print(w: Window, segments: []const Segment, opts: PrintOptions) Screen.DrawError!Print {
-                var at: Print = .{ .col = opts.col, .row = opts.row };
+            pub fn print(w: Window, segments: []const Segment, options: PrintOptions) Screen.DrawError!Print {
+                var at: Print = .{ .col = options.col, .row = options.row };
                 if (w.own_rect.isEmpty()) {
                     at.overflow = segments.len != 0;
                     return at;
                 }
-                for (segments) |segment| at = try w.printOne(segment, opts, at);
+                for (segments) |segment| at = try w.printOne(segment, options, at);
                 return at;
             }
 
             /// One run.
-            pub fn printSegment(w: Window, segment: Segment, opts: PrintOptions) Screen.DrawError!Print {
-                return w.print(&.{segment}, opts);
+            pub fn printSegment(w: Window, segment: Segment, options: PrintOptions) Screen.DrawError!Print {
+                return w.print(&.{segment}, options);
             }
 
             /// The columns a string takes, by this screen's width method.
@@ -534,7 +534,7 @@ pub fn WindowApi(comptime screen_module: type) type {
             fn printOne(
                 w: Window,
                 segment: Segment,
-                opts: PrintOptions,
+                options: PrintOptions,
                 from: Print,
             ) Screen.DrawError!Print {
                 var at = from;
@@ -554,8 +554,8 @@ pub fn WindowApi(comptime screen_module: type) type {
                         }
                         continue;
                     }
-                    if (opts.wrap == .word and g.len == 1 and g[0] == ' ' and at.col == 0) continue;
-                    if (opts.wrap == .word and atWordStart(segment.text, found.start)) {
+                    if (options.wrap == .word and g.len == 1 and g[0] == ' ' and at.col == 0) continue;
+                    if (options.wrap == .word and atWordStart(segment.text, found.start)) {
                         const word = wordWidth(w, segment.text, found.start);
                         if (@as(u32, at.col) + word > w.own_rect.cols and word <= w.own_rect.cols) {
                             at.col = 0;
@@ -569,7 +569,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                     const cluster = textmod.graphemeWidth(g, w.own_screen.method);
                     if (cluster == 0) continue;
                     if (@as(u32, at.col) + cluster > w.own_rect.cols) {
-                        switch (opts.wrap) {
+                        switch (options.wrap) {
                             .none => {
                                 at.overflow = true;
                                 return at;
@@ -584,7 +584,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                             },
                         }
                     }
-                    if (opts.commit) try w.write(at.col, at.row, g, segment.style, segment.link);
+                    if (options.commit) try w.write(at.col, at.row, g, segment.style, segment.link);
                     at.col += cluster;
                 }
                 return at;

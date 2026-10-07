@@ -49,7 +49,7 @@ pub const Document = struct {
     pub const TableCell = documentTableCell;
     pub const Table = documentTable;
     /// Private.
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     /// Private.
     own_source: []u8,
     /// Private.
@@ -94,32 +94,32 @@ pub const Document = struct {
         return d.aligns.items;
     }
 
-    pub fn init(allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
-        var d: Document = .{ .allocator = allocator, .own_source = try allocator.dupe(u8, input) };
+    pub fn init(gpa: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error!Document {
+        var d: Document = .{ .gpa = gpa, .own_source = try gpa.dupe(u8, input) };
         errdefer d.deinit();
         // The text is the source with its markup taken out, so it is never
         // longer: one allocation holds it.
-        try d.own_text.ensureTotalCapacity(allocator, input.len);
+        try d.own_text.ensureTotalCapacity(gpa, input.len);
         try d.read();
         return d;
     }
     pub fn deinit(d: *Document) void {
-        d.allocator.free(d.own_source);
-        d.own_text.deinit(d.allocator);
-        d.own_spans.deinit(d.allocator);
-        d.own_blocks.deinit(d.allocator);
-        d.own_cells.deinit(d.allocator);
-        d.aligns.deinit(d.allocator);
-        for (d.unescaped.items) |bytes| d.allocator.free(bytes);
-        d.unescaped.deinit(d.allocator);
+        d.gpa.free(d.own_source);
+        d.own_text.deinit(d.gpa);
+        d.own_spans.deinit(d.gpa);
+        d.own_blocks.deinit(d.gpa);
+        d.own_cells.deinit(d.gpa);
+        d.aligns.deinit(d.gpa);
+        for (d.unescaped.items) |bytes| d.gpa.free(bytes);
+        d.unescaped.deinit(d.gpa);
         d.* = undefined;
     }
 
     fn append(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
         if (bytes.len == 0) return;
         const start = d.own_text.items.len;
-        try d.own_text.appendSlice(d.allocator, bytes);
-        try d.own_spans.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
+        try d.own_text.appendSlice(d.gpa, bytes);
+        try d.own_spans.append(d.gpa, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
     }
 
     fn read(d: *Document) !void {
@@ -213,7 +213,7 @@ pub const Document = struct {
             const c = std.mem.trim(u8, cell, " \t");
             const left = c[0] == ':';
             const right = c[c.len - 1] == ':';
-            try d.aligns.append(d.allocator, if (left and right) .center else if (left) .left else if (right) .right else .none);
+            try d.aligns.append(d.gpa, if (left and right) .center else if (left) .left else if (right) .right else .none);
         }
         const first_cell = d.own_cells.items.len;
         try d.row(header, columns);
@@ -231,7 +231,7 @@ pub const Document = struct {
         b.table = .{ .columns = columns, .rows = rows, .first_cell = first_cell, .first_align = first_align };
         b.end = d.own_text.items.len;
         b.end_span = d.own_spans.items.len;
-        try d.own_blocks.append(d.allocator, b);
+        try d.own_blocks.append(d.gpa, b);
     }
 
     /// One row of a table: exactly `columns` cells, the ones it lacks empty
@@ -246,7 +246,7 @@ pub const Document = struct {
             d.in_cell = true;
             defer d.in_cell = false;
             try d.inlineRead(raw, .{}, "", 0);
-            try d.own_cells.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .first_span = first_span, .end_span = d.own_spans.items.len });
+            try d.own_cells.append(d.gpa, .{ .start = start, .end = d.own_text.items.len, .first_span = first_span, .end_span = d.own_spans.items.len });
         }
     }
 
@@ -257,7 +257,7 @@ pub const Document = struct {
         if (literal) try d.append(body, .{}, "") else try d.inlineRead(body, .{}, "", 0);
         b.end = d.own_text.items.len;
         b.end_span = d.own_spans.items.len;
-        try d.own_blocks.append(d.allocator, b);
+        try d.own_blocks.append(d.gpa, b);
     }
 
     /// Bytes kept as they are, but for a table cell's escaped pipes, which
@@ -265,22 +265,22 @@ pub const Document = struct {
     fn appendLiteral(d: *Document, bytes: []const u8, flags: Flags, uri: []const u8) !void {
         if (!d.in_cell or std.mem.find(u8, bytes, "\\|") == null) return d.append(bytes, flags, uri);
         const start = d.own_text.items.len;
-        try d.own_text.ensureUnusedCapacity(d.allocator, bytes.len);
+        try d.own_text.ensureUnusedCapacity(d.gpa, bytes.len);
         var i: usize = 0;
         while (i < bytes.len) : (i += 1) {
             if (bytes[i] == '\\' and i + 1 < bytes.len and bytes[i + 1] == '|') continue;
             d.own_text.appendAssumeCapacity(bytes[i]);
         }
-        try d.own_spans.append(d.allocator, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
+        try d.own_spans.append(d.gpa, .{ .start = start, .end = d.own_text.items.len, .flags = flags, .uri = uri });
     }
 
     /// A link target, its escaped pipes taken out in a table cell.
     fn cellTarget(d: *Document, raw: []const u8) ![]const u8 {
         if (!d.in_cell or std.mem.find(u8, raw, "\\|") == null) return raw;
-        const owned = try d.allocator.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
+        const owned = try d.gpa.alloc(u8, std.mem.replacementSize(u8, raw, "\\|", "|"));
         _ = std.mem.replace(u8, raw, "\\|", "|", owned);
-        d.unescaped.append(d.allocator, owned) catch |err| {
-            d.allocator.free(owned);
+        d.unescaped.append(d.gpa, owned) catch |err| {
+            d.gpa.free(owned);
             return err;
         };
         return owned;

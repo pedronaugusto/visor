@@ -102,7 +102,7 @@ try visor.expectScreensEqual(&screen, term.screen());
 
 // The grid as text, one row a line, for a golden file or a failing
 // test to be read from.
-try visor.dumpScreen(term.screen(), report);
+try visor.dumpScreen(term.screen(), report, .{});
 
 // Every sequence visor writes comes from morse, which it re-exports
 // whole: one fetch, and everything under the grid is reachable.
@@ -184,10 +184,10 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 | The views | `Window` — `screen`, `rect`, `ink`, `child`, `sub`, `inked`, `print`, `printSegment`, `copyCell`, `readCell`, `writeOwnedCell`, `writeOwnedCellUnchecked`, `write`, `writeScaled`, `fill`, `clear`, `scroll`, `width`, `hit`, `linkAt`, `copyText`, `showCursor`, `hideCursor`, `setCursorShape`, `cols`, `rows`, `size`. `Window.Segment`, `Window.Print`, `Window.PrintOptions`, `Window.ChildOptions`, `Window.Border`, `Window.Ink` and its `Stroke`. `Rect`, `Point`, `Size`. |
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
-| What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswerMs`, `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `free`, `freeAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
-| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `ioContext`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
-| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen`, `dumpScreenWith` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
+| What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswer`, `write`, `feed`, `complete`, `settled`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `deleteImage`, `deleteAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
+| This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeFile`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
+| Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`. `expectScreensEqual`, `dumpScreen` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
 
 ### `visor.widgets`
@@ -540,11 +540,11 @@ it: `enter` puts it in exactly the state asked for, whatever was on before,
 `setModes` changes only the setting that differs, the old mode off before the
 new one on, and `leave` turns off that motion and that encoding. Focus
 reports are a mode of their own. A screen entered through `Tty.enter` is
-undone by `Tty.leave()` or `restore`; `restoreGlobal` and the panic handler
+undone by `Tty.leave(io)` or `restore`; `restoreGlobal` and the panic handler
 restore every registered terminal from a buffer on the stack.
 `Tty` owns its descriptors, saved mode, renderer borrow and resize watcher.
-`ioContext()` returns the captured Io by value; use its methods for lifecycle
-changes. Keep `Tty` at a stable address, and its entered renderer alive and at a stable
+It keeps no `std.Io`: `close`, `enter`, `leave`, `writer` and `read` take the
+caller's, as `Input.next` and `nextWithin` do. Keep `Tty` at a stable address, and its entered renderer alive and at a stable
 address until restoration. Call terminal registration and restoration from
 one thread. A program that dies leaves the shell with its keyboard, its
 mouse and its cursor.
@@ -696,7 +696,7 @@ palette, the sixteen theme slots, or none. Every colour is fitted to it with
 terminal's own slots when `Palette.slots` has them. With nothing known it is
 the 256-colour palette; direct colour needs evidence. Probe
 questions and learned progress are internal; construct it with `init`, feed
-answers, and read copied capabilities and `hasAnswered` / `lastAnswerMs`. A mode the terminal
+answers, and read copied capabilities and `hasAnswered` / `lastAnswer`. A mode the terminal
 answers set or reset is one it has: nothing has turned synchronised output or
 in-band resize reports on when the probe asks, so a terminal that has them
 answers reset.
@@ -704,7 +704,8 @@ answers reset.
 `Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
 `Caps.Probe` and `Layers` together. Its component methods lend the owners; size, capabilities and probe progress
 are read through const queries.
-Pass terminal events to `handle(w, event, now_ms)`, which says a frame is due;
+Pass terminal events to `handle(w, event, now)`, `now` a `std.Io.Timestamp`
+on the caller's clock, which says a frame is due;
 keys and application policy are still yours. Housekeeping is retained if
 capability output fails; a later event retries that output without replaying
 the input. Drain the batch, call `resize(w)` once, paint `screen()`, then
@@ -718,8 +719,9 @@ fields it learned, so overrides such as `osc8` survive it. With `Input`, use
 is the convenience for a caller-owned morse parser. Input keeps its parser,
 buffers and unread bytes internal.
 
-`ProbeWait.init(now_ms, timeout_ms, quiet_ms).remaining(probe, now_ms)` gives
-the next read's budget, or null when done. It owns no clock or read: an early
+`ProbeWait.init(now, timeout, quiet).remaining(probe, now)` gives the next
+read's budget as a `std.Io.Duration`, or null when done; `now` is a
+`std.Io.Timestamp` and the spans are `std.Io.Duration`s. It owns no clock or read: an early
 key can be handled by the application while forwarded probe replies arrive.
 `examples/live.zig` shows the loop; run it with `zig build live`. The examples
 step runs its `--check` path without a terminal.
