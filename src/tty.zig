@@ -38,7 +38,7 @@ const Renderer = render.Renderer;
 const Io = std.Io;
 const Writer = std.Io.Writer;
 const windows = std.os.windows;
-const is_windows = builtin.os.tag == .windows;
+const is_windows = builtin.target.os.tag == .windows;
 
 /// Raw terminals registered for panic restoration. Each terminal owns its
 /// saved mode and renderer association; the list only makes them reachable.
@@ -573,12 +573,23 @@ fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
     return buf[0..got];
 }
 
+/// The attributes a terminal has, read through conduit: its raw mode hands
+/// back what it found, and `restore` puts that back at once. Never
+/// `std.posix.tcgetattr`: with a C library linked on Linux it writes the C
+/// library's `struct termios` over std's kernel-layout one, which is
+/// smaller, and the stack under it is overwritten.
+fn attributesOf(handle: terminal.Handle) !std.posix.termios {
+    const found = try terminal.rawMode(handle);
+    try terminal.restore(handle, found);
+    return found.termios;
+}
+
 test "entering through the terminal arms the way back, and the panic path undoes exactly that" {
     if (is_windows) return error.SkipZigTest;
     var pair = try conduit.Pty.open(testing.allocator, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(pair.slaveFile());
-    const before = try std.posix.tcgetattr(t.file.handle);
+    const before = try attributesOf(t.file.handle);
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
@@ -613,7 +624,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     const undone = try readUntil(testing.io, pair.readFile(), &out, "\x1b[<u\x1b[?1049l");
     try testing.expect(std.mem.endsWith(u8, undone, want.buffered()));
     try testing.expect(std.mem.endsWith(u8, undone, "\x1b[<u\x1b[?1049l"));
-    var after = try std.posix.tcgetattr(t.file.handle);
+    var after = try attributesOf(t.file.handle);
     // A BSD kernel marks input for retyping whenever canonical mode comes
     // back without a flush that waits on the output; it clears on the next
     // read and is not part of the mode that was found.
