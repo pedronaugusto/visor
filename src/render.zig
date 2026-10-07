@@ -1651,7 +1651,7 @@ pub const Renderer = struct {
                     if (erase_tail and col == erase_from and erases(to - col + 1)) break;
                     const next = visibleAs(fit, cells[col], caps);
                     if (next.shape.kind != .narrow or next.isScaled() or !next.text.isAscii() or
-                        next.link != c.link or !std.mem.eql(u8, std.mem.asBytes(&next.style), std.mem.asBytes(&c.style))) break;
+                        next.link != c.link or !cellmod.sameBytes(Style, &next.style, &c.style)) break;
                     bytes[n] = next.text.buf[0];
                     n += 1;
                     col += 1;
@@ -1820,7 +1820,7 @@ pub const Renderer = struct {
     /// Writes the shortest SGR between the style the terminal is in and the
     /// one it should be in.
     fn setStyle(r: *Renderer, out: *Writer, to: Style, stats: *Stats) Error!void {
-        if (std.mem.eql(u8, std.mem.asBytes(&r._style), std.mem.asBytes(&to))) return;
+        if (cellmod.sameBytes(Style, &r._style, &to)) return;
         const from = r._style;
         if (r.styleCache().get(from, to)) |sequence| {
             try out.writeAll(sequence);
@@ -2083,13 +2083,12 @@ const StyleSequenceCache = struct {
     }
 
     fn matches(found: *const Entry, from: Style, to: Style) bool {
-        return std.mem.eql(u8, std.mem.asBytes(&found.from), std.mem.asBytes(&from)) and
-            std.mem.eql(u8, std.mem.asBytes(&found.to), std.mem.asBytes(&to));
+        return cellmod.sameBytes(Style, &found.from, &from) and cellmod.sameBytes(Style, &found.to, &to);
     }
 };
 
 fn setStyleCost(r: *Renderer, state: *CostState, to: Style) usize {
-    if (std.mem.eql(u8, std.mem.asBytes(&state.style), std.mem.asBytes(&to))) return 0;
+    if (cellmod.sameBytes(Style, &state.style, &to)) return 0;
     const from = state.style;
     const n = r.styleCache().getCost(from, to) orelse cost: {
         const computed = morse.cost.diffStyle(from, to);

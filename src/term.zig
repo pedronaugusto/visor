@@ -954,7 +954,7 @@ fn writeColorName(w: *Writer, c: cellmod.Color) Writer.Error!void {
 fn stylesEqual(a: Style, b: Style) bool {
     const ca = cellmod.canonical(a);
     const cb = cellmod.canonical(b);
-    return std.mem.eql(u8, std.mem.asBytes(&ca), std.mem.asBytes(&cb));
+    return cellmod.sameBytes(Style, &ca, &cb);
 }
 
 /// Two screens compared cell by cell, naming the first that differs and

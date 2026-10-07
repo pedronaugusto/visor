@@ -871,7 +871,7 @@ pub const Screen = struct {
                     if (col >= @min(d._a.len(), d._b.len())) return col;
                     const a = &d._a._cells[col];
                     const b = &d._b._cells[col];
-                    if (!std.mem.eql(u8, std.mem.asBytes(a), std.mem.asBytes(b)) or (d._a._generation != d._b._generation and
+                    if (!cellmod.sameBytes(StoredCell, a, b) or (d._a._generation != d._b._generation and
                         (a.text.isPooled() or a.link != .none))) return col;
                 }
                 return null;

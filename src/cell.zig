@@ -211,7 +211,7 @@ fn TextType(comptime checked: bool) type {
         /// Whether two texts are the same inline value or the same pooled
         /// handle. Texts from different generations are different handles.
         pub fn eql(a: Self, b: Self) bool {
-            return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            return sameBytes(Self, &a, &b);
         }
     };
 }
@@ -279,7 +279,7 @@ fn CellType(comptime checked: bool) type {
         }
 
         inline fn equalValue(a: Self, b: Self) bool {
-            if (!checked) return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            if (!checked) return sameBytes(Self, &a, &b);
             const aw: *const [6]u64 = @ptrCast(&a); // safe: a checked cell is six aligned words, no padding (asserted below)
             const bw: *const [6]u64 = @ptrCast(&b); // safe: as above
             inline for (aw, bw) |av, bv| if (av != bv) return false;
@@ -331,7 +331,7 @@ fn CellType(comptime checked: bool) type {
             if (c.shape.kind != .narrow and c.shape.kind != .spacer_head) return false;
             if (!Text.eql(c.text, .space)) return false;
             const want = canonical(in);
-            return std.mem.eql(u8, std.mem.asBytes(&c.style), std.mem.asBytes(&want));
+            return sameBytes(Style, &c.style, &want);
         }
     };
 }
@@ -397,6 +397,26 @@ pub const internal = struct {
 pub fn rowsEqual(a: []const Cell, b: []const Cell) bool {
     if (a.len != b.len) return false;
     return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
+}
+
+/// Whether two values hold the same bytes: a `memcmp` whose size is known at
+/// compile time, read as unaligned words and compared in line. Under Zig 0.17
+/// `std.mem.eql` over the same bytes became a call, and a byte array cast to
+/// words or a vector is slower still. Only for types with no padding, which
+/// the layout asserts below hold for every caller's type.
+pub fn sameBytes(comptime T: type, a: *const T, b: *const T) bool {
+    const x = std.mem.asBytes(a);
+    const y = std.mem.asBytes(b);
+    comptime var at: usize = 0;
+    var differ: u64 = 0;
+    inline for (.{ u64, u32, u16, u8 }) |Word| {
+        inline while (at + @sizeOf(Word) <= @sizeOf(T)) : (at += @sizeOf(Word)) {
+            const xw: *align(1) const Word = @ptrCast(x[at..][0..@sizeOf(Word)]); // safe: any bytes are a valid integer
+            const yw: *align(1) const Word = @ptrCast(y[at..][0..@sizeOf(Word)]); // safe: as above
+            differ |= xw.* ^ yw.*;
+        }
+    }
+    return differ == 0;
 }
 
 /// The bytes a struct's fields take laid end to end: its size exactly when
