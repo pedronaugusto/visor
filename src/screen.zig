@@ -766,7 +766,7 @@ pub const Screen = struct {
     /// `dupeTarget` to retain the target across drawing.
     pub fn target(s: *const Screen, l: Link) ?pool.Target {
         if (l == .none or l.generation() != s._pool_generation) return null;
-        return s._links.get(@enumFromInt(@as(u16, @truncate(@intFromEnum(l)))));
+        return s._links.get(@fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(l))))));
     }
 
     /// Copies a cell's text for retention. The caller owns the result and
@@ -1641,7 +1641,7 @@ test "Screen.link refuses controls in either field before interning and preserve
     try testing.expectEqualStrings("https://example.com/café", target.uri);
     try testing.expectEqualStrings("id=🐈", target.params);
     const second = try s.link("uri", "");
-    try testing.expectEqual(@intFromEnum(first) + 1, @intFromEnum(second));
+    try testing.expectEqual(@backingInt(first) + 1, @backingInt(second));
 }
 
 test "owned text and targets survive drawing, compaction, resize and destruction" {

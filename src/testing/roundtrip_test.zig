@@ -297,7 +297,7 @@ fn operate(h: *Harness, dice: *corpus.Dice) !void {
             s.cursor.visible = dice.value(bool);
             s.cursor.col = @intCast(dice.index(cols));
             s.cursor.row = @intCast(dice.index(rows));
-            s.cursor.shape = @enumFromInt(dice.valueRangeAtMost(u8, 0, 6));
+            s.cursor.shape = @fromBackingInt(@intCast(dice.valueRangeAtMost(u8, 0, 6)));
         },
         else => unreachable,
     }

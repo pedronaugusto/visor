@@ -269,7 +269,7 @@ fn colorOf(color: visor.Color) vt.Style.Color {
         // The sixteen theme colours have their own short codes and the
         // palette has an index; the terminal stores both as an index,
         // because `38;5;1` and `31` name the same colour.
-        .ansi => .{ .palette = @intFromEnum(color.toAnsi()) },
+        .ansi => .{ .palette = @backingInt(color.toAnsi()) },
         .palette => .{ .palette = color.index() },
         .rgb => .{ .rgb = .{ .r = color.r, .g = color.g, .b = color.b } },
     };
@@ -289,7 +289,7 @@ fn styleAgrees(want: visor.Style, got: vt.Style) bool {
         f.invisible == want.hidden and
         f.strikethrough == want.strikethrough and
         f.overline == want.overline and
-        @intFromEnum(f.underline) == @intFromEnum(want.underline);
+        @backingInt(f.underline) == @backingInt(want.underline);
 }
 
 /// Where the grid the terminal rebuilt first differs from the grid that was
@@ -500,7 +500,7 @@ fn operate(h: *Harness, dice: *corpus.Dice) !void {
             s.cursor.visible = dice.value(bool);
             s.cursor.col = @intCast(dice.index(cols));
             s.cursor.row = @intCast(dice.index(rows));
-            s.cursor.shape = @enumFromInt(dice.valueRangeAtMost(u8, 0, 6));
+            s.cursor.shape = @fromBackingInt(@intCast(dice.valueRangeAtMost(u8, 0, 6)));
         },
         else => unreachable,
     }

@@ -919,7 +919,7 @@ test "a resize handler preserves errno when its pipe is full" {
         try testing.expectEqual(std.posix.E.AGAIN, std.posix.errno(rc));
         break;
     }
-    const interrupted = @intFromEnum(std.posix.E.NOENT);
+    const interrupted = @backingInt(std.posix.E.NOENT);
     errno_ptr.* = interrupted;
     onWinch(.WINCH);
     const after = errno_ptr.*;

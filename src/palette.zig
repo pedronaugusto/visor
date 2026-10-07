@@ -107,7 +107,7 @@ pub const Palette = struct {
                 .fg => p.fg,
                 .bg => p.bg,
             },
-            .ansi => p.entries[@intFromEnum(color.toAnsi())],
+            .ansi => p.entries[@backingInt(color.toAnsi())],
             .palette => morse.paletteRgb(color.index()) orelse p.entries[color.index()],
             .rgb => color.toRgb(),
         };

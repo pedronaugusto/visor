@@ -53,7 +53,7 @@ fn pooledText(offset: u32, len: u16) Text {
 fn pooledLink(index: u16) Link {
     // Zero is `.none`, so the last index has no handle.
     assert(index < std.math.maxInt(u16));
-    const link: Link = @enumFromInt(index + 1);
+    const link: Link = @fromBackingInt(@intCast(index + 1));
     assert(link.index().? == index);
     return link;
 }

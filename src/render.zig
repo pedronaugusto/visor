@@ -3330,7 +3330,7 @@ test "a row the diff writes as one run from the first column is the paint, byte 
 
         const r = &f.renderer;
         r._style = styles[random.uintLessThan(usize, styles.len)];
-        r._link = if (random.boolean()) @enumFromInt(@as(u16, @truncate(@intFromEnum(link)))) else .none;
+        r._link = if (random.boolean()) @fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(link))))) else .none;
         r._cursor = switch (random.uintLessThan(u8, 3)) {
             0 => null,
             1 => .{ .col = 0, .row = 0 },

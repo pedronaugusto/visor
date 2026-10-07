@@ -39,13 +39,13 @@ fn LinkType(comptime checked: bool) type {
 
         /// The table position, or null for `.none`.
         pub fn index(l: Self) ?u16 {
-            const payload: u16 = @truncate(@intFromEnum(l));
+            const payload: u16 = @truncate(@backingInt(l));
             return if (payload == 0) null else payload - 1;
         }
 
         /// The identity of the pool that issued this handle.
         pub fn generation(l: Self) u64 {
-            return if (checked) @intFromEnum(l) >> 16 else 0;
+            return if (checked) @backingInt(l) >> 16 else 0;
         }
     };
 }
@@ -358,7 +358,7 @@ pub const internal = struct {
     }
 
     pub fn store(c: Cell) StoredCell {
-        return .{ .text = .{ .buf = c.text.buf, .len = c.text.len }, .link = @enumFromInt(@as(u16, @truncate(@intFromEnum(c.link)))), .style = canonical(c.style), .shape = c.shape };
+        return .{ .text = .{ .buf = c.text.buf, .len = c.text.len }, .link = @fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(c.link))))), .style = canonical(c.style), .shape = c.shape };
     }
     pub inline fn exportCell(c: *const StoredCell, generation: u64) Cell {
         // Copy the contiguous payload before adding checked handle identities.
@@ -388,7 +388,7 @@ pub const internal = struct {
         return @bitCast(bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: u64) Link {
-        return if (link == .none) .none else @enumFromInt((generation << 16) | @intFromEnum(link));
+        return if (link == .none) .none else @fromBackingInt(@intCast((generation << 16) | @backingInt(link)));
     }
 };
 

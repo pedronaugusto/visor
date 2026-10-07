@@ -83,7 +83,7 @@ pub fn weekdayOf(d: Date) Weekday {
     const era = @divFloor(y, 4) - @divFloor(y, 100) + @divFloor(y, 400);
     const sunday_based = @mod(y + era + shift[d.month() - 1] + @as(i64, d.day()), 7);
     // Sakamoto counts from Sunday; this calendar counts from Monday.
-    return @enumFromInt(@as(u3, @intCast(@mod(sunday_based + 6, 7))));
+    return @fromBackingInt(@intCast(@as(u3, @intCast(@mod(sunday_based + 6, 7)))));
 }
 
 /// One month, as weeks in rows.
@@ -160,7 +160,7 @@ pub const Calendar = struct {
 
         if (c.show_weekdays) {
             for (0..7) |i| {
-                const name = weekday_names[(i + @intFromEnum(c.starts_on)) % 7];
+                const name = weekday_names[(i + @backingInt(c.starts_on)) % 7];
                 _ = try win.printSegment(
                     .{ .text = name, .style = c.weekday_style },
                     .{ .col = @intCast(i * 3), .row = row, .wrap = .none },
@@ -196,8 +196,8 @@ pub const Calendar = struct {
     fn firstColumn(c: Calendar) u16 {
         // unreachable: both callers return first for a month that does not exist, and every month has a first
         const first = Date.init(c.year, c.month, 1) catch unreachable;
-        const weekday = @intFromEnum(weekdayOf(first));
-        return (@as(u16, weekday) + 7 - @intFromEnum(c.starts_on)) % 7;
+        const weekday = @backingInt(weekdayOf(first));
+        return (@as(u16, weekday) + 7 - @backingInt(c.starts_on)) % 7;
     }
 
     /// How many rows of days the month takes.
