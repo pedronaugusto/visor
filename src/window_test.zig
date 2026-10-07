@@ -1,5 +1,5 @@
 const std = @import("std");
-const corpus = @import("corpus");
+const corpus = @import("shakedown").corpus;
 const morse = @import("dependencies.zig").morse;
 
 const cellmod = @import("cell.zig");

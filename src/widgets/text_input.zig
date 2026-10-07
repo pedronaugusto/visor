@@ -1210,8 +1210,13 @@ test "the input draws its selection in the selected style" {
     try testing.expectEqual(@as(u16, 4), h.screen.cursor.col);
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "an edit that cannot allocate changes nothing" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(a: std.mem.Allocator) !void {
             var b: Edited = try .initText(a, "one two");
             defer b.deinit();

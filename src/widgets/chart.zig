@@ -10,7 +10,7 @@
 //! file to have an opinion about them.
 
 const std = @import("std");
-const corpus = @import("corpus");
+const corpus = @import("shakedown").corpus;
 const visor = @import("visor");
 
 const canvas_mod = @import("canvas.zig");

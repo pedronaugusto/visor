@@ -381,8 +381,13 @@ test "the probe wait keeps DA1 quiet time and the overall deadline on caller tim
     try testing.expectEqual(@as(?std.Io.Duration, null), wait.remaining(&probe, ms(1000)));
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "a failed session resize keeps both grids and their borrowed content together" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var s = try Session.init(gpa, .{ .cells = .{ .cols = 4, .rows = 1 } }, .{ .graphics_id = 1 });
             defer s.deinit();

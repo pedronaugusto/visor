@@ -1,4 +1,5 @@
 const std = @import("std");
+const NoResize = @import("shakedown").alloc.NoResize;
 const widgets = @import("../widgets.zig");
 const visor = @import("visor");
 const Harness = @import("../testing/widget_harness.zig").Harness;
@@ -84,7 +85,8 @@ test "markdown owns its input and releases every failed parse allocation" {
             try t.expect(std.mem.startsWith(u8, doc.source(), "# heading"));
         }
     };
-    try t.checkAllAllocationFailures(t.allocator, Check.parse, .{});
+    var no_resize: NoResize = .init(t.allocator);
+    try t.checkAllAllocationFailures(no_resize.allocator(), Check.parse, .{});
 }
 
 test "markdown inline nesting escapes and exact code delimiters" {

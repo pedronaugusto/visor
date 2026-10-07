@@ -475,8 +475,13 @@ test "a link index from another screen reads as nothing" {
     try testing.expectEqual(@as(?Target, null), l.get(pooledLink(9)));
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "the pool gives its memory back under a failing allocator" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var p: Graphemes = .init(gpa);
             defer p.deinit();

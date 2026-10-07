@@ -6,7 +6,7 @@
 //! what each bar is.
 
 const std = @import("std");
-const corpus = @import("corpus");
+const corpus = @import("shakedown").corpus;
 const visor = @import("visor");
 
 const layout = @import("layout.zig");

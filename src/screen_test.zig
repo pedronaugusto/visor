@@ -1,4 +1,5 @@
 const std = @import("std");
+const NoResize = @import("shakedown").alloc.NoResize;
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const Allocator = std.mem.Allocator;
@@ -14,7 +15,8 @@ const Renderer = @import("render.zig").Renderer;
 const testing = std.testing;
 const made = @import("screen.zig").test_access.made;
 test "managed screens and renderers use their captured allocator through every operation" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var s = try Screen.init(gpa, .{ .cols = 4, .rows = 1 });
             defer s.deinit();

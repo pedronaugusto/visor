@@ -1,4 +1,5 @@
 const std = @import("std");
+const NoResize = @import("shakedown").alloc.NoResize;
 const morse = @import("dependencies.zig").morse;
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
@@ -787,7 +788,8 @@ test "shared memory reconfiguration cannot lose owners or accept an old policy r
 
 test "shared memory keeps ownership through every allocation and partial output failure" {
     if (!shm.supported) return error.SkipZigTest;
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var l: Layers = .init(gpa);
             l.configureSharedMemory(true);
@@ -855,7 +857,8 @@ test "picture grace time spans the signed clock range" {
 }
 
 test "managed layers keep one allocator through pictures placements and retirement" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var layers = Layers.init(gpa);
             defer layers.deinit();
@@ -906,7 +909,8 @@ test "a replacement settles without declaring or hiding placements" {
             try testing.expect(p.takeDirty());
         }
     };
-    try testing.checkAllAllocationFailures(testing.allocator, Check.run, .{});
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), Check.run, .{});
 }
 
 test "a late graphics answer cannot revive a failed transmission" {
@@ -1074,7 +1078,8 @@ fn retainInlineImages(gpa: Allocator) !void {
 }
 
 test "inline pictures retain and replace transactionally at every allocation failure" {
-    try testing.checkAllAllocationFailures(testing.allocator, retainInlineImages, .{});
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), retainInlineImages, .{});
 }
 
 /// A test's clock reading, in milliseconds.

@@ -1810,8 +1810,13 @@ test "a resize keeps the terminal's open link even before any cell uses it" {
     try testing.expectEqualStrings("b", t.scr.textAt(1, 0));
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "a failed terminal resize keeps its open link and both pool generations" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var t = try Term.init(gpa, .{ .cols = 4, .rows = 1 });
             defer t.deinit();

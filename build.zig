@@ -136,6 +136,17 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(widget_tests).step);
     check_step.dependOn(&widget_tests.step);
 
+    // Both suites' clocks, fault plans and allocators come from shakedown,
+    // a lazy, test-only dependency asked for only in visor's own tree: a
+    // program that depends on visor neither builds these tests nor fetches
+    // it.
+    if (b.pkg_hash.len == 0) {
+        if (b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })) |shakedown| {
+            tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
+            widget_tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
+        } else |_| {}
+    }
+
     //=====================================================================
     // Examples
     //

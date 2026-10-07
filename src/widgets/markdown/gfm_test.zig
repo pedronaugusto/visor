@@ -10,6 +10,7 @@
 //! shows as a space, is the one difference allowed for.
 
 const std = @import("std");
+const NoResize = @import("shakedown").alloc.NoResize;
 const widgets = @import("../../widgets.zig");
 const Harness = @import("../../testing/widget_harness.zig").Harness;
 const corpus = @import("corpus");
@@ -553,7 +554,8 @@ test "whatever the source, the reader's ranges hold and the rows counted are dra
 }
 
 test "the reader releases every allocation when a table or a task fails to read" {
-    try t.checkAllAllocationFailures(t.allocator, struct {
+    var no_resize: NoResize = .init(t.allocator);
+    try t.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn parse(a: std.mem.Allocator) !void {
             var doc = try Document.init(a, "- [x] done\n| a \\| b | c |\n|:-|-:|\n| `\\|` | [l](https://x) |\n");
             defer doc.deinit();

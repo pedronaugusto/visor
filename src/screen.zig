@@ -1575,8 +1575,13 @@ test "a link is interned and reaches the cell" {
     try checkInvariants(&s);
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "the screen survives every allocation failing in turn" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var s: Screen = try .init(gpa, .{ .cols = 8, .rows = 4 });
             defer s.deinit();
@@ -1698,7 +1703,8 @@ test "an owned target releases its first copy when the second allocation fails" 
     var s = try made(4, 1);
     defer s.deinit();
     const id = try s.link("https://kept.invalid", "id=kept");
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator, screen: *const Screen, link_id: Link) !void {
             var copy = (try screen.dupeTarget(gpa, link_id)).?;
             defer copy.deinit();
@@ -1708,7 +1714,8 @@ test "an owned target releases its first copy when the second allocation fails" 
 }
 
 test "a failed resize leaves cells, pool identities, borrows and damage untouched" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var s = try Screen.init(gpa, .{ .cols = 4, .rows = 1 });
             defer s.deinit();

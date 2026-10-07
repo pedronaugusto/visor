@@ -300,6 +300,7 @@ const console = @import("dependencies.zig").tty.console;
 const testing = std.testing;
 const conduit = @import("dependencies.zig").conduit;
 const corpus = @import("corpus");
+const shakedown = @import("shakedown");
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.
 const Piped = struct {
@@ -748,25 +749,23 @@ test "the pump is compiled for every target, the Windows wait included" {
 }
 
 test "a silent deadline submits one read and cancels it with the remaining budget" {
-    // The Io observes the operations and advances a synthetic clock. It
-    // never reads a descriptor or waits on the machine running the test.
-    const Clocked = struct {
-        ticks: usize = 0,
-        waits: usize = 0,
-        cancels: usize = 0,
+    // Time is a shakedown Clock's, and the batch never reaches the machine:
+    // its wait looks at what was submitted and times out as the clock's
+    // timer would, and its cancel calls nothing off. No descriptor is read,
+    // on any host. shakedown's Clock would hand a real batch to the base,
+    // where the read of a descriptor that is not one fails at once, so the
+    // two batch slots are a layer of the test's own until a simulated
+    // batch exists.
+    const Batches = struct {
+        const Self = @This();
+        const Layer = shakedown.Layer(Self, .{ .batchAwaitConcurrent = wait, .batchCancel = cancel });
+
+        clock: *shakedown.Clock,
         reads: usize = 0,
         budget: Io.Timeout = .none,
 
-        const Self = @This();
-
-        fn now(ptr: ?*anyopaque, _: Io.Clock) Io.Timestamp {
-            const self: *Self = @ptrCast(@alignCast(ptr.?));
-            defer self.ticks += 1;
-            return .fromNanoseconds(@as(i96, @intCast(self.ticks)) * 10 * std.time.ns_per_ms);
-        }
-        fn wait(ptr: ?*anyopaque, batch: *Io.Batch, timeout: Io.Timeout) Io.Batch.AwaitConcurrentError!void {
-            const self: *Self = @ptrCast(@alignCast(ptr.?));
-            self.waits += 1;
+        fn wait(userdata: ?*anyopaque, batch: *Io.Batch, timeout: Io.Timeout) Io.Batch.AwaitConcurrentError!void {
+            const self = &Layer.of(userdata).state;
             self.budget = timeout;
             var index = batch.submitted.head;
             while (index != .none) {
@@ -774,31 +773,31 @@ test "a silent deadline submits one read and cancels it with the remaining budge
                 if (submission.operation == .file_read_streaming) self.reads += 1;
                 index = submission.node.next;
             }
+            self.clock.advance(timeout.duration.raw);
             return error.Timeout;
         }
-        fn cancel(ptr: ?*anyopaque, _: *Io.Batch) void {
-            const self: *Self = @ptrCast(@alignCast(ptr.?));
-            self.cancels += 1;
-        }
+
+        fn cancel(_: ?*anyopaque, _: *Io.Batch) void {}
     };
-    var clocked: Clocked = .{};
-    var vtable = testing.io.vtable.*;
-    vtable.now = Clocked.now;
-    vtable.batchAwaitConcurrent = Clocked.wait;
-    vtable.batchCancel = Clocked.cancel;
-    const io: Io = .{ .userdata = &clocked, .vtable = &vtable };
+    var clock: shakedown.Clock = .init(testing.io, .{});
+    var batches: Batches.Layer = .init(clock.io(), .{ .clock = &clock });
+    const counted = try shakedown.FaultIo.init(testing.allocator, batches.io(), .{});
+    defer counted.deinit();
+    const io = counted.io();
     var tty = Tty.adopt(.{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
     var parser: [64]u8 = undefined;
     var read: [16]u8 = undefined;
     var in = try inputOver(&tty, &parser, &read, 5_000);
     // Exercise the Io wait on every host, including Windows where the
-    // real console wait has its own integration tests.
+    // real console wait has its own integration tests. Ten milliseconds
+    // pass between the deadline and the wait.
     const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }).toDeadline(io);
+    clock.advance(.fromMilliseconds(10));
     try testing.expectEqual(Input.Woke.expired, try in.waitPosix(io, until));
-    try testing.expectEqual(@as(usize, 2), clocked.ticks);
-    try testing.expectEqual(@as(usize, 1), clocked.waits);
-    try testing.expectEqual(@as(usize, 1), clocked.reads);
-    try testing.expectEqual(@as(usize, 1), clocked.cancels);
-    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), clocked.budget.duration.raw.nanoseconds);
-    try testing.expectEqual(Io.Clock.awake, clocked.budget.duration.clock);
+    try testing.expectEqual(@as(u64, 2), counted.count(.now));
+    try testing.expectEqual(@as(u64, 1), counted.count(.batchAwaitConcurrent));
+    try testing.expectEqual(@as(usize, 1), batches.state.reads);
+    try testing.expectEqual(@as(u64, 1), counted.count(.batchCancel));
+    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), batches.state.budget.duration.raw.nanoseconds);
+    try testing.expectEqual(Io.Clock.awake, batches.state.budget.duration.clock);
 }

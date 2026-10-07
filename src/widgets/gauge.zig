@@ -6,7 +6,7 @@
 //! background, so a gauge reads the same on a terminal with no colour.
 
 const std = @import("std");
-const corpus = @import("corpus");
+const corpus = @import("shakedown").corpus;
 const visor = @import("visor");
 
 const layout = @import("layout.zig");

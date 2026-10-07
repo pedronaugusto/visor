@@ -3164,7 +3164,7 @@ test "a repeat never stands for a cluster of more than one codepoint" {
     f.caps.rep = true;
     // What a terminal repeats after a base and a mark is the mark.
     for (0..8) |i| try f.screen.write(@intCast(i), 0, "e\u{301}", .{}, .none);
-    try f.expectBytes(corpus.repeat("e\u{301}", 8));
+    try f.expectBytes(repeat("e\u{301}", 8));
     // A single non-ASCII codepoint is repeated like any other glyph. The
     // first row filled its last column, so the move is an absolute one.
     for (0..8) |i| try f.screen.write(@intCast(i), 0, "\u{2500}", .{}, .none);
@@ -3905,6 +3905,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
 }
 
 const corpus = @import("corpus");
+const repeat = @import("shakedown").corpus.repeat;
 const Window = @import("screen.zig").window_api.Window;
 
 /// A row of the terminal as text, each cluster once however many columns
@@ -4212,8 +4213,13 @@ test "the shortest cursor move is the one written" {
     }
 }
 
+/// Tests only. Every allocation-failure check runs over it: each growth is then an
+/// allocation in every run, so the count of allocations to fail repeats.
+const NoResize = @import("shakedown").alloc.NoResize;
+
 test "the renderer gives its memory back under a failing allocator" {
-    try testing.checkAllAllocationFailures(testing.allocator, struct {
+    var no_resize: NoResize = .init(testing.allocator);
+    try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
             var r: Renderer = try .init(gpa, .{ .cols = 20, .rows = 8 });
             defer r.deinit();

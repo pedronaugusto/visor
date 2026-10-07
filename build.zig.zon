@@ -19,6 +19,11 @@
             .url = "git+https://github.com/pedronaugusto/conduit#43751a5cf7bd9359e1016508dbce8120483853b0",
             .hash = "conduit-0.5.1-4rIA71luEwDzl3f1NGpLRpmpSvwEBuUaw6b7FmnLySCQ",
         },
+        .shakedown = .{
+            .url = "git+https://github.com/pedronaugusto/shakedown#4f590164cf91ef9f244ee26b0a20444b9ecdcdae",
+            .hash = "shakedown-0.1.0-BR8U47zBAwCoNKX4gYuShFo5o5tCR_GSyQ3PVjzPDoPw",
+            .lazy = true,
+        },
     },
     .minimum_zig_version = "0.17.0",
     .fingerprint = 0xfc47eb8a53109791,

@@ -5,7 +5,7 @@
 //! and working that out twice in two places is how the two drift apart.
 
 const std = @import("std");
-const corpus = @import("corpus");
+const corpus = @import("shakedown").corpus;
 const visor = @import("visor");
 
 const Style = visor.Style;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const NoResize = @import("shakedown").alloc.NoResize;
 const visor = @import("visor");
 const Canvas = @import("canvas.zig").Canvas;
 const Harness = @import("../testing/widget_harness.zig").Harness;
@@ -104,7 +105,8 @@ test "raster ellipses keep tiny finite radii through their arithmetic" {
 }
 
 test "surface resize prepares pixels before committing geometry" {
-    try t.checkAllAllocationFailures(t.allocator, resizeSurface, .{});
+    var no_resize: NoResize = .init(t.allocator);
+    try t.checkAllAllocationFailures(no_resize.allocator(), resizeSurface, .{});
 }
 
 fn resizeSurface(gpa: std.mem.Allocator) !void {
