@@ -1,8 +1,8 @@
-//! The drawing core, one workload a run: `visor-bench draw <task>
-//! <check|smoke|full> <cols> <rows> <iterations>`, check lines first, then
-//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `run.zig` invokes it.
+//! Drawing-core workloads: legacy check evidence, shared smoke and measurement rows.
+//! Setup and output capacity remain outside each measured callback.
 const std = @import("std");
 const v = @import("visor");
+const Measurement = @import("measurement.zig");
 
 /// The Io the lines go out through, set once by `run`: unbuffered, so every
 /// line a check prints is out before anything that stops the program.
@@ -76,7 +76,6 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
     if (args.len != 5) return error.Arguments;
     const task = args[0];
     const check = std.mem.eql(u8, args[1], "check");
-    const timed = std.mem.eql(u8, args[1], "full");
     const cols = try std.fmt.parseInt(u16, args[2], 10);
     const rows = try std.fmt.parseInt(u16, args[3], 10);
     const iterations = try std.fmt.parseInt(usize, args[4], 10);
@@ -119,35 +118,39 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
     out.clearRetainingCapacity();
     var count: usize = 0;
     var bytes: usize = 0;
-    var style_elapsed: i96 = 0;
-    const start = if (timed and !heavy) std.Io.Clock.now(.awake, init.io).toNanoseconds() else 0;
-    for (0..iterations) |n| {
-        if (diff) {
-            count += if (cell_reads) readCells(&screens) else diffCells(&screens);
-        } else {
-            const s = &screens[0];
-            // Keep one screen owner: switching unrelated screens invalidates
-            // current-main handles and would measure an artificial repaint.
-            // Frame construction is outside the style-heavy draw interval.
-            if (heavy) try restyle(s, cols, rows, (n + 1) % 2);
-            if (std.mem.eql(u8, task, "full_repaint")) renderer.repaint();
-            if (heavy or std.mem.eql(u8, task, "unchanged_diff")) s.damageAll();
-            if (picture) try layers.declare(.{ .image = 7, .rect = .{
-                .col = if (std.mem.eql(u8, task, "picture_layers")) @intCast((n + 1) % 2) else 0,
-                .row = 0,
-                .cols = 2,
-                .rows = 2,
-            } });
-            out.clearRetainingCapacity();
-            const draw_start = if (timed and heavy) std.Io.Clock.now(.awake, init.io).toNanoseconds() else 0;
-            const stats = try renderer.draw(&out.writer, s, if (picture) &layers else null, caps);
-            if (timed and heavy) style_elapsed += std.Io.Clock.now(.awake, init.io).toNanoseconds() - draw_start;
-            bytes += out.written().len;
-            count += stats.cells;
-            std.mem.doNotOptimizeAway(out.written());
-            if (check) hex(out.written());
+    var measurement = try Measurement.init(init, task, args[1], cols, rows, iterations);
+    // The published callback API cannot exclude restyling between draws.
+    if (heavy and !check and !measurement.options.smoke) return error.StyleHeavyBoundaryUnavailable;
+    var prepared = .{ .screens = &screens, .renderer = &renderer, .layers = &layers, .out = &out, .count = &count, .bytes = &bytes, .task = task, .cols = cols, .rows = rows, .heavy = heavy, .cell_reads = cell_reads, .diff = diff, .picture = picture, .caps = caps, .check = check };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                if (context.diff) {
+                    context.count.* += if (context.cell_reads) readCells(&context.screens.*) else diffCells(&context.screens.*);
+                } else {
+                    const s = &context.screens.*[0];
+                    // Keep one screen owner: switching unrelated screens invalidates
+                    // current-main handles and would measure an artificial repaint.
+                    // Style preparation is retained for untimed check and smoke only.
+                    if (context.heavy) try restyle(s, context.cols, context.rows, (n + 1) % 2);
+                    if (std.mem.eql(u8, context.task, "full_repaint")) context.renderer.*.repaint();
+                    if (context.heavy or std.mem.eql(u8, context.task, "unchanged_diff")) s.damageAll();
+                    if (context.picture) try context.layers.*.declare(.{ .image = 7, .rect = .{
+                        .col = if (std.mem.eql(u8, context.task, "picture_layers")) @intCast((n + 1) % 2) else 0,
+                        .row = 0,
+                        .cols = 2,
+                        .rows = 2,
+                    } });
+                    context.out.*.clearRetainingCapacity();
+                    const stats = try context.renderer.*.draw(&context.out.*.writer, s, if (context.picture) &context.layers.* else null, context.caps);
+                    context.bytes.* += context.out.*.written().len;
+                    context.count.* += stats.cells;
+                    std.mem.doNotOptimizeAway(context.out.*.written());
+                    if (context.check) hex(context.out.*.written());
+                }
+            }
         }
-    }
-    const elapsed = if (timed and heavy) style_elapsed else if (timed) std.Io.Clock.now(.awake, init.io).toNanoseconds() - start else 0;
-    emit("result\t{d}\t{d}\t{d}\t{d}\n", .{ iterations, count, bytes, elapsed });
+    };
+    try measurement.run(&prepared, Callback.run);
+    if (check) emit("result\t{d}\t{d}\t{d}\t0\n", .{ iterations, count, bytes });
 }

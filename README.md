@@ -827,11 +827,14 @@ tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
 and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
 and compiles ReleaseSmall.
 
-`zig build bench` builds visor's own benchmarks in `bench/` in ReleaseFast and
-runs them: every drawing-core workload and every public operation, checked by
-an independent decoder before they are timed. `zig build test` checks and runs
-each once on the smallest grid, and runs the decoder's own tests.
-[`bench/README.md`](bench/README.md) says how to run them by hand.
+Benchmark migration is work in progress on this branch. `zig build bench-build`
+compiles the ReleaseFast drivers and shared comparison tools. Visor's workload
+checks and 63 smoke rows use `shakedown.bench`; `zig build test` checks and
+smoke-runs each workload on the smallest grid. Full `style_heavy` measurement
+fails explicitly: the shared callback API cannot yet exclude restyling between
+draws, as the existing workload requires. A default full pass therefore cannot
+complete. [`bench/README.md`](bench/README.md) describes the retained workloads
+and shared output contract.
 
 The headline test is a round trip. Random grid operations are drawn, the bytes
 are fed to the emulator this package ships, and the grid it rebuilt is
@@ -916,18 +919,6 @@ lowest value whenever they are out of range, so random bytes asked for a size
 answer one column and one row. Each property has a test beside it that
 replays the corpus with its draws counted and fails unless they cover every
 size, every operation and every grapheme it can ask for.
-
-What a frame costs, measured here on a 200 by 50 grid of 10,000 cells, ReleaseFast
-on an Apple M3 Max, best of five passes of a thousand frames each:
-
-| Frame | Time | Bytes |
-|---|---|---|
-| The whole grid repainted | 170 µs | 43,404 |
-| 100 cells changed at random | 69 µs | 4,047 |
-| The grid scrolled one row, repainted | 267 µs | 43,304 |
-| The same, with `Caps.scroll_detection` | 154 µs | 878 |
-| A page of widgets drawn into a blank grid | 257 µs | 2,445 |
-| Nothing changed | 0 | 0 |
 
 ## Licence
 

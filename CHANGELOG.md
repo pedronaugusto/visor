@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Work in progress
+
+- Benchmark drivers use `shakedown.bench` for smoke rows, calibrated timing,
+  warmup, statistics and JSONL, wired by published preflight. Workload fixtures,
+  frame units and independent checks remain in visor.
+- Full `style_heavy` measurement remains unavailable until the shared API can
+  preserve its untimed restyling boundary. This migration is not complete.
+- Breaking (benchmark CLI): `--row PREFIX` selects shared row names;
+  `--runs` and `--only` are removed. Check invocations retain their evidence
+  protocol; full and smoke invocations now emit shared JSONL.
+
 ### Breaking
 
 - Requires Zig 0.17.0; Zig 0.16 no longer builds visor. morse, conduit and uucode are pinned at their Zig 0.17 commits.

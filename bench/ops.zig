@@ -1,15 +1,11 @@
-//! Every other public visor operation, one workload a run: `visor-bench ops
-//! <task> <check|smoke|full> <cols> <rows> <iterations>`, the protocol of
-//! `draw.zig`: check lines first, then
-//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `visor-bench ops
-//! list-tasks` names them.
-//! Text inputs come from the generated corpus directory in
-//! VISOR_BENCH_CORPUS, identical for every library. Builds, corpus reads,
-//! fixture construction and reporting stay outside the timed interval.
+//! Public operation workloads, with prepared fixtures outside shared callbacks.
+//! `check` retains the independent evidence protocol; smoke and full measurement
+//! emit shakedown JSONL. Text inputs come from VISOR_BENCH_CORPUS.
 const std = @import("std");
 const v = @import("visor");
 const w = @import("visor.widgets");
-const plan = @import("plan.zig");
+const workloads = @import("workloads.zig");
+const Measurement = @import("measurement.zig");
 
 /// The Io the lines go out through, set once by `run`: unbuffered, so every
 /// line a check prints is out before anything that stops the program.
@@ -77,19 +73,6 @@ fn dumpGrid(gpa: std.mem.Allocator, s: *const v.Screen) void {
     line("grid", out.items);
 }
 
-const Clock = struct {
-    io: std.Io,
-    timed: bool,
-    total: i96 = 0,
-    started: i96 = 0,
-    fn start(c: *Clock) void {
-        if (c.timed) c.started = std.Io.Clock.now(.awake, c.io).toNanoseconds();
-    }
-    fn stop(c: *Clock) void {
-        if (c.timed) c.total += std.Io.Clock.now(.awake, c.io).toNanoseconds() - c.started;
-    }
-};
-
 const Ctx = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -97,7 +80,7 @@ const Ctx = struct {
     rows: u16,
     iterations: usize,
     check: bool,
-    clock: Clock,
+    measurement: Measurement,
     corpus: []const u8,
     count: usize = 0,
     bytes: usize = 0,
@@ -137,15 +120,19 @@ fn cellWrites(c: *Ctx) void {
     var s = c.screen();
     defer s.deinit();
     const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        for (0..c.rows) |y| for (0..c.cols) |x| {
-            const i = y * c.cols + x;
-            must(s.write(@intCast(x), @intCast(y), alphabet[(i + n) % alphabet.len ..][0..1], .{ .fg = rgb(i, n % 2), .bold = (i + n) % 2 == 0 }, .none));
-        };
-        c.count += @as(usize, c.cols) * c.rows;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .s = &s, .alphabet = &alphabet };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                for (0..context.c.rows) |y| for (0..context.c.cols) |x| {
+                    const i = y * context.c.cols + x;
+                    must(context.s.*.write(@intCast(x), @intCast(y), context.alphabet.*[(i + n) % context.alphabet.*.len ..][0..1], .{ .fg = rgb(i, n % 2), .bold = (i + n) % 2 == 0 }, .none));
+                };
+                context.c.count += @as(usize, context.c.cols) * context.c.rows;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -154,15 +141,19 @@ fn printRows(c: *Ctx, name: []const u8) void {
     defer s.deinit();
     const src = c.lines(name);
     const win = s.window();
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        for (0..c.rows) |y| {
-            const text = src[(y + n) % src.len];
-            _ = must(win.printSegment(.{ .text = text, .style = .{ .fg = rgb(y, n % 2) } }, .{ .row = @intCast(y), .wrap = .none }));
+    var prepared = .{ .c = c, .src = &src, .win = &win };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                for (0..context.c.rows) |y| {
+                    const text = context.src.*[(y + n) % context.src.*.len];
+                    _ = must(context.win.*.printSegment(.{ .text = text, .style = .{ .fg = rgb(y, n % 2) } }, .{ .row = @intCast(y), .wrap = .none }));
+                }
+                context.c.count += context.c.rows;
+            }
         }
-        c.count += c.rows;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -177,16 +168,20 @@ fn widePrintRepaint(c: *Ctx) void {
     const win = s.window();
     for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
     must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 64 + 8192));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        r.repaint();
-        out.clearRetainingCapacity();
-        const stats = must(r.draw(&out.writer, &s, null, caps));
-        c.count += stats.cells;
-        c.bytes += out.written().len;
-        std.mem.doNotOptimizeAway(out.written());
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .s = &s, .r = &r, .out = &out };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.r.*.repaint();
+                context.out.*.clearRetainingCapacity();
+                const stats = must(context.r.*.draw(&context.out.*.writer, &context.s.*, null, caps));
+                context.c.count += stats.cells;
+                context.c.bytes += context.out.*.written().len;
+                std.mem.doNotOptimizeAway(context.out.*.written());
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         dumpGrid(c.gpa, &s);
         line("wire", out.written());
@@ -197,13 +192,17 @@ fn fillClear(c: *Ctx) void {
     var s = c.screen();
     defer s.deinit();
     const all: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        fill(&s, all, .blank(.{ .bg = rgb(n, 1) }));
-        s.clear();
-        c.count += 2 * @as(usize, c.cols) * c.rows;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .s = &s, .all = &all };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                fill(&context.s.*, context.all.*, .blank(.{ .bg = rgb(n, 1) }));
+                context.s.*.clear();
+                context.c.count += 2 * @as(usize, context.c.cols) * context.c.rows;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         fill(&s, all, .blank(.{ .bg = rgb(1, 1) }));
         dumpGrid(c.gpa, &s);
@@ -230,20 +229,24 @@ fn scrollRows(c: *Ctx, render: bool) void {
     const all: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
     // The whole frame of a scrolling log is the job: the scroll, the new
     // row and, for scroll_repaint, the draw. Every library is clocked so.
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        s.scroll(all, 1);
-        _ = must(win.printSegment(.{ .text = src[(c.rows + n) % src.len] }, .{ .row = c.rows - 1, .wrap = .none }));
-        c.count += 1;
-        if (render) {
-            out.clearRetainingCapacity();
-            const stats = must(r.draw(&out.writer, &s, null, scrolling));
-            c.bytes += out.written().len;
-            c.count += stats.cells;
-            if (c.check) line("wire", out.written());
+    var prepared = .{ .c = c, .render = &render, .s = &s, .r = &r, .out = &out, .src = &src, .win = &win, .scrolling = &scrolling, .all = &all };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                context.s.*.scroll(context.all.*, 1);
+                _ = must(context.win.*.printSegment(.{ .text = context.src.*[(context.c.rows + n) % context.src.*.len] }, .{ .row = context.c.rows - 1, .wrap = .none }));
+                context.c.count += 1;
+                if (context.render.*) {
+                    context.out.*.clearRetainingCapacity();
+                    const stats = must(context.r.*.draw(&context.out.*.writer, &context.s.*, null, context.scrolling.*));
+                    context.c.bytes += context.out.*.written().len;
+                    context.c.count += stats.cells;
+                    if (context.c.check) line("wire", context.out.*.written());
+                }
+            }
         }
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -254,13 +257,17 @@ fn resizeGrid(c: *Ctx) void {
     const win = s.window();
     for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
     const small: v.Size = .{ .cols = c.cols - 3, .rows = c.rows - 2 };
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        must(s.resize(small));
-        must(s.resize(c.size()));
-        c.count += 2;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .s = &s, .small = &small };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                must(context.s.*.resize(context.small.*));
+                must(context.s.*.resize(context.c.size()));
+                context.c.count += 2;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -272,16 +279,20 @@ fn copyCells(c: *Ctx) void {
     const src = c.lines("wide.txt");
     const win = src_screen.window();
     for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        for (0..c.rows) |y| for (0..c.cols) |x| {
-            const cell = src_screen.readCell(@intCast(x), @intCast(y)).?;
-            if (cell.isTail()) continue;
-            must(dst.copyCell(&src_screen, @intCast(x), @intCast(y), cell));
-        };
-        c.count += @as(usize, c.cols) * c.rows;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .src_screen = &src_screen, .dst = &dst };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                for (0..context.c.rows) |y| for (0..context.c.cols) |x| {
+                    const cell = context.src_screen.*.readCell(@intCast(x), @intCast(y)).?;
+                    if (cell.isTail()) continue;
+                    must(context.dst.*.copyCell(&context.src_screen.*, @intCast(x), @intCast(y), cell));
+                };
+                context.c.count += @as(usize, context.c.cols) * context.c.rows;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &dst);
 }
 
@@ -294,17 +305,21 @@ fn copyText(c: *Ctx) void {
     var out: std.Io.Writer.Allocating = .init(c.gpa);
     defer out.deinit();
     must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 8));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
-        for (0..c.rows) |y| {
-            must(win.copyText(&out.writer, @intCast(y), 0, c.cols));
-            must(out.writer.writeByte('\n'));
+    var prepared = .{ .c = c, .win = &win, .out = &out };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.out.*.clearRetainingCapacity();
+                for (0..context.c.rows) |y| {
+                    must(context.win.*.copyText(&context.out.*.writer, @intCast(y), 0, context.c.cols));
+                    must(context.out.*.writer.writeByte('\n'));
+                }
+                context.c.bytes += context.out.*.written().len;
+                context.c.count += context.c.rows;
+            }
         }
-        c.bytes += out.written().len;
-        c.count += c.rows;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) line("text", out.written());
 }
 
@@ -326,15 +341,19 @@ fn links(c: *Ctx) void {
         const l = must(s.link(uri, ""));
         _ = must(s.window().printSegment(.{ .text = src[y % src.len], .link = l }, .{ .row = @intCast(y), .wrap = .none }));
     }
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        r.repaint();
-        out.clearRetainingCapacity();
-        const stats = must(r.draw(&out.writer, &s, null, linked));
-        c.count += stats.cells;
-        c.bytes += out.written().len;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .s = &s, .r = &r, .out = &out, .linked = &linked };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.r.*.repaint();
+                context.out.*.clearRetainingCapacity();
+                const stats = must(context.r.*.draw(&context.out.*.writer, &context.s.*, null, context.linked.*));
+                context.c.count += stats.cells;
+                context.c.bytes += context.out.*.written().len;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         dumpGrid(c.gpa, &s);
         line("wire", out.written());
@@ -345,21 +364,25 @@ fn graphemePool(c: *Ctx) void {
     var s = c.screen();
     defer s.deinit();
     const clusters = c.lines("pool.txt");
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        for (0..c.rows) |y| {
-            var x: u16 = 0;
-            var k: usize = 0;
-            while (x + 2 <= c.cols) : (x += 2) {
-                const g = clusters[(n * 7 + y * c.cols + k) % clusters.len];
-                must(s.write(x, @intCast(y), g, .{}, .none));
-                k += 1;
+    var prepared = .{ .c = c, .s = &s, .clusters = &clusters };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                for (0..context.c.rows) |y| {
+                    var x: u16 = 0;
+                    var k: usize = 0;
+                    while (x + 2 <= context.c.cols) : (x += 2) {
+                        const g = context.clusters.*[(n * 7 + y * context.c.cols + k) % context.clusters.*.len];
+                        must(context.s.*.write(x, @intCast(y), g, .{}, .none));
+                        k += 1;
+                    }
+                }
+                must(context.s.*.compactPool());
+                context.c.count += 1;
             }
         }
-        must(s.compactPool());
-        c.count += 1;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -370,15 +393,19 @@ fn modes(c: *Ctx) void {
     defer out.deinit();
     must(out.ensureTotalCapacity(4096));
     const wanted: v.Modes = .{ .mouse = .{ .motion = .any }, .focus = true, .paste = true };
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
-        must(r.enter(&out.writer, caps, .alt, wanted));
-        must(r.leave(&out.writer));
-        c.bytes += out.written().len;
-        c.count += 1;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .r = &r, .out = &out, .wanted = &wanted };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.out.*.clearRetainingCapacity();
+                must(context.r.*.enter(&context.out.*.writer, caps, .alt, context.wanted.*));
+                must(context.r.*.leave(&context.out.*.writer));
+                context.c.bytes += context.out.*.written().len;
+                context.c.count += 1;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) line("wire", out.written());
 }
 
@@ -387,14 +414,18 @@ fn modes(c: *Ctx) void {
 fn textWidth(c: *Ctx) void {
     const src = c.lines("wide.txt");
     var total: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        total = 0;
-        for (src) |l| total += v.width(l, .unicode);
-        std.mem.doNotOptimizeAway(total);
-        c.count += src.len;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .src = &src, .total = &total };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.total.* = 0;
+                for (context.src.*) |l| context.total.* += v.width(l, .unicode);
+                std.mem.doNotOptimizeAway(context.total.*);
+                context.c.count += context.src.*.len;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("value\twidth={d}\n", .{total});
 }
 
@@ -402,21 +433,25 @@ fn graphemes(c: *Ctx) void {
     const src = c.lines("emoji.txt");
     var clusters: usize = 0;
     var cols: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        clusters = 0;
-        cols = 0;
-        for (src) |l| {
-            var it: v.Graphemes = .init(l);
-            while (it.next()) |g| {
-                clusters += 1;
-                cols += v.graphemeWidth(g, .unicode);
+    var prepared = .{ .c = c, .src = &src, .clusters = &clusters, .cols = &cols };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.clusters.* = 0;
+                context.cols.* = 0;
+                for (context.src.*) |l| {
+                    var it: v.Graphemes = .init(l);
+                    while (it.next()) |g| {
+                        context.clusters.* += 1;
+                        context.cols.* += v.graphemeWidth(g, .unicode);
+                    }
+                }
+                std.mem.doNotOptimizeAway(context.cols.*);
+                context.c.count += context.clusters.*;
             }
         }
-        std.mem.doNotOptimizeAway(cols);
-        c.count += clusters;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("value\tclusters={d}\n", .{clusters});
     if (c.check) emit("info\tcolumns={d}\n", .{cols});
 }
@@ -426,24 +461,28 @@ fn widthModels(c: *Ctx) void {
     var disagree: usize = 0;
     var parts: usize = 0;
     var combining: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        disagree = 0;
-        parts = 0;
-        combining = 0;
-        for (src) |l| {
-            var it: v.Graphemes = .init(l);
-            while (it.next()) |g| {
-                if (v.disagrees(g)) disagree += 1;
-                if (v.combinesOnly(g)) combining += 1;
-                var p: v.Parts = .init(g);
-                while (p.next()) |_| parts += 1;
+    var prepared = .{ .c = c, .src = &src, .disagree = &disagree, .parts = &parts, .combining = &combining };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.disagree.* = 0;
+                context.parts.* = 0;
+                context.combining.* = 0;
+                for (context.src.*) |l| {
+                    var it: v.Graphemes = .init(l);
+                    while (it.next()) |g| {
+                        if (v.disagrees(g)) context.disagree.* += 1;
+                        if (v.combinesOnly(g)) context.combining.* += 1;
+                        var p: v.Parts = .init(g);
+                        while (p.next()) |_| context.parts.* += 1;
+                    }
+                }
+                std.mem.doNotOptimizeAway(context.parts.*);
+                context.c.count += context.parts.*;
             }
         }
-        std.mem.doNotOptimizeAway(parts);
-        c.count += parts;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("value\tdisagree={d} combining={d} parts={d}\n", .{ disagree, combining, parts });
 }
 
@@ -451,13 +490,17 @@ fn textWrap(c: *Ctx) void {
     const text = c.file("prose.txt");
     const rows = c.gpa.alloc(v.Row, text.len + 1) catch @panic("oom");
     var n: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        n = v.wrap(text, c.cols, .word, .unicode, rows);
-        std.mem.doNotOptimizeAway(rows[0..n]);
-        c.count += n;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .text = &text, .rows = &rows, .n = &n };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.n.* = v.wrap(context.text.*, context.c.cols, .word, .unicode, context.rows.*);
+                std.mem.doNotOptimizeAway(context.rows.*[0..context.n.*]);
+                context.c.count += context.n.*;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         emit("value\trows={d}\n", .{n});
         var out: std.ArrayList(u8) = .empty;
@@ -472,19 +515,23 @@ fn textWrap(c: *Ctx) void {
 fn textFit(c: *Ctx, end: bool) void {
     const src = c.lines("wide.txt");
     var kept: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        kept = 0;
-        for (src, 0..) |l, i| {
-            const cols: u16 = @intCast(@max(4, (c.cols * (i % 7 + 3)) / 10));
-            if (end) {
-                kept += v.fitEnd(l, cols, "…", .unicode).len;
-            } else kept += v.fit(l, cols, "…", .unicode).len;
+    var prepared = .{ .c = c, .end = &end, .src = &src, .kept = &kept };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.kept.* = 0;
+                for (context.src.*, 0..) |l, i| {
+                    const cols: u16 = @intCast(@max(4, (context.c.cols * (i % 7 + 3)) / 10));
+                    if (context.end.*) {
+                        context.kept.* += v.fitEnd(l, cols, "…", .unicode).len;
+                    } else context.kept.* += v.fit(l, cols, "…", .unicode).len;
+                }
+                std.mem.doNotOptimizeAway(context.kept.*);
+                context.c.count += context.src.*.len;
+            }
         }
-        std.mem.doNotOptimizeAway(kept);
-        c.count += src.len;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("value\tkept={d}\n", .{kept});
 }
 
@@ -498,26 +545,30 @@ fn layoutSplit(c: *Ctx) void {
     var inner: [inner_constraints.len]v.Rect = undefined;
     const area: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
     var report: std.ArrayList(u8) = .empty;
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        var l = w.Layout.vertical(&outer_constraints);
-        l.spacing = 1;
-        const rows = l.split(area, &outer);
-        for (rows) |row| {
-            var h = w.Layout.horizontal(&inner_constraints);
-            h.spacing = 1;
-            const cells = h.split(row, &inner);
-            std.mem.doNotOptimizeAway(cells);
-            c.count += cells.len;
-            if (c.check and n == 0) for (cells) |r| {
-                report.print(c.gpa, "{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
-            };
+    var prepared = .{ .c = c, .outer = &outer, .inner = &inner, .area = &area, .report = &report };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                var l = w.Layout.vertical(&outer_constraints);
+                l.spacing = 1;
+                const rows = l.split(context.area.*, &context.outer.*);
+                for (rows) |row| {
+                    var h = w.Layout.horizontal(&inner_constraints);
+                    h.spacing = 1;
+                    const cells = h.split(row, &context.inner.*);
+                    std.mem.doNotOptimizeAway(cells);
+                    context.c.count += cells.len;
+                    if (context.c.check and n == 0) for (cells) |r| {
+                        context.report.*.print(context.c.gpa, "{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
+                    };
+                }
+                if (context.c.check and n == 0) {
+                    for (rows) |r| context.report.*.print(context.c.gpa, "R{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
+                }
+            }
         }
-        if (c.check and n == 0) {
-            for (rows) |r| report.print(c.gpa, "R{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
-        }
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("rects\t{s}\n", .{report.items});
 }
 
@@ -525,14 +576,18 @@ fn layoutRepeat(c: *Ctx) void {
     const out = c.gpa.alloc(v.Rect, @as(usize, c.cols) * c.rows) catch @panic("oom");
     const area: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
     var got: []v.Rect = &.{};
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        got = w.Layout.repeat(.horizontal, .{ .col = 0, .row = 0, .cols = 6, .rows = 3 }, 1, out);
-        std.mem.doNotOptimizeAway(got);
-        _ = area;
-        c.count += got.len;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .out = &out, .area = &area, .got = &got };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.got.* = w.Layout.repeat(.horizontal, .{ .col = 0, .row = 0, .cols = 6, .rows = 3 }, 1, context.out.*);
+                std.mem.doNotOptimizeAway(context.got.*);
+                _ = context.area.*;
+                context.c.count += context.got.*.len;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) emit("value\ttiles={d}\n", .{got.len});
 }
 
@@ -546,12 +601,16 @@ fn widget(c: *Ctx, comptime draw: fn (*Ctx, v.Window, usize) void) void {
     var s = c.screen();
     defer s.deinit();
     const win = s.window();
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        draw(c, win, n);
-        c.count += 1;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .win = &win };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |n| {
+                draw(context.c, context.win.*, n);
+                context.c.count += 1;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) dumpGrid(c.gpa, &s);
 }
 
@@ -821,14 +880,18 @@ fn markdownParse(c: *Ctx) void {
     {
         const source = c.file("doc.md");
         var blocks_n: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var doc = must(w.Markdown.Document.init(c.gpa, source));
-            blocks_n = doc.blocks().len;
-            c.count += doc.spans().len;
-            doc.deinit();
-        }
-        c.clock.stop();
+        var prepared = .{ .c = c, .source = &source, .blocks_n = &blocks_n };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |_| {
+                    var doc = must(w.Markdown.Document.init(context.c.gpa, context.source.*));
+                    context.blocks_n.* = doc.blocks().len;
+                    context.c.count += doc.spans().len;
+                    doc.deinit();
+                }
+            }
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) emit("value\tblocks={d}\n", .{blocks_n});
     }
 }
@@ -839,23 +902,27 @@ fn markdownTableParse(c: *Ctx) void {
         var tables: usize = 0;
         var cells: usize = 0;
         var tasks: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var doc = must(w.Markdown.Document.init(c.gpa, source));
-            tables = 0;
-            cells = 0;
-            tasks = 0;
-            for (doc.blocks()) |b| {
-                if (b.table) |t| {
-                    tables += 1;
-                    cells += t.rows * t.columns;
+        var prepared = .{ .c = c, .source = &source, .tables = &tables, .cells = &cells, .tasks = &tasks };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |_| {
+                    var doc = must(w.Markdown.Document.init(context.c.gpa, context.source.*));
+                    context.tables.* = 0;
+                    context.cells.* = 0;
+                    context.tasks.* = 0;
+                    for (doc.blocks()) |b| {
+                        if (b.table) |t| {
+                            context.tables.* += 1;
+                            context.cells.* += t.rows * t.columns;
+                        }
+                        if (b.task != null) context.tasks.* += 1;
+                    }
+                    context.c.count += doc.spans().len;
+                    doc.deinit();
                 }
-                if (b.task != null) tasks += 1;
             }
-            c.count += doc.spans().len;
-            doc.deinit();
-        }
-        c.clock.stop();
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) emit("value\ttables={d} cells={d} tasks={d}\n", .{ tables, cells, tasks });
     }
 }
@@ -882,22 +949,26 @@ fn printAbove(c: *Ctx) void {
         drawView(&view, 0);
         _ = must(r.draw(&out.writer, &view, null, caps));
         if (c.check) line("wire", out.written());
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
-            lines.clear();
-            var buf: [64]u8 = undefined;
-            for (0..2) |k| {
-                const text = std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable; // unreachable: two corpus words fit
-                _ = must(lines.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
+        var prepared = .{ .c = c, .view = &view, .r = &r, .lines = &lines, .out = &out };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |n| {
+                    context.out.*.clearRetainingCapacity();
+                    context.lines.*.clear();
+                    var buf: [64]u8 = undefined;
+                    for (0..2) |k| {
+                        const text = std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable; // unreachable: two corpus words fit
+                        _ = must(context.lines.*.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
+                    }
+                    drawView(&context.view.*, n + 1);
+                    const stats = must(context.r.*.printAbove(&context.out.*.writer, &context.lines.*, &context.view.*, null, caps));
+                    context.c.bytes += stats.bytes;
+                    context.c.count += 2;
+                    if (context.c.check) line("wire", context.out.*.written());
+                }
             }
-            drawView(&view, n + 1);
-            const stats = must(r.printAbove(&out.writer, &lines, &view, null, caps));
-            c.bytes += stats.bytes;
-            c.count += 2;
-            if (c.check) line("wire", out.written());
-        }
-        c.clock.stop();
+        };
+        must(c.measurement.run(&prepared, Callback.run));
     }
 }
 
@@ -925,24 +996,28 @@ fn textEdit(c: *Ctx) void {
         var final: u64 = 0;
         var final_len: usize = 0;
         var undone_len: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var b: w.TextInput.Buffer = .init(c.gpa);
-            for (typed) |ch| must(b.insert(&.{ch}));
-            for (0..4) |_| must(b.delete(.word_left));
-            for (0..3) |_| b.move(.word_left, false);
-            for (0..5) |_| must(b.delete(.right));
-            b.move(.end, false);
-            for (0..3) |_| must(b.delete(.left));
-            while (must(b.undo())) {}
-            undone_len = b.text().len;
-            while (must(b.redo())) {}
-            final = std.hash.Fnv1a_64.hash(b.text());
-            final_len = b.text().len;
-            c.count += typed.len;
-            b.deinit();
-        }
-        c.clock.stop();
+        var prepared = .{ .c = c, .typed = &typed, .final = &final, .final_len = &final_len, .undone_len = &undone_len };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |_| {
+                    var b: w.TextInput.Buffer = .init(context.c.gpa);
+                    for (context.typed.*) |ch| must(b.insert(&.{ch}));
+                    for (0..4) |_| must(b.delete(.word_left));
+                    for (0..3) |_| b.move(.word_left, false);
+                    for (0..5) |_| must(b.delete(.right));
+                    b.move(.end, false);
+                    for (0..3) |_| must(b.delete(.left));
+                    while (must(b.undo())) {}
+                    context.undone_len.* = b.text().len;
+                    while (must(b.redo())) {}
+                    context.final.* = std.hash.Fnv1a_64.hash(b.text());
+                    context.final_len.* = b.text().len;
+                    context.c.count += context.typed.*.len;
+                    b.deinit();
+                }
+            }
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) emit("value\tfinal={d}:{x} undone={d}\n", .{ final_len, final, undone_len });
     }
 }
@@ -957,25 +1032,29 @@ fn inputEvents(c: *Ctx) void {
     const read_buffer = c.gpa.alloc(u8, 1 << 20) catch @panic("oom");
     var kinds: [32]usize = @splat(0);
     var events: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        // Back to the start of the input, as lseek does: the descriptor's own
-        // offset, which is what the Tty reads from.
-        c.io.vtable.fileSeekTo(c.io.userdata, file, 0) catch @panic("rewind");
-        var in = must(v.Input.init(&tty, .{ .parser_buffer = parser_buffer, .read_buffer = read_buffer, .escape = .fromMilliseconds(50) }));
-        events = 0;
-        kinds = @splat(0);
-        while (true) {
-            const e = in.next(c.io) catch |err| switch (err) {
-                error.EndOfStream => break,
-                else => std.debug.panic("{s}", .{@errorName(err)}),
-            };
-            events += 1;
-            kinds[@backingInt(std.meta.activeTag(e)) % kinds.len] += 1;
+    var prepared = .{ .c = c, .file = &file, .tty = &tty, .parser_buffer = &parser_buffer, .read_buffer = &read_buffer, .kinds = &kinds, .events = &events };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                // Back to the start of the input, as lseek does: the descriptor's own
+                // offset, which is what the Tty reads from.
+                context.c.io.vtable.fileSeekTo(context.c.io.userdata, context.file.*, 0) catch @panic("rewind");
+                var in = must(v.Input.init(&context.tty.*, .{ .parser_buffer = context.parser_buffer.*, .read_buffer = context.read_buffer.*, .escape = .fromMilliseconds(50) }));
+                context.events.* = 0;
+                context.kinds.* = @splat(0);
+                while (true) {
+                    const e = in.next(context.c.io) catch |err| switch (err) {
+                        error.EndOfStream => break,
+                        else => std.debug.panic("{s}", .{@errorName(err)}),
+                    };
+                    context.events.* += 1;
+                    context.kinds.*[@backingInt(std.meta.activeTag(e)) % context.kinds.*.len] += 1;
+                }
+                context.c.count += context.events.*;
+            }
         }
-        c.count += events;
-    }
-    c.clock.stop();
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         emit("value\tevents={d}", .{events});
         for (kinds) |k| emit(" {d}", .{k});
@@ -998,16 +1077,20 @@ fn termFeed(c: *Ctx) void {
     term.setMethod(.unicode);
     var dump: std.Io.Writer.Allocating = .init(c.gpa);
     defer dump.deinit();
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        must(term.feed("\x1b[H\x1b[2J"));
-        must(term.feed(frame.written()));
-        dump.clearRetainingCapacity();
-        must(v.dumpScreen(term.screen(), &dump.writer, .{}));
-        c.bytes += frame.written().len;
-        c.count += 1;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .frame = &frame, .term = &term, .dump = &dump };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                must(context.term.*.feed("\x1b[H\x1b[2J"));
+                must(context.term.*.feed(context.frame.*.written()));
+                context.dump.*.clearRetainingCapacity();
+                must(v.dumpScreen(context.term.*.screen(), &context.dump.*.writer, .{}));
+                context.c.bytes += context.frame.*.written().len;
+                context.c.count += 1;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         dumpGrid(c.gpa, &s);
         line("text", dump.written());
@@ -1025,14 +1108,18 @@ fn pictureTransmit(c: *Ctx) void {
     const pixels = c.gpa.alloc(u8, @as(usize, pw) * ph * 4) catch @panic("oom");
     for (pixels, 0..) |*p, i| p.* = @truncate(i *% 31 +% i / 4096);
     must(out.ensureTotalCapacity(pixels.len * 2 + 8192));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
-        const n = must(layers.transmit(&out.writer, 7, pixels, .{ .width = pw, .height = ph, .compress = false }));
-        c.bytes += out.written().len;
-        c.count += n;
-    }
-    c.clock.stop();
+    var prepared = .{ .c = c, .layers = &layers, .out = &out, .pw = &pw, .ph = &ph, .pixels = &pixels };
+    const Callback = struct {
+        fn run(context: *@TypeOf(prepared), units: u64) !void {
+            for (0..units) |_| {
+                context.out.*.clearRetainingCapacity();
+                const n = must(context.layers.*.transmit(&context.out.*.writer, 7, context.pixels.*, .{ .width = context.pw.*, .height = context.ph.*, .compress = false }));
+                context.c.bytes += context.out.*.written().len;
+                context.c.count += n;
+            }
+        }
+    };
+    must(c.measurement.run(&prepared, Callback.run));
     if (c.check) {
         const digest = digestOf(out.written());
         emit("value\tbytes={d} sha256={x}\n", .{ out.written().len, digest });
@@ -1075,20 +1162,24 @@ fn pictureFrame(c: *Ctx, comptime protocol: enum { kitty, sixel, iterm, cells })
         if (c.check and protocol == .kitty) line("setup", out.written());
         must(out.ensureTotalCapacity(pixels.len * 2 + 8192));
         _ = must(renderer.draw(&out.writer, &screen, null, policy));
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
-            const col: u16 = @intCast(n % 2);
-            if (protocol == .cells) {
-                screen.clear();
-                must((w.Sextants{ .width = width, .height = height, .pixels = pixels }).draw(screen.window().sub(.{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 })));
-            } else must(layers.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
-            const stats = must(renderer.draw(&out.writer, &screen, if (protocol == .cells) null else &layers, policy));
-            c.count += stats.placements;
-            c.bytes += stats.bytes;
-            if (c.check) line("wire", out.written());
-        }
-        c.clock.stop();
+        var prepared = .{ .c = c, .screen = &screen, .renderer = &renderer, .layers = &layers, .out = &out, .width = &width, .height = &height, .pixels = &pixels, .policy = &policy };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |n| {
+                    context.out.*.clearRetainingCapacity();
+                    const col: u16 = @intCast(n % 2);
+                    if (protocol == .cells) {
+                        context.screen.*.clear();
+                        must((w.Sextants{ .width = context.width.*, .height = context.height.*, .pixels = context.pixels.* }).draw(context.screen.*.window().sub(.{ .col = col, .row = 0, .cols = context.c.cols - 1, .rows = context.c.rows - 1 })));
+                    } else must(context.layers.*.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = context.c.cols - 1, .rows = context.c.rows - 1 } }));
+                    const stats = must(context.renderer.*.draw(&context.out.*.writer, &context.screen.*, if (protocol == .cells) null else &context.layers.*, context.policy.*));
+                    context.c.count += stats.placements;
+                    context.c.bytes += stats.bytes;
+                    if (context.c.check) line("wire", context.out.*.written());
+                }
+            }
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) emit("value\twidth={d} height={d} frames={d}\n", .{ width, height, c.iterations });
     }
 }
@@ -1109,19 +1200,23 @@ fn pictureReplace(c: *Ctx) void {
         for (0..16 * 16) |i| pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
         const pic: v.Caps = .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = true };
         var swaps: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
-            // A clock that moves 100 ms a frame, so every grace period runs out.
-            const now: std.Io.Timestamp = .{ .nanoseconds = @as(i96, @intCast(n)) * 100 * std.time.ns_per_ms };
-            if (replacement.canSend()) _ = must(replacement.send(&layers, &out.writer, &ids, &pixels, .{ .width = 16, .height = 16, .compress = false, .now = now }));
-            _ = must(replacement.declare(&layers, .{ .image = 0, .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
-            _ = must(r.draw(&out.writer, &s, &layers, pic));
-            if (replacement.current() != null) swaps += 1;
-            c.bytes += out.written().len;
-            c.count += 1;
-        }
-        c.clock.stop();
+        var prepared = .{ .c = c, .s = &s, .r = &r, .layers = &layers, .out = &out, .ids = &ids, .replacement = &replacement, .pixels = &pixels, .pic = &pic, .swaps = &swaps };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |n| {
+                    context.out.*.clearRetainingCapacity();
+                    // A clock that moves 100 ms a frame, so every grace period runs out.
+                    const now: std.Io.Timestamp = .{ .nanoseconds = @as(i96, @intCast(n)) * 100 * std.time.ns_per_ms };
+                    if (context.replacement.*.canSend()) _ = must(context.replacement.*.send(&context.layers.*, &context.out.*.writer, &context.ids.*, &context.pixels.*, .{ .width = 16, .height = 16, .compress = false, .now = now }));
+                    _ = must(context.replacement.*.declare(&context.layers.*, .{ .image = 0, .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
+                    _ = must(context.r.*.draw(&context.out.*.writer, &context.s.*, &context.layers.*, context.pic.*));
+                    if (context.replacement.*.current() != null) context.swaps.* += 1;
+                    context.c.bytes += context.out.*.written().len;
+                    context.c.count += 1;
+                }
+            }
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) emit("value\tcurrent={d} swaps={d} images={d}\n", .{ replacement.current() orelse 0, swaps, layers.images().len });
     }
 }
@@ -1132,23 +1227,27 @@ fn canvasRaster(c: *Ctx) void {
         defer surface.deinit();
         prepareWidgets(c, "canvas");
         const p = (w.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(&surface);
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            surface.clear();
-            for (0..32) |i| {
-                const a = @as(f64, @floatFromInt(i)) * std.math.pi / 16;
-                p.line(50, 50, 50 + 45 * @cos(a), 50 + 45 * @sin(a), .{});
+        var prepared = .{ .c = c, .surface = &surface, .p = &p };
+        const Callback = struct {
+            fn run(context: *@TypeOf(prepared), units: u64) !void {
+                for (0..units) |_| {
+                    context.surface.*.clear();
+                    for (0..32) |i| {
+                        const a = @as(f64, @floatFromInt(i)) * std.math.pi / 16;
+                        context.p.*.line(50, 50, 50 + 45 * @cos(a), 50 + 45 * @sin(a), .{});
+                    }
+                    for (0..8) |i| {
+                        const d: f64 = @floatFromInt(i * 5);
+                        context.p.*.rect(5 + d, 5 + d, 90 - 2 * d, 90 - 2 * d, .{});
+                    }
+                    context.p.*.circle(50, 50, 30, .{ .rgba = .{ 255, 200, 0, 255 } });
+                    context.p.*.disc(25, 25, 10, .{ .rgba = .{ 0, 200, 255, 255 } });
+                    context.p.*.polyline(State.wave, .{});
+                    context.c.count += 1;
+                }
             }
-            for (0..8) |i| {
-                const d: f64 = @floatFromInt(i * 5);
-                p.rect(5 + d, 5 + d, 90 - 2 * d, 90 - 2 * d, .{});
-            }
-            p.circle(50, 50, 30, .{ .rgba = .{ 255, 200, 0, 255 } });
-            p.disc(25, 25, 10, .{ .rgba = .{ 0, 200, 255, 255 } });
-            p.polyline(State.wave, .{});
-            c.count += 1;
-        }
-        c.clock.stop();
+        };
+        must(c.measurement.run(&prepared, Callback.run));
         if (c.check) {
             const digest = digestOf(surface.pixels());
             emit("value\tsha256={x}\n", .{digest});
@@ -1161,7 +1260,7 @@ fn canvasRaster(c: *Ctx) void {
 pub fn run(init: std.process.Init, args: []const []const u8) !void {
     stdout_io = init.io;
     if (args.len == 1 and std.mem.eql(u8, args[0], "list-tasks")) {
-        for (plan.ops) |name| emit("{s}\n", .{name});
+        for (workloads.ops) |name| emit("{s}\n", .{name});
         return;
     }
     if (args.len != 5) return error.Arguments;
@@ -1177,10 +1276,10 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
         .rows = rows,
         .iterations = iterations,
         .check = std.mem.eql(u8, args[1], "check"),
-        .clock = .{ .io = init.io, .timed = std.mem.eql(u8, args[1], "full") },
+        .measurement = try .init(init, task, args[1], cols, rows, iterations),
         .corpus = init.environ_map.get("VISOR_BENCH_CORPUS") orelse return error.NoCorpus,
     };
-    // Fixture construction for widgets happens here, before any clock.
+    // Fixture construction for widgets happens before the measured callback.
     var arena: std.heap.ArenaAllocator = .init(init.gpa);
     defer arena.deinit();
     var fixture = c;
@@ -1292,7 +1391,7 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
     inline for (runs) |r| {
         if (std.mem.eql(u8, task, r.name)) {
             r.run(&c);
-            emit("result\t{d}\t{d}\t{d}\t{d}\n", .{ iterations, c.count, c.bytes, c.clock.total });
+            if (c.check) emit("result\t{d}\t{d}\t{d}\t0\n", .{ iterations, c.count, c.bytes });
             return;
         }
     }

@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) !void {
     // have to replay the same bytes, and a file belongs to one module. It is
     // test data, so it is not published: the conformance build makes its
     // own module from the same file.
-    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig") });
+    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig"), .target = target, .optimize = optimize });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -100,6 +100,12 @@ pub fn build(b: *std.Build) !void {
     });
     const test_step = b.step("test", "Run the visor tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+    const corpus_tests = b.addTest(.{
+        .name = "visor-corpus-tests",
+        .filters = filters,
+        .root_module = corpus,
+    });
+    test_step.dependOn(&b.addRunArtifact(corpus_tests).step);
 
     // Compiling without running is what a target this host cannot execute can
     // still be held to, and it is also the default step, so a bare
@@ -109,6 +115,7 @@ pub fn build(b: *std.Build) !void {
     // fetch.
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
+    check_step.dependOn(&corpus_tests.step);
     b.getInstallStep().dependOn(check_step);
 
     // The widgets are a second module and get a second test binary. Every
@@ -140,7 +147,7 @@ pub fn build(b: *std.Build) !void {
         .name = "visor-bench-tests",
         .filters = filters,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/run.zig"),
+            .root_source_file = b.path("bench/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = benchImports(b, target, optimize),
@@ -227,6 +234,12 @@ pub fn build(b: *std.Build) !void {
     // Both suites' clocks, fault plans and allocators.
     const shakedown = (try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
+    bench_tests.root_module.addImport("shakedown", shakedown);
+    const bench_options = b.addOptions();
+    bench_options.addOption([]const u8, "commit", "test");
+    bench_options.addOption([]const u8, "cpu", target.result.cpu.model.name);
+    bench_options.addOption([]const u8, "os", @tagName(target.result.os.tag));
+    bench_tests.root_module.addOptions("preflight_bench_options", bench_options);
     widget_tests.root_module.addImport("shakedown", shakedown);
     if (ci) |preflight| {
         preflight.addCi(b, .{
@@ -236,7 +249,7 @@ pub fn build(b: *std.Build) !void {
             // the pass in ReleaseFast under zig-out/bench and runs it, and
             // `zig build test` runs it once with `--smoke`.
             .bench = .{
-                .programs = &.{.{ .name = "visor-bench", .source = "bench/run.zig" }},
+                .programs = &.{.{ .name = "visor-bench", .source = "bench/main.zig" }},
                 .imports = benchImports,
                 .target = target,
                 .optimize = optimize,
@@ -291,10 +304,12 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .optimize = optimize,
         .imports = &.{.{ .name = "visor", .module = visor }},
     });
+    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize }) catch unreachable; // unreachable: lazy discovery restarts configuration
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
         .{ .name = "visor.widgets", .module = widgets },
         .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "shakedown", .module = shakedown.module("shakedown") },
     }) catch @panic("OOM");
 }
 

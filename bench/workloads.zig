@@ -1,4 +1,4 @@
-//! Which workloads a pass runs: the drawing core of `draw.zig` and every
+//! The retained workload names and frame counts: the drawing core of `draw.zig` and every
 //! operation of `ops.zig`.
 
 const std = @import("std");
@@ -83,7 +83,7 @@ pub fn iterations(task: []const u8, default: usize) usize {
     return default;
 }
 
-test "the plan's counts: 55 operations, 8 drawing-core workloads" {
+test "workload counts: 55 operations, 8 drawing-core workloads" {
     try std.testing.expectEqual(@as(usize, 55), ops.len);
     try std.testing.expectEqual(@as(usize, 8), core.len);
 }
