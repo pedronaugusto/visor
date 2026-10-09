@@ -35,5 +35,24 @@
   ],
   "unreachable_exceptions": "ci/unreachable-exceptions.json",
   "debug_print_exceptions": "ci/debug-print-exceptions.json",
-  "file_name_exceptions": "ci/file-name-exceptions.json"
+  "file_name_exceptions": "ci/file-name-exceptions.json",
+  "shipped": {
+    "docs": "Pool identity and byte-domain API contracts needed by consumers of exported handles."
+  },
+  "glint": {
+    "profile": "none",
+    "rules": [
+      {
+        "id": "A004",
+        "level": "gate"
+      }
+    ],
+    "cast_scope": "all"
+  },
+  "glint_paths": [
+    "src",
+    "bench",
+    "ci",
+    "examples"
+  ]
 }

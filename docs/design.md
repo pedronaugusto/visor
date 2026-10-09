@@ -40,3 +40,7 @@ screen boundary has established their bounds. The byte layout, inline tier,
 whole-cell comparison and borrow lifetimes remain part of the design. Growth,
 compaction, resize and destruction can invalidate borrowed pool slices even
 when a checked handle's scalar value is unchanged.
+
+## Source policy
+
+`ci/preflight.json` selects A004 at gate level for the adopted identity and byte domains, including tests, benchmarks, compiler fixtures and examples. The pinned preflight still invokes ziglint; its future Glint integration must honor this package setting. Glint G3 currently admits A004 only as a report, so this declaration records the gate policy without claiming active enforcement. The two packed generation encoding exceptions name their exact safe-type-internals boundary.

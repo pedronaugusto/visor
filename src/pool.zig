@@ -295,11 +295,16 @@ pub const Links = struct {
     /// give the same `Link`. Each is at most `max_len` bytes. A table
     /// holding every link a sixteen-bit handle names is out of memory.
     pub fn intern(l: *Links, uri: []const u8, params: []const u8) Allocator.Error!Link {
-        const gpa = l.gpa;
         if (uri.len == 0) return .none;
         const target: Target = .{ .uri = uri, .params = params };
         if (l.index.getKeyAdapted(target, Adapted{ .links = l })) |i| return pooledLink(i);
+        return l.append(uri, params);
+    }
 
+    // Keep allocation and extent checks out of the repeated-link lookup's
+    // register set. A miss alone needs this path and its larger stack frame.
+    noinline fn append(l: *Links, uri: []const u8, params: []const u8) Allocator.Error!Link {
+        const gpa = l.gpa;
         assert(uri.len <= max_len);
         assert(params.len <= max_len);
         const uri_len: ByteLength = .fromRaw(@intCast(uri.len)); // safe: Screen checked max_len before interning
