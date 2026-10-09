@@ -28,12 +28,14 @@ only the base leaves the second line out. `morse` comes with it, re-exported
 as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
 program that wants the writers on their own.
 
-Three dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
+Four dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
 every escape sequence written and every reply parsed,
 [`conduit`](https://github.com/pedronaugusto/conduit) for the terminal's own
 calls — raw mode and the way back, the size, the device's name — of which only
 its `conduit.tty` module is imported, which on Linux links no C library, and
-`uucode` for grapheme segmentation and width. All are pinned by commit. `uucode` builds its tables
+`uucode` for grapheme segmentation and width, and
+[`aegis`](https://github.com/pedronaugusto/aegis) for distinct pool identities,
+byte addresses, table positions and checked byte counts. All are pinned by commit. `uucode` builds its tables
 at build time, and visor asks for six fields and no more — `grapheme_break`
 and `grapheme_break_no_control` for where one cluster ends and the next begins,
 `wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
@@ -196,6 +198,13 @@ unused channels are zeroed on the way in, so comparing the memory and
 comparing the meaning are the same answer.
 
 A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
+`Text.offset()` returns `?GraphemeOffset`, `Text.length()` returns `ByteLength`,
+`Text.generation()` and `Link.generation()` return `PoolGeneration`, and
+`Link.index()` returns `?LinkIndex`. These aegis scalar domains preserve their
+integer layouts and cannot be assigned across meanings. Use `fromRaw` for an
+explicit import and `raw()` at a slice-index or encoding boundary. Importing a
+number does not establish that a handle belongs to a screen; resolution still
+checks its generation and bounds.
 `Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
 
 State documented `Private:` belongs to the value that holds it and is

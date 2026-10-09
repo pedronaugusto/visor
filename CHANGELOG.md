@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- `Cell.Text.offset()` returns `?GraphemeOffset`, `length()` returns `ByteLength`, and `Cell.Text.generation()` and `Link.generation()` return `PoolGeneration`; `Link.index()` returns `?LinkIndex`. These are aegis scalar domains: use `fromRaw` for an explicit import and `raw()` only at an indexing or encoding boundary. Cell sizes and packed handle bytes are unchanged.
+
 - Requires Zig 0.17.0; Zig 0.16 no longer builds visor. morse, conduit and uucode are pinned at their Zig 0.17 commits.
 - `build.zig` no longer exports `needsLlvm`: Zig 0.17's x86_64 backend compiles uucode's tables, so nothing built on visor in Debug on x86_64 Linux has to ask for LLVM.
 - `Tty` keeps no `std.Io`: `adopt(file)` takes only the file, and `close(io)`, `enter(io, …)`, `leave(io)`, `writer(io, buffer)` and `read(io, buffer)` take the caller's, as `Input.next(io)` and `Input.nextWithin(io, timeout)` do. `Tty.ioContext` is gone.
@@ -51,6 +53,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tty.leave() releases its own renderer without an argument; Tty.enter can return AlreadyEntered, and raw terminals must stay at a stable address until restored, with their renderer alive.
 
 ### Added
+
+- Distinct aegis pool generations, grapheme and link byte offsets, link-table indices and byte lengths; pool growth rejects an unaddressable byte extent before allocation or mutation in every build mode.
 
 - Every public function that returned an unnamed or inferred error set returns a named one: `Input.InitError`, `ImageIds.InitError` and `AcquireError`, `Layers.StoreSixelError` and `TransmitError`, `Screen.HandleError`, `InternError`, `DupeTextError` and `PrintableError`, `Tty.WatchResizeError`, `Date.InitError`, `Canvas.Surface.InitError` and `ResizeError`, `Canvas.DrawError` and `ExpectError`, and `Term.DumpStylesError` for `Term.dumpStyles` and `dumpScreenStyles`. `Canvas.Painter`'s `points`, `map`, `circle` and `disc` return `visor.DrawError`.
 - `zig build bench` runs visor's own benchmarks, in `bench/`; `zig build check`, and so CI, compiles them and never runs them.

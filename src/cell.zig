@@ -20,6 +20,18 @@
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
 const geom = @import("geom.zig");
+const aegis = @import("dependencies.zig").aegis;
+
+/// Identity of one complete screen pool; compaction issues a new identity.
+pub const PoolGeneration = aegis.id.Id(struct {}, u64);
+/// Byte address within a grapheme pool, never a link table position.
+pub const GraphemeOffset = aegis.id.Id(struct {}, u32);
+/// Byte address within a link pool, never a grapheme address.
+pub const LinkOffset = aegis.id.Id(struct {}, u32);
+/// Position within the link table, never a byte address.
+pub const LinkIndex = aegis.id.Id(struct {}, u16);
+/// Length of a stored grapheme or link field in bytes.
+pub const ByteLength = aegis.units.Bytes(u16);
 
 /// Everything SGR can say about a cell. There is no second style type here.
 pub const Style = morse.Style;
@@ -28,6 +40,8 @@ pub const Color = morse.Color;
 /// Which underline a cell carries.
 pub const Underline = morse.Underline;
 
+// aegis: safe-type-internals: LinkType packs a generation and index, not a scalar ID.
+// Resolution checks the issuing Screen generation before extracting the index.
 /// An OSC 8 handle bound to the link pool that issued it.
 /// `.none` is portable; every other handle is valid only in its pool generation.
 fn LinkType(comptime checked: bool) type {
@@ -38,14 +52,14 @@ fn LinkType(comptime checked: bool) type {
         const Self = @This();
 
         /// The table position, or null for `.none`.
-        pub fn index(l: Self) ?u16 {
+        pub fn index(l: Self) ?LinkIndex {
             const payload: u16 = @truncate(@backingInt(l));
-            return if (payload == 0) null else payload - 1;
+            return if (payload == 0) null else .fromRaw(payload - 1);
         }
 
         /// The identity of the pool that issued this handle.
-        pub fn generation(l: Self) u64 {
-            return if (checked) @backingInt(l) >> 16 else 0;
+        pub fn generation(l: Self) PoolGeneration {
+            return .fromRaw(if (checked) @backingInt(l) >> 16 else 0);
         }
     };
 }
@@ -124,6 +138,8 @@ const CellShape = packed struct(u8) {
     reserved: u2 = 0,
 };
 
+// aegis: safe-type-internals: TextType preserves the packed six-byte encoding.
+// Its accessors return distinct domains; Screen checks identities and bounds.
 /// The grapheme: up to six bytes stored in the cell, an offset into the
 /// screen's pool beyond.
 ///
@@ -180,15 +196,15 @@ fn TextType(comptime checked: bool) type {
         }
 
         /// Where in the pool the grapheme starts, or null when it is inline.
-        pub fn offset(t: Self) ?u32 {
+        pub fn offset(t: Self) ?GraphemeOffset {
             if (!t.isPooled()) return null;
-            return std.mem.readInt(u32, t.buf[0..4], .little);
+            return .fromRaw(std.mem.readInt(u32, t.buf[0..4], .little));
         }
 
         /// How many bytes the grapheme is.
-        pub fn length(t: Self) u16 {
-            if (!t.isPooled()) return t.len;
-            return std.mem.readInt(u16, t.buf[4..6], .little);
+        pub fn length(t: Self) ByteLength {
+            if (!t.isPooled()) return .fromRaw(t.len);
+            return .fromRaw(std.mem.readInt(u16, t.buf[4..6], .little));
         }
 
         /// Inline bytes, or null when resolving needs the issuing screen.
@@ -198,8 +214,8 @@ fn TextType(comptime checked: bool) type {
         }
 
         /// The issuing pool identity, zero for inline text.
-        pub fn generation(t: Self) u64 {
-            return if (checked) std.mem.readInt(u48, &t.pool_generation, .little) else 0;
+        pub fn generation(t: Self) PoolGeneration {
+            return .fromRaw(if (checked) std.mem.readInt(u48, &t.pool_generation, .little) else 0);
         }
 
         /// Whether the grapheme is one printable ASCII byte, which every
@@ -360,7 +376,7 @@ pub const internal = struct {
     pub fn store(c: Cell) StoredCell {
         return .{ .text = .{ .buf = c.text.buf, .len = c.text.len }, .link = @fromBackingInt(@intCast(@as(u16, @truncate(@backingInt(c.link))))), .style = canonical(c.style), .shape = c.shape };
     }
-    pub inline fn exportCell(c: *const StoredCell, generation: u64) Cell {
+    pub inline fn exportCell(c: *const StoredCell, generation: PoolGeneration) Cell {
         // Copy the contiguous payload before adding checked handle identities.
         // Keeping these as byte ranges avoids rebuilding each style byte in
         // a vector when a caller immediately compares the exported value.
@@ -383,12 +399,14 @@ pub const internal = struct {
         @memcpy(bytes[checked_len..][0..payload_len], raw[stored_len..][0..payload_len]);
         if (c.text.isPooled()) {
             const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
-            std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation), .little);
+            // glint-ignore: A004 -- safe-type-internals: docs/design.md; the atomic pool issuer bounds generation to 48 bits before this packed encoding.
+            std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation.raw()), .little); // safe: pool issuance bounds identities to 48 bits
         }
         return std.mem.bytesToValue(Cell, &bytes);
     }
-    pub fn exportLink(link: LinkType(false), generation: u64) Link {
-        return if (link == .none) .none else @fromBackingInt(@intCast((generation << 16) | @backingInt(link)));
+    pub fn exportLink(link: LinkType(false), generation: PoolGeneration) Link {
+        // glint-ignore: A004 -- safe-type-internals: docs/design.md; the bounded 48-bit generation occupies the upper bits of this composite checked handle.
+        return if (link == .none) .none else @fromBackingInt(@intCast((generation.raw() << 16) | @backingInt(link)));
     }
 };
 
@@ -491,7 +509,7 @@ test "colours that differ only by their form are different cells" {
 test "inline text is portable and canonical" {
     const short: Cell.Text = .inlined("é");
     try testing.expect(!short.isPooled());
-    try testing.expectEqual(@as(u16, 2), short.length());
+    try testing.expectEqual(ByteLength.fromRaw(2), short.length());
     try testing.expectEqualStrings("é", short.inlineSlice().?);
     try testing.expect(Cell.Text.eql(.inlined("a"), .inlined("a")));
     try testing.expect(!Cell.Text.eql(.inlined("a"), .inlined("b")));
@@ -506,7 +524,7 @@ test "one printable ascii byte is the fast path and nothing else is" {
 test "a link is an index and none is the zero value" {
     const c: Cell = .{};
     try testing.expectEqual(Link.none, c.link);
-    try testing.expectEqual(@as(?u16, null), Link.none.index());
+    try testing.expectEqual(@as(?LinkIndex, null), Link.none.index());
 }
 
 test "a blank is a space in the style it was given" {
@@ -575,4 +593,16 @@ test "cell equality includes every checked and compact byte" {
             try testing.expect(!b.eql(a));
         }
     }
+}
+
+test "pool scalar domains preserve layout and reject mixed meanings" {
+    comptime {
+        if (GraphemeOffset == LinkOffset or GraphemeOffset == LinkIndex or PoolGeneration == GraphemeOffset) @compileError("pool identity domains must differ");
+        if (ByteLength == LinkIndex or ByteLength == u16) @compileError("bytes must not be a table position or raw integer");
+        if (@sizeOf(PoolGeneration) != @sizeOf(u64) or @alignOf(PoolGeneration) != @alignOf(u64)) @compileError("generation layout changed");
+        if (@sizeOf(GraphemeOffset) != @sizeOf(u32) or @alignOf(GraphemeOffset) != @alignOf(u32)) @compileError("offset layout changed");
+        if (@sizeOf(LinkIndex) != @sizeOf(u16) or @alignOf(LinkIndex) != @alignOf(u16)) @compileError("index layout changed");
+        if (@sizeOf(ByteLength) != @sizeOf(u16) or @alignOf(ByteLength) != @alignOf(u16)) @compileError("byte length layout changed");
+    }
+    try testing.expectEqual(ByteLength.fromRaw(6), TextType(false).inlined("123456").length());
 }

@@ -88,6 +88,7 @@ pub const modules: []const gantry.NamedModule = &.{
 };
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
+        "aegis",
         "builtin",
         "conduit",
         "conduit.tty",
@@ -97,6 +98,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "uucode",
     } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },
+    .{ .name = "aegis owner", .target = "aegis", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit owner", .target = "conduit", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit.tty owner", .target = "conduit.tty", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "morse owner", .target = "morse", .except_from = &.{"src/dependencies.zig"} },

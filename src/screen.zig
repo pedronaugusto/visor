@@ -73,9 +73,11 @@ pub const internal = struct {
         if (n >= s.dimensions().rows) return &.{};
         return s.own_cells[@as(usize, n) * s.dimensions().cols ..][0..s.dimensions().cols];
     }
+    // aegis: measured-boundary: docs/design.md; stored cells passed Screen import
+    // checks, so the measured pool resolution/compaction kernel only slices bytes.
     pub fn textOf(s: *const Screen, c: *const StoredCell) []const u8 {
         if (!c.text.isPooled()) return c.text.inlineSlice().?;
-        return s.graphemes.bytes.items[c.text.offset().?..][0..c.text.length()];
+        return s.graphemes.bytes.items[c.text.offset().?.raw()..][0..c.text.length().raw()];
     }
     pub fn target(s: *const Screen, link: @TypeOf(@as(StoredCell, .{}).link)) ?pool.Target {
         return s.links.get(link);
@@ -143,7 +145,7 @@ pub const Screen = struct {
     /// Private: every OSC 8 target the cells point at.
     links: pool.Links,
     /// Private: the identity of this pair of pools, changed whenever they are replaced.
-    pool_generation: u64 = 0,
+    pool_generation: cellmod.PoolGeneration = .fromRaw(0),
     /// Private: which cells have changed since the last frame was written.
     damage: Damage,
     /// Where the cursor should end the frame.
@@ -396,8 +398,8 @@ pub const Screen = struct {
         try checkGlyph(bytes, method);
         if (c.shape.reserved != 0 or !std.mem.allEqual(u8, &c.reserved, 0)) return error.InvalidCell;
         if (!c.text.isPooled()) {
-            if (c.text.generation() != 0 or !std.mem.allEqual(u8, c.text.buf[c.text.len..], 0)) return error.InvalidCell;
-        } else if (c.text.length() <= Cell.Text.max_inline) return error.InvalidCell;
+            if (c.text.generation() != cellmod.PoolGeneration.fromRaw(0) or !std.mem.allEqual(u8, c.text.buf[c.text.len..], 0)) return error.InvalidCell;
+        } else if (c.text.length().raw() <= Cell.Text.max_inline) return error.InvalidCell;
         if (c.shape.kind == .spacer_head) {
             if (!Cell.Text.eql(c.text, .space) or c.link != .none or c.shape.scale != 0 or c.shape.drift) return error.InvalidCell;
         } else if (c.isHead() and textmod.graphemeWidth(bytes, method) != c.glyphWidth()) return error.InvalidCell;
@@ -855,7 +857,7 @@ pub const Screen = struct {
         /// Private: the row's cells, borrowed from its screen.
         own_cells: []const StoredCell,
         /// Private: the screen's pool generation the cells belong to.
-        generation: u64,
+        generation: cellmod.PoolGeneration,
 
         /// Cell.eql over the row, including its length and checked pool
         /// identities. Equal pooled contents in different generations differ.
@@ -1107,9 +1109,9 @@ fn checkInvariants(s: *const Screen) !void {
             // table.
             if (c.text.isPooled()) {
                 const off = c.text.offset().?;
-                try testing.expect(off + c.text.length() <= s.graphemes.len());
+                try testing.expect(@as(usize, off.raw()) + c.text.length().raw() <= s.graphemes.len());
             }
-            if (c.link.index()) |li| try testing.expect(li < s.links.count());
+            if (c.link.index()) |li| try testing.expect(li.raw() < s.links.count());
 
             if (c.isTail()) {
                 // A tail never stands alone: something covers it.

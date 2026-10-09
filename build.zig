@@ -25,7 +25,8 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .fields = @as([]const []const u8, &uucode_fields),
     });
-    const imports = dependencies(morse, conduit, uucode);
+    const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize });
+    const imports = dependencies(morse, conduit, uucode, aegis);
 
     //=====================================================================
     // The modules.
@@ -62,7 +63,7 @@ pub fn build(b: *std.Build) !void {
     // have to replay the same bytes, and a file belongs to one module. It is
     // test data, so it is not published: the conformance build makes its
     // own module from the same file.
-    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig") });
+    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig"), .target = target, .optimize = optimize });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -109,6 +110,26 @@ pub fn build(b: *std.Build) !void {
     // fetch.
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
+
+    // The corpus is a separate module: name its own test artifact so its
+    // tests are reached without depending on incidental member uses.
+    const corpus_tests = b.addTest(.{ .name = "visor-corpus-tests", .root_module = corpus, .filters = filters });
+    test_step.dependOn(&b.addRunArtifact(corpus_tests).step);
+    check_step.dependOn(&corpus_tests.step);
+    // Compilation must reject byte addresses and byte counts as link positions.
+    const domains = b.step("check-domains", "Reject mixed pool scalar domains");
+    for ([_][]const u8{ "index", "bytes" }, [_][]const u8{ "u32,false)'", "found 'units.Bytes(u16)'" }) |name, diagnostic| {
+        const rejected = b.addObject(.{ .name = b.fmt("domain-{s}", .{name}), .root_module = b.createModule(.{
+            .root_source_file = b.path(b.fmt("ci/domain_{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "visor", .module = module }},
+        }) });
+        rejected.expect_errors = .{ .contains = diagnostic };
+        domains.dependOn(&rejected.step);
+    }
+    test_step.dependOn(domains);
+    check_step.dependOn(domains);
     b.getInstallStep().dependOn(check_step);
 
     // The widgets are a second module and get a second test binary. Every
@@ -250,14 +271,15 @@ pub fn build(b: *std.Build) !void {
             .package = "visor",
             .program = b.path("ci/consumer.zig"),
             .modules = &.{ "visor", "visor.widgets" },
-            .packages = &.{ morse, conduit, uucode },
+            .packages = &.{ morse, conduit, uucode, aegis },
         });
     }
 }
 
 /// The modules visor imports.
-fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency) [3]std.Build.Module.Import {
+fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency, aegis: *std.Build.Dependency) [4]std.Build.Module.Import {
     return .{
+        .{ .name = "aegis", .module = aegis.module("aegis") },
         .{ .name = "morse", .module = morse.module("morse") },
         .{ .name = "uucode", .module = uucode.module("uucode") },
         .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
@@ -283,7 +305,7 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .root_source_file = b.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &dependencies(morse, conduit, uucode),
+        .imports = &dependencies(morse, conduit, uucode, b.dependency("aegis", .{ .target = target, .optimize = optimize })),
     });
     const widgets = b.createModule(.{
         .root_source_file = b.path("src/widgets.zig"),

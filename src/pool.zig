@@ -22,16 +22,24 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const Text = cellmod.internal.StoredCell.Text;
 const Link = @TypeOf(@as(cellmod.internal.StoredCell, .{}).link);
+const PoolGeneration = cellmod.PoolGeneration;
+const GraphemeOffset = cellmod.GraphemeOffset;
+const LinkIndex = cellmod.LinkIndex;
+const LinkOffset = cellmod.LinkOffset;
+const aegis = @import("dependencies.zig").aegis;
+const ByteLength = cellmod.ByteLength;
 
 // Identities never wrap: exhaustion refuses creation instead of reusing a
 // handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
+// aegis: safe-type-internals: this atomic issuer validates the 48-bit ceiling
+// before CAS; its public result is PoolGeneration and can never wrap.
 var generations: std.atomic.Value(u64) = .init(1);
 
-pub fn nextGeneration() u64 {
+pub fn nextGeneration() PoolGeneration {
     var next = generations.load(.monotonic);
     while (true) {
         if (next > std.math.maxInt(u48)) @panic("pool identities exhausted");
-        next = generations.cmpxchgWeak(next, next + 1, .monotonic, .monotonic) orelse return next;
+        next = generations.cmpxchgWeak(next, next + 1, .monotonic, .monotonic) orelse return .fromRaw(next);
     }
 }
 
@@ -40,20 +48,20 @@ pub fn nextGeneration() u64 {
 /// reach a pool (`error.TooLong`), so here it is an invariant.
 pub const max_len = std.math.maxInt(u16);
 
-fn pooledText(offset: u32, len: u16) Text {
+fn pooledText(offset: GraphemeOffset, len: ByteLength) Text {
     var t: Text = .{ .buf = @splat(0), .len = Text.pooled };
-    std.mem.writeInt(u32, t.buf[0..4], offset, .little);
-    std.mem.writeInt(u16, t.buf[4..6], len, .little);
+    std.mem.writeInt(u32, t.buf[0..4], offset.raw(), .little);
+    std.mem.writeInt(u16, t.buf[4..6], len.raw(), .little);
     // What `Text.offset` and `Text.length` read back is what was written.
     assert(t.offset().? == offset);
     assert(t.length() == len);
     return t;
 }
 
-fn pooledLink(index: u16) Link {
+fn pooledLink(index: LinkIndex) Link {
     // Zero is `.none`, so the last index has no handle.
-    assert(index < std.math.maxInt(u16));
-    const link: Link = @fromBackingInt(@intCast(index + 1));
+    assert(index.raw() < std.math.maxInt(u16));
+    const link: Link = @fromBackingInt(@intCast(index.raw() + 1));
     assert(link.index().? == index);
     return link;
 }
@@ -70,18 +78,20 @@ pub const Graphemes = struct {
     const Index = std.HashMapUnmanaged(Entry, void, Context, std.hash_map.default_max_load_percentage);
 
     /// One interned grapheme's place in `bytes`.
-    pub const Entry = struct { offset: u32, len: u16 };
+    pub const Entry = struct { offset: GraphemeOffset, len: ByteLength };
 
     /// Hashing and equality for an `Entry`, which both have to read the
     /// bytes it points at.
+    // aegis: safe-type-internals: intern validates every Entry before publication.
+    // Hash/equality extract its byte address only for slicing that owned pool.
     pub const Context = struct {
         bytes: []const u8,
 
         pub fn hash(ctx: Graphemes.Context, e: Graphemes.Entry) u64 {
-            return std.hash.Wyhash.hash(0, ctx.bytes[e.offset..][0..e.len]);
+            return std.hash.Wyhash.hash(0, ctx.bytes[e.offset.raw()..][0..e.len.raw()]);
         }
         pub fn eql(ctx: Graphemes.Context, a: Graphemes.Entry, b: Graphemes.Entry) bool {
-            return std.mem.eql(u8, ctx.bytes[a.offset..][0..a.len], ctx.bytes[b.offset..][0..b.len]);
+            return std.mem.eql(u8, ctx.bytes[a.offset.raw()..][0..a.len.raw()], ctx.bytes[b.offset.raw()..][0..b.len.raw()]);
         }
     };
 
@@ -94,7 +104,7 @@ pub const Graphemes = struct {
             return std.hash.Wyhash.hash(0, key);
         }
         pub fn eql(ctx: Graphemes.Adapted, key: []const u8, e: Graphemes.Entry) bool {
-            return std.mem.eql(u8, key, ctx.bytes[e.offset..][0..e.len]);
+            return std.mem.eql(u8, key, ctx.bytes[e.offset.raw()..][0..e.len.raw()]);
         }
     };
 
@@ -120,19 +130,20 @@ pub const Graphemes = struct {
         const gpa = p.gpa;
         if (grapheme.len <= Text.max_inline) return .inlined(grapheme);
         assert(grapheme.len <= max_len);
-        const byte_len: u16 = @intCast(grapheme.len);
+        const byte_len: ByteLength = .fromRaw(@intCast(grapheme.len)); // safe: Screen checked max_len before interning
 
         const found = p.index.getEntryAdapted(grapheme, Adapted{ .bytes = p.bytes.items });
         if (found) |e| return pooledText(e.key_ptr.offset, e.key_ptr.len);
 
-        const offset = std.math.cast(u32, p.bytes.items.len) orelse return error.OutOfMemory;
+        const offset: GraphemeOffset = .fromRaw(aegis.int.cast(u32, p.bytes.items.len) catch return error.OutOfMemory);
+        _ = try appendEnd(p.bytes.items.len, grapheme.len);
         const borrowed = aliasOffset(p.bytes.items, grapheme);
         try p.bytes.ensureUnusedCapacity(gpa, grapheme.len);
         try p.index.ensureUnusedCapacityContext(gpa, 1, .{ .bytes = p.bytes.items });
         const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
         p.bytes.appendSliceAssumeCapacity(source);
         // The entry names the bytes just appended, the end of the pool.
-        assert(@as(usize, offset) + byte_len == p.bytes.items.len);
+        assert(@as(usize, offset.raw()) + byte_len.raw() == p.bytes.items.len);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return pooledText(offset, byte_len);
@@ -152,8 +163,8 @@ pub const Graphemes = struct {
     /// invalidate pooled slices.
     pub fn slice(p: *const Graphemes, t: *const Text) SliceError![]const u8 {
         if (!t.isPooled()) return t.inlineSlice() orelse error.InvalidHandle;
-        const off: usize = t.offset().?;
-        const n = t.length();
+        const off: usize = t.offset().?.raw();
+        const n = t.length().raw();
         if (off > p.bytes.items.len or n > p.bytes.items.len - off) return error.InvalidHandle;
         return p.bytes.items[off..][0..n];
     }
@@ -226,18 +237,20 @@ pub const Links = struct {
     /// Which link a target already has.
     index: Index = .empty,
 
-    const Index = std.HashMapUnmanaged(u16, void, Context, std.hash_map.default_max_load_percentage);
+    const Index = std.HashMapUnmanaged(LinkIndex, void, Context, std.hash_map.default_max_load_percentage);
 
     /// Where a link's two strings are.
-    pub const Entry = struct { uri_off: u32, uri_len: u16, params_off: u32, params_len: u16 };
+    pub const Entry = struct { uri_off: LinkOffset, uri_len: ByteLength, params_off: LinkOffset, params_len: ByteLength };
 
+    // aegis: safe-type-internals: this index contains only published LinkIndex values.
+    // Resolution bounds them against this table before extracting byte offsets.
     pub const Context = struct {
         links: *const Links,
 
-        pub fn hash(ctx: Links.Context, i: u16) u64 {
+        pub fn hash(ctx: Links.Context, i: LinkIndex) u64 {
             return hashTarget(ctx.links.get(pooledLink(i)).?);
         }
-        pub fn eql(ctx: Links.Context, a: u16, b: u16) bool {
+        pub fn eql(ctx: Links.Context, a: LinkIndex, b: LinkIndex) bool {
             return eqlTarget(ctx.links.get(pooledLink(a)).?, ctx.links.get(pooledLink(b)).?);
         }
     };
@@ -248,7 +261,7 @@ pub const Links = struct {
         pub fn hash(_: Links.Adapted, key: Target) u64 {
             return hashTarget(key);
         }
-        pub fn eql(ctx: Links.Adapted, key: Target, i: u16) bool {
+        pub fn eql(ctx: Links.Adapted, key: Target, i: LinkIndex) bool {
             return eqlTarget(key, ctx.links.get(pooledLink(i)).?);
         }
     };
@@ -289,27 +302,31 @@ pub const Links = struct {
 
         assert(uri.len <= max_len);
         assert(params.len <= max_len);
-        const uri_len: u16 = @intCast(uri.len);
-        const params_len: u16 = @intCast(params.len);
-        const uri_off = std.math.cast(u32, l.bytes.items.len) orelse return error.OutOfMemory;
-        const i = std.math.cast(u16, l.entries.items.len) orelse return error.OutOfMemory;
-        if (i == std.math.maxInt(u16)) return error.OutOfMemory;
+        const uri_len: ByteLength = .fromRaw(@intCast(uri.len)); // safe: Screen checked max_len before interning
+        const params_len: ByteLength = .fromRaw(@intCast(params.len)); // safe: Screen checked max_len before interning
+        const uri_off: LinkOffset = .fromRaw(aegis.int.cast(u32, l.bytes.items.len) catch return error.OutOfMemory);
+        const i: LinkIndex = .fromRaw(aegis.int.cast(u16, l.entries.items.len) catch return error.OutOfMemory);
+        if (i.raw() == std.math.maxInt(u16)) return error.OutOfMemory;
+
+        const added = aegis.units.Bytes(u32).fromRaw(uri_len.raw()).add(.fromRaw(params_len.raw())) catch return error.OutOfMemory;
+        _ = try appendEnd(l.bytes.items.len, added.raw());
+        const params_start = try appendEnd(l.bytes.items.len, uri_len.raw());
+        const params_off: LinkOffset = .fromRaw(params_start.raw());
 
         const uri_borrowed = aliasOffset(l.bytes.items, uri);
         const params_borrowed = aliasOffset(l.bytes.items, params);
-        try l.bytes.ensureUnusedCapacity(gpa, uri.len + params.len);
+        try l.bytes.ensureUnusedCapacity(gpa, added.raw());
         try l.entries.ensureUnusedCapacity(gpa, 1);
         try l.index.ensureUnusedCapacityContext(gpa, 1, .{ .links = l });
 
         const uri_source = if (uri_borrowed) |off| l.bytes.items[off..][0..uri.len] else uri;
         l.bytes.appendSliceAssumeCapacity(uri_source);
-        const params_off: u32 = @intCast(l.bytes.items.len);
         const params_source = if (params_borrowed) |off| l.bytes.items[off..][0..params.len] else params;
         l.bytes.appendSliceAssumeCapacity(params_source);
         // The two strings sit back to back at the end of the pool, which is
         // where `get` reads them from.
-        assert(@as(usize, uri_off) + uri_len == params_off);
-        assert(@as(usize, params_off) + params_len == l.bytes.items.len);
+        assert(@as(usize, uri_off.raw()) + uri_len.raw() == params_off.raw());
+        assert(@as(usize, params_off.raw()) + params_len.raw() == l.bytes.items.len);
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,
@@ -326,11 +343,11 @@ pub const Links = struct {
     pub fn get(l: *const Links, link: Link) ?Target {
         if (link == .none) return null;
         const i = link.index() orelse return null;
-        if (i >= l.entries.items.len) return null;
-        const e = l.entries.items[i];
+        if (i.raw() >= l.entries.items.len) return null;
+        const e = l.entries.items[i.raw()];
         return .{
-            .uri = l.bytes.items[e.uri_off..][0..e.uri_len],
-            .params = l.bytes.items[e.params_off..][0..e.params_len],
+            .uri = l.bytes.items[e.uri_off.raw()..][0..e.uri_len.raw()],
+            .params = l.bytes.items[e.params_off.raw()..][0..e.params_len.raw()],
         };
     }
 
@@ -340,8 +357,17 @@ pub const Links = struct {
     }
 };
 
+/// Checks the complete addressable byte extent before allocation or mutation.
+fn appendEnd(current: usize, added: usize) Allocator.Error!aegis.units.Bytes(u32) {
+    const bytes: aegis.units.Bytes(usize) = .fromRaw(current);
+    const end = bytes.add(.fromRaw(added)) catch return error.OutOfMemory;
+    return end.convert(u32) catch return error.OutOfMemory;
+}
+
 /// The offset of a slice borrowed from `storage`, saved across a possible
 /// reallocation. Empty slices need no preservation.
+// aegis: no-danger: addresses are compared to preserve a borrowed slice across
+// growth; the result is only a local offset, never a public identity or pointer.
 fn aliasOffset(storage: []const u8, bytes: []const u8) ?usize {
     if (bytes.len == 0 or storage.len == 0) return null;
     const base = @intFromPtr(storage.ptr); // safe: compared as numbers, never dereferenced
@@ -472,7 +498,7 @@ test "a link index from another screen reads as nothing" {
     var l: Links = .init(testing.allocator);
     defer l.deinit();
     _ = try l.intern("a://b", "");
-    try testing.expectEqual(@as(?Target, null), l.get(pooledLink(9)));
+    try testing.expectEqual(@as(?Target, null), l.get(pooledLink(.fromRaw(9))));
 }
 
 /// Tests only. Every allocation-failure check runs over it: each growth is then an
@@ -495,4 +521,29 @@ test "the pool gives its memory back under a failing allocator" {
             }
         }
     }.run, .{});
+}
+
+test "pool address exhaustion is rejected before allocation or mutation" {
+    var fail: testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
+    var no_resize: NoResize = .init(fail.allocator());
+    var storage: [1]u8 = .{0};
+    const address: [*]u8 = @ptrCast(&storage); // safe: synthetic extent is never read; growth fails before append on the old implementation
+    const limit = std.math.maxInt(u32);
+    var graphemes: Graphemes = .init(no_resize.allocator());
+    graphemes.bytes.items = address[0..limit];
+    graphemes.bytes.capacity = limit;
+    defer graphemes.bytes = .empty;
+    try testing.expectError(error.OutOfMemory, graphemes.intern("long-cluster"));
+    try testing.expect(!fail.has_induced_failure);
+    try testing.expectEqual(@as(usize, limit), graphemes.bytes.items.len);
+    try testing.expectEqual(@as(u32, 0), graphemes.index.count());
+
+    var links: Links = .init(no_resize.allocator());
+    links.bytes.items = address[0 .. limit - 1];
+    links.bytes.capacity = limit - 1;
+    defer links.bytes = .empty;
+    try testing.expectError(error.OutOfMemory, links.intern("uri", "id=x"));
+    try testing.expect(!fail.has_induced_failure);
+    try testing.expectEqual(@as(usize, limit - 1), links.bytes.items.len);
+    try testing.expectEqual(@as(usize, 0), links.entries.items.len);
 }

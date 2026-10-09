@@ -248,7 +248,7 @@ pub const Renderer = struct {
     /// Private: what the terminal was last shown.
     prev: []Cell,
     /// Private: the pool generation whose identities the previous frame records.
-    pool_generation: ?u64 = null,
+    pool_generation: ?cellmod.PoolGeneration = null,
     /// Private: rows the renderer has its own reason to write whole.
     force: []bool,
     /// Private: rows that have ever held a grapheme the two width models disagree

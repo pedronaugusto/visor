@@ -9,5 +9,10 @@ const widgets = @import("visor.widgets");
 pub fn main() !void {
     var screen: visor.Screen = try .init(std.heap.page_allocator, .{ .cols = 8, .rows = 1 });
     defer screen.deinit();
+    const text = try screen.intern("long-cluster");
+    const byte_len: visor.ByteLength = text.length();
+    const offset: visor.GraphemeOffset = text.offset().?;
+    const generation: visor.PoolGeneration = text.generation();
+    if (byte_len.raw() != 12 or offset.raw() != 0 or generation.raw() == 0) return error.InvalidPoolDomains;
     try (widgets.Paragraph{ .lines = &.{.{ .text = "visor" }} }).draw(screen.window());
 }

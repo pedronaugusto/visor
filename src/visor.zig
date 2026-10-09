@@ -64,6 +64,14 @@ pub const Color = cell_mod.Color;
 pub const Underline = cell_mod.Underline;
 /// An OSC 8 handle bound to the generation of its issuing link pool.
 pub const Link = cell_mod.Link;
+/// The pool identity carried by a pooled Text or Link.
+pub const PoolGeneration = cell_mod.PoolGeneration;
+/// A byte address within a grapheme pool.
+pub const GraphemeOffset = cell_mod.GraphemeOffset;
+/// A position within a link table.
+pub const LinkIndex = cell_mod.LinkIndex;
+/// The byte length returned by Text.length.
+pub const ByteLength = cell_mod.ByteLength;
 /// The target a `Link` names: a URI and the parameters beside it.
 pub const Target = pool_mod.Target;
 /// An independent link target, released with its `deinit`.
