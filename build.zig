@@ -249,6 +249,7 @@ pub fn build(b: *std.Build) !void {
     const shakedown = (try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
+    bench_tests.root_module.addImport("shakedown", shakedown);
     if (ci) |preflight| {
         preflight.addCi(b, .{
             .tests = test_step,

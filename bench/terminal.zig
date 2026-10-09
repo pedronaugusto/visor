@@ -456,13 +456,12 @@ pub fn expected(a: Allocator, cols: usize, rows: usize, heavy: bool, salt: usize
     return cells;
 }
 
-/// What a drawing-core program reported on its last line.
+/// What a checked workload reported on its last line.
 pub const Result = struct {
     units: u64,
     /// Changed cells the library counted itself, where it exposes them.
     native_count: ?u64,
     output_bytes: u64,
-    ns: u64,
 };
 
 /// One drawing-core check: `frames` are the hex lines a side printed.

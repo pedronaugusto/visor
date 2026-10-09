@@ -1,128 +1,21 @@
-//! Every other public visor operation, one workload a run: `visor-bench ops
-//! <task> <check|smoke|full> <cols> <rows> <iterations>`, the protocol of
-//! `draw.zig`: check lines first, then
-//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `visor-bench ops
-//! list-tasks` names them.
-//! Text inputs come from the generated corpus directory in
-//! VISOR_BENCH_CORPUS, identical for every library. Builds, corpus reads,
-//! fixture construction and reporting stay outside the timed interval.
+//! Every other public visor operation, as workloads: `harness.zig` says how
+//! one is run and checked, and `visor-bench ops list-tasks` names them.
+//! Text inputs come from the generated corpus directory, identical for every
+//! library. Corpus reads and fixture construction are the setup of a
+//! workload; its frames are what the clock reads.
 const std = @import("std");
 const v = @import("visor");
 const w = @import("visor.widgets");
-const plan = @import("plan.zig");
-
-/// The Io the lines go out through, set once by `run`: unbuffered, so every
-/// line a check prints is out before anything that stops the program.
-var stdout_io: std.Io = undefined;
-
-fn emit(comptime fmt: []const u8, args: anytype) void {
-    var buf: [4096]u8 = undefined;
-    const s = std.mem.print(&buf, fmt, args) catch @panic("report too long");
-    raw(s);
-}
-fn raw(s: []const u8) void {
-    std.Io.File.stdout().writeStreamingAll(stdout_io, s) catch @panic("write failed");
-}
-fn line(tag: []const u8, bytes: []const u8) void {
-    raw(tag);
-    raw("\t");
-    var buf: [2048]u8 = undefined;
-    var i: usize = 0;
-    while (i < bytes.len) {
-        const take = @min(bytes.len - i, buf.len / 2);
-        const hexed = std.mem.print(&buf, "{x}", .{bytes[i..][0..take]}) catch unreachable; // unreachable: take is half the buffer
-        raw(hexed);
-        i += take;
-    }
-    raw("\n");
-}
-
-/// Unwraps an error union or passes a plain value: the two revisions differ
-/// only in which calls became fallible.
-fn Payload(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .error_union => |e| e.payload,
-        else => T,
-    };
-}
-inline fn must(x: anytype) Payload(@TypeOf(x)) {
-    return switch (@typeInfo(@TypeOf(x))) {
-        .error_union => x catch |err| std.debug.panic("{s}", .{@errorName(err)}),
-        else => x,
-    };
-}
+const harness = @import("harness.zig");
+const Ctx = harness.Ctx;
+const emit = harness.emit;
+const line = harness.line;
+const must = harness.must;
+const dumpGrid = harness.dumpGrid;
 
 fn fill(s: *v.Screen, rect: v.Rect, c: v.Cell) void {
     must(s.fill(rect, c));
 }
-
-/// Rows as text: each head cell's grapheme, covered columns skipped, rows
-/// right-trimmed, joined by newlines. The same canonical form every library
-/// prints, so grids compare across implementations.
-fn dumpGrid(gpa: std.mem.Allocator, s: *const v.Screen) void {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(gpa);
-    const size = s.dimensions();
-    for (0..size.rows) |y| {
-        const start = out.items.len;
-        for (0..size.cols) |x| {
-            const c = s.readCell(@intCast(x), @intCast(y)).?;
-            if (c.isTail()) continue;
-            const t = s.textAt(@intCast(x), @intCast(y));
-            out.appendSlice(gpa, if (t.len == 0) " " else t) catch @panic("oom");
-        }
-        while (out.items.len > start and out.items[out.items.len - 1] == ' ') out.items.len -= 1;
-        if (y + 1 < size.rows) out.append(gpa, '\n') catch @panic("oom");
-    }
-    line("grid", out.items);
-}
-
-const Clock = struct {
-    io: std.Io,
-    timed: bool,
-    total: i96 = 0,
-    started: i96 = 0,
-    fn start(c: *Clock) void {
-        if (c.timed) c.started = std.Io.Clock.now(.awake, c.io).toNanoseconds();
-    }
-    fn stop(c: *Clock) void {
-        if (c.timed) c.total += std.Io.Clock.now(.awake, c.io).toNanoseconds() - c.started;
-    }
-};
-
-const Ctx = struct {
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    cols: u16,
-    rows: u16,
-    iterations: usize,
-    check: bool,
-    clock: Clock,
-    corpus: []const u8,
-    count: usize = 0,
-    bytes: usize = 0,
-
-    fn file(c: *Ctx, name: []const u8) []const u8 {
-        const path = c.gpa.print("{s}/{d}x{d}/{s}", .{ c.corpus, c.cols, c.rows, name }) catch @panic("oom");
-        defer c.gpa.free(path);
-        return std.Io.Dir.cwd().readFileAlloc(c.io, path, c.gpa, .unlimited) catch |err| std.debug.panic("corpus {s}: {s}", .{ path, @errorName(err) });
-    }
-    fn lines(c: *Ctx, name: []const u8) [][]const u8 {
-        const data = c.file(name);
-        var found: std.ArrayList([]const u8) = .empty;
-        var it = std.mem.splitScalar(u8, std.mem.trimEnd(u8, data, "\n"), '\n');
-        while (it.next()) |l| found.append(c.gpa, l) catch @panic("oom");
-        return found.items;
-    }
-    fn screen(c: *Ctx) v.Screen {
-        var s = must(v.Screen.init(c.gpa, .{ .cols = c.cols, .rows = c.rows }));
-        s.method = .unicode;
-        return s;
-    }
-    fn size(c: *const Ctx) v.Size {
-        return .{ .cols = c.cols, .rows = c.rows };
-    }
-};
 
 const words = [_][]const u8{ "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta" };
 const caps: v.Caps = .{ .width_method = .unicode, .truecolor = true };
@@ -131,361 +24,540 @@ fn rgb(i: usize, salt: usize) v.Color {
     return .rgb(@truncate(i *% 13 +% salt *% 17), @truncate(i *% 7 +% 31), @truncate(i *% 3 +% 53));
 }
 
+fn digestOf(bytes: []const u8) [32]u8 {
+    var d: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &d, .{});
+    return d;
+}
+
+/// A frame's output, for the renderer to write to: room reserved for the
+/// whole grid before the clock.
+fn output(c: *Ctx) std.Io.Writer.Allocating {
+    var out: std.Io.Writer.Allocating = .init(c.gpa);
+    must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 64 + 8192));
+    return out;
+}
+
+/// The rows of `name` printed down a window, as the fixture of the workloads
+/// that start from a full screen.
+fn printDown(win: v.Window, src: []const []const u8, rows: u16) void {
+    for (0..rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
+}
+
 // ---------------------------------------------------------------- the grid
 
-fn cellWrites(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-    c.clock.start();
-    for (0..c.iterations) |n| {
+const CellWrites = struct {
+    s: v.Screen,
+
+    pub fn init(f: *CellWrites, c: *Ctx) !void {
+        f.s = c.screen();
+    }
+
+    pub fn deinit(f: *CellWrites, _: *Ctx) void {
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *CellWrites, c: *Ctx, n: usize) !void {
+        const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
         for (0..c.rows) |y| for (0..c.cols) |x| {
             const i = y * c.cols + x;
-            must(s.write(@intCast(x), @intCast(y), alphabet[(i + n) % alphabet.len ..][0..1], .{ .fg = rgb(i, n % 2), .bold = (i + n) % 2 == 0 }, .none));
+            must(f.s.write(@intCast(x), @intCast(y), alphabet[(i + n) % alphabet.len ..][0..1], .{ .fg = rgb(i, n % 2), .bold = (i + n) % 2 == 0 }, .none));
         };
         c.count += @as(usize, c.cols) * c.rows;
     }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
-}
 
-fn printRows(c: *Ctx, name: []const u8) void {
-    var s = c.screen();
-    defer s.deinit();
-    const src = c.lines(name);
-    const win = s.window();
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        for (0..c.rows) |y| {
-            const text = src[(y + n) % src.len];
-            _ = must(win.printSegment(.{ .text = text, .style = .{ .fg = rgb(y, n % 2) } }, .{ .row = @intCast(y), .wrap = .none }));
+    pub fn evidence(f: *CellWrites, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+    }
+};
+
+fn PrintRows(comptime name: []const u8) type {
+    return struct {
+        const Self = @This();
+
+        s: v.Screen,
+        src: [][]const u8,
+        win: v.Window,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            f.s = c.screen();
+            f.src = c.lines(name);
+            f.win = f.s.window();
         }
-        c.count += c.rows;
-    }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
+
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.s.deinit();
+        }
+
+        pub fn frame(f: *Self, c: *Ctx, n: usize) !void {
+            for (0..c.rows) |y| {
+                const text = f.src[(y + n) % f.src.len];
+                _ = must(f.win.printSegment(.{ .text = text, .style = .{ .fg = rgb(y, n % 2) } }, .{ .row = @intCast(y), .wrap = .none }));
+            }
+            c.count += c.rows;
+        }
+
+        pub fn evidence(f: *Self, c: *Ctx) void {
+            dumpGrid(c.gpa, &f.s);
+        }
+    };
 }
 
-fn widePrintRepaint(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    var r = must(v.Renderer.init(c.gpa, c.size()));
-    defer r.deinit();
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    const src = c.lines("wide.txt");
-    const win = s.window();
-    for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 64 + 8192));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        r.repaint();
-        out.clearRetainingCapacity();
-        const stats = must(r.draw(&out.writer, &s, null, caps));
+const WideRepaint = struct {
+    s: v.Screen,
+    r: v.Renderer,
+    out: std.Io.Writer.Allocating,
+
+    pub fn init(f: *WideRepaint, c: *Ctx) !void {
+        f.s = c.screen();
+        f.r = must(v.Renderer.init(c.gpa, c.size()));
+        f.out = output(c);
+        printDown(f.s.window(), c.lines("wide.txt"), c.rows);
+    }
+
+    pub fn deinit(f: *WideRepaint, _: *Ctx) void {
+        f.out.deinit();
+        f.r.deinit();
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *WideRepaint, c: *Ctx, _: usize) !void {
+        f.r.repaint();
+        f.out.clearRetainingCapacity();
+        const stats = must(f.r.draw(&f.out.writer, &f.s, null, caps));
         c.count += stats.cells;
-        c.bytes += out.written().len;
-        std.mem.doNotOptimizeAway(out.written());
+        c.bytes += f.out.written().len;
+        std.mem.doNotOptimizeAway(f.out.written());
     }
-    c.clock.stop();
-    if (c.check) {
-        dumpGrid(c.gpa, &s);
-        line("wire", out.written());
-    }
-}
 
-fn fillClear(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    const all: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        fill(&s, all, .blank(.{ .bg = rgb(n, 1) }));
-        s.clear();
+    pub fn evidence(f: *WideRepaint, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+        line("wire", f.out.written());
+    }
+};
+
+const FillClear = struct {
+    s: v.Screen,
+    all: v.Rect,
+
+    pub fn init(f: *FillClear, c: *Ctx) !void {
+        f.s = c.screen();
+        f.all = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
+    }
+
+    pub fn deinit(f: *FillClear, _: *Ctx) void {
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *FillClear, c: *Ctx, n: usize) !void {
+        fill(&f.s, f.all, .blank(.{ .bg = rgb(n, 1) }));
+        f.s.clear();
         c.count += 2 * @as(usize, c.cols) * c.rows;
     }
-    c.clock.stop();
-    if (c.check) {
-        fill(&s, all, .blank(.{ .bg = rgb(1, 1) }));
-        dumpGrid(c.gpa, &s);
-    }
-}
 
-fn scrollRows(c: *Ctx, render: bool) void {
-    var s = c.screen();
-    defer s.deinit();
-    var r = must(v.Renderer.init(c.gpa, c.size()));
-    defer r.deinit();
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 64 + 8192));
-    const src = c.lines("log.txt");
-    const win = s.window();
-    for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    // A terminal profile with scrolling regions: the caller's caps say so.
-    const scrolling: v.Caps = .{ .width_method = .unicode, .truecolor = true, .decstbm = true, .su = true, .scroll_detection = true };
-    if (render) {
-        _ = must(r.draw(&out.writer, &s, null, scrolling));
-        if (c.check) line("wire", out.written());
+    pub fn evidence(f: *FillClear, c: *Ctx) void {
+        fill(&f.s, f.all, .blank(.{ .bg = rgb(1, 1) }));
+        dumpGrid(c.gpa, &f.s);
     }
-    const all: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
-    // The whole frame of a scrolling log is the job: the scroll, the new
-    // row and, for scroll_repaint, the draw. Every library is clocked so.
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        s.scroll(all, 1);
-        _ = must(win.printSegment(.{ .text = src[(c.rows + n) % src.len] }, .{ .row = c.rows - 1, .wrap = .none }));
-        c.count += 1;
-        if (render) {
-            out.clearRetainingCapacity();
-            const stats = must(r.draw(&out.writer, &s, null, scrolling));
-            c.bytes += out.written().len;
-            c.count += stats.cells;
-            if (c.check) line("wire", out.written());
+};
+
+/// A terminal profile with scrolling regions: the caller's caps say so.
+const scrolling: v.Caps = .{ .width_method = .unicode, .truecolor = true, .decstbm = true, .su = true, .scroll_detection = true };
+
+/// The whole frame of a scrolling log is the job: the scroll, the new row and,
+/// for `scroll_repaint`, the draw. Every library is clocked so.
+fn ScrollRows(comptime render: bool) type {
+    return struct {
+        const Self = @This();
+
+        s: v.Screen,
+        r: v.Renderer,
+        out: std.Io.Writer.Allocating,
+        src: [][]const u8,
+        win: v.Window,
+        all: v.Rect,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            f.s = c.screen();
+            f.r = must(v.Renderer.init(c.gpa, c.size()));
+            f.out = output(c);
+            f.src = c.lines("log.txt");
+            f.win = f.s.window();
+            printDown(f.win, f.src, c.rows);
+            if (render) {
+                _ = must(f.r.draw(&f.out.writer, &f.s, null, scrolling));
+                if (c.check) line("wire", f.out.written());
+            }
+            f.all = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
         }
-    }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
+
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.out.deinit();
+            f.r.deinit();
+            f.s.deinit();
+        }
+
+        pub fn frame(f: *Self, c: *Ctx, n: usize) !void {
+            f.s.scroll(f.all, 1);
+            _ = must(f.win.printSegment(.{ .text = f.src[(c.rows + n) % f.src.len] }, .{ .row = c.rows - 1, .wrap = .none }));
+            c.count += 1;
+            if (render) {
+                f.out.clearRetainingCapacity();
+                const stats = must(f.r.draw(&f.out.writer, &f.s, null, scrolling));
+                c.bytes += f.out.written().len;
+                c.count += stats.cells;
+                if (c.check) line("wire", f.out.written());
+            }
+        }
+
+        pub fn evidence(f: *Self, c: *Ctx) void {
+            dumpGrid(c.gpa, &f.s);
+        }
+    };
 }
 
-fn resizeGrid(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    const src = c.lines("ascii.txt");
-    const win = s.window();
-    for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    const small: v.Size = .{ .cols = c.cols - 3, .rows = c.rows - 2 };
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        must(s.resize(small));
-        must(s.resize(c.size()));
+const ResizeGrid = struct {
+    s: v.Screen,
+    small: v.Size,
+
+    pub fn init(f: *ResizeGrid, c: *Ctx) !void {
+        f.s = c.screen();
+        printDown(f.s.window(), c.lines("ascii.txt"), c.rows);
+        f.small = .{ .cols = c.cols - 3, .rows = c.rows - 2 };
+    }
+
+    pub fn deinit(f: *ResizeGrid, _: *Ctx) void {
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *ResizeGrid, c: *Ctx, _: usize) !void {
+        must(f.s.resize(f.small));
+        must(f.s.resize(c.size()));
         c.count += 2;
     }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
-}
 
-fn copyCells(c: *Ctx) void {
-    var src_screen = c.screen();
-    defer src_screen.deinit();
-    var dst = c.screen();
-    defer dst.deinit();
-    const src = c.lines("wide.txt");
-    const win = src_screen.window();
-    for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    c.clock.start();
-    for (0..c.iterations) |_| {
+    pub fn evidence(f: *ResizeGrid, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+    }
+};
+
+const CopyCells = struct {
+    src: v.Screen,
+    dst: v.Screen,
+
+    pub fn init(f: *CopyCells, c: *Ctx) !void {
+        f.src = c.screen();
+        f.dst = c.screen();
+        printDown(f.src.window(), c.lines("wide.txt"), c.rows);
+    }
+
+    pub fn deinit(f: *CopyCells, _: *Ctx) void {
+        f.dst.deinit();
+        f.src.deinit();
+    }
+
+    pub fn frame(f: *CopyCells, c: *Ctx, _: usize) !void {
         for (0..c.rows) |y| for (0..c.cols) |x| {
-            const cell = src_screen.readCell(@intCast(x), @intCast(y)).?;
+            const cell = f.src.readCell(@intCast(x), @intCast(y)).?;
             if (cell.isTail()) continue;
-            must(dst.copyCell(&src_screen, @intCast(x), @intCast(y), cell));
+            must(f.dst.copyCell(&f.src, @intCast(x), @intCast(y), cell));
         };
         c.count += @as(usize, c.cols) * c.rows;
     }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &dst);
-}
 
-fn copyText(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    const src = c.lines("wide.txt");
-    const win = s.window();
-    for (0..c.rows) |y| _ = must(win.printSegment(.{ .text = src[y % src.len] }, .{ .row = @intCast(y), .wrap = .none }));
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 8));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
+    pub fn evidence(f: *CopyCells, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.dst);
+    }
+};
+
+const CopyText = struct {
+    s: v.Screen,
+    win: v.Window,
+    out: std.Io.Writer.Allocating,
+
+    pub fn init(f: *CopyText, c: *Ctx) !void {
+        f.s = c.screen();
+        f.win = f.s.window();
+        printDown(f.win, c.lines("wide.txt"), c.rows);
+        f.out = .init(c.gpa);
+        must(f.out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 8));
+    }
+
+    pub fn deinit(f: *CopyText, _: *Ctx) void {
+        f.out.deinit();
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *CopyText, c: *Ctx, _: usize) !void {
+        f.out.clearRetainingCapacity();
         for (0..c.rows) |y| {
-            must(win.copyText(&out.writer, @intCast(y), 0, c.cols));
-            must(out.writer.writeByte('\n'));
+            must(f.win.copyText(&f.out.writer, @intCast(y), 0, c.cols));
+            must(f.out.writer.writeByte('\n'));
         }
-        c.bytes += out.written().len;
+        c.bytes += f.out.written().len;
         c.count += c.rows;
     }
-    c.clock.stop();
-    if (c.check) line("text", out.written());
-}
 
-fn links(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    var r = must(v.Renderer.init(c.gpa, c.size()));
-    defer r.deinit();
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    must(out.ensureTotalCapacity(@as(usize, c.cols) * c.rows * 64 + 8192));
-    const src = c.lines("ascii.txt");
-    var uri_buf: [64]u8 = undefined;
+    pub fn evidence(f: *CopyText, _: *Ctx) void {
+        line("text", f.out.written());
+    }
+};
+
+/// Interning and linked writes are frame construction; the measured job is a
+/// frame whose every row carries its own OSC 8 target.
+const Links = struct {
+    s: v.Screen,
+    r: v.Renderer,
+    out: std.Io.Writer.Allocating,
+
     const linked: v.Caps = .{ .width_method = .unicode, .truecolor = true, .osc8 = true };
-    // Interning and linked writes are frame construction; the measured job
-    // is a frame whose every row carries its own OSC 8 target.
-    for (0..c.rows) |y| {
-        const uri = std.mem.print(&uri_buf, "https://example.com/row/{d}", .{y}) catch unreachable; // unreachable: a row number fits
-        const l = must(s.link(uri, ""));
-        _ = must(s.window().printSegment(.{ .text = src[y % src.len], .link = l }, .{ .row = @intCast(y), .wrap = .none }));
-    }
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        r.repaint();
-        out.clearRetainingCapacity();
-        const stats = must(r.draw(&out.writer, &s, null, linked));
-        c.count += stats.cells;
-        c.bytes += out.written().len;
-    }
-    c.clock.stop();
-    if (c.check) {
-        dumpGrid(c.gpa, &s);
-        line("wire", out.written());
-    }
-}
 
-fn graphemePool(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    const clusters = c.lines("pool.txt");
-    c.clock.start();
-    for (0..c.iterations) |n| {
+    pub fn init(f: *Links, c: *Ctx) !void {
+        f.s = c.screen();
+        f.r = must(v.Renderer.init(c.gpa, c.size()));
+        f.out = output(c);
+        const src = c.lines("ascii.txt");
+        var uri_buf: [64]u8 = undefined;
+        for (0..c.rows) |y| {
+            const uri = std.mem.print(&uri_buf, "https://example.com/row/{d}", .{y}) catch unreachable; // unreachable: a row number fits
+            const l = must(f.s.link(uri, ""));
+            _ = must(f.s.window().printSegment(.{ .text = src[y % src.len], .link = l }, .{ .row = @intCast(y), .wrap = .none }));
+        }
+    }
+
+    pub fn deinit(f: *Links, _: *Ctx) void {
+        f.out.deinit();
+        f.r.deinit();
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *Links, c: *Ctx, _: usize) !void {
+        f.r.repaint();
+        f.out.clearRetainingCapacity();
+        const stats = must(f.r.draw(&f.out.writer, &f.s, null, linked));
+        c.count += stats.cells;
+        c.bytes += f.out.written().len;
+    }
+
+    pub fn evidence(f: *Links, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+        line("wire", f.out.written());
+    }
+};
+
+const GraphemePool = struct {
+    s: v.Screen,
+    clusters: [][]const u8,
+
+    pub fn init(f: *GraphemePool, c: *Ctx) !void {
+        f.s = c.screen();
+        f.clusters = c.lines("pool.txt");
+    }
+
+    pub fn deinit(f: *GraphemePool, _: *Ctx) void {
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *GraphemePool, c: *Ctx, n: usize) !void {
         for (0..c.rows) |y| {
             var x: u16 = 0;
             var k: usize = 0;
             while (x + 2 <= c.cols) : (x += 2) {
-                const g = clusters[(n * 7 + y * c.cols + k) % clusters.len];
-                must(s.write(x, @intCast(y), g, .{}, .none));
+                const g = f.clusters[(n * 7 + y * c.cols + k) % f.clusters.len];
+                must(f.s.write(x, @intCast(y), g, .{}, .none));
                 k += 1;
             }
         }
-        must(s.compactPool());
+        must(f.s.compactPool());
         c.count += 1;
     }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
-}
 
-fn modes(c: *Ctx) void {
-    var r = must(v.Renderer.init(c.gpa, c.size()));
-    defer r.deinit();
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    must(out.ensureTotalCapacity(4096));
+    pub fn evidence(f: *GraphemePool, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+    }
+};
+
+const Modes = struct {
+    r: v.Renderer,
+    out: std.Io.Writer.Allocating,
+
     const wanted: v.Modes = .{ .mouse = .{ .motion = .any }, .focus = true, .paste = true };
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
-        must(r.enter(&out.writer, caps, .alt, wanted));
-        must(r.leave(&out.writer));
-        c.bytes += out.written().len;
+
+    pub fn init(f: *Modes, c: *Ctx) !void {
+        f.r = must(v.Renderer.init(c.gpa, c.size()));
+        f.out = .init(c.gpa);
+        must(f.out.ensureTotalCapacity(4096));
+    }
+
+    pub fn deinit(f: *Modes, _: *Ctx) void {
+        f.out.deinit();
+        f.r.deinit();
+    }
+
+    pub fn frame(f: *Modes, c: *Ctx, _: usize) !void {
+        f.out.clearRetainingCapacity();
+        must(f.r.enter(&f.out.writer, caps, .alt, wanted));
+        must(f.r.leave(&f.out.writer));
+        c.bytes += f.out.written().len;
         c.count += 1;
     }
-    c.clock.stop();
-    if (c.check) line("wire", out.written());
-}
+
+    pub fn evidence(f: *Modes, _: *Ctx) void {
+        line("wire", f.out.written());
+    }
+};
 
 // ---------------------------------------------------------------- text
 
-fn textWidth(c: *Ctx) void {
-    const src = c.lines("wide.txt");
-    var total: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        total = 0;
-        for (src) |l| total += v.width(l, .unicode);
-        std.mem.doNotOptimizeAway(total);
-        c.count += src.len;
-    }
-    c.clock.stop();
-    if (c.check) emit("value\twidth={d}\n", .{total});
-}
+const TextWidth = struct {
+    src: [][]const u8,
+    total: usize = 0,
 
-fn graphemes(c: *Ctx) void {
-    const src = c.lines("emoji.txt");
-    var clusters: usize = 0;
-    var cols: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        clusters = 0;
-        cols = 0;
-        for (src) |l| {
+    pub fn init(f: *TextWidth, c: *Ctx) !void {
+        f.* = .{ .src = c.lines("wide.txt") };
+    }
+
+    pub fn deinit(_: *TextWidth, _: *Ctx) void {}
+
+    pub fn frame(f: *TextWidth, c: *Ctx, _: usize) !void {
+        f.total = 0;
+        for (f.src) |l| f.total += v.width(l, .unicode);
+        std.mem.doNotOptimizeAway(f.total);
+        c.count += f.src.len;
+    }
+
+    pub fn evidence(f: *TextWidth, _: *Ctx) void {
+        emit("value\twidth={d}\n", .{f.total});
+    }
+};
+
+const Graphemes = struct {
+    src: [][]const u8,
+    clusters: usize = 0,
+    cols: usize = 0,
+
+    pub fn init(f: *Graphemes, c: *Ctx) !void {
+        f.* = .{ .src = c.lines("emoji.txt") };
+    }
+
+    pub fn deinit(_: *Graphemes, _: *Ctx) void {}
+
+    pub fn frame(f: *Graphemes, c: *Ctx, _: usize) !void {
+        f.clusters = 0;
+        f.cols = 0;
+        for (f.src) |l| {
             var it: v.Graphemes = .init(l);
             while (it.next()) |g| {
-                clusters += 1;
-                cols += v.graphemeWidth(g, .unicode);
+                f.clusters += 1;
+                f.cols += v.graphemeWidth(g, .unicode);
             }
         }
-        std.mem.doNotOptimizeAway(cols);
-        c.count += clusters;
+        std.mem.doNotOptimizeAway(f.cols);
+        c.count += f.clusters;
     }
-    c.clock.stop();
-    if (c.check) emit("value\tclusters={d}\n", .{clusters});
-    if (c.check) emit("info\tcolumns={d}\n", .{cols});
-}
 
-fn widthModels(c: *Ctx) void {
-    const src = c.lines("emoji.txt");
-    var disagree: usize = 0;
-    var parts: usize = 0;
-    var combining: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        disagree = 0;
-        parts = 0;
-        combining = 0;
-        for (src) |l| {
+    pub fn evidence(f: *Graphemes, _: *Ctx) void {
+        emit("value\tclusters={d}\n", .{f.clusters});
+        emit("info\tcolumns={d}\n", .{f.cols});
+    }
+};
+
+const WidthModels = struct {
+    src: [][]const u8,
+    disagree: usize = 0,
+    parts: usize = 0,
+    combining: usize = 0,
+
+    pub fn init(f: *WidthModels, c: *Ctx) !void {
+        f.* = .{ .src = c.lines("emoji.txt") };
+    }
+
+    pub fn deinit(_: *WidthModels, _: *Ctx) void {}
+
+    pub fn frame(f: *WidthModels, c: *Ctx, _: usize) !void {
+        f.disagree = 0;
+        f.parts = 0;
+        f.combining = 0;
+        for (f.src) |l| {
             var it: v.Graphemes = .init(l);
             while (it.next()) |g| {
-                if (v.disagrees(g)) disagree += 1;
-                if (v.combinesOnly(g)) combining += 1;
+                if (v.disagrees(g)) f.disagree += 1;
+                if (v.combinesOnly(g)) f.combining += 1;
                 var p: v.Parts = .init(g);
-                while (p.next()) |_| parts += 1;
+                while (p.next()) |_| f.parts += 1;
             }
         }
-        std.mem.doNotOptimizeAway(parts);
-        c.count += parts;
+        std.mem.doNotOptimizeAway(f.parts);
+        c.count += f.parts;
     }
-    c.clock.stop();
-    if (c.check) emit("value\tdisagree={d} combining={d} parts={d}\n", .{ disagree, combining, parts });
-}
 
-fn textWrap(c: *Ctx) void {
-    const text = c.file("prose.txt");
-    const rows = c.gpa.alloc(v.Row, text.len + 1) catch @panic("oom");
-    var n: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        n = v.wrap(text, c.cols, .word, .unicode, rows);
-        std.mem.doNotOptimizeAway(rows[0..n]);
-        c.count += n;
+    pub fn evidence(f: *WidthModels, _: *Ctx) void {
+        emit("value\tdisagree={d} combining={d} parts={d}\n", .{ f.disagree, f.combining, f.parts });
     }
-    c.clock.stop();
-    if (c.check) {
-        emit("value\trows={d}\n", .{n});
+};
+
+const TextWrap = struct {
+    text: []const u8,
+    rows: []v.Row,
+    n: usize = 0,
+
+    pub fn init(f: *TextWrap, c: *Ctx) !void {
+        const text = c.file("prose.txt");
+        f.* = .{ .text = text, .rows = c.fixture.alloc(v.Row, text.len + 1) catch @panic("oom") };
+    }
+
+    pub fn deinit(_: *TextWrap, _: *Ctx) void {}
+
+    pub fn frame(f: *TextWrap, c: *Ctx, _: usize) !void {
+        f.n = v.wrap(f.text, c.cols, .word, .unicode, f.rows);
+        std.mem.doNotOptimizeAway(f.rows[0..f.n]);
+        c.count += f.n;
+    }
+
+    pub fn evidence(f: *TextWrap, c: *Ctx) void {
+        emit("value\trows={d}\n", .{f.n});
         var out: std.ArrayList(u8) = .empty;
-        for (rows[0..n]) |row| {
-            out.appendSlice(c.gpa, text[row.start..row.end]) catch @panic("oom");
-            out.append(c.gpa, '\n') catch @panic("oom");
+        for (f.rows[0..f.n]) |row| {
+            out.appendSlice(c.fixture, f.text[row.start..row.end]) catch @panic("oom");
+            out.append(c.fixture, '\n') catch @panic("oom");
         }
         line("text", out.items);
     }
-}
+};
 
-fn textFit(c: *Ctx, end: bool) void {
-    const src = c.lines("wide.txt");
-    var kept: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        kept = 0;
-        for (src, 0..) |l, i| {
-            const cols: u16 = @intCast(@max(4, (c.cols * (i % 7 + 3)) / 10));
-            if (end) {
-                kept += v.fitEnd(l, cols, "…", .unicode).len;
-            } else kept += v.fit(l, cols, "…", .unicode).len;
+fn TextFit(comptime end: bool) type {
+    return struct {
+        const Self = @This();
+
+        src: [][]const u8,
+        /// Which of the two the frame calls, read at run time, as one function
+        /// that takes it would: the compiler inlines `fitEnd` into the loop
+        /// less well when the loop is made for it alone.
+        from_end: bool,
+        kept: usize = 0,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            f.* = .{ .src = c.lines("wide.txt"), .from_end = end };
         }
-        std.mem.doNotOptimizeAway(kept);
-        c.count += src.len;
-    }
-    c.clock.stop();
-    if (c.check) emit("value\tkept={d}\n", .{kept});
+
+        pub fn deinit(_: *Self, _: *Ctx) void {}
+
+        pub fn frame(f: *Self, c: *Ctx, _: usize) !void {
+            f.kept = 0;
+            for (f.src, 0..) |l, i| {
+                const cols: u16 = @intCast(@max(4, (c.cols * (i % 7 + 3)) / 10));
+                if (f.from_end) {
+                    f.kept += v.fitEnd(l, cols, "…", .unicode).len;
+                } else f.kept += v.fit(l, cols, "…", .unicode).len;
+            }
+            std.mem.doNotOptimizeAway(f.kept);
+            c.count += f.src.len;
+        }
+
+        pub fn evidence(f: *Self, _: *Ctx) void {
+            emit("value\tkept={d}\n", .{f.kept});
+        }
+    };
 }
 
 // ---------------------------------------------------------------- layout
@@ -493,48 +565,65 @@ fn textFit(c: *Ctx, end: bool) void {
 const outer_constraints = [_]w.Constraint{ .{ .fixed = 3 }, .{ .percent = 20 }, .{ .min = 5 }, .{ .max = 10 }, .{ .fill = 1 }, .{ .fill = 2 } };
 const inner_constraints = [_]w.Constraint{ .{ .fixed = 12 }, .{ .percent = 25 }, .{ .min = 8 }, .{ .max = 30 }, .{ .fill = 1 } };
 
-fn layoutSplit(c: *Ctx) void {
-    var outer: [outer_constraints.len]v.Rect = undefined;
-    var inner: [inner_constraints.len]v.Rect = undefined;
-    const area: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
-    var report: std.ArrayList(u8) = .empty;
-    c.clock.start();
-    for (0..c.iterations) |n| {
+const LayoutSplit = struct {
+    outer: [outer_constraints.len]v.Rect,
+    inner: [inner_constraints.len]v.Rect,
+    area: v.Rect,
+    report: std.ArrayList(u8),
+
+    pub fn init(f: *LayoutSplit, c: *Ctx) !void {
+        f.area = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
+        f.report = .empty;
+    }
+
+    pub fn deinit(f: *LayoutSplit, c: *Ctx) void {
+        f.report.deinit(c.gpa);
+    }
+
+    pub fn frame(f: *LayoutSplit, c: *Ctx, n: usize) !void {
         var l = w.Layout.vertical(&outer_constraints);
         l.spacing = 1;
-        const rows = l.split(area, &outer);
+        const rows = l.split(f.area, &f.outer);
         for (rows) |row| {
             var h = w.Layout.horizontal(&inner_constraints);
             h.spacing = 1;
-            const cells = h.split(row, &inner);
+            const cells = h.split(row, &f.inner);
             std.mem.doNotOptimizeAway(cells);
             c.count += cells.len;
             if (c.check and n == 0) for (cells) |r| {
-                report.print(c.gpa, "{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
+                f.report.print(c.gpa, "{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
             };
         }
         if (c.check and n == 0) {
-            for (rows) |r| report.print(c.gpa, "R{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
+            for (rows) |r| f.report.print(c.gpa, "R{d},{d},{d},{d};", .{ r.col, r.row, r.cols, r.rows }) catch @panic("oom");
         }
     }
-    c.clock.stop();
-    if (c.check) emit("rects\t{s}\n", .{report.items});
-}
 
-fn layoutRepeat(c: *Ctx) void {
-    const out = c.gpa.alloc(v.Rect, @as(usize, c.cols) * c.rows) catch @panic("oom");
-    const area: v.Rect = .{ .col = 0, .row = 0, .cols = c.cols, .rows = c.rows };
-    var got: []v.Rect = &.{};
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        got = w.Layout.repeat(.horizontal, .{ .col = 0, .row = 0, .cols = 6, .rows = 3 }, 1, out);
-        std.mem.doNotOptimizeAway(got);
-        _ = area;
-        c.count += got.len;
+    pub fn evidence(f: *LayoutSplit, _: *Ctx) void {
+        emit("rects\t{s}\n", .{f.report.items});
     }
-    c.clock.stop();
-    if (c.check) emit("value\ttiles={d}\n", .{got.len});
-}
+};
+
+const LayoutRepeat = struct {
+    out: []v.Rect,
+    got: []v.Rect = &.{},
+
+    pub fn init(f: *LayoutRepeat, c: *Ctx) !void {
+        f.* = .{ .out = c.fixture.alloc(v.Rect, @as(usize, c.cols) * c.rows) catch @panic("oom") };
+    }
+
+    pub fn deinit(_: *LayoutRepeat, _: *Ctx) void {}
+
+    pub fn frame(f: *LayoutRepeat, c: *Ctx, _: usize) !void {
+        f.got = w.Layout.repeat(.horizontal, .{ .col = 0, .row = 0, .cols = 6, .rows = 3 }, 1, f.out);
+        std.mem.doNotOptimizeAway(f.got);
+        c.count += f.got.len;
+    }
+
+    pub fn evidence(f: *LayoutRepeat, _: *Ctx) void {
+        emit("value\ttiles={d}\n", .{f.got.len});
+    }
+};
 
 // ---------------------------------------------------------------- widgets
 
@@ -542,17 +631,34 @@ fn child(win: v.Window, r: v.Rect) v.Window {
     return win.child(.{ .col = r.col, .row = r.row, .cols = r.cols, .rows = r.rows });
 }
 
-fn widget(c: *Ctx, comptime draw: fn (*Ctx, v.Window, usize) void) void {
-    var s = c.screen();
-    defer s.deinit();
-    const win = s.window();
-    c.clock.start();
-    for (0..c.iterations) |n| {
-        draw(c, win, n);
-        c.count += 1;
-    }
-    c.clock.stop();
-    if (c.check) dumpGrid(c.gpa, &s);
+/// A widget drawn into a window on every frame. What it draws from is built
+/// before the clock, by `prepareWidgets`.
+fn Widget(comptime task: []const u8, comptime draw: fn (*Ctx, v.Window, usize) void) type {
+    return struct {
+        const Self = @This();
+
+        s: v.Screen,
+        win: v.Window,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            prepareWidgets(c, task);
+            f.s = c.screen();
+            f.win = f.s.window();
+        }
+
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.s.deinit();
+        }
+
+        pub fn frame(f: *Self, c: *Ctx, n: usize) !void {
+            draw(c, f.win, n);
+            c.count += 1;
+        }
+
+        pub fn evidence(f: *Self, c: *Ctx) void {
+            dumpGrid(c.gpa, &f.s);
+        }
+    };
 }
 
 const State = struct {
@@ -748,7 +854,7 @@ fn sextants(_: *Ctx, win: v.Window, _: usize) void {
 }
 
 fn prepareWidgets(c: *Ctx, task: []const u8) void {
-    const gpa = c.gpa;
+    const gpa = c.fixture;
     const n_items = @as(usize, c.rows) * 8;
     if (std.mem.eql(u8, task, "list")) {
         State.items = gpa.alloc(w.Item, n_items) catch @panic("oom");
@@ -817,89 +923,110 @@ fn prepareWidgets(c: *Ctx, task: []const u8) void {
     }
 }
 
-fn markdownParse(c: *Ctx) void {
-    {
-        const source = c.file("doc.md");
-        var blocks_n: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var doc = must(w.Markdown.Document.init(c.gpa, source));
-            blocks_n = doc.blocks().len;
-            c.count += doc.spans().len;
-            doc.deinit();
-        }
-        c.clock.stop();
-        if (c.check) emit("value\tblocks={d}\n", .{blocks_n});
-    }
-}
+const MarkdownParse = struct {
+    source: []const u8,
+    blocks_n: usize = 0,
 
-fn markdownTableParse(c: *Ctx) void {
-    {
-        const source = c.file("tables.md");
-        var tables: usize = 0;
-        var cells: usize = 0;
-        var tasks: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var doc = must(w.Markdown.Document.init(c.gpa, source));
-            tables = 0;
-            cells = 0;
-            tasks = 0;
-            for (doc.blocks()) |b| {
-                if (b.table) |t| {
-                    tables += 1;
-                    cells += t.rows * t.columns;
-                }
-                if (b.task != null) tasks += 1;
-            }
-            c.count += doc.spans().len;
-            doc.deinit();
-        }
-        c.clock.stop();
-        if (c.check) emit("value\ttables={d} cells={d} tasks={d}\n", .{ tables, cells, tasks });
+    pub fn init(f: *MarkdownParse, c: *Ctx) !void {
+        f.* = .{ .source = c.file("doc.md") };
     }
-}
+
+    pub fn deinit(_: *MarkdownParse, _: *Ctx) void {}
+
+    pub fn frame(f: *MarkdownParse, c: *Ctx, _: usize) !void {
+        var doc = must(w.Markdown.Document.init(c.gpa, f.source));
+        f.blocks_n = doc.blocks().len;
+        c.count += doc.spans().len;
+        doc.deinit();
+    }
+
+    pub fn evidence(f: *MarkdownParse, _: *Ctx) void {
+        emit("value\tblocks={d}\n", .{f.blocks_n});
+    }
+};
+
+const MarkdownTableParse = struct {
+    source: []const u8,
+    tables: usize = 0,
+    cells: usize = 0,
+    tasks: usize = 0,
+
+    pub fn init(f: *MarkdownTableParse, c: *Ctx) !void {
+        f.* = .{ .source = c.file("tables.md") };
+    }
+
+    pub fn deinit(_: *MarkdownTableParse, _: *Ctx) void {}
+
+    pub fn frame(f: *MarkdownTableParse, c: *Ctx, _: usize) !void {
+        var doc = must(w.Markdown.Document.init(c.gpa, f.source));
+        f.tables = 0;
+        f.cells = 0;
+        f.tasks = 0;
+        for (doc.blocks()) |b| {
+            if (b.table) |t| {
+                f.tables += 1;
+                f.cells += t.rows * t.columns;
+            }
+            if (b.task != null) f.tasks += 1;
+        }
+        c.count += doc.spans().len;
+        doc.deinit();
+    }
+
+    pub fn evidence(f: *MarkdownTableParse, _: *Ctx) void {
+        emit("value\ttables={d} cells={d} tasks={d}\n", .{ f.tables, f.cells, f.tasks });
+    }
+};
 
 /// Two log lines a frame, printed above an inline view a quarter of the
-/// terminal tall that is redrawn under them: the bytes of each frame are
-/// the evidence, replayed by the independent decoder.
-fn printAbove(c: *Ctx) void {
-    {
+/// terminal tall that is redrawn under them: the bytes of each frame are the
+/// evidence, replayed by the independent decoder.
+const PrintAbove = struct {
+    view: v.Screen,
+    r: v.Renderer,
+    lines: v.Screen,
+    out: std.Io.Writer.Allocating,
+
+    pub fn init(f: *PrintAbove, c: *Ctx) !void {
         const gpa = c.gpa;
         const view_rows: u16 = @max(2, c.rows / 4);
         const size: v.Size = .{ .cols = c.cols, .rows = view_rows };
-        var view = must(v.Screen.init(gpa, size));
-        defer view.deinit();
-        view.method = .unicode;
-        var r = must(v.Renderer.init(gpa, size));
-        defer r.deinit();
-        var lines = must(v.Screen.init(gpa, .{ .cols = c.cols, .rows = 2 }));
-        defer lines.deinit();
-        lines.method = .unicode;
-        var out: std.Io.Writer.Allocating = .init(gpa);
-        defer out.deinit();
-        must(r.enter(&out.writer, caps, .@"inline", .{}));
-        drawView(&view, 0);
-        _ = must(r.draw(&out.writer, &view, null, caps));
-        if (c.check) line("wire", out.written());
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
-            lines.clear();
-            var buf: [64]u8 = undefined;
-            for (0..2) |k| {
-                const text = std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable; // unreachable: two corpus words fit
-                _ = must(lines.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
-            }
-            drawView(&view, n + 1);
-            const stats = must(r.printAbove(&out.writer, &lines, &view, null, caps));
-            c.bytes += stats.bytes;
-            c.count += 2;
-            if (c.check) line("wire", out.written());
-        }
-        c.clock.stop();
+        f.view = must(v.Screen.init(gpa, size));
+        f.view.method = .unicode;
+        f.r = must(v.Renderer.init(gpa, size));
+        f.lines = must(v.Screen.init(gpa, .{ .cols = c.cols, .rows = 2 }));
+        f.lines.method = .unicode;
+        f.out = .init(gpa);
+        must(f.r.enter(&f.out.writer, caps, .@"inline", .{}));
+        drawView(&f.view, 0);
+        _ = must(f.r.draw(&f.out.writer, &f.view, null, caps));
+        if (c.check) line("wire", f.out.written());
     }
-}
+
+    pub fn deinit(f: *PrintAbove, _: *Ctx) void {
+        f.out.deinit();
+        f.lines.deinit();
+        f.r.deinit();
+        f.view.deinit();
+    }
+
+    pub fn frame(f: *PrintAbove, c: *Ctx, n: usize) !void {
+        f.out.clearRetainingCapacity();
+        f.lines.clear();
+        var buf: [64]u8 = undefined;
+        for (0..2) |k| {
+            const text = std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable; // unreachable: two corpus words fit
+            _ = must(f.lines.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
+        }
+        drawView(&f.view, n + 1);
+        const stats = must(f.r.printAbove(&f.out.writer, &f.lines, &f.view, null, caps));
+        c.bytes += stats.bytes;
+        c.count += 2;
+        if (c.check) line("wire", f.out.written());
+    }
+
+    pub fn evidence(_: *PrintAbove, _: *Ctx) void {}
+};
 
 /// The live view: a title row and bars of `#` under it.
 fn drawView(view: *v.Screen, n: usize) void {
@@ -918,383 +1045,376 @@ fn drawView(view: *v.Screen, n: usize) void {
 
 /// Typing, word and character deletes, word motions, then every edit undone
 /// and redone, on the first `cols * 2` bytes of the prose.
-fn textEdit(c: *Ctx) void {
-    {
+const TextEdit = struct {
+    typed: []const u8,
+    final: u64 = 0,
+    final_len: usize = 0,
+    undone_len: usize = 0,
+
+    pub fn init(f: *TextEdit, c: *Ctx) !void {
         const prose = c.file("prose.txt");
-        const typed = prose[0..@min(prose.len, @as(usize, c.cols) * 2)];
-        var final: u64 = 0;
-        var final_len: usize = 0;
-        var undone_len: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            var b: w.TextInput.Buffer = .init(c.gpa);
-            for (typed) |ch| must(b.insert(&.{ch}));
-            for (0..4) |_| must(b.delete(.word_left));
-            for (0..3) |_| b.move(.word_left, false);
-            for (0..5) |_| must(b.delete(.right));
-            b.move(.end, false);
-            for (0..3) |_| must(b.delete(.left));
-            while (must(b.undo())) {}
-            undone_len = b.text().len;
-            while (must(b.redo())) {}
-            final = std.hash.Fnv1a_64.hash(b.text());
-            final_len = b.text().len;
-            c.count += typed.len;
-            b.deinit();
-        }
-        c.clock.stop();
-        if (c.check) emit("value\tfinal={d}:{x} undone={d}\n", .{ final_len, final, undone_len });
+        f.* = .{ .typed = prose[0..@min(prose.len, @as(usize, c.cols) * 2)] };
     }
-}
+
+    pub fn deinit(_: *TextEdit, _: *Ctx) void {}
+
+    pub fn frame(f: *TextEdit, c: *Ctx, _: usize) !void {
+        var b: w.TextInput.Buffer = .init(c.gpa);
+        for (f.typed) |ch| must(b.insert(&.{ch}));
+        for (0..4) |_| must(b.delete(.word_left));
+        for (0..3) |_| b.move(.word_left, false);
+        for (0..5) |_| must(b.delete(.right));
+        b.move(.end, false);
+        for (0..3) |_| must(b.delete(.left));
+        while (must(b.undo())) {}
+        f.undone_len = b.text().len;
+        while (must(b.redo())) {}
+        f.final = std.hash.Fnv1a_64.hash(b.text());
+        f.final_len = b.text().len;
+        c.count += f.typed.len;
+        b.deinit();
+    }
+
+    pub fn evidence(f: *TextEdit, _: *Ctx) void {
+        emit("value\tfinal={d}:{x} undone={d}\n", .{ f.final_len, f.final, f.undone_len });
+    }
+};
 
 // ---------------------------------------------------------------- input, emulator, pictures
 
-fn inputEvents(c: *Ctx) void {
-    const path = c.gpa.print("{s}/{d}x{d}/input.bin", .{ c.corpus, c.cols, c.rows }) catch @panic("oom");
-    const file = std.Io.Dir.cwd().openFile(c.io, path, .{}) catch @panic("input corpus");
-    var tty = v.Tty.adopt(file);
-    const parser_buffer = c.gpa.alloc(u8, 1 << 16) catch @panic("oom");
-    const read_buffer = c.gpa.alloc(u8, 1 << 20) catch @panic("oom");
-    var kinds: [32]usize = @splat(0);
-    var events: usize = 0;
-    c.clock.start();
-    for (0..c.iterations) |_| {
+const InputEvents = struct {
+    file: std.Io.File,
+    tty: v.Tty,
+    parser_buffer: []u8,
+    read_buffer: []u8,
+    kinds: [32]usize = @splat(0),
+    events: usize = 0,
+
+    pub fn init(f: *InputEvents, c: *Ctx) !void {
+        const path = c.fixture.print("{s}/{d}x{d}/input.bin", .{ c.corpus, c.cols, c.rows }) catch @panic("oom");
+        f.file = std.Io.Dir.cwd().openFile(c.io, path, .{}) catch @panic("input corpus");
+        f.tty = v.Tty.adopt(f.file);
+        f.parser_buffer = c.fixture.alloc(u8, 1 << 16) catch @panic("oom");
+        f.read_buffer = c.fixture.alloc(u8, 1 << 20) catch @panic("oom");
+        f.kinds = @splat(0);
+        f.events = 0;
+    }
+
+    pub fn deinit(f: *InputEvents, c: *Ctx) void {
+        f.file.close(c.io);
+    }
+
+    pub fn frame(f: *InputEvents, c: *Ctx, _: usize) !void {
         // Back to the start of the input, as lseek does: the descriptor's own
         // offset, which is what the Tty reads from.
-        c.io.vtable.fileSeekTo(c.io.userdata, file, 0) catch @panic("rewind");
-        var in = must(v.Input.init(&tty, .{ .parser_buffer = parser_buffer, .read_buffer = read_buffer, .escape = .fromMilliseconds(50) }));
-        events = 0;
-        kinds = @splat(0);
+        c.io.vtable.fileSeekTo(c.io.userdata, f.file, 0) catch @panic("rewind");
+        var in = must(v.Input.init(&f.tty, .{ .parser_buffer = f.parser_buffer, .read_buffer = f.read_buffer, .escape = .fromMilliseconds(50) }));
+        f.events = 0;
+        f.kinds = @splat(0);
         while (true) {
             const e = in.next(c.io) catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => std.debug.panic("{s}", .{@errorName(err)}),
             };
-            events += 1;
-            kinds[@backingInt(std.meta.activeTag(e)) % kinds.len] += 1;
+            f.events += 1;
+            f.kinds[@backingInt(std.meta.activeTag(e)) % f.kinds.len] += 1;
         }
-        c.count += events;
+        c.count += f.events;
     }
-    c.clock.stop();
-    if (c.check) {
-        emit("value\tevents={d}", .{events});
-        for (kinds) |k| emit(" {d}", .{k});
+
+    pub fn evidence(f: *InputEvents, _: *Ctx) void {
+        emit("value\tevents={d}", .{f.events});
+        for (f.kinds) |k| emit(" {d}", .{k});
         emit("\n", .{});
     }
-}
+};
 
-fn termFeed(c: *Ctx) void {
-    var s = c.screen();
-    defer s.deinit();
-    var r = must(v.Renderer.init(c.gpa, c.size()));
-    defer r.deinit();
-    var frame: std.Io.Writer.Allocating = .init(c.gpa);
-    defer frame.deinit();
-    const src = c.lines("wide.txt");
-    for (0..c.rows) |y| _ = must(s.window().printSegment(.{ .text = src[y % src.len], .style = .{ .fg = rgb(y, 0), .bold = y % 2 == 0 } }, .{ .row = @intCast(y), .wrap = .none }));
-    _ = must(r.draw(&frame.writer, &s, null, caps));
-    var term = must(v.Term.init(c.gpa, c.size()));
-    defer term.deinit();
-    term.setMethod(.unicode);
-    var dump: std.Io.Writer.Allocating = .init(c.gpa);
-    defer dump.deinit();
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        must(term.feed("\x1b[H\x1b[2J"));
-        must(term.feed(frame.written()));
-        dump.clearRetainingCapacity();
-        must(v.dumpScreen(term.screen(), &dump.writer, .{}));
-        c.bytes += frame.written().len;
+const TermFeed = struct {
+    s: v.Screen,
+    r: v.Renderer,
+    drawn: std.Io.Writer.Allocating,
+    term: v.Term,
+    dump: std.Io.Writer.Allocating,
+
+    pub fn init(f: *TermFeed, c: *Ctx) !void {
+        f.s = c.screen();
+        f.r = must(v.Renderer.init(c.gpa, c.size()));
+        f.drawn = .init(c.gpa);
+        const src = c.lines("wide.txt");
+        for (0..c.rows) |y| _ = must(f.s.window().printSegment(.{ .text = src[y % src.len], .style = .{ .fg = rgb(y, 0), .bold = y % 2 == 0 } }, .{ .row = @intCast(y), .wrap = .none }));
+        _ = must(f.r.draw(&f.drawn.writer, &f.s, null, caps));
+        f.term = must(v.Term.init(c.gpa, c.size()));
+        f.term.setMethod(.unicode);
+        f.dump = .init(c.gpa);
+    }
+
+    pub fn deinit(f: *TermFeed, _: *Ctx) void {
+        f.dump.deinit();
+        f.term.deinit();
+        f.drawn.deinit();
+        f.r.deinit();
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *TermFeed, c: *Ctx, _: usize) !void {
+        must(f.term.feed("\x1b[H\x1b[2J"));
+        must(f.term.feed(f.drawn.written()));
+        f.dump.clearRetainingCapacity();
+        must(v.dumpScreen(f.term.screen(), &f.dump.writer, .{}));
+        c.bytes += f.drawn.written().len;
         c.count += 1;
     }
-    c.clock.stop();
-    if (c.check) {
-        dumpGrid(c.gpa, &s);
-        line("text", dump.written());
-        if (v.firstDifference(&s, term.screen()) != null) @panic("emulator differs from the drawn screen");
-    }
-}
 
-fn pictureTransmit(c: *Ctx) void {
-    var layers: v.Layers = .init(c.gpa);
-    defer layers.deinit();
-    var out: std.Io.Writer.Allocating = .init(c.gpa);
-    defer out.deinit();
-    const pw: u32 = @as(u32, c.cols) * 4;
-    const ph: u32 = @as(u32, c.rows) * 8;
-    const pixels = c.gpa.alloc(u8, @as(usize, pw) * ph * 4) catch @panic("oom");
-    for (pixels, 0..) |*p, i| p.* = @truncate(i *% 31 +% i / 4096);
-    must(out.ensureTotalCapacity(pixels.len * 2 + 8192));
-    c.clock.start();
-    for (0..c.iterations) |_| {
-        out.clearRetainingCapacity();
-        const n = must(layers.transmit(&out.writer, 7, pixels, .{ .width = pw, .height = ph, .compress = false }));
-        c.bytes += out.written().len;
+    pub fn evidence(f: *TermFeed, c: *Ctx) void {
+        dumpGrid(c.gpa, &f.s);
+        line("text", f.dump.written());
+        if (v.firstDifference(&f.s, f.term.screen()) != null) @panic("emulator differs from the drawn screen");
+    }
+};
+
+const PictureTransmit = struct {
+    layers: v.Layers,
+    out: std.Io.Writer.Allocating,
+    pixels: []u8,
+    pw: u32,
+    ph: u32,
+
+    pub fn init(f: *PictureTransmit, c: *Ctx) !void {
+        f.layers = .init(c.gpa);
+        f.out = .init(c.gpa);
+        f.pw = @as(u32, c.cols) * 4;
+        f.ph = @as(u32, c.rows) * 8;
+        f.pixels = c.fixture.alloc(u8, @as(usize, f.pw) * f.ph * 4) catch @panic("oom");
+        for (f.pixels, 0..) |*p, i| p.* = @truncate(i *% 31 +% i / 4096);
+        must(f.out.ensureTotalCapacity(f.pixels.len * 2 + 8192));
+    }
+
+    pub fn deinit(f: *PictureTransmit, _: *Ctx) void {
+        f.out.deinit();
+        f.layers.deinit();
+    }
+
+    pub fn frame(f: *PictureTransmit, c: *Ctx, _: usize) !void {
+        f.out.clearRetainingCapacity();
+        const n = must(f.layers.transmit(&f.out.writer, 7, f.pixels, .{ .width = f.pw, .height = f.ph, .compress = false }));
+        c.bytes += f.out.written().len;
         c.count += n;
     }
-    c.clock.stop();
-    if (c.check) {
-        const digest = digestOf(out.written());
-        emit("value\tbytes={d} sha256={x}\n", .{ out.written().len, digest });
+
+    pub fn evidence(f: *PictureTransmit, _: *Ctx) void {
+        const digest = digestOf(f.out.written());
+        emit("value\tbytes={d} sha256={x}\n", .{ f.out.written().len, digest });
     }
-}
+};
 
-fn digestOf(bytes: []const u8) [32]u8 {
-    var d: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(bytes, &d, .{});
-    return d;
-}
+const Protocol = enum { kitty, sixel, iterm, cells };
 
-fn pictureFrame(c: *Ctx, comptime protocol: enum { kitty, sixel, iterm, cells }) void {
-    {
-        var screen = c.screen();
-        defer screen.deinit();
-        var renderer = must(v.Renderer.init(c.gpa, c.size()));
-        defer renderer.deinit();
-        var layers: v.Layers = .init(c.gpa);
-        defer layers.deinit();
-        layers.configureSize(.{ .cells = c.size(), .cell = .{ .width = 8, .height = 16 } });
-        var out: std.Io.Writer.Allocating = .init(c.gpa);
-        defer out.deinit();
-        const width: u32 = (@as(u32, c.cols) - 1) * 8;
-        const height: u32 = (@as(u32, c.rows) - 1) * 16;
-        const pixels = c.gpa.alloc(u8, @as(usize, width) * height * 4) catch @panic("oom");
-        for (0..@as(usize, width) * height) |i| @memcpy(pixels[i * 4 ..][0..4], &[_]u8{ 255, 0, 0, 255 });
-        const policy: v.Caps = .{ .width_method = .unicode, .truecolor = true, .picture_protocol = switch (protocol) {
-            .kitty => .kitty,
-            .sixel => .sixel,
-            .iterm => .iterm,
-            .cells => .cells,
-        } };
-        switch (protocol) {
-            .kitty => _ = must(layers.transmit(&out.writer, 7, pixels, .{ .width = width, .height = height, .compress = false })),
-            .sixel => must(layers.storeSixel(7, .{ .width = width, .height = height, .pixels = .{ .rgba = pixels }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} })),
-            .iterm => must(layers.storeIterm(7, c.file("picture.png"), 0)),
-            .cells => {},
+fn PictureFrame(comptime protocol: Protocol) type {
+    return struct {
+        const Self = @This();
+
+        screen: v.Screen,
+        renderer: v.Renderer,
+        layers: v.Layers,
+        out: std.Io.Writer.Allocating,
+        pixels: []u8,
+        width: u32,
+        height: u32,
+        policy: v.Caps,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            f.screen = c.screen();
+            f.renderer = must(v.Renderer.init(c.gpa, c.size()));
+            f.layers = .init(c.gpa);
+            f.layers.configureSize(.{ .cells = c.size(), .cell = .{ .width = 8, .height = 16 } });
+            f.out = .init(c.gpa);
+            f.width = (@as(u32, c.cols) - 1) * 8;
+            f.height = (@as(u32, c.rows) - 1) * 16;
+            f.pixels = c.fixture.alloc(u8, @as(usize, f.width) * f.height * 4) catch @panic("oom");
+            for (0..@as(usize, f.width) * f.height) |i| @memcpy(f.pixels[i * 4 ..][0..4], &[_]u8{ 255, 0, 0, 255 });
+            f.policy = .{ .width_method = .unicode, .truecolor = true, .picture_protocol = switch (protocol) {
+                .kitty => .kitty,
+                .sixel => .sixel,
+                .iterm => .iterm,
+                .cells => .cells,
+            } };
+            switch (protocol) {
+                .kitty => _ = must(f.layers.transmit(&f.out.writer, 7, f.pixels, .{ .width = f.width, .height = f.height, .compress = false })),
+                .sixel => must(f.layers.storeSixel(7, .{ .width = f.width, .height = f.height, .pixels = .{ .rgba = f.pixels }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} })),
+                .iterm => must(f.layers.storeIterm(7, c.file("picture.png"), 0)),
+                .cells => {},
+            }
+            if (c.check and protocol == .kitty) line("setup", f.out.written());
+            must(f.out.ensureTotalCapacity(f.pixels.len * 2 + 8192));
+            _ = must(f.renderer.draw(&f.out.writer, &f.screen, null, f.policy));
         }
-        if (c.check and protocol == .kitty) line("setup", out.written());
-        must(out.ensureTotalCapacity(pixels.len * 2 + 8192));
-        _ = must(renderer.draw(&out.writer, &screen, null, policy));
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
+
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.out.deinit();
+            f.layers.deinit();
+            f.renderer.deinit();
+            f.screen.deinit();
+        }
+
+        pub fn frame(f: *Self, c: *Ctx, n: usize) !void {
+            f.out.clearRetainingCapacity();
             const col: u16 = @intCast(n % 2);
             if (protocol == .cells) {
-                screen.clear();
-                must((w.Sextants{ .width = width, .height = height, .pixels = pixels }).draw(screen.window().sub(.{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 })));
-            } else must(layers.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
-            const stats = must(renderer.draw(&out.writer, &screen, if (protocol == .cells) null else &layers, policy));
+                f.screen.clear();
+                must((w.Sextants{ .width = f.width, .height = f.height, .pixels = f.pixels }).draw(f.screen.window().sub(.{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 })));
+            } else must(f.layers.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
+            const stats = must(f.renderer.draw(&f.out.writer, &f.screen, if (protocol == .cells) null else &f.layers, f.policy));
             c.count += stats.placements;
             c.bytes += stats.bytes;
-            if (c.check) line("wire", out.written());
+            if (c.check) line("wire", f.out.written());
         }
-        c.clock.stop();
-        if (c.check) emit("value\twidth={d} height={d} frames={d}\n", .{ width, height, c.iterations });
-    }
+
+        pub fn evidence(f: *Self, c: *Ctx) void {
+            emit("value\twidth={d} height={d} frames={d}\n", .{ f.width, f.height, c.frames });
+        }
+    };
 }
 
-fn pictureReplace(c: *Ctx) void {
-    {
-        var s = c.screen();
-        defer s.deinit();
-        var r = must(v.Renderer.init(c.gpa, c.size()));
-        defer r.deinit();
-        var layers: v.Layers = .init(c.gpa);
-        defer layers.deinit();
-        var out: std.Io.Writer.Allocating = .init(c.gpa);
-        defer out.deinit();
-        var ids = must(v.ImageIds.init(100, 107, 0));
-        var replacement: v.Replacement = .{};
-        var pixels: [16 * 16 * 4]u8 = undefined;
-        for (0..16 * 16) |i| pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
-        const pic: v.Caps = .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = true };
-        var swaps: usize = 0;
-        c.clock.start();
-        for (0..c.iterations) |n| {
-            out.clearRetainingCapacity();
-            // A clock that moves 100 ms a frame, so every grace period runs out.
-            const now: std.Io.Timestamp = .{ .nanoseconds = @as(i96, @intCast(n)) * 100 * std.time.ns_per_ms };
-            if (replacement.canSend()) _ = must(replacement.send(&layers, &out.writer, &ids, &pixels, .{ .width = 16, .height = 16, .compress = false, .now = now }));
-            _ = must(replacement.declare(&layers, .{ .image = 0, .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
-            _ = must(r.draw(&out.writer, &s, &layers, pic));
-            if (replacement.current() != null) swaps += 1;
-            c.bytes += out.written().len;
-            c.count += 1;
-        }
-        c.clock.stop();
-        if (c.check) emit("value\tcurrent={d} swaps={d} images={d}\n", .{ replacement.current() orelse 0, swaps, layers.images().len });
-    }
-}
+const PictureReplace = struct {
+    s: v.Screen,
+    r: v.Renderer,
+    layers: v.Layers,
+    out: std.Io.Writer.Allocating,
+    ids: v.ImageIds,
+    replacement: v.Replacement,
+    pixels: [16 * 16 * 4]u8,
+    swaps: usize,
 
-fn canvasRaster(c: *Ctx) void {
-    {
-        var surface = must(w.Canvas.Surface.init(c.gpa, @as(u32, c.cols) * 8, @as(u32, c.rows) * 16));
-        defer surface.deinit();
+    const pic: v.Caps = .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = true };
+
+    pub fn init(f: *PictureReplace, c: *Ctx) !void {
+        f.s = c.screen();
+        f.r = must(v.Renderer.init(c.gpa, c.size()));
+        f.layers = .init(c.gpa);
+        f.out = .init(c.gpa);
+        f.ids = must(v.ImageIds.init(100, 107, 0));
+        f.replacement = .{};
+        for (0..16 * 16) |i| f.pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
+        f.swaps = 0;
+    }
+
+    pub fn deinit(f: *PictureReplace, _: *Ctx) void {
+        f.out.deinit();
+        f.layers.deinit();
+        f.r.deinit();
+        f.s.deinit();
+    }
+
+    pub fn frame(f: *PictureReplace, c: *Ctx, n: usize) !void {
+        f.out.clearRetainingCapacity();
+        // A clock that moves 100 ms a frame, so every grace period runs out.
+        const now: std.Io.Timestamp = .{ .nanoseconds = @as(i96, @intCast(n)) * 100 * std.time.ns_per_ms };
+        if (f.replacement.canSend()) _ = must(f.replacement.send(&f.layers, &f.out.writer, &f.ids, &f.pixels, .{ .width = 16, .height = 16, .compress = false, .now = now }));
+        _ = must(f.replacement.declare(&f.layers, .{ .image = 0, .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
+        _ = must(f.r.draw(&f.out.writer, &f.s, &f.layers, pic));
+        if (f.replacement.current() != null) f.swaps += 1;
+        c.bytes += f.out.written().len;
+        c.count += 1;
+    }
+
+    pub fn evidence(f: *PictureReplace, _: *Ctx) void {
+        emit("value\tcurrent={d} swaps={d} images={d}\n", .{ f.replacement.current() orelse 0, f.swaps, f.layers.images().len });
+    }
+};
+
+const CanvasRaster = struct {
+    surface: w.Canvas.Surface,
+    p: Painter,
+
+    const Painter = @TypeOf((w.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(undefined));
+
+    pub fn init(f: *CanvasRaster, c: *Ctx) !void {
+        f.surface = must(w.Canvas.Surface.init(c.gpa, @as(u32, c.cols) * 8, @as(u32, c.rows) * 16));
         prepareWidgets(c, "canvas");
-        const p = (w.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(&surface);
-        c.clock.start();
-        for (0..c.iterations) |_| {
-            surface.clear();
-            for (0..32) |i| {
-                const a = @as(f64, @floatFromInt(i)) * std.math.pi / 16;
-                p.line(50, 50, 50 + 45 * @cos(a), 50 + 45 * @sin(a), .{});
-            }
-            for (0..8) |i| {
-                const d: f64 = @floatFromInt(i * 5);
-                p.rect(5 + d, 5 + d, 90 - 2 * d, 90 - 2 * d, .{});
-            }
-            p.circle(50, 50, 30, .{ .rgba = .{ 255, 200, 0, 255 } });
-            p.disc(25, 25, 10, .{ .rgba = .{ 0, 200, 255, 255 } });
-            p.polyline(State.wave, .{});
-            c.count += 1;
-        }
-        c.clock.stop();
-        if (c.check) {
-            const digest = digestOf(surface.pixels());
-            emit("value\tsha256={x}\n", .{digest});
-        }
+        f.p = (w.Canvas{ .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 } }).raster(&f.surface);
     }
-}
 
-/// One workload: `args` are `<task> <check|smoke|full> <cols> <rows>
-/// <iterations>`, or `list-tasks`.
-pub fn run(init: std.process.Init, args: []const []const u8) !void {
-    stdout_io = init.io;
-    if (args.len == 1 and std.mem.eql(u8, args[0], "list-tasks")) {
-        for (plan.ops) |name| emit("{s}\n", .{name});
-        return;
+    pub fn deinit(f: *CanvasRaster, _: *Ctx) void {
+        f.surface.deinit();
     }
-    if (args.len != 5) return error.Arguments;
-    const task = args[0];
-    const cols = try std.fmt.parseInt(u16, args[2], 10);
-    const rows = try std.fmt.parseInt(u16, args[3], 10);
-    const iterations = try std.fmt.parseInt(usize, args[4], 10);
-    if (cols < 8 or rows < 4 or iterations == 0) return error.InvalidSize;
-    var c: Ctx = .{
-        .gpa = init.gpa,
-        .io = init.io,
-        .cols = cols,
-        .rows = rows,
-        .iterations = iterations,
-        .check = std.mem.eql(u8, args[1], "check"),
-        .clock = .{ .io = init.io, .timed = std.mem.eql(u8, args[1], "full") },
-        .corpus = init.environ_map.get("VISOR_BENCH_CORPUS") orelse return error.NoCorpus,
-    };
-    // Fixture construction for widgets happens here, before any clock.
-    var arena: std.heap.ArenaAllocator = .init(init.gpa);
-    defer arena.deinit();
-    var fixture = c;
-    fixture.gpa = arena.allocator();
-    prepareWidgets(&fixture, task);
-    c.corpus = fixture.corpus;
 
-    const Run = struct { name: []const u8, run: *const fn (*Ctx) void };
-    const S = struct {
-        fn printAscii(x: *Ctx) void {
-            printRows(x, "ascii.txt");
+    pub fn frame(f: *CanvasRaster, c: *Ctx, _: usize) !void {
+        f.surface.clear();
+        for (0..32) |i| {
+            const a = @as(f64, @floatFromInt(i)) * std.math.pi / 16;
+            f.p.line(50, 50, 50 + 45 * @cos(a), 50 + 45 * @sin(a), .{});
         }
-        fn printWide(x: *Ctx) void {
-            printRows(x, "wide.txt");
+        for (0..8) |i| {
+            const d: f64 = @floatFromInt(i * 5);
+            f.p.rect(5 + d, 5 + d, 90 - 2 * d, 90 - 2 * d, .{});
         }
-        fn scrollModel(x: *Ctx) void {
-            scrollRows(x, false);
-        }
-        fn scrollRender(x: *Ctx) void {
-            scrollRows(x, true);
-        }
-        fn fitStart(x: *Ctx) void {
-            textFit(x, false);
-        }
-        fn fitEnd(x: *Ctx) void {
-            textFit(x, true);
-        }
-        fn W(comptime f: fn (*Ctx, v.Window, usize) void) *const fn (*Ctx) void {
-            return struct {
-                fn run(x: *Ctx) void {
-                    widget(x, f);
-                }
-            }.run;
-        }
-    };
-    const runs = [_]Run{
-        .{ .name = "cell_writes", .run = cellWrites },
-        .{ .name = "print_rows", .run = S.printAscii },
-        .{ .name = "wide_print", .run = S.printWide },
-        .{ .name = "wide_repaint", .run = widePrintRepaint },
-        .{ .name = "fill_clear", .run = fillClear },
-        .{ .name = "scroll_rows", .run = S.scrollModel },
-        .{ .name = "scroll_repaint", .run = S.scrollRender },
-        .{ .name = "resize", .run = resizeGrid },
-        .{ .name = "copy_cells", .run = copyCells },
-        .{ .name = "copy_text", .run = copyText },
-        .{ .name = "links", .run = links },
-        .{ .name = "grapheme_pool", .run = graphemePool },
-        .{ .name = "modes", .run = modes },
-        .{ .name = "text_width", .run = textWidth },
-        .{ .name = "graphemes", .run = graphemes },
-        .{ .name = "width_models", .run = widthModels },
-        .{ .name = "text_wrap", .run = textWrap },
-        .{ .name = "text_fit", .run = S.fitStart },
-        .{ .name = "text_fit_end", .run = S.fitEnd },
-        .{ .name = "layout_split", .run = layoutSplit },
-        .{ .name = "layout_repeat", .run = layoutRepeat },
-        .{ .name = "block", .run = S.W(blocks) },
-        .{ .name = "paragraph", .run = S.W(paragraph) },
-        .{ .name = "markdown_parse", .run = markdownParse },
-        .{ .name = "markdown_draw", .run = S.W(markdownDraw) },
-        .{ .name = "markdown_table_parse", .run = markdownTableParse },
-        .{ .name = "markdown_table_draw", .run = S.W(markdownTableDraw) },
-        .{ .name = "tree", .run = S.W(tree) },
-        .{ .name = "print_above", .run = printAbove },
-        .{ .name = "text_edit", .run = textEdit },
-        .{ .name = "list", .run = S.W(list) },
-        .{ .name = "table", .run = S.W(table) },
-        .{ .name = "tabs", .run = S.W(tabs) },
-        .{ .name = "gauge", .run = S.W(gauge) },
-        .{ .name = "line_gauge", .run = S.W(lineGauge) },
-        .{ .name = "sparkline", .run = S.W(sparkline) },
-        .{ .name = "barchart", .run = S.W(barchart) },
-        .{ .name = "chart", .run = S.W(chart) },
-        .{ .name = "scrollbar", .run = S.W(scrollbar) },
-        .{ .name = "canvas", .run = S.W(canvas) },
-        .{ .name = "canvas_raster", .run = canvasRaster },
-        .{ .name = "calendar", .run = S.W(calendar) },
-        .{ .name = "text_input", .run = S.W(textInput) },
-        .{ .name = "keys", .run = S.W(keys) },
-        .{ .name = "rule", .run = S.W(rule) },
-        .{ .name = "edges", .run = S.W(edges) },
-        .{ .name = "sextants", .run = S.W(sextants) },
-        .{ .name = "input_events", .run = inputEvents },
-        .{ .name = "term_feed", .run = termFeed },
-        .{ .name = "picture_transmit", .run = pictureTransmit },
-        .{ .name = "picture_frame_kitty", .run = struct {
-            fn run(x: *Ctx) void {
-                pictureFrame(x, .kitty);
-            }
-        }.run },
-        .{ .name = "picture_frame_sixel", .run = struct {
-            fn run(x: *Ctx) void {
-                pictureFrame(x, .sixel);
-            }
-        }.run },
-        .{ .name = "picture_frame_iterm", .run = struct {
-            fn run(x: *Ctx) void {
-                pictureFrame(x, .iterm);
-            }
-        }.run },
-        .{ .name = "picture_frame_cells", .run = struct {
-            fn run(x: *Ctx) void {
-                pictureFrame(x, .cells);
-            }
-        }.run },
-        .{ .name = "picture_replace", .run = pictureReplace },
-    };
-    inline for (runs) |r| {
-        if (std.mem.eql(u8, task, r.name)) {
-            r.run(&c);
-            emit("result\t{d}\t{d}\t{d}\t{d}\n", .{ iterations, c.count, c.bytes, c.clock.total });
-            return;
-        }
+        f.p.circle(50, 50, 30, .{ .rgba = .{ 255, 200, 0, 255 } });
+        f.p.disc(25, 25, 10, .{ .rgba = .{ 0, 200, 255, 255 } });
+        f.p.polyline(State.wave, .{});
+        c.count += 1;
     }
-    return error.UnknownTask;
-}
+
+    pub fn evidence(f: *CanvasRaster, _: *Ctx) void {
+        const digest = digestOf(f.surface.pixels());
+        emit("value\tsha256={x}\n", .{digest});
+    }
+};
+
+/// The workloads, in the order a pass runs them.
+pub const workloads = .{
+    .{ "cell_writes", CellWrites },
+    .{ "print_rows", PrintRows("ascii.txt") },
+    .{ "wide_print", PrintRows("wide.txt") },
+    .{ "wide_repaint", WideRepaint },
+    .{ "fill_clear", FillClear },
+    .{ "scroll_rows", ScrollRows(false) },
+    .{ "scroll_repaint", ScrollRows(true) },
+    .{ "resize", ResizeGrid },
+    .{ "copy_cells", CopyCells },
+    .{ "copy_text", CopyText },
+    .{ "links", Links },
+    .{ "grapheme_pool", GraphemePool },
+    .{ "modes", Modes },
+    .{ "text_width", TextWidth },
+    .{ "graphemes", Graphemes },
+    .{ "width_models", WidthModels },
+    .{ "text_wrap", TextWrap },
+    .{ "text_fit", TextFit(false) },
+    .{ "text_fit_end", TextFit(true) },
+    .{ "layout_split", LayoutSplit },
+    .{ "layout_repeat", LayoutRepeat },
+    .{ "block", Widget("block", blocks) },
+    .{ "paragraph", Widget("paragraph", paragraph) },
+    .{ "markdown_parse", MarkdownParse },
+    .{ "markdown_draw", Widget("markdown_draw", markdownDraw) },
+    .{ "markdown_table_parse", MarkdownTableParse },
+    .{ "markdown_table_draw", Widget("markdown_table_draw", markdownTableDraw) },
+    .{ "tree", Widget("tree", tree) },
+    .{ "print_above", PrintAbove },
+    .{ "text_edit", TextEdit },
+    .{ "list", Widget("list", list) },
+    .{ "table", Widget("table", table) },
+    .{ "tabs", Widget("tabs", tabs) },
+    .{ "gauge", Widget("gauge", gauge) },
+    .{ "line_gauge", Widget("line_gauge", lineGauge) },
+    .{ "sparkline", Widget("sparkline", sparkline) },
+    .{ "barchart", Widget("barchart", barchart) },
+    .{ "chart", Widget("chart", chart) },
+    .{ "scrollbar", Widget("scrollbar", scrollbar) },
+    .{ "canvas", Widget("canvas", canvas) },
+    .{ "canvas_raster", CanvasRaster },
+    .{ "calendar", Widget("calendar", calendar) },
+    .{ "text_input", Widget("text_input", textInput) },
+    .{ "keys", Widget("keys", keys) },
+    .{ "rule", Widget("rule", rule) },
+    .{ "edges", Widget("edges", edges) },
+    .{ "sextants", Widget("sextants", sextants) },
+    .{ "input_events", InputEvents },
+    .{ "term_feed", TermFeed },
+    .{ "picture_transmit", PictureTransmit },
+    .{ "picture_frame_kitty", PictureFrame(.kitty) },
+    .{ "picture_frame_sixel", PictureFrame(.sixel) },
+    .{ "picture_frame_iterm", PictureFrame(.iterm) },
+    .{ "picture_frame_cells", PictureFrame(.cells) },
+    .{ "picture_replace", PictureReplace },
+};

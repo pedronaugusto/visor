@@ -1,21 +1,17 @@
-//! The drawing core, one workload a run: `visor-bench draw <task>
-//! <check|smoke|full> <cols> <rows> <iterations>`, check lines first, then
-//! `result\t<units>\t<native count>\t<bytes>\t<ns>`. `run.zig` invokes it.
+//! The drawing core: eight workloads over two screens and a renderer. A
+//! frame is what the clock reads, except in `style_heavy`, whose frame is
+//! restyled in full before the draw and whose clock reads the draw alone.
+//! `harness.zig` says how a workload is run and checked.
 const std = @import("std");
 const v = @import("visor");
+const harness = @import("harness.zig");
+const Ctx = harness.Ctx;
 
-/// The Io the lines go out through, set once by `run`: unbuffered, so every
-/// line a check prints is out before anything that stops the program.
-var stdout_io: std.Io = undefined;
-fn emit(comptime fmt: []const u8, args: anytype) void {
-    var buf: [4096]u8 = undefined;
-    const s = std.mem.print(&buf, fmt, args) catch @panic("report too long");
-    std.Io.File.stdout().writeStreamingAll(stdout_io, s) catch @panic("write failed");
-}
 fn hex(bytes: []const u8) void {
-    for (bytes) |b| emit("{x:0>2}", .{b});
-    emit("\n", .{});
+    for (bytes) |b| harness.emit("{x:0>2}", .{b});
+    harness.emit("\n", .{});
 }
+
 fn paint(s: *v.Screen, cols: u16, rows: u16, salt: usize, heavy: bool) !void {
     const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
     for (0..rows) |y| for (0..cols) |x| {
@@ -27,6 +23,7 @@ fn paint(s: *v.Screen, cols: u16, rows: u16, salt: usize, heavy: bool) !void {
         try s.write(@intCast(x), @intCast(y), alphabet[(i + (if (heavy) @as(usize, 0) else salt)) % alphabet.len ..][0..1], style, .none);
     };
 }
+
 fn restyle(s: *v.Screen, cols: u16, rows: u16, salt: usize) !void {
     for (0..rows) |y| for (0..cols) |x| {
         const i = y * cols + x;
@@ -38,6 +35,7 @@ fn restyle(s: *v.Screen, cols: u16, rows: u16, salt: usize) !void {
         try s.writeOwnedCell(@intCast(x), @intCast(y), c);
     };
 }
+
 fn equal(a: v.Cell, b: v.Cell) bool {
     return v.Cell.eql(a, b);
 }
@@ -70,84 +68,173 @@ noinline fn readCells(screens: *const [2]v.Screen) usize {
     std.mem.doNotOptimizeAway(changed);
     return changed;
 }
-/// One workload: `args` are `<task> <check|smoke|full> <cols> <rows> <iterations>`.
-pub fn run(init: std.process.Init, args: []const []const u8) !void {
-    stdout_io = init.io;
-    if (args.len != 5) return error.Arguments;
-    const task = args[0];
-    const check = std.mem.eql(u8, args[1], "check");
-    const timed = std.mem.eql(u8, args[1], "full");
-    const cols = try std.fmt.parseInt(u16, args[2], 10);
-    const rows = try std.fmt.parseInt(u16, args[3], 10);
-    const iterations = try std.fmt.parseInt(usize, args[4], 10);
-    if (cols < 4 or rows < 4 or iterations == 0) return error.InvalidSize;
-    const gpa = init.gpa;
-    const size: v.Size = .{ .cols = cols, .rows = rows };
-    var screens = [_]v.Screen{ try .init(gpa, size), try .init(gpa, size) };
-    defer for (&screens) |*s| s.deinit();
-    for (&screens) |*s| s.method = .unicode;
-    const heavy = std.mem.eql(u8, task, "style_heavy");
-    const cell_reads = std.mem.eql(u8, task, "cell_reads");
-    const diff = std.mem.eql(u8, task, "buffer_diff") or cell_reads;
-    const picture = std.mem.startsWith(u8, task, "picture_");
-    try paint(&screens[0], cols, rows, 0, heavy);
-    try paint(&screens[1], cols, rows, if (heavy) 1 else 0, heavy);
-    if (diff) for (0..size.area()) |i| {
-        if (i % 97 == 0) try screens[1].write(@intCast(i % cols), @intCast(i / cols), "!", .{}, .none);
+
+const Kind = enum {
+    cell_reads,
+    buffer_diff,
+    full_repaint,
+    unchanged_diff,
+    style_heavy,
+    unchanged_idle,
+    picture_layers,
+    picture_unchanged,
+};
+
+/// The two screens, the renderer and the output every workload draws with.
+fn Fixture(comptime kind: Kind) type {
+    const heavy = kind == .style_heavy;
+    const diff = kind == .buffer_diff or kind == .cell_reads;
+    const picture = kind == .picture_layers or kind == .picture_unchanged;
+    return struct {
+        const Self = @This();
+
+        screens: [2]v.Screen,
+        renderer: v.Renderer,
+        layers: v.Layers,
+        out: std.Io.Writer.Allocating,
+        caps: v.Caps,
+        /// The cells the last draw reported, between a shot and its settling.
+        cells: usize = 0,
+
+        fn init(f: *Self, c: *Ctx) !void {
+            const gpa = c.gpa;
+            if (c.cols < 4 or c.rows < 4) return error.InvalidSize;
+            const size = c.size();
+            f.screens[0] = try .init(gpa, size);
+            errdefer f.screens[0].deinit();
+            f.screens[1] = try .init(gpa, size);
+            errdefer f.screens[1].deinit();
+            for (&f.screens) |*s| s.method = .unicode;
+            try paint(&f.screens[0], c.cols, c.rows, 0, heavy);
+            try paint(&f.screens[1], c.cols, c.rows, if (heavy) 1 else 0, heavy);
+            if (diff) for (0..size.area()) |i| {
+                if (i % 97 == 0) try f.screens[1].write(@intCast(i % c.cols), @intCast(i / c.cols), "!", .{}, .none);
+            };
+            f.renderer = try .init(gpa, size);
+            errdefer f.renderer.deinit();
+            f.layers = .init(gpa);
+            errdefer f.layers.deinit();
+            f.out = .init(gpa);
+            errdefer f.out.deinit();
+            f.cells = 0;
+            f.caps = .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = picture };
+            if (picture) {
+                var pixels: [16 * 16 * 4]u8 = undefined;
+                for (0..16 * 16) |i| pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
+                _ = try f.layers.transmit(&f.out.writer, 7, &pixels, .{ .width = 16, .height = 16, .compress = false });
+                if (c.check) hex(f.out.written());
+                try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
+            }
+            if (!diff) {
+                f.out.clearRetainingCapacity();
+                _ = try f.renderer.draw(&f.out.writer, &f.screens[0], if (picture) &f.layers else null, f.caps);
+                if (c.check) hex(f.out.written());
+            }
+            // Reserve the maximum output outside the interval; no terminal is opened.
+            try f.out.ensureTotalCapacity(@as(usize, size.area()) * 64 + 8192);
+            f.out.clearRetainingCapacity();
+        }
+
+        fn deinit(f: *Self) void {
+            f.out.deinit();
+            f.layers.deinit();
+            f.renderer.deinit();
+            for (&f.screens) |*s| s.deinit();
+        }
     };
-    var renderer: v.Renderer = try .init(gpa, size);
-    defer renderer.deinit();
-    var layers: v.Layers = .init(gpa);
-    defer layers.deinit();
-    var out: std.Io.Writer.Allocating = .init(gpa);
-    defer out.deinit();
-    const caps: v.Caps = .{ .width_method = .unicode, .truecolor = true, .kitty_graphics = picture };
-    if (picture) {
-        var pixels: [16 * 16 * 4]u8 = undefined;
-        for (0..16 * 16) |i| pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
-        _ = try layers.transmit(&out.writer, 7, &pixels, .{ .width = 16, .height = 16, .compress = false });
-        if (check) hex(out.written());
-        try layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
-    }
-    if (!diff) {
-        out.clearRetainingCapacity();
-        _ = try renderer.draw(&out.writer, &screens[0], if (picture) &layers else null, caps);
-        if (check) hex(out.written());
-    }
-    // Reserve the maximum output outside the interval; no terminal is opened.
-    try out.ensureTotalCapacity(@as(usize, size.area()) * 64 + 8192);
-    out.clearRetainingCapacity();
-    var count: usize = 0;
-    var bytes: usize = 0;
-    var style_elapsed: i96 = 0;
-    const start = if (timed and !heavy) std.Io.Clock.now(.awake, init.io).toNanoseconds() else 0;
-    for (0..iterations) |n| {
-        if (diff) {
-            count += if (cell_reads) readCells(&screens) else diffCells(&screens);
-        } else {
-            const s = &screens[0];
+}
+
+/// The workload `kind` names, all but `style_heavy`: its frame is timed whole.
+fn Core(comptime kind: Kind) type {
+    const diff = kind == .buffer_diff or kind == .cell_reads;
+    const picture = kind == .picture_layers or kind == .picture_unchanged;
+    const Fx = Fixture(kind);
+    return struct {
+        const Self = @This();
+
+        fx: Fx,
+
+        pub fn init(f: *Self, c: *Ctx) !void {
+            try Fx.init(&f.fx, c);
+        }
+
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.fx.deinit();
+        }
+
+        pub fn evidence(_: *Self, _: *Ctx) void {}
+
+        pub fn frame(f: *Self, c: *Ctx, n: usize) !void {
+            const fx = &f.fx;
+            if (diff) {
+                c.count += if (kind == .cell_reads) readCells(&fx.screens) else diffCells(&fx.screens);
+                return;
+            }
             // Keep one screen owner: switching unrelated screens invalidates
             // current-main handles and would measure an artificial repaint.
-            // Frame construction is outside the style-heavy draw interval.
-            if (heavy) try restyle(s, cols, rows, (n + 1) % 2);
-            if (std.mem.eql(u8, task, "full_repaint")) renderer.repaint();
-            if (heavy or std.mem.eql(u8, task, "unchanged_diff")) s.damageAll();
-            if (picture) try layers.declare(.{ .image = 7, .rect = .{
-                .col = if (std.mem.eql(u8, task, "picture_layers")) @intCast((n + 1) % 2) else 0,
+            const s = &fx.screens[0];
+            if (kind == .full_repaint) fx.renderer.repaint();
+            if (kind == .unchanged_diff) s.damageAll();
+            if (picture) try fx.layers.declare(.{ .image = 7, .rect = .{
+                .col = if (kind == .picture_layers) @intCast((n + 1) % 2) else 0,
                 .row = 0,
                 .cols = 2,
                 .rows = 2,
             } });
-            out.clearRetainingCapacity();
-            const draw_start = if (timed and heavy) std.Io.Clock.now(.awake, init.io).toNanoseconds() else 0;
-            const stats = try renderer.draw(&out.writer, s, if (picture) &layers else null, caps);
-            if (timed and heavy) style_elapsed += std.Io.Clock.now(.awake, init.io).toNanoseconds() - draw_start;
-            bytes += out.written().len;
-            count += stats.cells;
-            std.mem.doNotOptimizeAway(out.written());
-            if (check) hex(out.written());
+            fx.out.clearRetainingCapacity();
+            const stats = try fx.renderer.draw(&fx.out.writer, s, if (picture) &fx.layers else null, fx.caps);
+            c.bytes += fx.out.written().len;
+            c.count += stats.cells;
+            std.mem.doNotOptimizeAway(fx.out.written());
+            if (c.check) hex(fx.out.written());
         }
-    }
-    const elapsed = if (timed and heavy) style_elapsed else if (timed) std.Io.Clock.now(.awake, init.io).toNanoseconds() - start else 0;
-    emit("result\t{d}\t{d}\t{d}\t{d}\n", .{ iterations, count, bytes, elapsed });
+    };
 }
+
+/// `style_heavy`: every cell restyled and damaged before each draw, which is
+/// all the clock reads. The restyle is the stage of a frame, the draw its
+/// shot, and the bookkeeping after it the settling.
+const StyleHeavy = struct {
+    fx: Fixture(.style_heavy),
+
+    pub fn init(f: *StyleHeavy, c: *Ctx) !void {
+        try @TypeOf(f.fx).init(&f.fx, c);
+    }
+
+    pub fn deinit(f: *StyleHeavy, _: *Ctx) void {
+        f.fx.deinit();
+    }
+
+    pub fn evidence(_: *StyleHeavy, _: *Ctx) void {}
+
+    pub fn stage(f: *StyleHeavy, c: *Ctx, n: usize) !void {
+        const s = &f.fx.screens[0];
+        try restyle(s, c.cols, c.rows, (n + 1) % 2);
+        s.damageAll();
+        f.fx.out.clearRetainingCapacity();
+    }
+
+    pub fn shot(f: *StyleHeavy, _: *Ctx) !void {
+        const stats = try f.fx.renderer.draw(&f.fx.out.writer, &f.fx.screens[0], null, f.fx.caps);
+        f.fx.cells = stats.cells;
+    }
+
+    pub fn settle(f: *StyleHeavy, c: *Ctx) !void {
+        c.bytes += f.fx.out.written().len;
+        c.count += f.fx.cells;
+        std.mem.doNotOptimizeAway(f.fx.out.written());
+        if (c.check) hex(f.fx.out.written());
+    }
+};
+
+/// The workloads, in the order a pass runs them.
+pub const workloads = .{
+    .{ "cell_reads", Core(.cell_reads) },
+    .{ "buffer_diff", Core(.buffer_diff) },
+    .{ "full_repaint", Core(.full_repaint) },
+    .{ "unchanged_diff", Core(.unchanged_diff) },
+    .{ "style_heavy", StyleHeavy },
+    .{ "unchanged_idle", Core(.unchanged_idle) },
+    .{ "picture_layers", Core(.picture_layers) },
+    .{ "picture_unchanged", Core(.picture_unchanged) },
+};
