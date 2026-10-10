@@ -32,6 +32,10 @@
             .url = "git+https://github.com/pedronaugusto/reactor#286105e9eee61d4ee1abf4ce4f3bc445bdb4492e",
             .hash = "reactor-0.1.0-MjQ-WAXREQAIXx8Nf7W-Vz7Go1b5cgTpiBgFu7lfb3FY",
         },
+        .warp = .{
+            .url = "git+https://github.com/pedronaugusto/warp#f446a8b7bf86aef188075a32cc5d42e43eb102e0",
+            .hash = "warp-0.1.0-JASxFaMZEQBWhVdtwJ_gojtCU1nxRcpLj9OX-nlaaSqa",
+        },
     },
     .minimum_zig_version = "0.17.0",
     .fingerprint = 0xfc47eb8a53109791,

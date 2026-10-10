@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- Pictures are compressed with warp's level-1 `Compressor` over the whole buffer, where `std.compress.flate` ran over a 64 KiB window kept in `Layers` and every compressor failure came back as `OutOfMemory`: now only the compressor's one allocation can fail, and it fails as `OutOfMemory`. warp is a dependency of visor.
 - Resizes come through reactor's `Signals`, which owns the process's `SIGWINCH` handler: visor no longer installs a handler of its own, so a program's or reactor's other listeners keep hearing the signal while a `Tty` watches. `Tty.watchResize`, `unwatchResize`, `resized` and `drainResize` take the `Io`, and `resizeFile` is `resizeWake`, a reactor `Wake` that `Input` waits on beside the terminal. reactor is a dependency of visor, at the revision conduit waits through.
 - Checked arithmetic and conversions in the terminal parser and the picture layer go through aegis (`int.cast`, `int.Checked`) where they used `std.math`.
 - Pictures use morse's ids and sizes: `Image.id`, `Layer.image`, `Layers.transmit`, `ready`, `retire`, `deleteImage`, `undeclare`, `Replacement.current`/`pending`/`send`'s id and `ImageIds` take `ImageId` (`visor.ImageId`), a layer's `placement` is a `PlacementId`, and `Transmit`'s and `Image`'s `width` and `height` and a layer's `x_offset` and `y_offset` are `Pixels`. `ImageIds.init` takes the probe's `QueryImageId`. `Canvas.Picture.image` and `.placement` follow. Build values with `.fromRaw`.

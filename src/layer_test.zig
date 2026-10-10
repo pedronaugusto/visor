@@ -231,7 +231,8 @@ test "the pixels decompress to what was sent, chunk after chunk" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
     var pixels: [96 * 96 * 4]u8 = undefined;
-    for (&pixels, 0..) |*b, i| b.* = @truncate(i / 7);
+    // Smooth with some noise: it compresses, but not to a single chunk.
+    for (&pixels, 0..) |*b, i| b.* = @truncate((i / 7) ^ ((i *% 2654435761) >> 29));
     _ = try l.transmit(&out.writer, .fromRaw(4), &pixels, .{ .width = .fromRaw(96), .height = .fromRaw(96) });
 
     // Join the chunks' payloads, undo the base64, then the deflate.

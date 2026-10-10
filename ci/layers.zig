@@ -97,6 +97,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "conduit.tty",
         "morse",
         "reactor",
+        "warp",
         "shakedown",
         "std",
         "uucode",

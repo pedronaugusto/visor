@@ -32,6 +32,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
+const warp = @import("dependencies.zig").warp;
 const aegis = @import("dependencies.zig").aegis;
 
 const geom = @import("geom.zig");
@@ -408,9 +409,9 @@ pub const Layers = struct {
     /// Private: how many images were taken as ready because the grace period ran
     /// out rather than because the terminal said so.
     fallbacks: u32 = 0,
-    /// Private: the deflate window, made the first time a picture is compressed and
+    /// Private: warp's compressor, made the first time a picture is compressed and
     /// kept for the next.
-    window: []u8 = &.{},
+    compressor: ?warp.Compressor = null,
     /// Private: where a picture is deflated to, kept and reused for the next, so
     /// sending pictures frame after frame allocates nothing once the buffer
     /// has grown to the largest of them.
@@ -557,7 +558,7 @@ pub const Layers = struct {
         l.declared.deinit(gpa);
         l.shown.deinit(gpa);
         l.retired.deinit(gpa);
-        gpa.free(l.window);
+        if (l.compressor) |*compressor| compressor.deinit();
         l.deflated.deinit(gpa);
         l.* = undefined;
     }
@@ -608,24 +609,16 @@ pub const Layers = struct {
         if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(w, sm, id, pixels, how)) |n| return n;
         };
-        var packed_pixels: std.Io.Writer.Allocating = .fromArrayList(gpa, &l.deflated);
-        defer l.deflated = packed_pixels.toArrayList();
-        packed_pixels.clearRetainingCapacity();
         var payload = pixels;
         var compressed = false;
         if (how.compress and how.format != .png and pixels.len > 64) {
-            if (l.window.len == 0) l.window = try gpa.alloc(u8, std.compress.flate.max_window_len);
-            try packed_pixels.ensureTotalCapacity(pixels.len / 8 + 1024);
-            var deflate = std.compress.flate.Compress.init(
-                &packed_pixels.writer,
-                l.window,
-                .zlib,
-                .fastest,
-            ) catch return error.OutOfMemory;
-            deflate.writer.writeAll(pixels) catch return error.OutOfMemory;
-            deflate.finish() catch return error.OutOfMemory;
-            if (packed_pixels.written().len < pixels.len) {
-                payload = packed_pixels.written();
+            if (l.compressor == null) l.compressor = try .init(gpa, .{ .level = 1 });
+            const frame: warp.Compressor.Frame = .{ .container = .zlib };
+            try l.deflated.resize(gpa, warp.Compressor.bound(pixels.len, frame));
+            // unreachable: the output is as long as the longest stream `compress` writes
+            const n = l.compressor.?.compress(pixels, l.deflated.items, frame) catch unreachable;
+            if (n < pixels.len) {
+                payload = l.deflated.items[0..n];
                 compressed = true;
             }
         }
