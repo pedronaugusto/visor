@@ -54,12 +54,12 @@ pub fn build(b: *std.Build) !void {
     // builds the module above and nothing else, and fetches nothing for it.
     if (b.pkg_hash.len != 0) return;
 
-    // The inputs the round-trip properties replay. Its own module because
-    // the suite inside the package and the conformance build outside it
-    // have to replay the same bytes, and a file belongs to one module. It is
-    // test data, so it is not published: the conformance build makes its
-    // own module from the same file.
-    const corpus = b.createModule(.{ .root_source_file = b.path("src/testing/corpus.zig"), .target = target, .optimize = optimize });
+    // What the round-trip properties count of their draws. Its own module
+    // because the suite inside the package and the conformance build outside
+    // it count the same way, and a file belongs to one module. It is test
+    // support, so it is not published: the conformance build makes its own
+    // module from the same file.
+    const spread = b.createModule(.{ .root_source_file = b.path("src/testing/spread.zig"), .target = target, .optimize = optimize });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
-                .{ .name = "corpus", .module = corpus },
+                .{ .name = "spread", .module = spread },
                 .{ .name = "conduit", .module = conduit.module("conduit") },
             }),
         }),
@@ -107,11 +107,11 @@ pub fn build(b: *std.Build) !void {
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
 
-    // The corpus is a separate module: name its own test artifact so its
+    // The spread is a separate module: name its own test artifact so its
     // tests are reached without depending on incidental member uses.
-    const corpus_tests = b.addTest(.{ .name = "visor-corpus-tests", .root_module = corpus, .filters = filters });
-    test_step.dependOn(&b.addRunArtifact(corpus_tests).step);
-    check_step.dependOn(&corpus_tests.step);
+    const spread_tests = b.addTest(.{ .name = "visor-spread-tests", .root_module = spread, .filters = filters });
+    test_step.dependOn(&b.addRunArtifact(spread_tests).step);
+    check_step.dependOn(&spread_tests.step);
     // Compilation must reject byte addresses and byte counts as link positions.
     const domains = b.step("check-domains", "Reject mixed pool scalar domains");
     for ([_][]const u8{ "index", "bytes" }, [_][]const u8{ "u32,false)'", "found 'units.Bytes(u16)'" }) |name, diagnostic| {
@@ -144,7 +144,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
-                .{ .name = "corpus", .module = corpus },
+                .{ .name = "spread", .module = spread },
             }),
         }),
     });
@@ -239,7 +239,9 @@ pub fn build(b: *std.Build) !void {
 
     const ci = b.lazyImport(@This(), "preflight");
     // Both suites' clocks, fault plans and allocators.
-    const shakedown = (try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize })).module("shakedown");
+    const shakedown_dep = try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
+    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown_dep, aegis.module("aegis"));
+    const shakedown = shakedown_dep.module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
     bench_tests.root_module.addImport("shakedown", shakedown);

@@ -87,7 +87,7 @@ pub const layers: []const gantry.rules.Layer = &.{
 pub const entries: []const []const u8 = &.{};
 
 pub const modules: []const gantry.NamedModule = &.{
-    .{ .name = "corpus", .path = "src/testing/corpus.zig" },
+    .{ .name = "spread", .path = "src/testing/spread.zig" },
 };
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
@@ -115,7 +115,7 @@ pub const required = [_][]const u8{
     "src/dependencies.zig",
     "src/tests.zig",
     "src/widgets_test.zig",
-    "src/testing/corpus.zig",
+    "src/testing/spread.zig",
 };
 
 /// Tokens only their owners may spell. The console and the terminal's

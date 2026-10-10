@@ -9,7 +9,7 @@
 //! disagree, the emulator is right and this package is wrong.
 //!
 //! The same four properties as the suite inside the package, over the same
-//! committed corpus, read by column:
+//! generated cases, read by column:
 //!
 //! - **The terminal shows the screen.** Every column, the covered column of
 //!   a wide cluster included, its grapheme, its width, its style and its
@@ -35,11 +35,13 @@
 const std = @import("std");
 const visor = @import("visor");
 const vt = @import("ghostty-vt");
-const corpus = @import("corpus");
+const Spread = @import("spread").Spread;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 const widgets = visor.widgets;
 
 const Allocator = std.mem.Allocator;
-const Smith = std.testing.Smith;
 const testing = std.testing;
 const log = std.log.scoped(.conformance);
 
@@ -374,20 +376,43 @@ fn expectAgrees(screen: *const visor.Screen, o: *const Oracle) !void {
 // The property.
 //=========================================================================
 
-/// What the generators drew over a run of the corpus, one `Spread` a
+/// What the generators drew over a run of cases, one `Spread` a
 /// question.
 const Tally = struct {
     /// The grid's width, at the start and after every resize.
-    cols: corpus.Spread = .{},
+    cols: Spread = .{},
     /// Its height, the same.
-    rows: corpus.Spread = .{},
+    rows: Spread = .{},
     /// Which grid operation.
-    ops: corpus.Spread = .{},
+    ops: Spread = .{},
     /// Which grapheme a write took.
-    graphemes: corpus.Spread = .{},
+    graphemes: Spread = .{},
     /// How many frames one input ran to.
-    frames: corpus.Spread = .{},
+    frames: Spread = .{},
 };
+
+/// `property` over the cases `check` draws, with its draws counted in
+/// `tally` when it is given one.
+fn checked(comptime property: anytype, args: anytype, tally: ?*Tally) !void {
+    const Run = struct { args: @TypeOf(args), tally: ?*Tally };
+    const body = struct {
+        fn run(r: Run, case: *shakedown.Case) !void {
+            try @call(.auto, property, .{ testing.allocator, case.source } ++ r.args ++ .{r.tally});
+        }
+    }.run;
+    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{});
+}
+
+/// `property` over the cases `check` draws, for a property that counts
+/// nothing.
+fn checkedUncounted(comptime property: anytype, args: anytype) !void {
+    const body = struct {
+        fn run(a: @TypeOf(args), case: *shakedown.Case) !void {
+            try @call(.auto, property, .{ testing.allocator, case.source } ++ a);
+        }
+    }.run;
+    try shakedown.check(testing.allocator, args, body, .{});
+}
 
 /// Everything one round needs.
 const Harness = struct {
@@ -399,7 +424,7 @@ const Harness = struct {
     /// The pictures shown beside the screen.
     layers: visor.Layers,
     /// Where the generator's draws are counted, for the test that proves the
-    /// corpus explores; null everywhere else.
+    /// cases explore; null everywhere else.
     tally: ?*Tally = null,
 
     fn init(gpa: Allocator, size: visor.Size, method: visor.Method) !Harness {
@@ -471,59 +496,58 @@ const Harness = struct {
 
 /// One random operation on the grid. The same set the suite inside the
 /// package draws from, written against the public API.
-fn operate(h: *Harness, dice: *corpus.Dice) !void {
+fn operate(h: *Harness, src: *Source) !void {
     const s = &h.screen;
     const cols = s.dimensions().cols;
     const rows = s.dimensions().rows;
-    const op = dice.valueRangeAtMost(u8, 0, 6);
+    const op = gen.intRange(src, u8, 0, 6);
     if (h.tally) |t| t.ops.add(op);
     switch (op) {
         0, 1, 2 => {
-            const col: u16 = @intCast(dice.index(cols));
-            const row: u16 = @intCast(dice.index(rows));
-            const which = dice.index(alphabet.len);
+            const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            const which = gen.intRange(src, usize, 0, alphabet.len - 1);
             if (h.tally) |t| t.graphemes.add(which);
             const g = alphabet[which];
-            const style = styles[dice.index(styles.len)];
-            const target = dice.index(uris.len);
+            const style = styles[gen.intRange(src, usize, 0, styles.len - 1)];
+            const target = gen.intRange(src, usize, 0, uris.len - 1);
             const link = try s.link(uris[target], params[target]);
             try s.write(col, row, g, style, link);
         },
         3 => {
-            const col: u16 = @intCast(dice.index(cols));
-            const row: u16 = @intCast(dice.index(rows));
-            try s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
+            const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            try s.writeOwnedCell(col, row, .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)]));
         },
-        4 => try s.fill(randomRect(dice, cols, rows), .blank(styles[dice.index(styles.len)])),
-        5 => s.scroll(randomRect(dice, cols, rows), dice.valueRangeAtMost(i32, -3, 3)),
+        4 => try s.fill(randomRect(src, cols, rows), .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)])),
+        5 => s.scroll(randomRect(src, cols, rows), gen.intRange(src, i32, -3, 3)),
         6 => {
-            s.cursor.visible = dice.value(bool);
-            s.cursor.col = @intCast(dice.index(cols));
-            s.cursor.row = @intCast(dice.index(rows));
-            s.cursor.shape = @fromBackingInt(@intCast(dice.valueRangeAtMost(u8, 0, 6)));
+            s.cursor.visible = gen.boolean(src);
+            s.cursor.col = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            s.cursor.row = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            s.cursor.shape = @fromBackingInt(@intCast(gen.intRange(src, u8, 0, 6)));
         },
         else => unreachable,
     }
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(dice: *corpus.Dice, cols: u16, rows: u16) visor.Rect {
-    const col: u16 = @intCast(dice.index(cols));
-    const row: u16 = @intCast(dice.index(rows));
+fn randomRect(src: *Source, cols: u16, rows: u16) visor.Rect {
+    const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+    const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
     return .{
         .col = col,
         .row = row,
-        .cols = @intCast(dice.index(cols - col) + 1),
-        .rows = @intCast(dice.index(rows - row) + 1),
+        .cols = @intCast(gen.intRange(src, usize, 0, (cols - col) - 1) + 1),
+        .rows = @intCast(gen.intRange(src, usize, 0, (rows - row) - 1) + 1),
     };
 }
 
 /// The four properties, once, over a generated sequence of frames.
-fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn roundTrip(gpa: Allocator, src: *Source, method: visor.Method, tally: ?*Tally) !void {
     const size: visor.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 1, 24),
-        .rows = dice.valueRangeAtMost(u16, 1, 12),
+        .cols = gen.intRange(src, u16, 1, 24),
+        .rows = gen.intRange(src, u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
@@ -537,10 +561,10 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
     defer o.deinit();
 
     var frames: usize = 0;
-    while (frames < 6 and !dice.eos()) : (frames += 1) {
+    while (frames < 6 and src.more(7)) : (frames += 1) {
         var ops: usize = 0;
-        const count = dice.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, &dice);
+        const count = gen.intRange(src, u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, src);
 
         // The terminal shows the screen.
         _ = try h.frame(o);
@@ -556,7 +580,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
     if (tally) |t| t.frames.add(frames);
 
     // A repaint recovers from any state the renderer drifted into.
-    corrupt(&h.renderer, &dice);
+    corrupt(&h.renderer, src);
     h.renderer.repaint();
     _ = try h.frame(o);
     try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
@@ -577,39 +601,28 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: visor.Method, tally: ?*Tally
 
 /// Puts the renderer's model out of step with the terminal, as a dropped
 /// write or an out-of-band terminal write would.
-fn corrupt(r: *visor.Renderer, dice: *corpus.Dice) void {
+fn corrupt(r: *visor.Renderer, src: *Source) void {
     var i: usize = 0;
-    const count = dice.valueRangeAtMost(u8, 1, 8);
+    const count = gen.intRange(src, u8, 1, 8);
     while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
+        r.prev[gen.intRange(src, usize, 0, r.prev.len - 1)] = .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)]);
     }
-    r.style = styles[dice.index(styles.len)];
+    r.style = styles[gen.intRange(src, usize, 0, styles.len - 1)];
     r.own_cursor = null;
     r.shown = null;
 }
 
 test "the second emulator agrees, measuring by codepoint" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .wcwidth, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTrip, .{visor.Method.wcwidth}, null);
 }
 
 test "the second emulator agrees, measuring by cluster" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .unicode, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTrip, .{visor.Method.unicode}, null);
 }
 
-test "the corpus draws every size, every operation and every grapheme against the second emulator" {
+test "the cases draw every size, every operation and every grapheme against the second emulator" {
     var t: Tally = .{};
-    for (corpus.entries) |entry| {
-        var smith: Smith = .{ .in = entry };
-        try roundTrip(testing.allocator, &smith, .unicode, &t);
-    }
+    try checked(roundTrip, .{visor.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
     try testing.expect(t.rows.covers(1, 12));
     try testing.expect(t.ops.covers(0, 6));
@@ -704,10 +717,10 @@ test "measured by codepoint, a cluster of wide codepoints is in the cells the te
 
 /// A size somewhere in the generator's range, reached from `from` the way a
 /// window's edge moves: both ways, the width alone, or the height alone.
-fn nextSize(dice: *corpus.Dice, from: visor.Size) visor.Size {
-    const cols = dice.valueRangeAtMost(u16, 1, 24);
-    const rows = dice.valueRangeAtMost(u16, 1, 12);
-    return switch (dice.valueRangeAtMost(u8, 0, 2)) {
+fn nextSize(src: *Source, from: visor.Size) visor.Size {
+    const cols = gen.intRange(src, u16, 1, 24);
+    const rows = gen.intRange(src, u16, 1, 12);
+    return switch (gen.intRange(src, u8, 0, 2)) {
         0 => .{ .cols = cols, .rows = rows },
         1 => .{ .cols = cols, .rows = from.rows },
         else => .{ .cols = from.cols, .rows = rows },
@@ -717,11 +730,11 @@ fn nextSize(dice: *corpus.Dice, from: visor.Size) visor.Size {
 /// What a program draws after a resize: now and then the whole layout
 /// again from nothing, as a program whose layout moved does, then some
 /// random operations.
-fn scribble(h: *Harness, dice: *corpus.Dice) !void {
-    if (dice.value(bool)) h.screen.clear();
+fn scribble(h: *Harness, src: *Source) !void {
+    if (gen.boolean(src)) h.screen.clear();
     var ops: usize = 0;
-    const count = dice.valueRangeAtMost(u8, 1, 12);
-    while (ops < count) : (ops += 1) try operate(h, dice);
+    const count = gen.intRange(src, u8, 1, 12);
+    while (ops < count) : (ops += 1) try operate(h, src);
 }
 
 /// ASCII along a row, one cell a byte.
@@ -731,20 +744,19 @@ fn put(s: *visor.Screen, col: u16, row: u16, text: []const u8, style: visor.Styl
 
 /// The terminal passes through a size the program may never hear of, with
 /// a frame drawn at the program's size arriving after it, or not.
-fn dragThrough(h: *Harness, o: *Oracle, dice: *corpus.Dice, to: visor.Size) !void {
-    if (dice.value(bool)) {
-        try scribble(h, dice);
+fn dragThrough(h: *Harness, o: *Oracle, src: *Source, to: visor.Size) !void {
+    if (gen.boolean(src)) {
+        try scribble(h, src);
         const stale = try h.render();
         try o.resize(to);
         o.feed(stale);
     } else try o.resize(to);
 }
 
-fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
-    var dice: corpus.Dice = .init(smith);
+fn resizeTrip(gpa: Allocator, src: *Source, method: visor.Method) !void {
     var size: visor.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 1, 24),
-        .rows = dice.valueRangeAtMost(u16, 1, 12),
+        .cols = gen.intRange(src, u16, 1, 24),
+        .rows = gen.intRange(src, u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
@@ -753,14 +765,14 @@ fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
     defer o.deinit();
     try h.enter(o);
 
-    try scribble(&h, &dice);
+    try scribble(&h, src);
     _ = try h.frame(o);
 
     var drawn = true;
-    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    const steps = gen.intRange(src, u8, 1, 5);
     for (0..steps) |_| {
-        const to = nextSize(&dice, size);
-        switch (dice.valueRangeAtMost(u8, 0, 3)) {
+        const to = nextSize(src, size);
+        switch (gen.intRange(src, u8, 0, 3)) {
             // The terminal takes the size, then the program hears of it.
             0 => {
                 try o.resize(to);
@@ -769,23 +781,23 @@ fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
             // A frame drawn at the old size is still on its way when the
             // terminal takes the new one, and lands after it.
             1 => {
-                try dragThrough(&h, o, &dice, to);
+                try dragThrough(&h, o, src, to);
                 try h.resize(to);
             },
             // A drag: the terminal passes through sizes the program never
             // hears of, frames at the old size landing between them.
             2 => {
-                var hops = dice.valueRangeAtMost(u8, 1, 3);
-                while (hops > 0) : (hops -= 1) try dragThrough(&h, o, &dice, nextSize(&dice, size));
-                try dragThrough(&h, o, &dice, to);
+                var hops = gen.intRange(src, u8, 1, 3);
+                while (hops > 0) : (hops -= 1) try dragThrough(&h, o, src, nextSize(src, size));
+                try dragThrough(&h, o, src, to);
                 try h.resize(to);
             },
             // A drag the program hears every step of, drawing after none
             // of them but the last.
             else => {
-                var hops = dice.valueRangeAtMost(u8, 1, 3);
+                var hops = gen.intRange(src, u8, 1, 3);
                 while (hops > 0) : (hops -= 1) {
-                    const mid = nextSize(&dice, size);
+                    const mid = nextSize(src, size);
                     try o.resize(mid);
                     try h.resize(mid);
                 }
@@ -796,34 +808,26 @@ fn resizeTrip(gpa: Allocator, smith: *Smith, method: visor.Method) !void {
         size = to;
 
         // A frame now, or not until the next size.
-        drawn = dice.valueRangeAtMost(u8, 0, 3) != 0;
+        drawn = gen.intRange(src, u8, 0, 3) != 0;
         if (drawn) {
-            try scribble(&h, &dice);
+            try scribble(&h, src);
             _ = try h.frame(o);
             try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
         }
     }
     if (!drawn) {
-        try scribble(&h, &dice);
+        try scribble(&h, src);
         _ = try h.frame(o);
         try testing.expectEqual(@as(usize, 0), (try h.frame(o)).bytes);
     }
 }
 
 test "the second emulator agrees across resizes, measuring by codepoint" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try resizeTrip(gpa, smith, .wcwidth);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checkedUncounted(resizeTrip, .{visor.Method.wcwidth});
 }
 
 test "the second emulator agrees across resizes, measuring by cluster" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try resizeTrip(gpa, smith, .unicode);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checkedUncounted(resizeTrip, .{visor.Method.unicode});
 }
 
 test "a label is not left on the row it moved from when the window grows" {
@@ -940,11 +944,10 @@ fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
 /// the text property resizes it, the layers laid out again for the new
 /// size -- sometimes in the same cells, sometimes moved -- and every one
 /// where the terminal has it.
-fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
-    var dice: corpus.Dice = .init(smith);
+fn layerResizeTrip(gpa: Allocator, src: *Source) !void {
     var size: visor.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 4, 24),
-        .rows = dice.valueRangeAtMost(u16, 4, 12),
+        .cols = gen.intRange(src, u16, 4, 24),
+        .rows = gen.intRange(src, u16, 4, 12),
     };
     var h: Harness = try .init(gpa, size, .unicode);
     defer h.deinit();
@@ -953,32 +956,32 @@ fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
     defer o.deinit();
     try h.enter(o);
 
-    const pictures = dice.valueRangeAtMost(u32, 1, 3);
+    const pictures = gen.intRange(src, u32, 1, 3);
     var id: u32 = 1;
     while (id <= pictures) : (id += 1) try sendPicture(&h, o, id);
 
     var rects: [3]visor.Rect = undefined;
-    for (rects[0..pictures]) |*r| r.* = randomRect(&dice, size.cols, size.rows);
+    for (rects[0..pictures]) |*r| r.* = randomRect(src, size.cols, size.rows);
     try layOut(&h, rects[0..pictures]);
     _ = try h.frame(o);
     try expectLayersAgree(&h, o);
 
-    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    const steps = gen.intRange(src, u8, 1, 5);
     for (0..steps) |_| {
-        const to = nextSize(&dice, size);
-        var hops = dice.valueRangeAtMost(u8, 0, 2);
-        while (hops > 0) : (hops -= 1) try dragThrough(&h, o, &dice, nextSize(&dice, size));
-        try dragThrough(&h, o, &dice, to);
+        const to = nextSize(src, size);
+        var hops = gen.intRange(src, u8, 0, 2);
+        while (hops > 0) : (hops -= 1) try dragThrough(&h, o, src, nextSize(src, size));
+        try dragThrough(&h, o, src, to);
         try h.resize(to);
         size = to;
 
         // Each picture keeps its cells where they still fit, or moves.
         for (rects[0..pictures]) |*r| {
             const fits = r.col + r.cols <= size.cols and r.row + r.rows <= size.rows;
-            if (!fits or dice.value(bool)) r.* = randomRect(&dice, size.cols, size.rows);
+            if (!fits or gen.boolean(src)) r.* = randomRect(src, size.cols, size.rows);
         }
         try layOut(&h, rects[0..pictures]);
-        try scribble(&h, &dice);
+        try scribble(&h, src);
         _ = try h.frame(o);
         try expectLayersAgree(&h, o);
         // The same layers again: nothing to write.
@@ -993,11 +996,7 @@ fn layOut(h: *Harness, rects: []const visor.Rect) !void {
 }
 
 test "pictures stay where the program put them across resizes" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try layerResizeTrip(gpa, smith);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checkedUncounted(layerResizeTrip, .{});
 }
 
 //=========================================================================

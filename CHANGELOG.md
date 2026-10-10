@@ -23,7 +23,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Layers.free` and `freeAll` are `deleteImage` and `deleteAll`, morse's word for the same command.
 - `Damage` keeps the allocator `init` was given: `deinit()` and `resize(rows)` take none.
 - `visor.version` and `visor.widgets.version` are gone: no other package in the family exports one, and the manifest says it.
-- visor no longer publishes a `corpus` module. It is the round trips' test data, not API; the conformance build makes its own module from `src/testing/corpus.zig`.
+- visor no longer publishes a `corpus` module. The round trips count their draws with `src/testing/spread.zig`, test support rather than API; the conformance build makes its own module from it.
 - `Screen.intern` returns `TooLong` for more than 65535 bytes, and `Screen.link` for a target or parameters that long (`Screen.LinkError`); both returned `OutOfMemory`. `Term` and `Markdown` leave such a link out, and `Markdown` interns a span's link once rather than once a cluster.
 - Input.init returns error.EmptyReadBuffer for empty read storage; callers must handle its error union.
 - Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.
@@ -80,6 +80,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The Smith fuzz tests are shakedown `check` properties; `corpus.Dice` and the generated corpus are gone.
 - The benchmarks measure with shakedown's `bench` and print its JSON rows, one for each workload and size, `<task>/<cols>x<rows>`, every sample in nanoseconds a frame. Each workload keeps its name and what its clock reads; its fixture is built once for the row and kept for all its samples, outside the clock; `style_heavy`, which restyles every cell before each draw, is a row of one-frame samples that restage outside the clock. `visor-bench` takes `--row <name prefix>` and `--samples <n>` in place of `--only` and `--runs`, prints what it checked to standard error, and no longer prints the bytes a frame wrote. Each workload is still checked and measured in a process of its own.
 - Test the silent input deadline with shakedown 1bb13e7: a stalled counted read and an automatic clock replace the local batch Io layer.
 - morse is pinned at a commit whose manifest no longer names the terminal emulator its conformance build feeds, so a program that depends on visor never fetches or compiles that emulator, with `--fetch=all` too, and a Zig the emulator's build script refuses no longer fails its build once the emulator is in the package cache.

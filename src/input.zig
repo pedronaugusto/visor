@@ -299,8 +299,10 @@ const console = @import("dependencies.zig").tty.console;
 
 const testing = std.testing;
 const conduit = @import("dependencies.zig").conduit;
-const corpus = @import("corpus");
+const Spread = @import("spread").Spread;
 const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.
 const Piped = struct {
@@ -626,36 +628,36 @@ fn describe(log: *std.Io.Writer.Allocating, text: *std.Io.Writer.Allocating, eve
     }
 }
 
-/// What the pump property drew over the corpus, for the test that proves
+/// What the pump property drew over its cases, for the test that proves
 /// it explores.
 const Tally = struct {
     /// How long each stream was, in bytes.
-    bytes: corpus.Spread = .{},
+    bytes: Spread = .{},
     /// Which fragment each piece took; a raw piece is `fragments.len`.
-    pieces: corpus.Spread = .{},
+    pieces: Spread = .{},
     /// How many bytes each read took at most.
-    read_len: corpus.Spread = .{},
+    read_len: Spread = .{},
 };
 
-fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn pumpMatchesParser(gpa: std.mem.Allocator, src: *Source, tally: ?*Tally) !void {
     var stream: std.ArrayList(u8) = .empty;
     defer stream.deinit(gpa);
-    const count = dice.valueRangeAtMost(u16, 0, 256);
+    const count = gen.intRange(src, u16, 0, 256);
     var piece: u16 = 0;
     while (piece < count and stream.items.len < 2048) : (piece += 1) {
-        if (dice.valueRangeAtMost(u8, 0, 7) == 0) {
+        if (gen.intRange(src, u8, 0, 7) == 0) {
             var raw: [8]u8 = undefined;
-            const n = dice.slice(&raw);
+            const n = gen.intRange(src, usize, 0, raw.len);
+            src.bytes(raw[0..n]);
             try stream.appendSlice(gpa, raw[0..n]);
             if (tally) |t| t.pieces.add(fragments.len);
         } else {
-            const which = dice.index(fragments.len);
+            const which = gen.intRange(src, usize, 0, fragments.len - 1);
             try stream.appendSlice(gpa, fragments[which]);
             if (tally) |t| t.pieces.add(which);
         }
     }
-    const read_len: usize = dice.valueRangeAtMost(u8, 1, 32);
+    const read_len: usize = gen.intRange(src, u8, 1, 32);
     if (tally) |t| {
         t.bytes.add(stream.items.len);
         t.read_len.add(read_len);
@@ -702,20 +704,21 @@ fn pumpMatchesParser(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?
 
 test "the pump hands over what the parser makes of the whole stream, however it is read" {
     if (is_windows) return error.SkipZigTest;
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try pumpMatchesParser(gpa, smith, null);
+    try shakedown.check(testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try pumpMatchesParser(testing.allocator, case.source, null);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
-test "the pump's corpus draws every fragment, raw bytes, every read size and long streams" {
+test "the pump's cases draw every fragment, raw bytes, every read size and long streams" {
     if (is_windows) return error.SkipZigTest;
     var t: Tally = .{};
-    for (corpus.entries) |entry| {
-        var smith: std.testing.Smith = .{ .in = entry };
-        try pumpMatchesParser(testing.allocator, &smith, &t);
-    }
+    try shakedown.check(testing.allocator, &t, struct {
+        fn body(tally: *Tally, case: *shakedown.Case) !void {
+            try pumpMatchesParser(testing.allocator, case.source, tally);
+        }
+    }.body, .{});
     try testing.expect(t.pieces.covers(0, fragments.len));
     try testing.expect(t.read_len.covers(1, 32));
     try testing.expect(t.bytes.least == 0);

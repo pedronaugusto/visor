@@ -416,7 +416,9 @@ pub const Tree = struct {
 
 const testing = std.testing;
 const Harness = @import("../testing/widget_harness.zig").Harness;
-const corpus = @import("corpus");
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 
 // src
 // ├─ widgets
@@ -609,14 +611,13 @@ test "runs, an aside and a cut with an ellipsis draw as a list item draws them" 
 
 /// A tree of random shape, opened at random, held to what a slow and
 /// obvious reading of the same nodes says.
-fn treeHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
-    var dice: corpus.Dice = .init(smith);
+fn treeHolds(gpa: std.mem.Allocator, src: *Source) !void {
     var nodes: [40]Tree.Node = undefined;
-    const n: usize = dice.valueRangeAtMost(u8, 0, nodes.len);
+    const n: usize = gen.intRange(src, u8, 0, nodes.len);
     var depth: u16 = 0;
     for (nodes[0..n], 0..) |*node, i| {
-        if (i > 0) depth = dice.valueRangeAtMost(u16, 0, depth + 1);
-        node.* = .{ .depth = depth, .text = "n", .open = if (dice.value(bool)) dice.value(bool) else null };
+        if (i > 0) depth = gen.intRange(src, u16, 0, depth + 1);
+        node.* = .{ .depth = depth, .text = "n", .open = if (gen.boolean(src)) gen.boolean(src) else null };
     }
     const tree: Tree = .{ .nodes = nodes[0..n] };
 
@@ -645,11 +646,11 @@ fn treeHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 
     // Drawn with any selection and offset, the selection is a shown node on
     // screen, and the frame reads back.
-    const rows = dice.valueRangeAtMost(u16, 1, 8);
+    const rows = gen.intRange(src, u16, 1, 8);
     var h: Harness = try .init(gpa, 24, rows);
     defer h.deinit();
-    var state: Tree.State = .{ .offset = dice.valueRangeAtMost(u8, 0, 50) };
-    if (n > 0 and dice.value(bool)) state.selected = dice.index(n);
+    var state: Tree.State = .{ .offset = gen.intRange(src, u8, 0, 50) };
+    if (n > 0 and gen.boolean(src)) state.selected = gen.intRange(src, usize, 0, n - 1);
     const was = state.selected;
     try tree.draw(h.window(), &state);
     if (state.selected) |sel| {
@@ -662,11 +663,11 @@ fn treeHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 }
 
 test "whatever the shape and what is open, the walk agrees with the slow reading" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try treeHolds(gpa, smith);
+    try shakedown.check(testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try treeHolds(testing.allocator, case.source);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
 test "the guides of a long tree are the guides of the same rows drawn one at a time" {
