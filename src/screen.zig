@@ -399,7 +399,7 @@ pub const Screen = struct {
         if (c.shape.reserved != 0 or !std.mem.allEqual(u8, &c.reserved, 0)) return error.InvalidCell;
         if (!c.text.isPooled()) {
             if (c.text.generation() != cellmod.PoolGeneration.fromRaw(0) or !std.mem.allEqual(u8, c.text.buf[c.text.len..], 0)) return error.InvalidCell;
-        } else if (c.text.length().raw() <= Cell.Text.max_inline) return error.InvalidCell;
+        } else if (c.text.length().compare(.fromRaw(Cell.Text.max_inline)) != .gt) return error.InvalidCell;
         if (c.shape.kind == .spacer_head) {
             if (!Cell.Text.eql(c.text, .space) or c.link != .none or c.shape.scale != 0 or c.shape.drift) return error.InvalidCell;
         } else if (c.isHead() and textmod.graphemeWidth(bytes, method) != c.glyphWidth()) return error.InvalidCell;

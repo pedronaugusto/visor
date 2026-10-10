@@ -143,7 +143,7 @@ pub const Graphemes = struct {
         const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
         p.bytes.appendSliceAssumeCapacity(source);
         // The entry names the bytes just appended, the end of the pool.
-        assert(end.raw() == p.bytes.items.len);
+        assert(end.convert(usize).eql(.fromRaw(p.bytes.items.len)));
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return pooledText(offset, byte_len);
@@ -337,7 +337,7 @@ pub const Links = struct {
         l.bytes.appendSliceAssumeCapacity(params_source);
         // The two strings sit back to back at the end of the pool, which is
         // where `get` reads them from.
-        assert(end.raw() == l.bytes.items.len);
+        assert(end.convert(usize).eql(.fromRaw(l.bytes.items.len)));
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,
