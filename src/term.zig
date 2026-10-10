@@ -478,7 +478,7 @@ pub const Term = struct {
     fn controlSequence(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const csi = morse.parseCsi(bytes) orelse return 0;
         if (csi.final != 0) try t.dispatch(csi);
-        return csi.len;
+        return csi.len.raw();
     }
 
     /// One complete control sequence, acted on.
@@ -694,7 +694,7 @@ pub const Term = struct {
     /// inverses of what wrote them.
     fn operatingSystemCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const string = morse.parseControlString(bytes) orelse return 0;
-        if (!string.terminated) return string.len;
+        if (!string.terminated) return string.len.raw();
         if (morse.parseTextSize(string.body)) |sized| {
             try t.sizedText(sized);
         } else if (morse.parseHyperlink(string.body)) |found| {
@@ -702,11 +702,11 @@ pub const Term = struct {
                 .none
             else
                 t.scr.link(found.uri, found.params) catch |err| switch (err) {
-                    error.ControlInText, error.TooLong => return string.len,
+                    error.ControlInText, error.TooLong => return string.len.raw(),
                     error.OutOfMemory => return error.OutOfMemory,
                 };
         }
-        return string.len;
+        return string.len.raw();
     }
 
     /// The text of an OSC 66, drawn at the width it was told and the scale
@@ -771,11 +771,11 @@ pub const Term = struct {
     /// not to have written one.
     fn applicationCommand(t: *Term, bytes: []const u8) Allocator.Error!usize {
         const string = morse.parseControlString(bytes) orelse return 0;
-        if (!string.terminated) return string.len;
+        if (!string.terminated) return string.len.raw();
         const payload = try t.gpa.dupe(u8, string.body);
         errdefer t.gpa.free(payload);
         try t.own_graphics.append(t.gpa, payload);
-        return string.len;
+        return string.len.raw();
     }
 
     //=====================================================================

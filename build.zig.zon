@@ -3,12 +3,12 @@
     .version = "0.4.0",
     .dependencies = .{
         .aegis = .{
-            .url = "git+https://github.com/pedronaugusto/aegis#45d3aa1f12d0b1e9803af424f61d81aaa4c0c113",
-            .hash = "aegis-0.0.0-rsxoujrXAQDkze8z-wu3N0mJ03Q-Vy4FIhAU1qi6xnxM",
+            .url = "git+https://github.com/pedronaugusto/aegis#104b1c07ebc698ec86cb65ca0befa0a63c266e8a",
+            .hash = "aegis-0.0.0-rsxouifgBgBOnC8-wtmFrZSIUjR9aEYPYmZD1G-hASAz",
         },
         .preflight = .{
-            .url = "git+https://github.com/pedronaugusto/preflight#84cccbc0e7040c42c28a7333c22cf7261b04694e",
-            .hash = "preflight-0.1.0-LX1ZwsM0CQD0DgjeTq1o54U4UFJWYoGztCgwOCEglJvN",
+            .url = "git+https://github.com/pedronaugusto/preflight#e3d81b9e477c1c690f1ce03506511935d16035c3",
+            .hash = "preflight-0.1.0-LX1Zwl2HCQB4-h0brJMmXe_1ZA3UoIT6vI9kJ3IE1grE",
             .lazy = true,
         },
         .uucode = .{
@@ -16,16 +16,16 @@
             .hash = "uucode-0.2.0-ZZjBPm6FVgBcY-79AHV8ckQj86z0JwOyVyj89VeZrEiv",
         },
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse#04f979220e7db734724f690e1cd57740bee572a3",
-            .hash = "morse-0.7.0-OKnGofY5EQBo00LOXu9FlG_14dl8pX40_aJh4q2yb70o",
+            .url = "git+https://github.com/pedronaugusto/morse#497e10529ccc7530a458ceec596f28784a1bff5c",
+            .hash = "morse-0.7.0-OKnGoQJtEQAoPGjhZO2CA1kg4XpHV3C7U4AefB6KWHbv",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#48ad753eece079278d3e46b237c90e60f039bae9",
-            .hash = "conduit-0.5.1-4rIA74pUEwCQaKush7TlJgA462c01S9mhUj-__W--VkS",
+            .url = "git+https://github.com/pedronaugusto/conduit#412f9cafed4a32f9bd50cf6c0738b8427bdb39ea",
+            .hash = "conduit-0.5.1-4rIA70aBEwAENeACjqF3rVWnqsouKvXe4MsI0YY51Nlw",
         },
         .shakedown = .{
-            .url = "git+https://github.com/pedronaugusto/shakedown#99418acb02deacefe8cc555c4205dce98f54ef68",
-            .hash = "shakedown-0.1.0-BR8U409YEgCLU7igVgkutLKZ1u5FzuaC6geo-4n84d_G",
+            .url = "git+https://github.com/pedronaugusto/shakedown#caf380381a49ace7c13beba70dd512c4faf24ce7",
+            .hash = "shakedown-0.1.0-BR8U4yVfEgCS2Vw6zWMqw0wRjxct8g3tePy1UKNZ8Q89",
             .lazy = true,
         },
     },

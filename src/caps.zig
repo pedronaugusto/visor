@@ -286,7 +286,8 @@ pub const Caps = struct {
             if (!p.own_questions.asks(question)) return;
             // A graphics answer about one of the program's pictures answers
             // nothing here.
-            if (question == .graphics and event.reply.graphics.id != p.own_questions.graphics_id) return;
+            const own: morse.ImageId = .fromRaw(p.own_questions.graphics_id.raw());
+            if (question == .graphics and !(if (event.reply.graphics.id) |id| id.eql(own) else false)) return;
             p.answered.insert(question);
             p.last_answer = now;
             const reply = switch (event) {
@@ -391,11 +392,11 @@ test "the defaults are what is safe on the oldest terminal" {
 test "the probe asks morse's questions, in morse's order, and nothing of its own" {
     var buffer: [512]u8 = undefined;
     var out: std.Io.Writer = .fixed(&buffer);
-    const p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    const p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     try p.write(&out);
     var theirs_buf: [512]u8 = undefined;
     var theirs: std.Io.Writer = .fixed(&theirs_buf);
-    try (morse.Probe{ .graphics_id = 1 }).write(&theirs);
+    try (morse.Probe{ .graphics_id = try morse.QueryImageId.fromRaw(1) }).write(&theirs);
     try testing.expectEqualStrings(theirs.buffered(), out.buffered());
     // Among them the ones a `Caps` is made of, and the one always answered
     // last.
@@ -410,7 +411,7 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
     // What a terminal with each of them says before anything turned them
     // on: reset. That is a yes.
     for ([_][]const u8{ "1", "2", "3" }) |state| {
-        var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+        var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
         var buf: [4][32]u8 = undefined;
         p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), ms(0));
         p.feed(answer(try std.mem.print(&buf[1], "\x1b[?2027;{s}$y", .{state})), ms(0));
@@ -422,7 +423,7 @@ test "a mode the terminal answers set or reset is one it has, and not recognised
         try testing.expect(p.caps.sgr_pixels);
     }
     for ([_][]const u8{ "0", "4" }) |state| {
-        var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+        var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
         p.caps = .{ .sync = true, .width_method = .unicode, .in_band_resize = true, .sgr_pixels = true };
         var buf: [4][32]u8 = undefined;
         p.feed(answer(try std.mem.print(&buf[0], "\x1b[?2026;{s}$y", .{state})), ms(0));
@@ -440,7 +441,7 @@ test "the device attributes answer does not settle the probe while a forwarded a
     // A multiplexer answers the device attributes itself while a question it
     // forwarded is still on its way: the probe waits for the caller's quiet
     // period after the last answer, on the caller's clock.
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1b[?2026;1$y"), ms(100));
     try testing.expect(!p.settled(ms(100), .fromMilliseconds(50)));
     p.feed(answer("\x1b[?62;4;22c"), ms(110));
@@ -452,14 +453,14 @@ test "the device attributes answer does not settle the probe while a forwarded a
     // Without the device attributes no quiet period settles it: silence
     // there is a terminal that has not answered yet, for the caller's own
     // timeout to end.
-    var q: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var q: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     q.feed(answer("\x1b[?2026;1$y"), ms(0));
     try testing.expect(!q.settled(ms(10_000), .fromMilliseconds(50)));
 }
 
 test "a probe answered in full is settled at once" {
     var p: Caps.Probe = .init(.{
-        .graphics_id = 1,
+        .graphics_id = try morse.QueryImageId.fromRaw(1),
         .cursor_position = false,
         .foreground_color = false,
         .background_color = false,
@@ -490,7 +491,7 @@ test "a probe answered in full is settled at once" {
 }
 
 test "an unrecognised reply changes nothing" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     const before = p.caps;
     p.feed(answer("nonsense"), ms(0));
     p.feed(answer("\x1b["), ms(0));
@@ -500,14 +501,14 @@ test "an unrecognised reply changes nothing" {
 }
 
 test "a 256-colour count is not evidence of truecolor" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     // XTGETTCAP reply: "Co" = "256", both halves in hex.
     p.feed(answer("\x1bP1+r436f=323536\x1b\\"), ms(0));
     try testing.expect(!p.caps.truecolor);
 }
 
 test "a colour count is folded in, and picks the profile" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1bP1+r436f=323536\x1b\\"), ms(0));
     try testing.expect(p.hasAnswered(.color_count));
     try testing.expectEqual(@as(?std.Io.Timestamp, ms(0)), p.lastAnswer());
@@ -545,13 +546,13 @@ test "COLORTERM and NO_COLOR say what they say and no more" {
 }
 
 test "a truecolor-specific capability enables truecolor" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1bP1+r5463\x1b\\"), ms(0));
     try testing.expect(p.caps.truecolor);
 }
 
 test "the graphics answer is the one carrying the id the program chose" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     // An answer about a picture is not an answer to the question.
     p.feed(answer("\x1b_Gi=31;OK\x1b\\"), ms(0));
     try testing.expect(!p.caps.kitty_graphics);
@@ -568,7 +569,7 @@ fn answer(bytes: []const u8) morse.Event {
 }
 
 test "a probe ignores disabled questions without extending its quiet period" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1, .sync_output = false, .unicode_core = false });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1), .sync_output = false, .unicode_core = false });
     p.feed(answer("\x1b[?62;4;22c"), ms(100));
     p.feed(answer("\x1b[?2026;1$y"), ms(140));
     p.feed(answer("\x1b[?2027;1$y"), ms(145));
@@ -581,7 +582,7 @@ test "a probe ignores disabled questions without extending its quiet period" {
 }
 
 test "probe quiet time spans the signed clock range" {
-    var probe: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var probe: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     probe.feed(answer("\x1b[?62;4;22c"), ms(std.math.minInt(i64)));
     try testing.expect(probe.settled(ms(std.math.maxInt(i64)), .fromMilliseconds(50)));
     probe.last_answer = ms(std.math.maxInt(i64));
@@ -600,7 +601,7 @@ test "the picture protocol is kitty, then iTerm2, then sixel, then cells, unless
 }
 
 test "sixels are the device attributes' attribute 4, and their registers and size are XTSMGRAPHICS's" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1b[?62;22c"), ms(0));
     try testing.expect(!p.caps.sixel);
     p.feed(answer("\x1b[?65;4;6;22c"), ms(0));
@@ -628,7 +629,7 @@ test "sixels are the device attributes' attribute 4, and their registers and siz
 }
 
 test "iTerm2's images are a terminal calling itself iTerm2, and nothing else" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1bP>|WezTerm 20240203-110809-5046fc22\x1b\\"), ms(0));
     try testing.expect(!p.caps.iterm_images);
     p.feed(answer("\x1bP>|iTerm2X 1.0\x1b\\"), ms(0));
@@ -651,7 +652,7 @@ test "TERM_PROGRAM is supplied by the caller and recognizes iTerm.app exactly" {
 test "picture probe replies stay within the register bound under arbitrary input" {
     try testing.fuzz(testing.allocator, struct {
         fn one(_: std.mem.Allocator, smith: *testing.Smith) !void {
-            var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+            var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
             var bytes: [512]u8 = undefined;
             const n = smith.slice(&bytes);
             p.feed(answer(bytes[0..n]), ms(0));
@@ -665,7 +666,7 @@ test "picture probe replies stay within the register bound under arbitrary input
 }
 
 test "a colour count arriving after DA1 extends the quiet period" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     p.feed(answer("\x1b[?62;4;22c"), ms(100));
     p.feed(answer("\x1bP1+r436f=3136\x1b\\"), ms(140));
     try testing.expect(p.hasAnswered(.color_count));
@@ -682,7 +683,7 @@ test "a refused or invalid colour count leaves the count unknown" {
         "\x1bP1+r436f=6e6f\x1b\\",
         "\x1bP1+r436f=34323934393637323936\x1b\\",
     }) |bytes| {
-        var p: Caps.Probe = .init(.{ .graphics_id = 1 });
+        var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
         p.feed(answer(bytes), ms(10));
         try testing.expect(p.hasAnswered(.color_count));
         try testing.expectEqual(@as(?u32, null), p.capabilities().colors);
@@ -691,7 +692,7 @@ test "a refused or invalid colour count leaves the count unknown" {
 }
 
 test "a disabled colour count changes neither caps nor quiet time" {
-    var p: Caps.Probe = .init(.{ .graphics_id = 1, .color_count = false });
+    var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1), .color_count = false });
     p.feed(answer("\x1b[?62;4;22c"), ms(100));
     p.feed(answer("\x1bP1+r436f=3136\x1b\\"), ms(140));
     try testing.expect(!p.hasAnswered(.color_count));

@@ -632,10 +632,10 @@ pub const Layers = struct {
 
         errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
-            .image = .{ .id = id },
+            .image = .{ .id = morse.ImageId.fromRaw(id) },
             .format = how.format,
-            .width = how.width,
-            .height = how.height,
+            .width = .fromRaw(how.width),
+            .height = .fromRaw(how.height),
             .compressed = compressed,
             .quiet = if (how.answer) .answers else .silent,
         }, payload);
@@ -685,12 +685,12 @@ pub const Layers = struct {
         l.shared_objects.appendAssumeCapacity(object);
         errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
-            .image = .{ .id = id },
+            .image = .{ .id = morse.ImageId.fromRaw(id) },
             .format = how.format,
             .medium = .shared_memory,
-            .width = how.width,
-            .height = how.height,
-            .size = size,
+            .width = .fromRaw(how.width),
+            .height = .fromRaw(how.height),
+            .size = .fromRaw(size),
             .quiet = if (how.answer or trying) .answers else .silent,
         }, object.name.slice());
         return object.name.len;
@@ -775,10 +775,10 @@ pub const Layers = struct {
     /// changes nothing. A failed image stays refused until transmitted again.
     pub fn ack(l: *Layers, response: morse.GraphicsResponse) void {
         const id = response.id orelse return;
-        const held = l.find(id) orelse return;
+        const held = l.find(id.raw()) orelse return;
         l.answers = true;
         if (held.state != .failed) held.state = if (response.ok()) .ready else .failed;
-        if (l.sharedObject(id)) |object| {
+        if (l.sharedObject(id.raw())) |object| {
             l.release(held);
             if (l.policyFor(object)) |sm| {
                 if (sm.state == .trying) sm.state = if (response.ok()) .yes else .no;
@@ -794,7 +794,7 @@ pub const Layers = struct {
     /// with, so the terminal's memory and this list stay as small as what
     /// is alive.
     pub fn deleteImage(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
-        if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
+        if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = morse.ImageId.fromRaw(id) } }, .free = true, .quiet = .silent });
         var i: usize = 0;
         while (i < l.own_images.items.len) {
             if (l.own_images.items[i].id == id) {
@@ -1013,10 +1013,10 @@ pub const Layers = struct {
                     const cell = l.size.cellSize() orelse continue;
                     const max_width: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.width) * cols));
                     const max_height: u32 = @intFromFloat(@min(@as(f64, std.math.maxInt(u32)), @as(f64, cell.height) * rows));
-                    const x = @min(layer.source.x, original.width);
-                    const y = @min(layer.source.y, original.height);
-                    const width = @min(@min(original.width - x, if (layer.source.width == 0) original.width else layer.source.width), @min(max_width, if (caps.sixel_max_width == 0) max_width else caps.sixel_max_width));
-                    const height = @min(@min(original.height - y, if (layer.source.height == 0) original.height else layer.source.height), @min(max_height, if (caps.sixel_max_height == 0) max_height else caps.sixel_max_height));
+                    const x = @min(layer.source.x.raw(), original.width);
+                    const y = @min(layer.source.y.raw(), original.height);
+                    const width = @min(@min(original.width - x, if (layer.source.width.eql(.fromRaw(0))) original.width else layer.source.width.raw()), @min(max_width, if (caps.sixel_max_width == 0) max_width else caps.sixel_max_width));
+                    const height = @min(@min(original.height - y, if (layer.source.height.eql(.fromRaw(0))) original.height else layer.source.height.raw()), @min(max_height, if (caps.sixel_max_height == 0) max_height else caps.sixel_max_height));
                     if (width == 0 or height == 0) continue;
                     for (0..height) |row| {
                         for (0..width) |col| {
@@ -1062,15 +1062,15 @@ pub const Layers = struct {
     fn writePlace(w: *Writer, layer: Layer, z: i32) Writer.Error!void {
         try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
         try morse.placeImage(w, .{
-            .image = .{ .id = layer.image },
+            .image = .{ .id = morse.ImageId.fromRaw(layer.image) },
             .quiet = .silent,
             .placement = .{
-                .id = layer.placement,
+                .id = morse.PlacementId.fromRaw(layer.placement),
                 .source = layer.source,
-                .x_offset = layer.x_offset,
-                .y_offset = layer.y_offset,
-                .columns = layer.rect.cols,
-                .rows = layer.rect.rows,
+                .x_offset = .fromRaw(layer.x_offset),
+                .y_offset = .fromRaw(layer.y_offset),
+                .columns = .fromRaw(layer.rect.cols),
+                .rows = .fromRaw(layer.rect.rows),
                 .z = z,
                 // The text pass owns the cursor, so a placement must leave
                 // it exactly where it found it.
@@ -1083,7 +1083,7 @@ pub const Layers = struct {
     /// with the image's pixels kept.
     fn writeDelete(w: *Writer, layer: Layer) Writer.Error!void {
         try morse.deleteImage(w, .{
-            .target = .{ .image = .{ .id = layer.image, .placement = layer.placement } },
+            .target = .{ .image = .{ .id = morse.ImageId.fromRaw(layer.image), .placement = morse.PlacementId.fromRaw(layer.placement) } },
             .free = false,
             .quiet = .silent,
         });

@@ -1109,9 +1109,9 @@ fn checkInvariants(s: *const Screen) !void {
             // table.
             if (c.text.isPooled()) {
                 const off = c.text.offset().?;
-                try testing.expect(@as(usize, off.raw()) + c.text.length().raw() <= s.graphemes.len());
+                try testing.expect(s.graphemes.holds(off, c.text.length()));
             }
-            if (c.link.index()) |li| try testing.expect(li.raw() < s.links.count());
+            if (c.link.index()) |li| try testing.expect(s.links.contains(li));
 
             if (c.isTail()) {
                 // A tail never stands alone: something covers it.

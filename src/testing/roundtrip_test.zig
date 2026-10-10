@@ -185,9 +185,9 @@ fn checkGrid(s: *const Screen) !void {
             const c = s.own_cells[s.index(col, @intCast(r))];
             try testing.expect(c.shape.reserved == 0);
             if (c.text.isPooled()) {
-                try testing.expect(@as(usize, c.text.offset().?.raw()) + c.text.length().raw() <= s.graphemes.len());
+                try testing.expect(s.graphemes.holds(c.text.offset().?, c.text.length()));
             }
-            if (c.link.index()) |li| try testing.expect(li.raw() < s.links.count());
+            if (c.link.index()) |li| try testing.expect(s.links.contains(li));
             if (c.isTail()) {
                 // A tail is its head's, content and all: the renderer never
                 // writes one, and the terminal makes its own from the head.
@@ -874,7 +874,7 @@ const PictureRun = struct {
             },
             // The terminal answers for an image, or refuses it.
             1 => layers.ack(.{
-                .id = dice.valueRangeAtMost(u32, 1, 4),
+                .id = .fromRaw(dice.valueRangeAtMost(u32, 1, 4)),
                 .message = if (dice.value(bool)) "OK" else "ENOENT",
             }),
             // An image freed: its placements go with it, and nothing is

@@ -208,7 +208,7 @@ pub const Session = struct {
                     } else if (s.own_pending) |*next| redraw = next.update(event) or redraw else redraw = s.ws.update(event) or redraw;
                 },
                 .graphics => |response| {
-                    const held = if (response.id) |id| s.own_layers.image(id) != null else false;
+                    const held = if (response.id) |id| s.own_layers.image(id.raw()) != null else false;
                     s.own_layers.ack(response);
                     redraw = held or redraw;
                 },
@@ -273,7 +273,7 @@ pub const Session = struct {
 const testing = std.testing;
 
 test "a session coalesces sizes, resizes both grids, and asks for cell pixels again" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 }, .cell = .{ .width = 9, .height = 20 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 }, .cell = .{ .width = 9, .height = 20 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var out: Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
@@ -296,7 +296,7 @@ test "a session coalesces sizes, resizes both grids, and asks for cell pixels ag
 }
 
 test "a session repaints an unchanged in-band size, including pictures" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var out: Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
@@ -318,7 +318,7 @@ test "a session repaints an unchanged in-band size, including pictures" {
 }
 
 test "session modes keep pixel mouse parsing in step and caps change without re-entering" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 8, .rows = 3 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var buffer: [256]u8 = undefined;
     var parser = morse.KeyParser.init(&buffer);
@@ -342,7 +342,7 @@ test "session modes keep pixel mouse parsing in step and caps change without re-
 
 test "a second session entry preserves pixel mouse parsing" {
     for ([_]bool{ false, true }) |partial| {
-        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 4, .rows = 2 } }, .{ .graphics_id = 1 });
+        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 4, .rows = 2 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
         defer s.deinit();
         var buffer: [256]u8 = undefined;
         var parser = morse.KeyParser.init(&buffer);
@@ -367,7 +367,7 @@ test "a second session entry preserves pixel mouse parsing" {
 }
 
 test "the probe wait keeps DA1 quiet time and the overall deadline on caller time" {
-    var probe: Caps.Probe = .init(.{ .graphics_id = 1 });
+    var probe: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     const wait = ProbeWait.init(ms(1000), .fromMilliseconds(500), .fromMilliseconds(50));
     try testing.expectEqual(@as(?std.Io.Duration, .fromMilliseconds(500)), wait.remaining(&probe, ms(1000)));
     probe.feed(.{ .reply = morse.Reply.parse("\x1b[?62c").? }, ms(1010));
@@ -389,7 +389,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
     var no_resize: NoResize = .init(testing.allocator);
     try testing.checkAllAllocationFailures(no_resize.allocator(), struct {
         fn run(gpa: Allocator) !void {
-            var s = try Session.init(gpa, .{ .cells = .{ .cols = 4, .rows = 1 } }, .{ .graphics_id = 1 });
+            var s = try Session.init(gpa, .{ .cells = .{ .cols = 4, .rows = 1 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
             defer s.deinit();
             s.own_screen.method = .unicode;
             const link = try s.own_screen.link("https://kept.invalid", "id=kept");
@@ -424,7 +424,7 @@ test "a failed session resize keeps both grids and their borrowed content togeth
 }
 
 test "session allocation and coordinated state stay behind their owner" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 3, .rows = 2 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 3, .rows = 2 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     try testing.expectEqual(s.windowSize().cells, s.screen().dimensions());
     try testing.expectEqual(s.screen().dimensions(), s.renderer().dimensions());
@@ -440,7 +440,7 @@ test "session allocation and coordinated state stay behind their owner" {
 }
 
 test "a session retries learned capabilities after failed output" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var bytes: [1024]u8 = undefined;
     var out: Writer = .fixed(&bytes);
@@ -469,10 +469,10 @@ test "session housekeeping survives failed capability output" {
         .{ .reply = .{ .window_size = .{ .what = .text_area_cells, .width = 4, .height = 3 } } },
         .{ .reply = .{ .window_size = .{ .what = .text_area_pixels, .width = 40, .height = 60 } } },
         .{ .reply = .{ .window_size = .{ .what = .cell_pixels, .width = 10, .height = 20 } } },
-        .{ .reply = .{ .graphics = .{ .id = 2, .message = "OK" } } },
+        .{ .reply = .{ .graphics = .{ .id = .fromRaw(2), .message = "OK" } } },
     };
     for (events) |event| {
-        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+        var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
         defer s.deinit();
         var bytes: [4096]u8 = undefined;
         var out: Writer = .fixed(&bytes);
@@ -509,7 +509,7 @@ test "session housekeeping survives failed capability output" {
 }
 
 test "session policy can cancel pending learned capabilities at the current value" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var bytes: [1024]u8 = undefined;
     var out: Writer = .fixed(&bytes);
@@ -527,7 +527,7 @@ test "session policy can cancel pending learned capabilities at the current valu
 }
 
 test "a late probe answer keeps the caller's capability overrides" {
-    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = 1 });
+    var s = try Session.init(testing.allocator, .{ .cells = .{ .cols = 2, .rows = 1 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer s.deinit();
     var bytes: [1024]u8 = undefined;
     var out: Writer = .fixed(&bytes);

@@ -390,7 +390,7 @@ test "keys, text and replies come through as the parser makes them" {
     try testing.expectEqual(morse.Key.up, (try in.next(testing.io)).key.key);
     // A reply is handed over read.
     const reply = (try in.next(testing.io)).reply.graphics;
-    try testing.expectEqual(@as(?u32, 5), reply.id);
+    try testing.expectEqual(5, reply.id.?.raw());
     try testing.expect(reply.ok());
     try testing.expectEqualStrings("hello", (try in.next(testing.io)).text);
     try testing.expect((try in.next(testing.io)) == .focus_in);
@@ -427,7 +427,7 @@ test "an escape followed within the timeout is the start of a sequence" {
     p.send("\x1b");
     const later = try std.Thread.spawn(.{}, struct {
         fn run(pp: *Piped) void {
-            // ziglint-ignore: Z026 a sleep cut short only sends the rest sooner, inside the timeout all the same
+            // glint-ignore: Z026 -- a sleep cut short only sends the rest sooner, inside the timeout all the same
             std.Io.sleep(testing.io, .fromMilliseconds(30), .awake) catch {};
             pp.send("[A");
         }

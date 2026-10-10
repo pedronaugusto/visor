@@ -140,7 +140,7 @@ test "markdown borrowed rows match drawing and preserve block structure" {
             var count: usize = 0;
             while (rows.next()) |row| : (count += 1) {
                 try t.expectEqualStrings(doc.text()[row.start..row.end], row.text);
-                try t.expectEqual(@intFromPtr(doc.text().ptr) + row.start, @intFromPtr(row.text.ptr));
+                try t.expectEqual(@intFromPtr(doc.text().ptr) + row.start, @intFromPtr(row.text.ptr)); // safe: addresses are compared, never dereferenced, to show the row borrows the document text
                 try t.expectEqualDeep(doc.blocks()[row.block_index], row.block);
                 if (row.block.fence) |f| {
                     try t.expectEqual(@as(u8, '~'), f.char);

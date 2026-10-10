@@ -265,7 +265,8 @@ pub fn build(b: *std.Build) !void {
             .package = "visor",
             .program = b.path("ci/consumer.zig"),
             .modules = &.{"visor"},
-            .packages = &.{ morse, conduit, uucode, aegis },
+            // conduit waits through reactor, which a consumer fetches with it.
+            .packages = &.{ morse, conduit, conduit.builder.dependency("reactor", .{}), uucode, aegis },
         });
     }
 }

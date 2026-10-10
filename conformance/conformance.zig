@@ -1028,7 +1028,7 @@ test "the probe finds what the second emulator has, reset modes included" {
     var stream: vt.TerminalStream = .init(.{ .allocator = gpa, .handler = handler });
     defer stream.deinit();
 
-    var probe: visor.Caps.Probe = .init(.{ .graphics_id = 1 });
+    var probe: visor.Caps.Probe = .init(.{ .graphics_id = try visor.morse.QueryImageId.fromRaw(1) });
     var questions: std.Io.Writer.Allocating = .init(gpa);
     defer questions.deinit();
     try probe.write(&questions.writer);

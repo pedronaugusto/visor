@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- `Caps.Probe`'s `graphics_id` is morse's `QueryImageId` (nonzero, built with `fromRaw`, which refuses zero), and a graphics answer's `id` is morse's `ImageId`. The layers keep their own `u32` ids and turn them into morse's at the point they write.
+- CI gates glint's A004 and Z026 with the whole default rule set (it ran A004 alone); the retired exception files are gone. `Graphemes.holds` and `Links.contains` answer, with typed arithmetic, what the pools' tests and `get` computed from raw numbers. The consumer check also fetches reactor, which conduit waits through.
 - `visor.widgets` is no longer a module of its own: it is a namespace of `visor`, and `@import("visor").widgets` replaces `@import("visor.widgets")`. Anyone who added `visor_dep.module("visor.widgets")` as an import drops that line; `visor_dep.module("visor.widgets")` is gone. The widgets bring no dependency and link nothing the base does not, and Zig compiles only what a program names, so a second module bought nothing. `widgets.visor`, the base re-exported, is gone with it: `@import("visor")` is the base already.
 - `Cell.Text.offset()` returns `?GraphemeOffset`, `length()` returns `ByteLength`, and `Cell.Text.generation()` and `Link.generation()` return `PoolGeneration`; `Link.index()` returns `?LinkIndex`. These are aegis scalar domains: use `fromRaw` for an explicit import and `raw()` only at an indexing or encoding boundary. Cell sizes and packed handle bytes are unchanged.
 

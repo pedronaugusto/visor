@@ -13,9 +13,10 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var tty = try visor.Tty.open(io);
     defer tty.close(io);
-    var session = try visor.Session.init(init.gpa, try tty.size(), .{ .graphics_id = 1 });
+    var session = try visor.Session.init(init.gpa, try tty.size(), .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer session.deinit();
     // Register the way out before entry, including a partial entry.
+    // glint-ignore: Z026 -- leaving is best effort at the end of the program; a failure has nowhere left to be reported
     defer tty.leave(io) catch {};
     try tty.enter(io, session.renderer(), session.capabilities(), .alt, .{ .paste = true });
     try tty.watchResize();
@@ -85,7 +86,7 @@ fn paint(session: *visor.Session, count: usize) !void {
 }
 
 fn check(gpa: std.mem.Allocator) !void {
-    var session = try visor.Session.init(gpa, .{ .cells = .{ .cols = 60, .rows = 3 } }, .{ .graphics_id = 1 });
+    var session = try visor.Session.init(gpa, .{ .cells = .{ .cols = 60, .rows = 3 } }, .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer session.deinit();
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();

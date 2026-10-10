@@ -13,6 +13,6 @@ pub fn main() !void {
     const byte_len: visor.ByteLength = text.length();
     const offset: visor.GraphemeOffset = text.offset().?;
     const generation: visor.PoolGeneration = text.generation();
-    if (byte_len.raw() != 12 or offset.raw() != 0 or generation.raw() == 0) return error.InvalidPoolDomains;
+    if (!byte_len.eql(.fromRaw(12)) or !offset.eql(.fromRaw(0)) or generation.eql(.fromRaw(0))) return error.InvalidPoolDomains;
     try (widgets.Paragraph{ .lines = &.{.{ .text = "visor" }} }).draw(screen.window());
 }

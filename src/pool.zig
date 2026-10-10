@@ -60,8 +60,8 @@ fn pooledText(offset: GraphemeOffset, len: ByteLength) Text {
 
 fn pooledLink(index: LinkIndex) Link {
     // Zero is `.none`, so the last index has no handle.
-    assert(index.raw() < std.math.maxInt(u16));
-    const link: Link = @fromBackingInt(@intCast(index.raw() + 1));
+    const next = index.successor() catch unreachable; // unreachable: the last index has no handle, and is refused when interning
+    const link: Link = @fromBackingInt(next.raw());
     assert(link.index().? == index);
     return link;
 }
@@ -136,14 +136,14 @@ pub const Graphemes = struct {
         if (found) |e| return pooledText(e.key_ptr.offset, e.key_ptr.len);
 
         const offset: GraphemeOffset = .fromRaw(aegis.int.cast(u32, p.bytes.items.len) catch return error.OutOfMemory);
-        _ = try appendEnd(p.bytes.items.len, grapheme.len);
+        const end = try appendEnd(p.bytes.items.len, grapheme.len);
         const borrowed = aliasOffset(p.bytes.items, grapheme);
         try p.bytes.ensureUnusedCapacity(gpa, grapheme.len);
         try p.index.ensureUnusedCapacityContext(gpa, 1, .{ .bytes = p.bytes.items });
         const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
         p.bytes.appendSliceAssumeCapacity(source);
         // The entry names the bytes just appended, the end of the pool.
-        assert(@as(usize, offset.raw()) + byte_len.raw() == p.bytes.items.len);
+        assert(end.raw() == p.bytes.items.len);
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return pooledText(offset, byte_len);
@@ -180,6 +180,13 @@ pub const Graphemes = struct {
     /// How many bytes of grapheme the screen is holding.
     pub fn len(p: *const Graphemes) usize {
         return p.bytes.items.len;
+    }
+
+    /// Whether `length` bytes at `offset` lie inside what the pool holds.
+    pub fn holds(p: *const Graphemes, offset: GraphemeOffset, length: ByteLength) bool {
+        const start: aegis.units.Bytes(usize) = .fromRaw(offset.raw());
+        const end = start.add(.fromRaw(length.raw())) catch return false;
+        return end.compare(.fromRaw(p.bytes.items.len)) != .gt;
     }
 };
 
@@ -311,10 +318,10 @@ pub const Links = struct {
         const params_len: ByteLength = .fromRaw(@intCast(params.len)); // safe: Screen checked max_len before interning
         const uri_off: LinkOffset = .fromRaw(aegis.int.cast(u32, l.bytes.items.len) catch return error.OutOfMemory);
         const i: LinkIndex = .fromRaw(aegis.int.cast(u16, l.entries.items.len) catch return error.OutOfMemory);
-        if (i.raw() == std.math.maxInt(u16)) return error.OutOfMemory;
+        if (i.eql(.fromRaw(std.math.maxInt(u16)))) return error.OutOfMemory;
 
         const added = aegis.units.Bytes(u32).fromRaw(uri_len.raw()).add(.fromRaw(params_len.raw())) catch return error.OutOfMemory;
-        _ = try appendEnd(l.bytes.items.len, added.raw());
+        const end = try appendEnd(l.bytes.items.len, added.raw());
         const params_start = try appendEnd(l.bytes.items.len, uri_len.raw());
         const params_off: LinkOffset = .fromRaw(params_start.raw());
 
@@ -330,8 +337,7 @@ pub const Links = struct {
         l.bytes.appendSliceAssumeCapacity(params_source);
         // The two strings sit back to back at the end of the pool, which is
         // where `get` reads them from.
-        assert(@as(usize, uri_off.raw()) + uri_len.raw() == params_off.raw());
-        assert(@as(usize, params_off.raw()) + params_len.raw() == l.bytes.items.len);
+        assert(end.raw() == l.bytes.items.len);
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,
@@ -348,7 +354,7 @@ pub const Links = struct {
     pub fn get(l: *const Links, link: Link) ?Target {
         if (link == .none) return null;
         const i = link.index() orelse return null;
-        if (i.raw() >= l.entries.items.len) return null;
+        if (!l.contains(i)) return null;
         const e = l.entries.items[i.raw()];
         return .{
             .uri = l.bytes.items[e.uri_off.raw()..][0..e.uri_len.raw()],
@@ -359,6 +365,12 @@ pub const Links = struct {
     /// How many links the screen is holding.
     pub fn count(l: *const Links) usize {
         return l.entries.items.len;
+    }
+
+    /// Whether `index` names an entry of the table.
+    pub fn contains(l: *const Links, index: LinkIndex) bool {
+        const entries: LinkIndex = .fromRaw(@intCast(l.entries.items.len)); // safe: append refuses the last u16 index
+        return index.compare(entries) == .lt;
     }
 };
 

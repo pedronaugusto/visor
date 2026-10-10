@@ -216,7 +216,7 @@ pub const Tty = struct {
         if (is_windows) {
             const input_mode = terminal.rawMode(t.input.handle) catch |err| return modeError(err);
             const output_mode = terminal.rawMode(t.file.handle) catch |err| {
-                // ziglint-ignore: Z026 the output's failure is the one reported; a second has nowhere to go
+                // glint-ignore: Z026 -- the output's failure is the one reported; a second has nowhere to go
                 terminal.restore(t.input.handle, input_mode) catch {};
                 return modeError(err);
             };
@@ -481,19 +481,19 @@ fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
     // Raw mode must come back even when output cannot accept a byte. Every
     // step is best effort: the caller may be a panic handler, nothing here
     // can report a failure, and a step that fails must not stop the next.
-    // ziglint-ignore: Z026 best effort, see above
+    // glint-ignore: Z026 -- best effort, see above
     if (!is_windows) terminal.restore(was.handle, was.mode) catch {};
     if (renderer) |r| {
         var buffer: [512]u8 = undefined;
         var out: Writer = .fixed(&buffer);
-        // ziglint-ignore: Z026 a full buffer still holds the sequences that fit, which are written
+        // glint-ignore: Z026 -- a full buffer still holds the sequences that fit, which are written
         r.leave(&out) catch {};
         writeRaw(if (is_windows) was.output else was.handle, out.buffered());
     }
     if (is_windows) {
-        // ziglint-ignore: Z026 best effort, see above
+        // glint-ignore: Z026 -- best effort, see above
         terminal.restore(was.input, was.input_mode) catch {};
-        // ziglint-ignore: Z026 best effort, see above
+        // glint-ignore: Z026 -- best effort, see above
         terminal.restore(was.output, was.output_mode) catch {};
         return;
     }
@@ -510,6 +510,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
         const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
         fcntlSet(handle, std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock) catch return;
     }
+    // glint-ignore: Z026 -- putting the flags back is best effort after the write has finished or failed; the write's own result is the one returned
     defer if (!is_windows) fcntlSet(handle, std.posix.F.SETFL, @intCast(flags)) catch {};
     var left = bytes;
     while (left.len != 0) {

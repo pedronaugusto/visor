@@ -267,18 +267,18 @@ test "an image sent asking for an answer is ready on the word, or when the grace
     _ = try l.transmit(&out.writer, 6, &px, .{ .width = 1, .height = 1, .answer = true, .now = ms(1000) });
     try testing.expect(std.mem.find(u8, out.written(), "q=") == null);
     try testing.expect(!l.ready(6, ms(1100), .fromMilliseconds(250)));
-    l.ack(.{ .id = 6, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(6), .message = "OK" });
     try testing.expect(l.ready(6, ms(1101), .fromMilliseconds(250)));
     try testing.expectEqual(@as(?bool, true), l.answers);
 
     // A refusal: not ready, and the program sends again.
     _ = try l.transmit(&out.writer, 7, &px, .{ .width = 1, .height = 1, .answer = true, .now = ms(2000) });
-    l.ack(.{ .id = 7, .message = "EBADPNG: bad data" });
+    l.ack(.{ .id = .fromRaw(7), .message = "EBADPNG: bad data" });
     try testing.expect(!l.ready(7, ms(5000), .fromMilliseconds(250)));
     try testing.expectEqual(Image.State.failed, l.image(7).?.state);
 
     // An answer about an id never sent here -- a probe's -- changes nothing.
-    l.ack(.{ .id = 31, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(31), .message = "OK" });
     try testing.expect(l.image(31) == null);
 }
 
@@ -542,7 +542,7 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     try testing.expectEqual(name.len, n);
     // on trial, the terminal is asked to answer even when the caller was not
     try testing.expect(!l.ready(5, ms(0), .fromMilliseconds(1000)));
-    l.ack(.{ .id = 5, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(5), .message = "OK" });
     try testing.expect(l.ready(5, ms(0), .fromMilliseconds(1000)));
     try testing.expect(l.shared_memory.?.state == .yes);
     try testing.expect(l.image(5).?.shm == null);
@@ -563,7 +563,7 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     l.configureSharedMemory(true);
     defer l.deinit();
     _ = try l.transmit(&out.writer, 7, &pixels, .{ .width = 1, .height = 1 });
-    l.ack(.{ .id = 7, .message = "EBADF:no such object" });
+    l.ack(.{ .id = .fromRaw(7), .message = "EBADF:no such object" });
     try testing.expect(l.shared_memory.?.state == .no);
     try testing.expect(!l.ready(7, ms(0), .fromMilliseconds(1000)));
     out.clearRetainingCapacity();
@@ -596,14 +596,14 @@ test "a replacement lands over the old picture, placed before dropped before fre
     try testing.expectError(error.Busy, p.send(&f.layers, &sink.writer, &ids, &pixels, .{}));
     try testing.expect(try p.declare(&f.layers, at, ms(1016), .fromMilliseconds(250)));
     try testing.expectEqual(@as(u32, 0), (try f.draw()).placements);
-    f.layers.ack(.{ .id = first.id, .message = "OK" });
+    f.layers.ack(.{ .id = .fromRaw(first.id), .message = "OK" });
     try testing.expect(!try p.declare(&f.layers, at, ms(1033), .fromMilliseconds(250)));
     try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
     const next = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .width = 2, .height = 2, .answer = true, .now = ms(2000) });
     try testing.expectEqual(@as(u32, 7), next.id);
     try testing.expect(try p.declare(&f.layers, at, ms(2016), .fromMilliseconds(250)));
     try testing.expectEqual(@as(usize, 0), (try f.draw()).bytes);
-    f.layers.ack(.{ .id = next.id, .message = "OK" });
+    f.layers.ack(.{ .id = .fromRaw(next.id), .message = "OK" });
     _ = try p.declare(&f.layers, at, ms(2041), .fromMilliseconds(250));
     const swapped = try f.draw();
     try testing.expectEqual(f.written().len, swapped.bytes);
@@ -632,7 +632,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     _ = try f.draw();
     try testing.expectEqual(@as(u32, 1), f.layers.fallbacks);
     const next = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now = ms(2000) });
-    f.layers.ack(.{ .id = next.id, .message = "EBADPNG:bad" });
+    f.layers.ack(.{ .id = .fromRaw(next.id), .message = "EBADPNG:bad" });
     _ = try p.declare(&f.layers, at, ms(2001), .fromMilliseconds(250));
     try testing.expect(p.takeDirty());
     try testing.expect(!p.takeDirty());
@@ -640,7 +640,7 @@ test "replacement grace, refusals and failed output leave another picture due" {
     _ = try f.draw();
     try testing.expect(f.layers.image(next.id) == null);
     const retry = try p.send(&f.layers, &sink.writer, &ids, &pixels, .{ .answer = true, .now = ms(3000) });
-    f.layers.ack(.{ .id = retry.id, .message = "OK" });
+    f.layers.ack(.{ .id = .fromRaw(retry.id), .message = "OK" });
     _ = try p.declare(&f.layers, at, ms(3001), .fromMilliseconds(250));
     var no_room: [0]u8 = .{};
     var blocked: Writer = .fixed(&no_room);
@@ -679,7 +679,7 @@ test "a retired first picture is freed even when the frame has no text or placem
     var p: Replacement = .{};
     var sink: Writer.Discarding = .init(&.{});
     const sent = try p.send(&f.layers, &sink.writer, &ids, "pixels", .{ .answer = true });
-    f.layers.ack(.{ .id = sent.id, .message = "EBADPNG:bad" });
+    f.layers.ack(.{ .id = .fromRaw(sent.id), .message = "EBADPNG:bad" });
     _ = try p.declare(&f.layers, .{ .image = 0, .rect = .{ .cols = 2, .rows = 2 } }, ms(0), .fromMilliseconds(250));
     try testing.expect(p.takeDirty());
     try testing.expectEqual(@as(usize, 0), f.layers.count());
@@ -773,11 +773,11 @@ test "shared memory reconfiguration cannot lose owners or accept an old policy r
     _ = try l.transmit(&sink.writer, 2, "new!", .{ .width = 1, .height = 1 });
     const second = l.image(2).?.shm.?;
     defer shm.unlink(second);
-    l.ack(.{ .id = 1, .message = "EBADF:old configuration" });
+    l.ack(.{ .id = .fromRaw(1), .message = "EBADF:old configuration" });
     try testing.expect(l.shared_memory.?.state == .trying);
     try shm.put(first, "gone");
     shm.unlink(first);
-    l.ack(.{ .id = 2, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(2), .message = "OK" });
     try testing.expect(l.shared_memory.?.state == .yes);
     l.configureSharedMemory(true);
     try testing.expectEqual(generation, l.shared_memory.?.generation);
@@ -893,17 +893,17 @@ test "a replacement settles without declaring or hiding placements" {
             const at: Layer = .{ .image = first.id, .rect = .{ .cols = 1, .rows = 1 } };
             try layers.declare(at);
             const next = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
-            layers.ack(.{ .id = next.id, .message = "refused" });
+            layers.ack(.{ .id = .fromRaw(next.id), .message = "refused" });
             try testing.expect(!try p.settle(&layers, ms(0), .fromMilliseconds(10)));
             try testing.expect(p.takeDirty());
             try testing.expectEqual(first.id, p.current().?);
             try testing.expectEqualDeep(at, layers.declarations()[0]);
             const last = try p.send(&layers, &sink.writer, &ids, "rgba", .{ .answer = true });
-            layers.ack(.{ .id = last.id, .message = "OK" });
+            layers.ack(.{ .id = .fromRaw(last.id), .message = "OK" });
             try testing.expect(!try p.settle(&layers, ms(0), .fromMilliseconds(10)));
             try testing.expectEqual(last.id, p.current().?);
             try testing.expectEqualDeep(at, layers.declarations()[0]);
-            layers.ack(.{ .id = last.id, .message = "refused" });
+            layers.ack(.{ .id = .fromRaw(last.id), .message = "refused" });
             try testing.expect(!try p.settle(&layers, ms(0), .fromMilliseconds(10)));
             try testing.expectEqual(null, p.current());
             try testing.expect(p.takeDirty());
@@ -918,17 +918,17 @@ test "a late graphics answer cannot revive a failed transmission" {
     defer l.deinit();
     var blocked: Writer = .fixed(&.{});
     try testing.expectError(error.WriteFailed, l.transmit(&blocked, 7, "pixels", .{ .compress = false, .answer = true }));
-    l.ack(.{ .id = 7, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(7), .message = "OK" });
     try testing.expectEqual(Image.State.failed, l.image(7).?.state);
     try testing.expect(!l.ready(7, ms(1000), .fromMilliseconds(10)));
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, 7, "pixels", .{ .compress = false, .answer = true });
     try testing.expectEqual(Image.State.loading, l.image(7).?.state);
-    l.ack(.{ .id = 7, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(7), .message = "OK" });
     try testing.expect(l.ready(7, ms(1000), .fromMilliseconds(10)));
     // A terminal refusal also requires a new transmission before readiness.
-    l.ack(.{ .id = 7, .message = "EBADPNG:bad data" });
-    l.ack(.{ .id = 7, .message = "OK" });
+    l.ack(.{ .id = .fromRaw(7), .message = "EBADPNG:bad data" });
+    l.ack(.{ .id = .fromRaw(7), .message = "OK" });
     try testing.expectEqual(Image.State.failed, l.image(7).?.state);
     try l.deleteImage(&sink.writer, 7);
     try testing.expect(l.image(7) == null);
@@ -1049,7 +1049,7 @@ test "inline pictures use source cropping, probe geometry and palette limits" {
     f.caps.sixel_max_width = 1;
     f.caps.sixel_max_height = 1;
     f.caps.sixel_registers = 1;
-    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 }, .source = .{ .x = 1, .y = 1, .width = 1, .height = 1 } });
+    try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 4, .rows = 2 }, .source = .{ .x = .fromRaw(1), .y = .fromRaw(1), .width = .fromRaw(1), .height = .fromRaw(1) } });
     _ = try f.draw();
     try testing.expect(std.mem.find(u8, f.written(), "q\"1;1;1;1#0;2;0;0;0#0@") != null);
     f.layers.configureSize(.{ .cells = .{ .cols = 8, .rows = 4 } });
