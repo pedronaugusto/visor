@@ -411,10 +411,12 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
     var left = bytes;
     while (left.len != 0) {
         if (is_windows) {
-            var written: windows.DWORD = 0;
-            const n: windows.DWORD = @intCast(@min(left.len, std.math.maxInt(windows.DWORD)));
-            if (terminal.console.WriteFile(handle, left.ptr, n, &written, null) == .FALSE or written == 0) return;
-            left = left[written..];
+            // One synchronous write, as the console takes it; std's own, with no `Io` in the way.
+            var status_block: windows.IO_STATUS_BLOCK = undefined;
+            const n: u32 = @intCast(@min(left.len, std.math.maxInt(u32)));
+            const status = windows.ntdll.NtWriteFile(handle, null, null, null, &status_block, left.ptr, n, null, null);
+            if (status != .SUCCESS or status_block.Information == 0) return;
+            left = left[status_block.Information..];
             continue;
         }
         const rc = std.posix.system.write(handle, left.ptr, left.len);
