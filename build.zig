@@ -242,7 +242,7 @@ pub fn build(b: *std.Build) !void {
     const ci = b.lazyImport(@This(), "preflight");
     // Both suites' clocks, fault plans and allocators.
     const shakedown_dep = try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown_dep, aegis.module("aegis"));
+    bindAegis(b, shakedown_dep, aegis.module("aegis"));
     const shakedown = shakedown_dep.module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
@@ -337,3 +337,10 @@ const uucode_fields = [_][]const u8{
     "is_emoji_modifier_base",
     "is_emoji_vs_base",
 };
+
+/// Binds shakedown to visor's aegis. Its own function because `lazyImport` compares
+/// every package in the tree at comptime, and two in one function exceed the
+/// default branch quota.
+fn bindAegis(b: *std.Build, shakedown: *std.Build.Dependency, aegis: *std.Build.Module) void {
+    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown, aegis);
+}
