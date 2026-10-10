@@ -36,7 +36,7 @@ const std = @import("std");
 const visor = @import("visor");
 const vt = @import("ghostty-vt");
 const corpus = @import("corpus");
-const widgets = @import("visor.widgets");
+const widgets = visor.widgets;
 
 const Allocator = std.mem.Allocator;
 const Smith = std.testing.Smith;

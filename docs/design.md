@@ -1,8 +1,14 @@
 # Visor design
 
-The base module owns cell storage, pools, terminal input and rendering. Widgets
-import the base; the base never imports widgets. `src/dependencies.zig` is the
-single seam to morse, conduit, uucode and aegis. The allocator belongs to each
+The `visor` module owns cell storage, pools, terminal input, rendering and, as
+`visor.widgets`, the widgets. It is one module because a second would buy
+nothing: the widgets bring no dependency and link nothing the base does not,
+and Zig compiles only what a program names, so a program that draws no widget
+builds none. The layering stays at file level, enforced by gantry's layer
+check in `ci/layers.zig`: widgets look down at the base through
+`src/widgets/base.zig`, `src/visor.zig` names `widgets.zig` last, and no file
+of the base imports a widget. `src/dependencies.zig` is the single seam to
+morse, conduit, uucode and aegis. The allocator belongs to each
 allocating owner; blocking operations receive the caller's `std.Io`.
 
 ## Pool identities and bytes

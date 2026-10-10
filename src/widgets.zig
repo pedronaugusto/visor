@@ -14,12 +14,13 @@
 //! can allocate when the screen interns a long grapheme or a link; picture
 //! transmission allocates through the allocator supplied by the caller.
 //!
-//! This module imports `visor`. `visor` never imports this one: a base layer
-//! that depends on its widgets is not a base layer.
+//! These are `visor.widgets`, a namespace of the same module as the base:
+//! one import, one fetch. The widgets build on the base's files and the
+//! base's files never import them; `visor.zig` only names this file, as the
+//! last thing it exports. Zig compiles what a program uses, so a program
+//! that never touches a widget builds none of them.
 
-/// The base this is drawn on, re-exported so a program that imports the
-/// widgets has the grid, the window and the styles without a second import.
-pub const visor = @import("visor");
+const visor = @import("widgets/base.zig");
 
 /// What every widget's `draw` can fail with, `visor.DrawError`.
 pub const DrawError = visor.DrawError;

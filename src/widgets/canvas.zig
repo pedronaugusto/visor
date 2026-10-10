@@ -3,7 +3,7 @@
 //! Layers owns transmission and placement of its pixels.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const raster_mod = @import("canvas/raster.zig");
 const sextants = @import("sextants.zig");

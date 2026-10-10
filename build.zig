@@ -29,11 +29,14 @@ pub fn build(b: *std.Build) !void {
     const imports = dependencies(morse, conduit, uucode, aegis);
 
     //=====================================================================
-    // The modules.
+    // The module.
     //
-    // Two, in one repository and one fetch: the base, and the widgets that
-    // will be written on it. The base never imports the widgets, which is
-    // what keeps it a base.
+    // One: `visor`, with the widgets as `visor.widgets` inside it. A widget
+    // brings no dependency and links nothing the base does not, so a second
+    // module would buy a consumer nothing that Zig's lazy analysis does not
+    // already give: a program that never names a widget compiles none. The
+    // base never imports the widgets, which gantry's layer check enforces
+    // on the files (ci/layers.zig).
     //=====================================================================
 
     const module = b.addModule("visor", .{
@@ -43,19 +46,12 @@ pub fn build(b: *std.Build) !void {
         .imports = &imports,
     });
 
-    const widgets = b.addModule("visor.widgets", .{
-        .root_source_file = b.path("src/widgets.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{.{ .name = "visor", .module = module }},
-    });
-
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
     b.modules.put(b.allocator, b.graph.dupeString("morse"), morse.module("morse")) catch @panic("OOM");
 
     // Everything below is visor's own tree: a program that depends on visor
-    // builds the modules above and nothing else, and fetches nothing for it.
+    // builds the module above and nothing else, and fetches nothing for it.
     if (b.pkg_hash.len != 0) return;
 
     // The inputs the round-trip properties replay. Its own module because
@@ -132,11 +128,12 @@ pub fn build(b: *std.Build) !void {
     check_step.dependOn(domains);
     b.getInstallStep().dependOn(check_step);
 
-    // The widgets are a second module and get a second test binary. Every
-    // widget's test draws it into a real grid, renders the frame, feeds the
-    // bytes to the emulator and compares the picture -- so the suite proves
-    // the widget and the renderer together, which is the only combination a
-    // user ever runs.
+    // The widgets get a test binary of their own, so it compiles beside the
+    // base's; for a consumer they are the same module. Every widget's test
+    // draws it into a real grid, renders the frame, feeds the bytes to the
+    // emulator and compares the picture -- so the suite proves the widget
+    // and the renderer together, which is the only combination a user ever
+    // runs.
     const widget_tests = b.addTest(.{
         .name = "visor-widget-tests",
         .filters = filters,
@@ -146,10 +143,9 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
             .sanitize_thread = sanitize,
-            .imports = &.{
-                .{ .name = "visor", .module = module },
+            .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "corpus", .module = corpus },
-            },
+            }),
         }),
     });
     test_step.dependOn(&b.addRunArtifact(widget_tests).step);
@@ -188,10 +184,7 @@ pub fn build(b: *std.Build) !void {
                 .root_source_file = b.path(source),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "visor", .module = module },
-                    .{ .name = "visor.widgets", .module = widgets },
-                },
+                .imports = &.{.{ .name = "visor", .module = module }},
             }),
         });
         const run_example = b.addRunArtifact(example);
@@ -271,7 +264,7 @@ pub fn build(b: *std.Build) !void {
         preflight.addConsumerCheck(b, .{
             .package = "visor",
             .program = b.path("ci/consumer.zig"),
-            .modules = &.{ "visor", "visor.widgets" },
+            .modules = &.{"visor"},
             .packages = &.{ morse, conduit, uucode, aegis },
         });
     }
@@ -287,7 +280,7 @@ fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uu
     };
 }
 
-/// visor, its widgets and the Unicode properties the checks read, in the
+/// visor (widgets included) and the Unicode properties the checks read, in the
 /// mode a benchmark builds in: an imported module keeps its own mode, so a
 /// ReleaseFast benchmark over the Debug module would time the Debug module.
 /// The checks read properties of their own, independent of the rule visor
@@ -308,15 +301,8 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .optimize = optimize,
         .imports = &dependencies(morse, conduit, uucode, b.dependency("aegis", .{ .target = target, .optimize = optimize })),
     });
-    const widgets = b.createModule(.{
-        .root_source_file = b.path("src/widgets.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{.{ .name = "visor", .module = visor }},
-    });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
-        .{ .name = "visor.widgets", .module = widgets },
         .{ .name = "uucode", .module = uucode.module("uucode") },
     }) catch @panic("OOM");
 }

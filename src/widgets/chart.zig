@@ -11,7 +11,7 @@
 
 const std = @import("std");
 const corpus = @import("shakedown").corpus;
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const canvas_mod = @import("canvas.zig");
 const layout = @import("layout.zig");

@@ -40,13 +40,14 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "input", .patterns = &.{
         "src/input.zig",
     } },
-    .{ .name = "public", .patterns = &.{
-        "src/visor.zig",
+    // The widgets, on the base. They look down at the base through one file,
+    // and the root names them last, so the base never reaches them. What
+    // several widgets share sits under the widgets; the widgets are peers in
+    // one layer, where one may build on another (a tree on a list, a chart on
+    // a canvas) and the cycle rule keeps them a DAG.
+    .{ .name = "widget base", .patterns = &.{
+        "src/widgets/base.zig",
     } },
-    // The second module, on the first. What several widgets share sits
-    // under the widgets; the widgets are peers in one layer, where one may
-    // build on another (a tree on a list, a chart on a canvas) and the cycle
-    // rule keeps them a DAG.
     .{ .name = "widget geometry", .patterns = &.{
         "src/widgets/layout.zig",
         "src/widgets/selection.zig",
@@ -75,15 +76,17 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/widgets/text_input.zig",
         "src/widgets/tree.zig",
     } },
-    .{ .name = "widgets module", .patterns = &.{
+    .{ .name = "widgets namespace", .patterns = &.{
         "src/widgets.zig",
+    } },
+    .{ .name = "public", .patterns = &.{
+        "src/visor.zig",
     } },
 };
 
 pub const entries: []const []const u8 = &.{};
 
 pub const modules: []const gantry.NamedModule = &.{
-    .{ .name = "visor", .path = "src/visor.zig", .from = "src/**" },
     .{ .name = "corpus", .path = "src/testing/corpus.zig" },
 };
 pub const references: []const gantry.rules.ReferenceRule = &.{
@@ -109,7 +112,6 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
 /// one seam to the dependencies.
 pub const required = [_][]const u8{
     "src/visor.zig",
-    "src/widgets.zig",
     "src/dependencies.zig",
     "src/tests.zig",
     "src/widgets_test.zig",

@@ -1,7 +1,7 @@
 //! RGBA storage and bounded, antialiased terminal drawing primitives.
 //! Pixels are straight alpha. No palette, glow, transport or clock lives here.
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("../base.zig");
 
 pub const Blend = enum { normal, additive };
 

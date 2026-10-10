@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- `visor.widgets` is no longer a module of its own: it is a namespace of `visor`, and `@import("visor").widgets` replaces `@import("visor.widgets")`. Anyone who added `visor_dep.module("visor.widgets")` as an import drops that line; `visor_dep.module("visor.widgets")` is gone. The widgets bring no dependency and link nothing the base does not, and Zig compiles only what a program names, so a second module bought nothing. `widgets.visor`, the base re-exported, is gone with it: `@import("visor")` is the base already.
 - `Cell.Text.offset()` returns `?GraphemeOffset`, `length()` returns `ByteLength`, and `Cell.Text.generation()` and `Link.generation()` return `PoolGeneration`; `Link.index()` returns `?LinkIndex`. These are aegis scalar domains: use `fromRaw` for an explicit import and `raw()` only at an indexing or encoding boundary. Cell sizes and packed handle bytes are unchanged.
 
 - Requires Zig 0.17.0; Zig 0.16 no longer builds visor. morse, conduit and uucode are pinned at their Zig 0.17 commits.

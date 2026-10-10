@@ -6,7 +6,7 @@
 //! a count where the terminal can take it.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Direction = layout.Direction;

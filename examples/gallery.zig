@@ -7,7 +7,7 @@
 
 const std = @import("std");
 const visor = @import("visor");
-const widgets = @import("visor.widgets");
+const widgets = visor.widgets;
 
 pub fn main(init: std.process.Init) !void {
     var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});

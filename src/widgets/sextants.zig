@@ -8,7 +8,7 @@
 //! last decade can show.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const Style = visor.Style;
 

@@ -6,7 +6,7 @@
 //! already has.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Direction = layout.Direction;

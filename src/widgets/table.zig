@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const selection = @import("selection.zig");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Align = layout.Align;

@@ -30,7 +30,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "visor", .module = visor.module("visor") },
-                .{ .name = "visor.widgets", .module = visor.module("visor.widgets") },
                 // visor's test data, not a module it publishes: the same
                 // file the package's own suite replays, so both emulators
                 // read the same bytes.

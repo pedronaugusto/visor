@@ -15,7 +15,7 @@
 
 const std = @import("std");
 const visor = @import("visor");
-const widgets = @import("visor.widgets");
+const widgets = visor.widgets;
 
 /// What the viewer is showing, which is the whole of what it remembers
 /// between frames.

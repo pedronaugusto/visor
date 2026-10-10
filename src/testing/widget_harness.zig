@@ -14,7 +14,7 @@
 //! is already showing it.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("../widgets/base.zig");
 
 const testing = std.testing;
 

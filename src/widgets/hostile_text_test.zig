@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const widgets = @import("../widgets.zig");
-const visor = @import("visor");
+const visor = @import("base.zig");
 const Harness = @import("../testing/widget_harness.zig").Harness;
 const t = std.testing;
 

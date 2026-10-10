@@ -1,7 +1,7 @@
 //! Styled items at the two edges of one row. The right side keeps its
 //! room; the left is clipped before it, with a caller-selected gap.
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 pub const Edges = struct {
     /// Drawn from the left edge, in order, and clipped where the right

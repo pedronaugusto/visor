@@ -6,7 +6,7 @@
 //! which keys go first is the program's call, not this file's.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Align = layout.Align;

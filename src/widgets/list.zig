@@ -13,7 +13,7 @@
 
 const std = @import("std");
 const selection = @import("selection.zig");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const Style = visor.Style;
 

@@ -20,7 +20,7 @@
 //! symbol that says whether it is open.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 const list_mod = @import("list.zig");
 
 const List = list_mod.List;

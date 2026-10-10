@@ -4,9 +4,9 @@
 
 visor is a cell grid and a diff renderer for programs that draw their own
 screen. You draw into a grid; it writes the shortest run of bytes that moves
-the terminal from the frame it is showing to the one it should be showing. A
-second module, `visor.widgets`, holds a layout solver and twenty widgets
-drawn on that grid, and the base never imports it.
+the terminal from the frame it is showing to the one it should be showing.
+`visor.widgets` holds a layout solver and twenty widgets drawn on that grid,
+and the base never imports it.
 
 ## Install
 
@@ -19,12 +19,13 @@ zig fetch --save git+https://github.com/pedronaugusto/visor
 ```zig
 const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("visor", visor_dep.module("visor"));
-exe.root_module.addImport("visor.widgets", visor_dep.module("visor.widgets"));
 ```
 
-One fetch, three modules. `visor` is the grid and the renderer;
-`visor.widgets` is the layout solver and the widgets, and a program that wants
-only the base leaves the second line out. `morse` comes with it, re-exported
+One fetch, one module. `visor` is the grid and the renderer, and
+`visor.widgets` inside it is the layout solver and the widgets. A second
+module would buy nothing here: the widgets bring no dependency and link
+nothing the base does not, and Zig compiles only what a program names, so a
+program that draws no widget builds none. `morse` comes with it, re-exported
 as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
 program that wants the writers on their own.
 
@@ -620,7 +621,7 @@ its own.
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
 | The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
-| The base, re-exported | `widgets.visor`, so a file that draws does not need both imports, and `DrawError`, what every `draw` fails with. |
+| What every draw fails with | `DrawError`. |
 
 ### Canvas
 
@@ -631,7 +632,7 @@ by the caller; there is no bundled geographic dataset. The existing
 half blocks, dots or bars. Its y bounds name the bottom and top.
 
 ```zig
-const widgets = @import("visor.widgets");
+const widgets = @import("visor").widgets;
 const canvas: widgets.Canvas = .{
     .x_bounds = .{ 0, 100 }, .y_bounds = .{ 0, 100 }, .marker = .sextant,
 };
@@ -779,7 +780,7 @@ own structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Scope
 
-- **No widgets in the base.** They are a second module, which `visor` never imports.
+- **No widgets in the base.** They are `visor.widgets`, in the same module, and no file of the base imports them.
 - **No event loop and no threads.** A base layer that owns the loop cannot be used by a program that already has one. `Input` is a read, not a loop: the program decides where it runs and what an event means.
 - **No widget whose substance is handling keys, focus or a clock.** Those are three quarters event handling, and the program has the loop. `Keys` shows which keys work and handles none; `TextInput` says where the cursor lands, and `TextInput.Buffer` does the edit a key asks for (insert, delete by a motion, select, undo, redo, on whole clusters), but which key asks for which is the program's.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.

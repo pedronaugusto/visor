@@ -5,7 +5,7 @@
 //! returns and never has to know whether there was a frame around it.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Align = layout.Align;

@@ -6,7 +6,7 @@
 //! which column a day falls in.
 
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
 const Style = visor.Style;

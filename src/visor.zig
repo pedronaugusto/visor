@@ -22,6 +22,9 @@
 //! adapter installs SIGWINCH handling when asked through `Tty.watchResize`.
 //! `Caps` says what the terminal can do and the caller fills it in — from
 //! `Caps.Probe`, which asks the terminal, or from anywhere else it likes.
+//!
+//! `widgets` is a layout solver and widgets drawn on the grid. They build on
+//! the files above and nothing above builds on them.
 
 const std = @import("std");
 
@@ -219,6 +222,14 @@ pub const dumpScreen = term_mod.dumpScreen;
 pub const DumpOptions = term_mod.DumpOptions;
 /// A screen's styles as one identifier a cell, with the legend above.
 pub const dumpScreenStyles = term_mod.dumpScreenStyles;
+
+//=========================================================================
+// The widgets.
+//=========================================================================
+
+/// A layout solver and the widgets, drawn on the grid above. They build on
+/// this file's names and nothing here builds on them.
+pub const widgets = @import("widgets.zig");
 
 test {
     _ = cell_mod;

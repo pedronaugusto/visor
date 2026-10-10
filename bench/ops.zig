@@ -5,7 +5,7 @@
 //! workload; its frames are what the clock reads.
 const std = @import("std");
 const v = @import("visor");
-const w = @import("visor.widgets");
+const w = v.widgets;
 const harness = @import("harness.zig");
 const Ctx = harness.Ctx;
 const emit = harness.emit;

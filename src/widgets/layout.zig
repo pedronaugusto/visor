@@ -23,7 +23,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 /// Which way a split runs.
 pub const Direction = enum {

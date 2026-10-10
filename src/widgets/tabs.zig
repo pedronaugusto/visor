@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const corpus = @import("shakedown").corpus;
-const visor = @import("visor");
+const visor = @import("base.zig");
 
 const Style = visor.Style;
 

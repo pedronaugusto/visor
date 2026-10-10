@@ -1,7 +1,7 @@
 //! Markdown rendered to width, with a theme supplied by the caller.
 //! A Document owns parsing; rowCount and draw share the same row iterator.
 const std = @import("std");
-const visor = @import("visor");
+const visor = @import("base.zig");
 const reader = @import("markdown/reader.zig");
 const Paragraph = @import("paragraph.zig").Paragraph;
 const layout = @import("layout.zig");
