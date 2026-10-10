@@ -417,7 +417,10 @@ pub fn offset(outer: u16, inner: u16, how: Align) u16 {
 }
 
 const std_testing = std.testing;
-const corpus = @import("corpus");
+const Spread = @import("spread").Spread;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 
 /// The whole grid as a rectangle, for the tests below.
 fn grid(cols: u16, rows: u16) visor.Rect {
@@ -564,48 +567,47 @@ test "a rectangle is placed where the alignment says" {
     try std_testing.expectEqual(@as(u16, 0), offset(10, 20, .right));
 }
 
-/// What the split property drew over the corpus, for the test that proves
+/// What the split property drew over its cases, for the test that proves
 /// it explores.
 const Tally = struct {
     /// How many parts a split had.
-    parts: corpus.Spread = .{},
+    parts: Spread = .{},
     /// Which kind of constraint each part took.
-    kinds: corpus.Spread = .{},
+    kinds: Spread = .{},
     /// How long the axis was.
-    axis: corpus.Spread = .{},
+    axis: Spread = .{},
     /// Which way the split ran, down (0) or across (1).
-    direction: corpus.Spread = .{},
+    direction: Spread = .{},
 };
 
 /// Every split, whatever the constraints: the parts are in order, none
 /// overlaps another, none leaves the area, and together with the spacing
 /// they never claim more of the axis than there is.
-fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn splitHolds(src: *Source, tally: ?*Tally) !void {
     var constraints: [8]Constraint = undefined;
-    const n = dice.valueRangeAtMost(u8, 1, 8);
+    const n = gen.intRange(src, u8, 1, 8);
     for (constraints[0..n]) |*c| {
-        const kind = dice.valueRangeAtMost(u8, 0, 4);
+        const kind = gen.intRange(src, u8, 0, 4);
         if (tally) |t| t.kinds.add(kind);
         c.* = switch (kind) {
-            0 => .{ .fixed = dice.valueRangeAtMost(u16, 0, 40) },
-            1 => .{ .percent = dice.valueRangeAtMost(u8, 0, 120) },
-            2 => .{ .min = dice.valueRangeAtMost(u16, 0, 40) },
-            3 => .{ .max = dice.valueRangeAtMost(u16, 0, 40) },
-            else => .{ .fill = dice.valueRangeAtMost(u16, 0, 4) },
+            0 => .{ .fixed = gen.intRange(src, u16, 0, 40) },
+            1 => .{ .percent = gen.intRange(src, u8, 0, 120) },
+            2 => .{ .min = gen.intRange(src, u16, 0, 40) },
+            3 => .{ .max = gen.intRange(src, u16, 0, 40) },
+            else => .{ .fill = gen.intRange(src, u16, 0, 4) },
         };
     }
     const whole: visor.Rect = .{
-        .col = dice.valueRangeAtMost(u16, 0, 5),
-        .row = dice.valueRangeAtMost(u16, 0, 5),
-        .cols = dice.valueRangeAtMost(u16, 0, 40),
-        .rows = dice.valueRangeAtMost(u16, 0, 20),
+        .col = gen.intRange(src, u16, 0, 5),
+        .row = gen.intRange(src, u16, 0, 5),
+        .cols = gen.intRange(src, u16, 0, 40),
+        .rows = gen.intRange(src, u16, 0, 20),
     };
     const l: Layout = .{
-        .direction = if (dice.value(bool)) .horizontal else .vertical,
+        .direction = if (gen.boolean(src)) .horizontal else .vertical,
         .constraints = constraints[0..n],
-        .spacing = dice.valueRangeAtMost(u16, 0, 3),
-        .margin = .all(dice.valueRangeAtMost(u16, 0, 2)),
+        .spacing = gen.intRange(src, u16, 0, 3),
+        .margin = .all(gen.intRange(src, u16, 0, 2)),
     };
     if (tally) |t| {
         t.parts.add(n);
@@ -645,19 +647,20 @@ fn splitHolds(smith: *std.testing.Smith, tally: ?*Tally) !void {
 }
 
 test "a split of anything by anything stays inside what it was given" {
-    try std.testing.fuzz({}, struct {
-        fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try splitHolds(smith, null);
+    try shakedown.check(std_testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try splitHolds(case.source, null);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
-test "the split's corpus draws every count, every kind of constraint and both ways" {
+test "the split's cases draw every count, every kind of constraint and both ways" {
     var t: Tally = .{};
-    for (corpus.entries) |entry| {
-        var smith: std.testing.Smith = .{ .in = entry };
-        try splitHolds(&smith, &t);
-    }
+    try shakedown.check(std_testing.allocator, &t, struct {
+        fn body(tally: *Tally, case: *shakedown.Case) !void {
+            try splitHolds(case.source, tally);
+        }
+    }.body, .{});
     try std_testing.expect(t.parts.covers(1, 8));
     try std_testing.expect(t.kinds.covers(0, 4));
     try std_testing.expect(t.direction.covers(0, 1));

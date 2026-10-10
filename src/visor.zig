@@ -258,7 +258,7 @@ test {
     _ = window_mod;
     _ = winsize_mod;
     _ = @import("testing/roundtrip_test.zig");
-    _ = @import("corpus");
+    _ = @import("spread");
     _ = @import("testing/render_budget_test.zig");
 }
 

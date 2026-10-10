@@ -59,11 +59,13 @@ const Renderer = render.Renderer;
 const Screen = @import("../screen.zig").Screen;
 const Term = term.Term;
 
-/// The inputs replayed on every run, shared with the conformance build.
-const corpus = @import("corpus");
+/// What the generators drew, counted.
+const Spread = @import("spread").Spread;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 
 const Allocator = std.mem.Allocator;
-const Smith = std.testing.Smith;
 const testing = std.testing;
 
 /// The graphemes the generator draws from: ASCII, a combining pair, a wide
@@ -129,7 +131,7 @@ const Harness = struct {
     /// The pictures shown beside the screen.
     layers: layer.Layers,
     /// Where the generator's draws are counted, for the test that proves the
-    /// corpus explores; null everywhere else.
+    /// cases explore; null everywhere else.
     tally: ?*Tally = null,
 
     fn init(gpa: Allocator, size: geom.Size, method: textmod.Method) !Harness {
@@ -231,87 +233,87 @@ fn checkDamage(s: *const Screen, before: []const cellmod.internal.StoredCell) !v
     }
 }
 
-/// What the generators drew over a run of the corpus, one `Spread` a
+/// What the generators drew over a run of cases, one `Spread` a
 /// question: the evidence that the properties explore the grid rather than
 /// replaying one small case.
 const Tally = struct {
     /// The grid's width, at the start and after every resize.
-    cols: corpus.Spread = .{},
+    cols: Spread = .{},
     /// Its height, the same.
-    rows: corpus.Spread = .{},
+    rows: Spread = .{},
     /// Which grid operation, `operate`'s switch.
-    ops: corpus.Spread = .{},
+    ops: Spread = .{},
     /// Which grapheme a write took.
-    graphemes: corpus.Spread = .{},
+    graphemes: Spread = .{},
     /// How many frames (or resize steps) one input ran to.
-    frames: corpus.Spread = .{},
+    frames: Spread = .{},
     /// Which picture operation, the image property's switch.
-    picture_ops: corpus.Spread = .{},
+    picture_ops: Spread = .{},
     /// How far down the terminal the prompt left an inline screen.
-    prompt: corpus.Spread = .{},
+    prompt: Spread = .{},
     /// How many times an inline screen changed size.
-    resizes: corpus.Spread = .{},
+    resizes: Spread = .{},
 };
 
 /// One random operation on the grid.
-fn operate(h: *Harness, dice: *corpus.Dice) !void {
+fn operate(h: *Harness, src: *Source) !void {
     const s = &h.screen;
     const cols = s.dimensions().cols;
     const rows = s.dimensions().rows;
     const graphemes = &alphabet;
-    const op = dice.valueRangeAtMost(u8, 0, 7);
+    const op = gen.intRange(src, u8, 0, 7);
     if (h.tally) |tl| tl.ops.add(op);
     switch (op) {
         0, 1, 2 => {
-            const col: u16 = @intCast(dice.index(cols));
-            const row: u16 = @intCast(dice.index(rows));
-            const which_grapheme = dice.index(graphemes.len);
+            const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            const which_grapheme = gen.intRange(src, usize, 0, graphemes.len - 1);
             if (h.tally) |tl| tl.graphemes.add(which_grapheme);
             const g = graphemes[which_grapheme];
-            const style = styles[dice.index(styles.len)];
-            const which = dice.index(uris.len);
+            const style = styles[gen.intRange(src, usize, 0, styles.len - 1)];
+            const which = gen.intRange(src, usize, 0, uris.len - 1);
             const link = try s.link(uris[which], params[which]);
             try s.write(col, row, g, style, link);
         },
         7 => {
-            const col: u16 = @intCast(dice.index(cols));
-            const row: u16 = @intCast(dice.index(rows));
-            const g = graphemes[dice.index(graphemes.len)];
-            const style = styles[dice.index(styles.len)];
-            _ = try s.writeScaled(col, row, g, style, .none, dice.valueRangeAtMost(u3, 2, 3));
+            const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            const g = graphemes[gen.intRange(src, usize, 0, graphemes.len - 1)];
+            const style = styles[gen.intRange(src, usize, 0, styles.len - 1)];
+            _ = try s.writeScaled(col, row, g, style, .none, gen.intRange(src, u3, 2, 3));
         },
         3 => {
-            const col: u16 = @intCast(dice.index(cols));
-            const row: u16 = @intCast(dice.index(rows));
-            try s.writeOwnedCell(col, row, .blank(styles[dice.index(styles.len)]));
+            const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            try s.writeOwnedCell(col, row, .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)]));
         },
         4 => {
-            const rect = randomRect(dice, cols, rows);
-            try s.fill(rect, .blank(styles[dice.index(styles.len)]));
+            const rect = randomRect(src, cols, rows);
+            try s.fill(rect, .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)]));
         },
         5 => {
-            const rect = randomRect(dice, cols, rows);
-            s.scroll(rect, dice.valueRangeAtMost(i32, -3, 3));
+            const rect = randomRect(src, cols, rows);
+            s.scroll(rect, gen.intRange(src, i32, -3, 3));
         },
         6 => {
-            s.cursor.visible = dice.value(bool);
-            s.cursor.col = @intCast(dice.index(cols));
-            s.cursor.row = @intCast(dice.index(rows));
-            s.cursor.shape = @fromBackingInt(@intCast(dice.valueRangeAtMost(u8, 0, 6)));
+            s.cursor.visible = gen.boolean(src);
+            s.cursor.col = @intCast(gen.intRange(src, usize, 0, cols - 1));
+            s.cursor.row = @intCast(gen.intRange(src, usize, 0, rows - 1));
+            s.cursor.shape = @fromBackingInt(@intCast(gen.intRange(src, u8, 0, 6)));
         },
         else => unreachable,
     }
 }
 
 /// A rectangle somewhere inside the grid.
-fn randomRect(dice: *corpus.Dice, cols: u16, rows: u16) geom.Rect {
-    const col: u16 = @intCast(dice.index(cols));
-    const row: u16 = @intCast(dice.index(rows));
+fn randomRect(src: *Source, cols: u16, rows: u16) geom.Rect {
+    const col: u16 = @intCast(gen.intRange(src, usize, 0, cols - 1));
+    const row: u16 = @intCast(gen.intRange(src, usize, 0, rows - 1));
     return .{
         .col = col,
         .row = row,
-        .cols = @intCast(dice.index(cols - col) + 1),
-        .rows = @intCast(dice.index(rows - row) + 1),
+        .cols = @intCast(gen.intRange(src, usize, 0, (cols - col) - 1) + 1),
+        .rows = @intCast(gen.intRange(src, usize, 0, (rows - row) - 1) + 1),
     };
 }
 
@@ -323,11 +325,10 @@ fn terminalMethod(method: textmod.Method) textmod.Method {
 }
 
 /// The four properties, once, over a generated sequence of frames.
-fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn roundTrip(gpa: Allocator, src: *Source, method: textmod.Method, tally: ?*Tally) !void {
     const size: geom.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 1, 24),
-        .rows = dice.valueRangeAtMost(u16, 1, 12),
+        .cols = gen.intRange(src, u16, 1, 24),
+        .rows = gen.intRange(src, u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
@@ -345,13 +346,13 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     defer gpa.free(before);
 
     var frames: usize = 0;
-    while (frames < 6 and !dice.eos()) : (frames += 1) {
+    while (frames < 6 and src.more(7)) : (frames += 1) {
         @memcpy(before, h.screen.own_cells);
         h.screen.damage.clear();
 
         var ops: usize = 0;
-        const count = dice.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, &dice);
+        const count = gen.intRange(src, u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, src);
 
         try checkGrid(&h.screen);
         try checkDamage(&h.screen, before);
@@ -370,7 +371,7 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
     if (tally) |tl| tl.frames.add(frames);
 
     // A repaint recovers from any state the renderer drifted into.
-    corrupt(&h.renderer, &dice);
+    corrupt(&h.renderer, src);
     h.renderer.repaint();
     _ = try h.frame(&t);
     try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
@@ -393,39 +394,27 @@ fn roundTrip(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tal
 /// Puts the renderer's idea of the terminal out of step with it, the way a
 /// dropped write or a program writing to the terminal behind the renderer's
 /// back would.
-fn corrupt(r: *Renderer, dice: *corpus.Dice) void {
+fn corrupt(r: *Renderer, src: *Source) void {
     var i: usize = 0;
-    const count = dice.valueRangeAtMost(u8, 1, 8);
+    const count = gen.intRange(src, u8, 1, 8);
     while (i < count and r.prev.len != 0) : (i += 1) {
-        r.prev[dice.index(r.prev.len)] = .blank(styles[dice.index(styles.len)]);
+        r.prev[gen.intRange(src, usize, 0, r.prev.len - 1)] = .blank(styles[gen.intRange(src, usize, 0, styles.len - 1)]);
     }
-    r.style = styles[dice.index(styles.len)];
+    r.style = styles[gen.intRange(src, usize, 0, styles.len - 1)];
     r.own_cursor = null;
     r.shown = null;
 }
 
 test "the round trip holds against a terminal measuring by codepoint" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .wcwidth, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTrip, .{textmod.Method.wcwidth}, null);
 }
 
 test "the round trip holds against a terminal measuring by cluster" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .unicode, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTrip, .{textmod.Method.unicode}, null);
 }
 
 test "the round trip holds against a terminal told every width" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTrip(gpa, smith, .explicit, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTrip, .{textmod.Method.explicit}, null);
 }
 
 /// The properties across resizes: the terminal takes a new size first and
@@ -435,11 +424,10 @@ test "the round trip holds against a terminal told every width" {
 /// exactly the screen, the rows it has nothing new to write included. The
 /// frames draw everything the other properties do, clusters the width
 /// models disagree about and text drawn at a scale among it.
-fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn roundTripResize(gpa: Allocator, src: *Source, method: textmod.Method, tally: ?*Tally) !void {
     var size: geom.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 1, 24),
-        .rows = dice.valueRangeAtMost(u16, 1, 12),
+        .cols = gen.intRange(src, u16, 1, 24),
+        .rows = gen.intRange(src, u16, 1, 12),
     };
 
     var h: Harness = try .init(gpa, size, method);
@@ -452,39 +440,39 @@ fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
     try h.renderer.enter(&h.out.writer, h.caps, .alt, .{});
     try t.feed(h.out.written());
 
-    try scribble(&h, &dice);
+    try scribble(&h, src);
     _ = try h.frame(&t);
 
-    const steps = dice.valueRangeAtMost(u8, 1, 5);
+    const steps = gen.intRange(src, u8, 1, 5);
     if (tally) |tl| tl.frames.add(steps);
     for (0..steps) |step| {
-        const to = nextSize(&dice, size);
+        const to = nextSize(src, size);
         if (tally) |tl| {
             tl.cols.add(to.cols);
             tl.rows.add(to.rows);
         }
-        var hops = dice.valueRangeAtMost(u8, 0, 3);
-        const told_each = dice.value(bool);
+        var hops = gen.intRange(src, u8, 0, 3);
+        const told_each = gen.boolean(src);
         // The terminal passes through sizes on the way, frames drawn at the
         // size the program knows landing after each; the program hears of
         // every one or only of the last.
         while (hops > 0) : (hops -= 1) {
-            const mid = nextSize(&dice, size);
-            try stale(&h, &t, &dice, mid);
+            const mid = nextSize(src, size);
+            try stale(&h, &t, src, mid);
             if (told_each) {
                 try h.screen.resize(mid);
                 try h.renderer.resize(mid);
             }
         }
-        try stale(&h, &t, &dice, to);
+        try stale(&h, &t, src, to);
         try h.screen.resize(to);
         try h.renderer.resize(to);
         try checkGrid(&h.screen);
         size = to;
 
         // A frame now, or not until the next size; always after the last.
-        if (step + 1 == steps or dice.valueRangeAtMost(u8, 0, 3) != 0) {
-            try scribble(&h, &dice);
+        if (step + 1 == steps or gen.intRange(src, u8, 0, 3) != 0) {
+            try scribble(&h, src);
             _ = try h.frame(&t);
             try testing.expectEqual(@as(usize, 0), (try h.frame(&t)).bytes);
             h.screen.damageAll();
@@ -495,9 +483,9 @@ fn roundTripResize(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
 
 /// The terminal resized to `to`, and now and then a frame drawn at the size
 /// the program still knows landing after it.
-fn stale(h: *Harness, t: *Term, dice: *corpus.Dice, to: geom.Size) !void {
-    if (dice.value(bool)) {
-        try scribble(h, dice);
+fn stale(h: *Harness, t: *Term, src: *Source, to: geom.Size) !void {
+    if (gen.boolean(src)) {
+        try scribble(h, src);
         h.out.clearRetainingCapacity();
         _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
         try t.resize(to);
@@ -507,19 +495,19 @@ fn stale(h: *Harness, t: *Term, dice: *corpus.Dice, to: geom.Size) !void {
 
 /// What a program draws after a resize: now and then its whole layout again
 /// from nothing, then some operations.
-fn scribble(h: *Harness, dice: *corpus.Dice) !void {
-    if (dice.value(bool)) h.screen.clear();
+fn scribble(h: *Harness, src: *Source) !void {
+    if (gen.boolean(src)) h.screen.clear();
     var ops: usize = 0;
-    const count = dice.valueRangeAtMost(u8, 1, 12);
-    while (ops < count) : (ops += 1) try operate(h, dice);
+    const count = gen.intRange(src, u8, 1, 12);
+    while (ops < count) : (ops += 1) try operate(h, src);
 }
 
 /// A size in the generator's range, reached from `from` the way a window's
 /// edge moves: both ways, the width alone, or the height alone.
-fn nextSize(dice: *corpus.Dice, from: geom.Size) geom.Size {
-    const cols = dice.valueRangeAtMost(u16, 1, 24);
-    const rows = dice.valueRangeAtMost(u16, 1, 12);
-    return switch (dice.valueRangeAtMost(u8, 0, 2)) {
+fn nextSize(src: *Source, from: geom.Size) geom.Size {
+    const cols = gen.intRange(src, u16, 1, 24);
+    const rows = gen.intRange(src, u16, 1, 12);
+    return switch (gen.intRange(src, u8, 0, 2)) {
         0 => .{ .cols = cols, .rows = rows },
         1 => .{ .cols = cols, .rows = from.rows },
         else => .{ .cols = from.cols, .rows = rows },
@@ -527,27 +515,15 @@ fn nextSize(dice: *corpus.Dice, from: geom.Size) geom.Size {
 }
 
 test "the round trip holds across resizes against a terminal measuring by codepoint" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .wcwidth, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTripResize, .{textmod.Method.wcwidth}, null);
 }
 
 test "the round trip holds across resizes against a terminal measuring by cluster" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .unicode, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTripResize, .{textmod.Method.unicode}, null);
 }
 
 test "the round trip holds across resizes against a terminal told every width" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripResize(gpa, smith, .explicit, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTripResize, .{textmod.Method.explicit}, null);
 }
 
 /// The rows of a terminal the inline screen occupies, compared with the
@@ -585,12 +561,11 @@ fn linksEqual(want: *const Screen, got: *const Screen, a: cellmod.Link, b: cellm
 /// The properties again for an inline screen: rows of a taller terminal,
 /// taken at a cursor the prompt left somewhere down it, the screen growing
 /// and shrinking between frames, and the cursor left below it at the end.
-fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
-    const cols = dice.valueRangeAtMost(u16, 1, 24);
-    const terminal_rows = dice.valueRangeAtMost(u16, 2, 16);
-    const prompt = dice.valueRangeAtMost(u16, 0, terminal_rows - 1);
-    var size: geom.Size = .{ .cols = cols, .rows = dice.valueRangeAtMost(u16, 1, terminal_rows) };
+fn roundTripInline(gpa: Allocator, src: *Source, method: textmod.Method, tally: ?*Tally) !void {
+    const cols = gen.intRange(src, u16, 1, 24);
+    const terminal_rows = gen.intRange(src, u16, 2, 16);
+    const prompt = gen.intRange(src, u16, 0, terminal_rows - 1);
+    var size: geom.Size = .{ .cols = cols, .rows = gen.intRange(src, u16, 1, terminal_rows) };
     if (tally) |tl| {
         tl.cols.add(size.cols);
         tl.rows.add(size.rows);
@@ -612,22 +587,22 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
     try expectRegionEqual(&h.screen, &t);
 
     var frames: usize = 0;
-    while (frames < 6 and !dice.eos()) : (frames += 1) {
+    while (frames < 6 and src.more(7)) : (frames += 1) {
         // Now and then the screen changes size, in rows or in columns; the
         // terminal is the same terminal, so the screen is never wider than
         // it.
-        if (dice.valueRangeAtMost(u8, 0, 3) == 0) {
+        if (gen.intRange(src, u8, 0, 3) == 0) {
             size = .{
-                .cols = dice.valueRangeAtMost(u16, 1, cols),
-                .rows = dice.valueRangeAtMost(u16, 1, terminal_rows),
+                .cols = gen.intRange(src, u16, 1, cols),
+                .rows = gen.intRange(src, u16, 1, terminal_rows),
             };
             if (tally) |tl| tl.resizes.add(1);
             try h.screen.resize(size);
             try h.renderer.resize(size);
         }
         var ops: usize = 0;
-        const count = dice.valueRangeAtMost(u8, 1, 12);
-        while (ops < count) : (ops += 1) try operate(&h, &dice);
+        const count = gen.intRange(src, u8, 1, 12);
+        while (ops < count) : (ops += 1) try operate(&h, src);
         try checkGrid(&h.screen);
 
         h.out.clearRetainingCapacity();
@@ -646,7 +621,7 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
     if (tally) |tl| tl.frames.add(frames);
 
     // A repaint recovers, from the origin.
-    corrupt(&h.renderer, &dice);
+    corrupt(&h.renderer, src);
     h.renderer.repaint();
     h.out.clearRetainingCapacity();
     _ = try h.renderer.draw(&h.out.writer, &h.screen, &h.layers, h.caps);
@@ -665,19 +640,11 @@ fn roundTripInline(gpa: Allocator, smith: *Smith, method: textmod.Method, tally:
 }
 
 test "the round trip holds for an inline screen measuring by codepoint" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripInline(gpa, smith, .wcwidth, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTripInline, .{textmod.Method.wcwidth}, null);
 }
 
 test "the round trip holds for an inline screen measuring by cluster" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try roundTripInline(gpa, smith, .unicode, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(roundTripInline, .{textmod.Method.unicode}, null);
 }
 
 //=========================================================================
@@ -710,11 +677,10 @@ const Shown = struct {
 
 /// Random placements, moves, deletions, stacking changes and acknowledgements
 /// over a few frames, with text drawn beside them.
-fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn imageRoundTrip(gpa: Allocator, src: *Source, tally: ?*Tally) !void {
     const size: geom.Size = .{
-        .cols = dice.valueRangeAtMost(u16, 2, 24),
-        .rows = dice.valueRangeAtMost(u16, 2, 12),
+        .cols = gen.intRange(src, u16, 2, 24),
+        .rows = gen.intRange(src, u16, 2, 12),
     };
     var h: Harness = try .init(gpa, size, .unicode);
     defer h.deinit();
@@ -723,19 +689,19 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
         tl.cols.add(size.cols);
         tl.rows.add(size.rows);
     }
-    h.caps.kitty_graphics = dice.valueRangeAtMost(u8, 0, 3) != 0;
+    h.caps.kitty_graphics = gen.intRange(src, u8, 0, 3) != 0;
     h.caps.scroll_detection = false;
 
-    var run: PictureRun = try .init(gpa, &h, &dice, tally);
+    var run: PictureRun = try .init(gpa, &h, src, tally);
     defer run.deinit();
 
-    while (run.frames < 6 and !dice.eos()) : (run.frames += 1) {
+    while (run.frames < 6 and src.more(7)) : (run.frames += 1) {
         const previous = try gpa.dupe(Shown, run.showing.items);
         defer gpa.free(previous);
         run.resent.clearRetainingCapacity();
 
         var ops: usize = 0;
-        const count = dice.valueRangeAtMost(u8, 1, 8);
+        const count = gen.intRange(src, u8, 1, 8);
         while (ops < count) : (ops += 1) try run.pictureOp();
         for (run.showing.items) |p| try h.layers.declare(p.asLayer());
         try checkGrid(&h.screen);
@@ -762,7 +728,7 @@ fn imageRoundTrip(gpa: Allocator, smith: *Smith, tally: ?*Tally) !void {
 const PictureRun = struct {
     gpa: Allocator,
     h: *Harness,
-    dice: *corpus.Dice,
+    src: *Source,
     tally: ?*Tally,
     /// Given every byte.
     whole: Term,
@@ -779,7 +745,7 @@ const PictureRun = struct {
     expected_commands: usize = 0,
     frames: usize = 0,
 
-    fn init(gpa: Allocator, h: *Harness, dice: *corpus.Dice, tally: ?*Tally) !PictureRun {
+    fn init(gpa: Allocator, h: *Harness, src: *Source, tally: ?*Tally) !PictureRun {
         const size = h.screen.dimensions();
         var whole: Term = try .init(gpa, size);
         errdefer whole.deinit();
@@ -789,7 +755,7 @@ const PictureRun = struct {
         return .{
             .gpa = gpa,
             .h = h,
-            .dice = dice,
+            .src = src,
             .tally = tally,
             .whole = whole,
             .before_graphics = before_graphics,
@@ -808,22 +774,22 @@ const PictureRun = struct {
 
     /// One thing the program does to its pictures, or to the text.
     fn pictureOp(run: *PictureRun) !void {
-        const dice = run.dice;
+        const src = run.src;
         const size = run.h.screen.dimensions();
-        const picture_op = dice.valueRangeAtMost(u8, 0, 6);
+        const picture_op = gen.intRange(src, u8, 0, 6);
         if (run.tally) |tl| tl.picture_ops.add(picture_op);
         switch (picture_op) {
             0, 1 => {
                 // A new picture, or the same one moved.
                 const shown: Shown = .{
-                    .image = .fromRaw(dice.valueRangeAtMost(u32, 1, 4)),
-                    .placement = .fromRaw(dice.valueRangeAtMost(u32, 1, 3)),
-                    .rect = randomRect(dice, size.cols, size.rows),
-                    .under = dice.value(bool),
+                    .image = .fromRaw(gen.intRange(src, u32, 1, 4)),
+                    .placement = .fromRaw(gen.intRange(src, u32, 1, 3)),
+                    .rect = randomRect(src, size.cols, size.rows),
+                    .under = gen.boolean(src),
                     .order = .{
-                        .layer = dice.valueRangeAtMost(i32, -2, 2),
-                        .z = dice.valueRangeAtMost(i32, -2, 2),
-                        .sibling = dice.valueRangeAtMost(i32, -2, 2),
+                        .layer = gen.intRange(src, i32, -2, 2),
+                        .z = gen.intRange(src, i32, -2, 2),
+                        .sibling = gen.intRange(src, i32, -2, 2),
                     },
                 };
                 for (run.showing.items) |*held| {
@@ -834,7 +800,7 @@ const PictureRun = struct {
                 } else try run.showing.append(run.gpa, shown);
             },
             2 => {
-                if (run.showing.items.len != 0) _ = run.showing.swapRemove(dice.index(run.showing.items.len));
+                if (run.showing.items.len != 0) _ = run.showing.swapRemove(gen.intRange(src, usize, 0, run.showing.items.len - 1));
             },
             3 => try run.imageOp(),
             4 => {
@@ -844,20 +810,20 @@ const PictureRun = struct {
                     held.rect.cols = @intCast(@min(held.rect.cols, size.cols - held.rect.col));
                 }
             },
-            5, 6 => try operate(run.h, dice),
+            5, 6 => try operate(run.h, src),
             else => unreachable,
         }
     }
 
     /// Something done to an image rather than to a placement of it.
     fn imageOp(run: *PictureRun) !void {
-        const dice = run.dice;
+        const src = run.src;
         const layers = &run.h.layers;
-        switch (dice.valueRangeAtMost(u8, 0, 2)) {
+        switch (gen.intRange(src, u8, 0, 2)) {
             // Pixels sent under an id, perhaps one on screen, which the
             // terminal takes down while they land.
             0 => {
-                const id: layer.ImageId = .fromRaw(dice.valueRangeAtMost(u32, 1, 4));
+                const id: layer.ImageId = .fromRaw(gen.intRange(src, u32, 1, 4));
                 const px = [_]u8{
                     0, 0, 0, 255,
                     0, 0, 0, 255,
@@ -867,20 +833,20 @@ const PictureRun = struct {
                 _ = try layers.transmit(&run.side.writer, id, &px, .{
                     .width = .fromRaw(2),
                     .height = .fromRaw(2),
-                    .answer = dice.value(bool),
+                    .answer = gen.boolean(src),
                     .now = ms(@intCast(run.frames * 16)),
                 });
                 try run.resent.append(run.gpa, id);
             },
             // The terminal answers for an image, or refuses it.
             1 => layers.ack(.{
-                .id = .fromRaw(dice.valueRangeAtMost(u32, 1, 4)),
-                .message = if (dice.value(bool)) "OK" else "ENOENT",
+                .id = .fromRaw(gen.intRange(src, u32, 1, 4)),
+                .message = if (gen.boolean(src)) "OK" else "ENOENT",
             }),
             // An image freed: its placements go with it, and nothing is
             // left for the frame to delete.
             2 => {
-                const id: layer.ImageId = .fromRaw(dice.valueRangeAtMost(u32, 1, 4));
+                const id: layer.ImageId = .fromRaw(gen.intRange(src, u32, 1, 4));
                 try layers.deleteImage(&run.side.writer, id);
                 try run.resent.append(run.gpa, id);
                 var i: usize = 0;
@@ -952,33 +918,33 @@ const PictureRun = struct {
 };
 
 test "pictures placed, moved, stacked and taken down keep every frame idempotent and out of the text pass" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *Smith) anyerror!void {
-            try imageRoundTrip(gpa, smith, null);
-        }
-    }.one, .{ .corpus = &corpus.entries });
+    try checked(imageRoundTrip, .{}, null);
 }
 
 //=========================================================================
-// The corpus explores. Each property is replayed over every entry with its
+// The cases explore. Each property is run over its cases with its
 // draws counted, and the counts must cover the whole of every range the
 // property asks for: every size from one cell to the largest, every
 // operation, every grapheme, and runs of more than one frame. A generator
-// that answered every entry with the same small case -- which is what
-// `Smith` alone does on a replayed entry -- fails here, not silently.
+// that answered every case with the same small one fails here, not
+// silently.
 //=========================================================================
 
-/// Every entry of the corpus through `property`, with its draws counted.
-fn replayCounted(comptime property: anytype, args: anytype, tally: *Tally) !void {
-    for (corpus.entries) |entry| {
-        var smith: Smith = .{ .in = entry };
-        try @call(.auto, property, .{ testing.allocator, &smith } ++ args ++ .{tally});
-    }
+/// `property` over the cases `check` draws, with its draws counted when there
+/// is a `tally`.
+fn checked(comptime property: anytype, args: anytype, tally: ?*Tally) !void {
+    const Run = struct { args: @TypeOf(args), tally: ?*Tally };
+    const body = struct {
+        fn run(r: Run, case: *shakedown.Case) !void {
+            try @call(.auto, property, .{ testing.allocator, case.source } ++ r.args ++ .{r.tally});
+        }
+    }.run;
+    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{});
 }
 
-test "the round trip's corpus draws every size, every operation and every grapheme" {
+test "the round trip's cases draw every size, every operation and every grapheme" {
     var t: Tally = .{};
-    try replayCounted(roundTrip, .{textmod.Method.unicode}, &t);
+    try checked(roundTrip, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
     try testing.expect(t.rows.covers(1, 12));
     try testing.expect(t.ops.covers(0, 7));
@@ -986,21 +952,21 @@ test "the round trip's corpus draws every size, every operation and every graphe
     try testing.expect(t.frames.covers(1, 6));
 }
 
-test "the inline round trip's corpus draws every width, prompt and height, and resizes" {
+test "the inline round trip's cases draw every width, prompt and height, and resizes" {
     var t: Tally = .{};
-    try replayCounted(roundTripInline, .{textmod.Method.unicode}, &t);
+    try checked(roundTripInline, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
     try testing.expect(t.rows.covers(1, 16));
     try testing.expect(t.prompt.covers(0, 15));
     try testing.expect(t.ops.covers(0, 7));
     try testing.expect(t.frames.covers(1, 6));
     // And the screen changes size in about one frame in four.
-    try testing.expect(t.resizes.count > corpus.len / 2);
+    try testing.expect(t.resizes.count > (shakedown.CheckOptions{}).cases / 2);
 }
 
-test "the resize round trip's corpus draws every size and several steps" {
+test "the resize round trip's cases draw every size and several steps" {
     var t: Tally = .{};
-    try replayCounted(roundTripResize, .{textmod.Method.unicode}, &t);
+    try checked(roundTripResize, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
     try testing.expect(t.rows.covers(1, 12));
     try testing.expect(t.ops.covers(0, 7));
@@ -1008,9 +974,9 @@ test "the resize round trip's corpus draws every size and several steps" {
     try testing.expect(t.frames.covers(1, 5));
 }
 
-test "the picture property's corpus draws every size and every picture operation" {
+test "the picture property's cases draw every size and every picture operation" {
     var t: Tally = .{};
-    try replayCounted(imageRoundTrip, .{}, &t);
+    try checked(imageRoundTrip, .{}, &t);
     try testing.expect(t.cols.covers(2, 24));
     try testing.expect(t.rows.covers(2, 12));
     try testing.expect(t.picture_ops.covers(0, 6));

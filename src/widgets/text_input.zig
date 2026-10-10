@@ -732,7 +732,10 @@ pub const TextInput = struct {
 
 const testing = std.testing;
 const Harness = @import("../testing/widget_harness.zig").Harness;
-const corpus = @import("corpus");
+const Spread = @import("spread").Spread;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 
 fn allRows(text: []const u8, cols: u16) ![]TextInput.Row {
     var list: std.ArrayList(TextInput.Row) = .empty;
@@ -892,33 +895,32 @@ const pieces = [_][]const u8{
     "\t",   "\xff",     "\xe4\xb8", "\u{26a0}\u{fe0f}",           "x.y/z",
 };
 
-/// What the layout property drew over the corpus, for the test that proves
+/// What the layout property drew over its cases, for the test that proves
 /// it explores.
 const Tally = struct {
     /// Which piece each part of the text was.
-    pieces: corpus.Spread = .{},
+    pieces: Spread = .{},
     /// How long the text was, in pieces.
-    parts: corpus.Spread = .{},
+    parts: Spread = .{},
     /// How wide the window was.
-    cols: corpus.Spread = .{},
+    cols: Spread = .{},
     /// Which way it measured, cluster (1) or codepoint (0).
-    method: corpus.Spread = .{},
+    method: Spread = .{},
 };
 
-fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally) !void {
-    var dice: corpus.Dice = .init(smith);
+fn layoutHolds(gpa: std.mem.Allocator, src: *Source, tally: ?*Tally) !void {
     var text: std.ArrayList(u8) = .empty;
     defer text.deinit(gpa);
-    const parts = dice.valueRangeAtMost(u8, 0, 60);
+    const parts = gen.intRange(src, u8, 0, 60);
     var part: u8 = 0;
     while (part < parts and text.items.len < 200) : (part += 1) {
-        const which = dice.index(pieces.len);
+        const which = gen.intRange(src, usize, 0, pieces.len - 1);
         if (tally) |tl| tl.pieces.add(which);
         try text.appendSlice(gpa, pieces[which]);
     }
     const t = text.items;
-    const cols = dice.valueRangeAtMost(u16, 1, 12);
-    const method: visor.Method = if (dice.value(bool)) .unicode else .wcwidth;
+    const cols = gen.intRange(src, u16, 1, 12);
+    const method: visor.Method = if (gen.boolean(src)) .unicode else .wcwidth;
     if (tally) |tl| {
         tl.parts.add(part);
         tl.cols.add(cols);
@@ -972,8 +974,8 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally
     // inside it.
     var h: Harness = try .init(gpa, cols, 3);
     defer h.deinit();
-    var state: TextInput.State = .{ .first = dice.value(u8) };
-    const cursor = dice.index(t.len + 1);
+    var state: TextInput.State = .{ .first = gen.int(src, u8) };
+    const cursor = gen.intRange(src, usize, 0, (t.len + 1) - 1);
     try (TextInput{ .text = t, .cursor = cursor }).draw(h.window(), &state);
     try testing.expect(h.screen.cursor.visible);
     try testing.expect(h.screen.cursor.row < 3);
@@ -982,19 +984,20 @@ fn layoutHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith, tally: ?*Tally
 }
 
 test "the layout covers every byte and every cluster has a place that leads back to it" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try layoutHolds(gpa, smith, null);
+    try shakedown.check(testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try layoutHolds(testing.allocator, case.source, null);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
-test "the layout's corpus draws every piece, every width, both methods and long texts" {
+test "the layout's cases draw every piece, every width, both methods and long texts" {
     var t: Tally = .{};
-    for (corpus.entries) |entry| {
-        var smith: std.testing.Smith = .{ .in = entry };
-        try layoutHolds(testing.allocator, &smith, &t);
-    }
+    try shakedown.check(testing.allocator, &t, struct {
+        fn body(tally: *Tally, case: *shakedown.Case) !void {
+            try layoutHolds(testing.allocator, case.source, tally);
+        }
+    }.body, .{});
     try testing.expect(t.pieces.covers(0, pieces.len - 1));
     try testing.expect(t.cols.covers(1, 12));
     try testing.expect(t.method.covers(0, 1));
@@ -1250,8 +1253,7 @@ test "a failed edit leaves the text, the cursor and the history as they were" {
 
 /// Edits of every kind, at random, held to what undo and redo must give
 /// back.
-fn bufferHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
-    var dice: corpus.Dice = .init(smith);
+fn bufferHolds(gpa: std.mem.Allocator, src: *Source) !void {
     var b: Edited = .init(gpa);
     defer b.deinit();
     // Every text the buffer held after an edit, in order.
@@ -1262,12 +1264,12 @@ fn bufferHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
     }
     try seen.append(gpa, try gpa.dupe(u8, ""));
     const motions = std.enums.values(Edited.Motion);
-    for (0..dice.valueRangeAtMost(u8, 0, 60)) |_| {
-        switch (dice.valueRangeAtMost(u8, 0, 5)) {
-            0, 1 => try b.insert(pieces[dice.index(pieces.len)]),
-            2 => try b.delete(motions[dice.index(motions.len)]),
-            3 => b.move(motions[dice.index(motions.len)], dice.value(bool)),
-            4 => b.moveRows(@as(isize, dice.valueRangeAtMost(u8, 0, 4)) - 2, dice.valueRangeAtMost(u16, 1, 12), .unicode, dice.value(bool)),
+    for (0..gen.intRange(src, u8, 0, 60)) |_| {
+        switch (gen.intRange(src, u8, 0, 5)) {
+            0, 1 => try b.insert(pieces[gen.intRange(src, usize, 0, pieces.len - 1)]),
+            2 => try b.delete(motions[gen.intRange(src, usize, 0, motions.len - 1)]),
+            3 => b.move(motions[gen.intRange(src, usize, 0, motions.len - 1)], gen.boolean(src)),
+            4 => b.moveRows(@as(isize, gen.intRange(src, u8, 0, 4)) - 2, gen.intRange(src, u16, 1, 12), .unicode, gen.boolean(src)),
             else => b.seal(),
         }
         const t = b.text();
@@ -1297,11 +1299,11 @@ fn bufferHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 }
 
 test "whatever is typed, moved and deleted, undo walks back and redo forward to the same text" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try bufferHolds(gpa, smith);
+    try shakedown.check(testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try bufferHolds(testing.allocator, case.source);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
 test "from a cluster boundary, every motion lands on one" {

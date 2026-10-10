@@ -650,19 +650,46 @@ test "TERM_PROGRAM is supplied by the caller and recognizes iTerm.app exactly" {
 }
 
 test "picture probe replies stay within the register bound under arbitrary input" {
-    try testing.fuzz(testing.allocator, struct {
-        fn one(_: std.mem.Allocator, smith: *testing.Smith) !void {
+    const shakedown = @import("shakedown");
+    const gen = shakedown.gen;
+    const replies = [_][]const u8{ "\x1b[?65;4c", "\x1b[?1;0;16S", "\x1b[?2;0;1000;800S", "\x1bP>|iTerm2 3.5.4\x1b\\", "\x1b[?1;0;4294967295S", "\x1b[?1;0;-1S" };
+    const property = struct {
+        fn holds(bytes: []const u8) !void {
             var p: Caps.Probe = .init(.{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
-            var bytes: [512]u8 = undefined;
-            const n = smith.slice(&bytes);
-            p.feed(answer(bytes[0..n]), ms(0));
+            p.feed(answer(bytes), ms(0));
             const caps = p.capabilities();
             try testing.expect(caps.sixel_registers >= 2 and caps.sixel_registers <= morse.sixel_palette_max);
             // The reply parser and question ownership stay with morse;
             // folding any unhandled input cannot make pictures available.
-            if (morse.Reply.parse(bytes[0..n]) == null) try testing.expectEqual(Caps.Pictures.cells, caps.pictures());
+            if (morse.Reply.parse(bytes) == null) try testing.expectEqual(Caps.Pictures.cells, caps.pictures());
         }
-    }.one, .{ .corpus = &.{ "\x1b[?65;4c", "\x1b[?1;0;16S", "\x1b[?2;0;1000;800S", "\x1bP>|iTerm2 3.5.4\x1b\\", "\x1b[?1;0;4294967295S", "\x1b[?1;0;-1S" } });
+
+        fn body(_: void, case: *shakedown.Case) !void {
+            const src = case.source;
+            // Random bytes, or one of the replies a terminal sends with a few
+            // bytes changed: the parsers accept little else.
+            var bytes: [512]u8 = undefined;
+            if (gen.boolean(src)) {
+                const n = gen.intRange(src, usize, 0, bytes.len);
+                src.bytes(bytes[0..n]);
+                return holds(bytes[0..n]);
+            }
+            const reply = gen.oneOf(src, []const u8, &replies);
+            @memcpy(bytes[0..reply.len], reply);
+            var n = reply.len;
+            var edits = gen.intRange(src, u8, 0, 3);
+            while (edits > 0) : (edits -= 1) {
+                if (gen.boolean(src) and n > 0) {
+                    bytes[gen.intRange(src, usize, 0, n - 1)] = gen.int(src, u8);
+                } else {
+                    n = gen.intRange(src, usize, 0, n);
+                }
+            }
+            try holds(bytes[0..n]);
+        }
+    };
+    for (replies) |reply| try property.holds(reply);
+    try shakedown.check(testing.allocator, {}, property.body, .{});
 }
 
 test "a colour count arriving after DA1 extends the quiet period" {

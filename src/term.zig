@@ -3,7 +3,7 @@
 //! It consumes what `draw` wrote and rebuilds a `Screen` from it, so a
 //! program's frame can be asserted on with no terminal anywhere: draw, feed,
 //! compare. That comparison is this package's own headline test, run under
-//! `std.testing.fuzz` over random grids, and it is public because a program
+//! shakedown's `check` over random grids, and it is public because a program
 //! built on this package needs exactly the same check.
 //!
 //! It is as complete as the renderer's output and no more: the cursor

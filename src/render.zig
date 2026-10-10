@@ -3904,8 +3904,10 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
     try expectRowText(&u, 2, "");
 }
 
-const corpus = @import("corpus");
-const repeat = @import("shakedown").corpus.repeat;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
+const repeat = shakedown.corpus.repeat;
 const Window = @import("screen.zig").window_api.Window;
 
 /// A row of the terminal as text, each cluster once however many columns
@@ -4097,12 +4099,11 @@ test "printing above takes the rows a resized screen needs, and is refused outsi
 
 /// The inline print, any rows on any screen at any place in the terminal,
 /// read back through the emulator.
-fn printAboveHolds(gpa: Allocator, smith: *std.testing.Smith) !void {
-    var dice: corpus.Dice = .init(smith);
-    const cols = dice.valueRangeAtMost(u16, 1, 12);
-    const term_rows = dice.valueRangeAtMost(u16, 2, 10);
-    const view_rows = dice.valueRangeAtMost(u16, 1, term_rows - 1);
-    const prompt = dice.valueRangeAtMost(u16, 0, term_rows);
+fn printAboveHolds(gpa: Allocator, src: *Source) !void {
+    const cols = gen.intRange(src, u16, 1, 12);
+    const term_rows = gen.intRange(src, u16, 2, 10);
+    const view_rows = gen.intRange(src, u16, 1, term_rows - 1);
+    const prompt = gen.intRange(src, u16, 0, term_rows);
     const pieces = [_][]const u8{ "a", "bc", " ", "\u{4e2d}", "e\u{301}", "\u{1f469}\u{200d}\u{1f680}" };
 
     var f: Fixture = try .init(gpa, cols, view_rows);
@@ -4123,22 +4124,22 @@ fn printAboveHolds(gpa: Allocator, smith: *std.testing.Smith) !void {
         shown.deinit(gpa);
     }
 
-    const rounds = dice.valueRangeAtMost(u8, 1, 4);
+    const rounds = gen.intRange(src, u8, 1, 4);
     for (0..rounds) |_| {
         f.screen.clear();
         for (0..view_rows) |row| {
-            const piece = pieces[dice.index(pieces.len)];
-            _ = try f.screen.window().printSegment(.{ .text = piece, .style = .{ .bold = dice.value(bool) } }, .{ .row = @intCast(row), .wrap = .none });
+            const piece = pieces[gen.intRange(src, usize, 0, pieces.len - 1)];
+            _ = try f.screen.window().printSegment(.{ .text = piece, .style = .{ .bold = gen.boolean(src) } }, .{ .row = @intCast(row), .wrap = .none });
         }
-        const count = dice.valueRangeAtMost(u16, 0, 2 * term_rows);
+        const count = gen.intRange(src, u16, 0, 2 * term_rows);
         var lines: Screen = try .init(gpa, .{ .cols = cols, .rows = count });
         defer lines.deinit();
         lines.method = .unicode;
         for (0..count) |row| {
             var at: Window.Print = .{ .row = @intCast(row) };
-            for (0..dice.valueRangeAtMost(u8, 0, 4)) |_| {
-                const piece = pieces[dice.index(pieces.len)];
-                at = try lines.window().printSegment(.{ .text = piece, .style = .{ .italic = dice.value(bool) } }, .{ .col = at.col, .row = at.row, .wrap = .none });
+            for (0..gen.intRange(src, u8, 0, 4)) |_| {
+                const piece = pieces[gen.intRange(src, usize, 0, pieces.len - 1)];
+                at = try lines.window().printSegment(.{ .text = piece, .style = .{ .italic = gen.boolean(src) } }, .{ .col = at.col, .row = at.row, .wrap = .none });
                 at.row = @intCast(row);
             }
             var buf: std.Io.Writer.Allocating = .init(gpa);
@@ -4175,11 +4176,11 @@ fn printAboveHolds(gpa: Allocator, smith: *std.testing.Smith) !void {
 }
 
 test "rows printed above any inline screen anywhere in the terminal read back above it" {
-    try std.testing.fuzz(testing.allocator, struct {
-        fn one(gpa: Allocator, smith: *std.testing.Smith) anyerror!void {
-            try printAboveHolds(gpa, smith);
+    try shakedown.check(testing.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try printAboveHolds(testing.allocator, case.source);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
 test "the shortest cursor move is the one written" {

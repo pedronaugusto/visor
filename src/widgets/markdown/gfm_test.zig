@@ -13,7 +13,9 @@ const std = @import("std");
 const NoResize = @import("shakedown").alloc.NoResize;
 const widgets = @import("../../widgets.zig");
 const Harness = @import("../../testing/widget_harness.zig").Harness;
-const corpus = @import("corpus");
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
+const Source = shakedown.Source;
 const t = std.testing;
 
 const Document = widgets.Markdown.Document;
@@ -501,11 +503,10 @@ const pieces = [_][]const u8{
     "[l](https://x)",
 };
 
-fn readerHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
-    var dice: corpus.Dice = .init(smith);
+fn readerHolds(gpa: std.mem.Allocator, src: *Source) !void {
     var source: std.ArrayList(u8) = .empty;
     defer source.deinit(gpa);
-    for (0..dice.valueRangeAtMost(u8, 0, 80)) |_| try source.appendSlice(gpa, pieces[dice.index(pieces.len)]);
+    for (0..gen.intRange(src, u8, 0, 80)) |_| try source.appendSlice(gpa, pieces[gen.intRange(src, usize, 0, pieces.len - 1)]);
     var doc = try Document.init(gpa, source.items);
     defer doc.deinit();
 
@@ -526,7 +527,7 @@ fn readerHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 
     // Drawn at any width, the rows counted are the rows drawn, and the
     // frame reads back.
-    const cols = dice.valueRangeAtMost(u16, 0, 30);
+    const cols = gen.intRange(src, u16, 0, 30);
     const m = md(&doc);
     const count = m.rowCount(cols, .unicode);
     var rows = widgets.Markdown.Rows.init(&doc, cols, .unicode);
@@ -546,11 +547,11 @@ fn readerHolds(gpa: std.mem.Allocator, smith: *std.testing.Smith) !void {
 }
 
 test "whatever the source, the reader's ranges hold and the rows counted are drawn" {
-    try std.testing.fuzz(t.allocator, struct {
-        fn one(gpa: std.mem.Allocator, smith: *std.testing.Smith) anyerror!void {
-            try readerHolds(gpa, smith);
+    try shakedown.check(t.allocator, {}, struct {
+        fn body(_: void, case: *shakedown.Case) !void {
+            try readerHolds(t.allocator, case.source);
         }
-    }.one, .{ .corpus = &corpus.entries });
+    }.body, .{});
 }
 
 test "the reader releases every allocation when a table or a task fails to read" {
