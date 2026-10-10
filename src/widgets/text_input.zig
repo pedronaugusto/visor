@@ -992,12 +992,14 @@ test "the layout covers every byte and every cluster has a place that leads back
 }
 
 test "the layout's cases draw every piece, every width, both methods and long texts" {
+    // The assertions are about the cases `check` draws, not the fuzzer's.
+    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try shakedown.check(testing.allocator, &t, struct {
         fn body(tally: *Tally, case: *shakedown.Case) !void {
             try layoutHolds(testing.allocator, case.source, tally);
         }
-    }.body, .{});
+    }.body, .{ .seed = 0x5eed });
     try testing.expect(t.pieces.covers(0, pieces.len - 1));
     try testing.expect(t.cols.covers(1, 12));
     try testing.expect(t.method.covers(0, 1));

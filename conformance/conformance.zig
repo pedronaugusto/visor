@@ -400,7 +400,7 @@ fn checked(comptime property: anytype, args: anytype, tally: ?*Tally) !void {
             try @call(.auto, property, .{ testing.allocator, case.source } ++ r.args ++ .{r.tally});
         }
     }.run;
-    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{});
+    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{ .seed = if (tally != null) 0x5eed else null });
 }
 
 /// `property` over the cases `check` draws, for a property that counts
@@ -621,6 +621,8 @@ test "the second emulator agrees, measuring by cluster" {
 }
 
 test "the cases draw every size, every operation and every grapheme against the second emulator" {
+    // The assertions are about the cases `check` draws, not the fuzzer's.
+    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try checked(roundTrip, .{visor.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));

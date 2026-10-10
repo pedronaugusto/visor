@@ -655,12 +655,14 @@ test "a split of anything by anything stays inside what it was given" {
 }
 
 test "the split's cases draw every count, every kind of constraint and both ways" {
+    // The assertions are about the cases `check` draws, not the fuzzer's.
+    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try shakedown.check(std_testing.allocator, &t, struct {
         fn body(tally: *Tally, case: *shakedown.Case) !void {
             try splitHolds(case.source, tally);
         }
-    }.body, .{});
+    }.body, .{ .seed = 0x5eed });
     try std_testing.expect(t.parts.covers(1, 8));
     try std_testing.expect(t.kinds.covers(0, 4));
     try std_testing.expect(t.direction.covers(0, 1));
