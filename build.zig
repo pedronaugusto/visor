@@ -1,6 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
+    // lazyImport compares every package of the dependency tree at comptime;
+    // a large tree runs past the default quota of 1000 branches.
+    @setEvalBranchQuota(100_000);
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -342,5 +345,8 @@ const uucode_fields = [_][]const u8{
 /// every package in the tree at comptime, and two in one function exceed the
 /// default branch quota.
 fn bindAegis(b: *std.Build, shakedown: *std.Build.Dependency, aegis: *std.Build.Module) void {
+    // lazyImport compares every package of the dependency tree at comptime;
+    // a large tree runs past the default quota of 1000 branches.
+    @setEvalBranchQuota(100_000);
     if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown, aegis);
 }
