@@ -19,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
     // glint-ignore: Z026 -- leaving is best effort at the end of the program; a failure has nowhere left to be reported
     defer tty.leave(io) catch {};
     try tty.enter(io, session.renderer(), session.capabilities(), .alt, .{ .paste = true });
-    try tty.watchResize();
+    try tty.watchResize(io);
     var output_buffer: [16 * 1024]u8 = undefined;
     var output = tty.writer(io, &output_buffer);
     const w = &output.interface;

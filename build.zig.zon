@@ -20,13 +20,17 @@
             .hash = "morse-0.7.0-OKnGoQJtEQAoPGjhZO2CA1kg4XpHV3C7U4AefB6KWHbv",
         },
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit#412f9cafed4a32f9bd50cf6c0738b8427bdb39ea",
-            .hash = "conduit-0.5.1-4rIA70aBEwAENeACjqF3rVWnqsouKvXe4MsI0YY51Nlw",
+            .url = "git+https://github.com/pedronaugusto/conduit#5fe369da8af76b220b2615ecb96cf37662cc1baf",
+            .hash = "conduit-0.5.1-4rIA73iEEwAwaFx6QIxnAgvqm7O-EqpY2nGu1BRkzOGH",
         },
         .shakedown = .{
             .url = "git+https://github.com/pedronaugusto/shakedown#caf380381a49ace7c13beba70dd512c4faf24ce7",
             .hash = "shakedown-0.1.0-BR8U4yVfEgCS2Vw6zWMqw0wRjxct8g3tePy1UKNZ8Q89",
             .lazy = true,
+        },
+        .reactor = .{
+            .url = "git+https://github.com/pedronaugusto/reactor#286105e9eee61d4ee1abf4ce4f3bc445bdb4492e",
+            .hash = "reactor-0.1.0-MjQ-WAXREQAIXx8Nf7W-Vz7Go1b5cgTpiBgFu7lfb3FY",
         },
     },
     .minimum_zig_version = "0.17.0",

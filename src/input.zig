@@ -164,11 +164,11 @@ pub const Input = struct {
         quiet,
         /// Nothing arrived before the caller's deadline.
         expired,
-        /// The resize pipe, and nothing else.
+        /// The resize signal, and nothing else.
         resized,
     };
 
-    /// Waits for the terminal, the resize pipe, the escape timeout or the
+    /// Waits for the terminal, the resize signal, the escape timeout or the
     /// caller's deadline, whichever comes first.
     const wait = if (is_windows) waitWindows else waitPosix;
 
@@ -223,58 +223,26 @@ pub const Input = struct {
         const tty_file = in.tty.inputFile();
         const lim = in.limit(io, until);
         const timeout = lim.timeout;
-        const resize = in.tty.resizeFile();
+        const resize = in.tty.resizeWake();
 
         if (timeout == .none and resize == null) return in.readBlocking(io, tty_file);
 
-        var storage: [2]Io.Operation.Storage = undefined;
-        var batch: Io.Batch = .init(&storage);
-        batch.addAt(0, .{ .file_read_streaming = .{ .file = tty_file, .data = &.{in.read_buffer} } });
-        var sink: [64]u8 = undefined;
-        if (resize) |file| batch.addAt(1, .{ .file_read_streaming = .{ .file = file, .data = &.{&sink} } });
-
-        const outcome = batch.awaitConcurrent(io, timeout);
-        // Whatever finished is kept, before and after the rest is called off:
-        // a read that completed while being cancelled still read bytes.
-        var woke: ?Woke = null;
-        var failed: ?Error = null;
-        in.collect(&batch, &woke, &failed);
-        batch.cancel(io);
-        in.collect(&batch, &woke, &failed);
-
-        if (woke) |w| return w;
-        if (failed) |e| return e;
-        if (in.resize_due) return .resized;
-        outcome catch |err| switch (err) {
+        // The terminal first: bytes that came with a resize are handed over
+        // before it, and the wake stays set for the next wait.
+        var set: [2]reactor.Waitable = .{ .{ .readable = tty_file.handle }, undefined };
+        if (resize) |wake| set[1] = .{ .wake = wake };
+        const ready = reactor.waitAny(io, set[0..if (resize == null) 1 else 2], timeout) catch |err| switch (err) {
             error.Timeout => return if (lim.expires) .expired else .quiet,
             error.Canceled => return error.Canceled,
-            // An `Io` that cannot wait on two things at once still reads.
-            error.ConcurrencyUnavailable => return in.readBlocking(io, tty_file),
+            // A wait that cannot be had still reads.
+            error.Unsupported, error.Unexpected => return in.readBlocking(io, tty_file),
         };
-        return .quiet;
-    }
-
-    /// The completions of one wait, folded into what it woke for. A resize
-    /// is remembered rather than returned, so bytes that came with it are
-    /// handed over first and the size after them.
-    fn collect(in: *Input, batch: *Io.Batch, woke: *?Woke, failed: *?Error) void {
-        while (batch.next()) |done| {
-            const result = done.result.file_read_streaming;
-            if (done.index == 1) {
-                // The pipe does not block: whatever this read took, the rest
-                // is taken here so the next wait does not wake for it again.
-                in.tty.drainResize();
-                in.resize_due = true;
-                continue;
-            }
-            if (result) |n| {
-                woke.* = if (n == 0) .ended else .{ .bytes = n };
-            } else |err| switch (err) {
-                error.EndOfStream => woke.* = .ended,
-                error.WouldBlock => {},
-                else => |e| failed.* = e,
-            }
-        }
+        if (ready == 0) return in.readBlocking(io, tty_file);
+        // Whatever was delivered is taken here, so the next wait does not
+        // wake for it again.
+        in.tty.drainResize(io);
+        in.resize_due = true;
+        return .resized;
     }
 
     /// One read with nothing beside it.
@@ -296,11 +264,11 @@ fn keyWaiting(records: []const console.InputRecord) bool {
 
 /// The console's input records and waits are conduit's.
 const console = @import("dependencies.zig").tty.console;
+const reactor = @import("dependencies.zig").reactor;
 
 const testing = std.testing;
 const conduit = @import("dependencies.zig").conduit;
 const corpus = @import("corpus");
-const shakedown = @import("shakedown");
 
 /// A `Tty` over the read end of a pipe, and the write end to type into.
 const Piped = struct {
@@ -488,8 +456,8 @@ test "a resize wakes the wait and carries the size and pixels the system has now
     var pair = try conduit.Pty.open(testing.allocator, .{ .rows = 30, .cols = 100, .x_pixel = 900, .y_pixel = 600 });
     defer pair.close(testing.io);
     var t: Tty = .adopt(pair.slaveFile());
-    try t.watchResize();
-    defer t.unwatchResize();
+    try t.watchResize(testing.io);
+    defer t.unwatchResize(testing.io);
 
     var parser: [64]u8 = undefined;
     var read: [16]u8 = undefined;
@@ -507,12 +475,12 @@ test "a resize wakes the wait and carries the size and pixels the system has now
     const again = try in.next(testing.io);
     try testing.expectEqual(@as(u32, 80), again.resize.cols);
     try testing.expectEqual(@as(u32, 720), again.resize.xpixels);
-    try testing.expect(!t.resized());
+    try testing.expect(!t.resized(testing.io));
 
     // For a loop of its own: the same wake, asked without blocking.
     try std.posix.raise(.WINCH);
-    try testing.expect(t.resized());
-    try testing.expect(!t.resized());
+    try testing.expect(t.resized(testing.io));
+    try testing.expect(!t.resized(testing.io));
 }
 
 test "watching a resize puts back the handler it found" {
@@ -521,10 +489,10 @@ test "watching a resize puts back the handler it found" {
     defer p.deinit();
     var before: std.posix.Sigaction = undefined;
     std.posix.sigaction(.WINCH, null, &before);
-    try p.tty.watchResize();
-    try testing.expect(p.tty.resizeFile() != null);
-    p.tty.unwatchResize();
-    try testing.expect(p.tty.resizeFile() == null);
+    try p.tty.watchResize(testing.io);
+    try testing.expect(p.tty.resizeWake() != null);
+    p.tty.unwatchResize(testing.io);
+    try testing.expect(p.tty.resizeWake() == null);
     var after: std.posix.Sigaction = undefined;
     std.posix.sigaction(.WINCH, null, &after);
     try testing.expectEqual(before.handler.handler, after.handler.handler);
@@ -539,22 +507,22 @@ test "two terminals watching each hear a resize, and one stopping leaves the oth
     var before: std.posix.Sigaction = undefined;
     std.posix.sigaction(.WINCH, null, &before);
 
-    try a.tty.watchResize();
-    try b.tty.watchResize();
-    try testing.expect(a.tty.resizeFile().?.handle != b.tty.resizeFile().?.handle);
+    try a.tty.watchResize(testing.io);
+    try b.tty.watchResize(testing.io);
+    try testing.expect(a.tty.resizeWake().? != b.tty.resizeWake().?);
     try std.posix.raise(.WINCH);
-    try testing.expect(a.tty.resized());
-    try testing.expect(b.tty.resized());
+    try testing.expect(a.tty.resized(testing.io));
+    try testing.expect(b.tty.resized(testing.io));
 
     // The first stops: the second still hears, and the handler stays.
-    a.tty.unwatchResize();
-    try testing.expect(a.tty.resizeFile() == null);
+    a.tty.unwatchResize(testing.io);
+    try testing.expect(a.tty.resizeWake() == null);
     try std.posix.raise(.WINCH);
-    try testing.expect(!a.tty.resized());
-    try testing.expect(b.tty.resized());
+    try testing.expect(!a.tty.resized(testing.io));
+    try testing.expect(b.tty.resized(testing.io));
 
     // The last stops: the handler found before the first is back.
-    b.tty.unwatchResize();
+    b.tty.unwatchResize(testing.io);
     var after: std.posix.Sigaction = undefined;
     std.posix.sigaction(.WINCH, null, &after);
     try testing.expectEqual(before.handler.handler, after.handler.handler);
@@ -748,34 +716,19 @@ test "the pump is compiled for every target, the Windows wait included" {
     _ = &Input.nextWithin;
 }
 
-test "a silent deadline submits one read and cancels it with the remaining budget" {
-    // The read stays pending until canceled; the clock fires the wait's
-    // timer as it is armed, without reading a descriptor on any host.
-    var clock: shakedown.Clock = .init(testing.io, .{ .advance = .{ .auto = .{} } });
-    const fio = try shakedown.FaultIo.init(testing.allocator, clock.io(), .{ .plan = &.{.{
-        .at = .{ .nth = .{ .call = .file_read_streaming, .n = 1 } },
-        .fault = .stall,
-        .times = 0,
-    }} });
-    defer fio.deinit();
-    const io = fio.io();
-    var tty = Tty.adopt(.{ .handle = if (is_windows) std.os.windows.INVALID_HANDLE_VALUE else -1, .flags = .{ .nonblocking = false } });
+test "a silent deadline ends the wait at the caller's deadline, not at a fresh timeout" {
+    if (is_windows) return error.SkipZigTest;
+    var p: Piped = try .init();
+    defer p.deinit();
     var parser: [64]u8 = undefined;
     var read: [16]u8 = undefined;
-    var in = try inputOver(&tty, &parser, &read, 5_000);
-    // Exercise the Io wait on every host, including Windows where the
-    // real console wait has its own integration tests. Ten milliseconds
-    // pass between the deadline and the wait.
-    const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(30), .clock = .awake } }).toDeadline(io);
-    clock.advance(.fromMilliseconds(10));
-    const remaining = in.limit(clock.io(), until).timeout.duration;
-    try testing.expectEqual(@as(i96, 20 * std.time.ns_per_ms), remaining.raw.nanoseconds);
-    try testing.expectEqual(Io.Clock.awake, remaining.clock);
-    const started = clock.read(.awake);
+    // An escape timeout far past the deadline: only the deadline can end it.
+    var in = try inputOver(&p.tty, &parser, &read, 60_000);
+    const io = testing.io;
+    const until = (Io.Timeout{ .duration = .{ .raw = .fromMilliseconds(40), .clock = .awake } }).toDeadline(io);
+    const started: Io.Timestamp = .now(io, .awake);
     try testing.expectEqual(Input.Woke.expired, try in.waitPosix(io, until));
-    try testing.expectEqual(Io.Duration.fromMilliseconds(20), started.durationTo(clock.read(.awake)));
-    try testing.expectEqual(@as(u64, 2), fio.count(.now));
-    try testing.expectEqual(@as(u64, 1), fio.count(.batchAwaitConcurrent));
-    try testing.expectEqual(@as(u64, 1), fio.count(.file_read_streaming));
-    try testing.expectEqual(@as(u64, 1), fio.count(.batchCancel));
+    const took = started.durationTo(.now(io, .awake));
+    try testing.expect(took.toMilliseconds() >= 30);
+    try testing.expect(took.toMilliseconds() < 5_000);
 }

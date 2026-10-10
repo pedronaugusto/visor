@@ -26,7 +26,8 @@ pub fn build(b: *std.Build) !void {
         .fields = @as([]const []const u8, &uucode_fields),
     });
     const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize });
-    const imports = dependencies(morse, conduit, uucode, aegis);
+    const reactor = b.dependency("reactor", .{ .target = target, .optimize = optimize });
+    const imports = dependencies(morse, conduit, uucode, aegis, reactor);
 
     //=====================================================================
     // The module.
@@ -265,19 +266,20 @@ pub fn build(b: *std.Build) !void {
             .package = "visor",
             .program = b.path("ci/consumer.zig"),
             .modules = &.{"visor"},
-            // conduit waits through reactor, which a consumer fetches with it.
-            .packages = &.{ morse, conduit, conduit.builder.dependency("reactor", .{}), uucode, aegis },
+            // conduit waits through reactor, and visor listens for a resize through it.
+            .packages = &.{ morse, conduit, reactor, uucode, aegis },
         });
     }
 }
 
 /// The modules visor imports.
-fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency, aegis: *std.Build.Dependency) [4]std.Build.Module.Import {
+fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency, aegis: *std.Build.Dependency, reactor: *std.Build.Dependency) [5]std.Build.Module.Import {
     return .{
         .{ .name = "aegis", .module = aegis.module("aegis") },
         .{ .name = "morse", .module = morse.module("morse") },
         .{ .name = "uucode", .module = uucode.module("uucode") },
         .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
+        .{ .name = "reactor", .module = reactor.module("reactor") },
     };
 }
 
@@ -300,7 +302,7 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .root_source_file = b.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &dependencies(morse, conduit, uucode, b.dependency("aegis", .{ .target = target, .optimize = optimize })),
+        .imports = &dependencies(morse, conduit, uucode, b.dependency("aegis", .{ .target = target, .optimize = optimize }), b.dependency("reactor", .{ .target = target, .optimize = optimize })),
     });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },

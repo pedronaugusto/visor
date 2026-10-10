@@ -8,10 +8,11 @@
 //! What it owns is small and dangerous: the mode the terminal was found in,
 //! and the way back to it. Everything else — the timeouts, the event loop,
 //! when to read, when to flush — is the caller's. No thread is started, no
-//! signal handler is installed unless asked for, and no panic handler is
-//! installed behind anyone's back.
+//! signal is listened for unless asked for (through reactor's `Signals`,
+//! which owns the process's handlers), and no panic handler is installed
+//! behind anyone's back.
 //!
-//! The registrations for raw terminals and resize watchers live here, so
+//! The registrations for raw terminals live here, so
 //! `restoreGlobal` can put every terminal back from a panic handler, where
 //! there is nothing to pass and nothing that may fail.
 //!
@@ -29,6 +30,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const terminal = @import("dependencies.zig").tty;
+const reactor = @import("dependencies.zig").reactor;
 
 const Winsize = @import("winsize.zig").Winsize;
 const render = @import("render.zig");
@@ -43,94 +45,6 @@ const is_windows = builtin.target.os.tag == .windows;
 /// Raw terminals registered for panic restoration. Each terminal owns its
 /// saved mode and renderer association; the list only makes them reachable.
 var open_ttys: ?*Tty = null;
-
-/// A pipe's descriptor, `-1` for none.
-const Fd = if (is_windows) i32 else std.posix.fd_t;
-
-/// Subscriptions to the process's resize signal. A Tty owns its pipe;
-/// its slot lends the write end to handlers until withdrawal has finished.
-var watchers: [max_watchers]ResizeWatch = @splat(.{});
-
-const ResizeWatch = struct {
-    // The low bit admits new borrows; the other bits count existing ones.
-    // One atomic word makes taking a borrow and closing admission ordered:
-    // a handler either increments first, or sees admission closed. These
-    // native-word atomics are lock-free on every supported POSIX target.
-    const admitted: usize = 1;
-    const borrow: usize = 2;
-    state: std.atomic.Value(usize) = .init(0),
-    fd: Fd = -1,
-
-    fn publish(w: *ResizeWatch, fd: Fd) void {
-        std.debug.assert(w.fd == -1);
-        w.fd = fd;
-        w.state.store(admitted, .release);
-    }
-
-    fn acquire(w: *ResizeWatch) ?Fd {
-        var state = w.state.load(.monotonic);
-        while (state & admitted != 0) {
-            state = w.state.cmpxchgWeak(state, state + borrow, .acquire, .monotonic) orelse return w.fd;
-        }
-        return null;
-    }
-
-    fn release(w: *ResizeWatch) void {
-        _ = w.state.fetchSub(borrow, .release);
-    }
-
-    fn withdraw(w: *ResizeWatch) void {
-        _ = w.state.fetchAnd(~admitted, .acq_rel);
-        // No handler waits on the owner: each only writes a nonblocking
-        // byte and releases. On this thread an interrupt finishes before
-        // withdrawal resumes; on another thread its borrow keeps BOTH ends
-        // open here, avoiding descriptor reuse and a write without a reader.
-        while (w.state.load(.acquire) != 0) {
-            if (builtin.is_test) ResizePause.quiescing.store(true, .release);
-            std.atomic.spinLoopHint();
-        }
-        w.fd = -1;
-    }
-};
-/// How many terminals can watch at once. A program has one terminal; a
-/// test, or a program that also drives a pseudo-terminal of its own, a few.
-const max_watchers = 8;
-/// How many slots are taken, which says when the handler goes in and when
-/// the one it replaced comes back.
-var watching: usize = 0;
-/// The `SIGWINCH` handler that was there before the first watcher.
-var resize_was: if (is_windows) void else std.posix.Sigaction = undefined;
-
-/// The handler: one byte into each watcher's pipe, which is all a signal
-/// handler may do. A full pipe already holds a wake, so a write that would
-/// block is dropped.
-fn onWinch(_: std.posix.SIG) callconv(.c) void {
-    // libc writes can change the interrupted thread's errno, even for the
-    // expected full-pipe case. Raw Linux syscalls return their error instead.
-    const errno_ptr: ?*c_int = if (std.posix.system == std.c) std.c._errno() else null;
-    const saved_errno = if (errno_ptr) |p| p.* else 0;
-    defer if (errno_ptr) |p| {
-        p.* = saved_errno;
-    };
-    const byte: [1]u8 = .{'w'};
-    for (&watchers) |*w| {
-        const fd = w.acquire() orelse continue;
-        if (builtin.is_test) ResizePause.borrowed();
-        _ = std.posix.system.write(fd, &byte, 1);
-        w.release();
-    }
-}
-
-/// Empties a resize pipe's read end; whether there was anything in it.
-fn drainPipe(fd: Fd) bool {
-    var any = false;
-    var sink: [64]u8 = undefined;
-    while (true) {
-        const rc = std.posix.system.read(fd, &sink, sink.len);
-        if (std.posix.errno(rc) != .SUCCESS or rc == 0) return any;
-        any = true;
-    }
-}
 
 fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
     const rc = std.posix.system.fcntl(fd, cmd, @as(usize, arg));
@@ -166,9 +80,8 @@ pub const Tty = struct {
     own_renderer: ?*Renderer = null,
     /// Private: the next raw terminal in the panic registrations.
     next_raw: ?*Tty = null,
-    /// Private: this terminal's resize pipe, read end first, while it watches for a
-    /// resize; `-1` otherwise.
-    resize_pipe: [2]Fd = .{ -1, -1 },
+    /// Private: this terminal's listener for the resize signal, while it watches for one.
+    resize: ?reactor.Signals = null,
 
     /// Anything opening the terminal can fail with.
     pub const OpenError = terminal.OpenControllingError;
@@ -200,7 +113,7 @@ pub const Tty = struct {
     /// Gives the terminal back, restoring its mode first if it was changed.
     pub fn close(t: *Tty, io: Io) void {
         t.restore();
-        t.unwatchResize();
+        t.unwatchResize(io);
         t.file.close(io);
         if (is_windows and t.input.handle != t.file.handle) t.input.close(io);
         t.* = undefined;
@@ -344,90 +257,73 @@ pub const Tty = struct {
         return file.readStreaming(io, &.{buf});
     }
 
-    /// What `watchResize` fails with: no pipe or handler could be had.
+    /// What `watchResize` fails with: no listener could be had.
     pub const WatchResizeError = error{ SystemResources, Unexpected };
 
-    /// Has a resize wake the reader: a handler for `SIGWINCH` that writes a
-    /// byte into this terminal's own pipe, which `Input.next` waits on beside
-    /// the terminal and turns into a `resize` event carrying the size and
-    /// pixels the operating system has now.
+    /// Has a resize wake the reader: a listener for `SIGWINCH` on reactor's
+    /// `Signals`, which `Input.next` waits on beside the terminal and turns
+    /// into a `resize` event carrying the size and pixels the operating
+    /// system has now.
     ///
-    /// The pipe is this `Tty`'s, so two terminals watching -- a program's
+    /// The listener is this `Tty`'s, so two terminals watching -- a program's
     /// own and one it drives, or two in a test -- each get their wake and
     /// neither's `unwatchResize` takes the other's away. The signal is the
-    /// process's, so its handler is installed once, when the first terminal
-    /// watches, and only when asked for, because a library that installs a
-    /// signal handler takes something from the program that the program
-    /// cannot get back; the last terminal to stop watching puts back the one
-    /// the first found. The handler does nothing but write, so a burst of
-    /// signals is one wake and one event.
+    /// process's, and reactor owns its handler: it is installed when the
+    /// first listener of any kind starts and the one it found is put back
+    /// when the last stops, and it tells every listener, a program's own
+    /// among them. A burst of signals is one wake and one event.
     ///
     /// A terminal that answers for mode 2048 makes this unnecessary: the
     /// resize arrives on the input stream, in step with everything else. On
     /// Windows there is no signal and this does nothing.
-    pub fn watchResize(t: *Tty) WatchResizeError!void {
+    pub fn watchResize(t: *Tty, io: Io) WatchResizeError!void {
         if (is_windows) return;
-        if (t.resize_pipe[0] != -1) return;
-        if (watching == max_watchers) return error.SystemResources;
-        // conduit's pipe, so a child conduit starts while it is being made
-        // is not handed it before it is marked close-on-exec.
-        const fds = terminal.pipe(.{ .nonblocking = true }) catch |err| switch (err) {
-            error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded => return error.SystemResources,
-            error.Unexpected => return error.Unexpected,
+        if (t.resize != null) return;
+        t.resize = reactor.Signals.start(io, &.{.window_change}) catch |err| switch (err) {
+            error.TooManyListeners => return error.SystemResources,
+            error.Unsupported, error.Unexpected => return error.Unexpected,
+            else => return error.SystemResources,
         };
-        for (&watchers) |*w| {
-            if (w.fd != -1) continue;
-            w.publish(fds[1]);
-            break;
-        }
-        t.resize_pipe = fds;
-        watching += 1;
-        if (watching == 1) {
-            const action: std.posix.Sigaction = .{
-                .handler = .{ .handler = onWinch },
-                .mask = std.posix.sigemptyset(),
-                .flags = std.posix.SA.RESTART,
-            };
-            std.posix.sigaction(.WINCH, &action, &resize_was);
-        }
     }
 
-    /// Stops this terminal watching, and closes its pipe; when it was the
-    /// last one watching, puts back the `SIGWINCH` handler the first one
-    /// found. Waits for any handler already writing this pipe before either
-    /// end is closed. Safe to call when nothing is being watched.
-    pub fn unwatchResize(t: *Tty) void {
-        if (is_windows or t.resize_pipe[0] == -1) return;
-        for (&watchers) |*w| {
-            if (w.fd == t.resize_pipe[1]) w.withdraw();
-        }
-        watching -= 1;
-        if (watching == 0) std.posix.sigaction(.WINCH, &resize_was, null);
-        for (t.resize_pipe) |fd| {
-            _ = std.posix.system.close(fd);
-        }
-        t.resize_pipe = .{ -1, -1 };
+    /// Stops this terminal watching; when it was the last listener of the
+    /// signal, reactor puts back the handler it found. Safe to call when
+    /// nothing is being watched.
+    pub fn unwatchResize(t: *Tty, io: Io) void {
+        if (is_windows) return;
+        if (t.resize) |*listener| listener.stop(io);
+        t.resize = null;
     }
 
     /// Whether the terminal has changed size since this was last asked, for
     /// a program with a loop of its own rather than an `Input`. Never
     /// blocks; false when nothing is being watched.
-    pub fn resized(t: *Tty) bool {
-        if (is_windows or t.resize_pipe[0] == -1) return false;
-        return drainPipe(t.resize_pipe[0]);
+    pub fn resized(t: *Tty, io: Io) bool {
+        return t.takeResize(io);
     }
 
-    /// Empties this terminal's resize pipe, which woke a wait. `Input` calls
-    /// this after the pipe woke it.
-    pub fn drainResize(t: *Tty) void {
-        if (is_windows or t.resize_pipe[0] == -1) return;
-        _ = drainPipe(t.resize_pipe[0]);
+    /// Takes what a wait on `resizeWake` reported. `Input` calls this after
+    /// the wake woke it.
+    pub fn drainResize(t: *Tty, io: Io) void {
+        _ = t.takeResize(io);
     }
 
-    /// The read end of this terminal's resize pipe, while it watches.
-    pub fn resizeFile(t: *const Tty) ?Io.File {
-        if (is_windows or t.resize_pipe[0] == -1) return null;
-        return .{ .handle = t.resize_pipe[0], .flags = .{ .nonblocking = true } };
+    fn takeResize(t: *Tty, io: Io) bool {
+        if (is_windows) return false;
+        const listener = &(t.resize orelse return false);
+        var any = false;
+        while (listener.next(io, .{ .duration = .{ .raw = .zero, .clock = .awake } })) |_| {
+            any = true;
+        } else |_| {}
+        return any;
+    }
+
+    /// The wake a delivery of the resize signal sets, to wait on beside the
+    /// terminal while it watches.
+    pub fn resizeWake(t: *const Tty) ?*reactor.Wake {
+        if (is_windows) return null;
+        const listener = t.resize orelse return null;
+        return listener.wake();
     }
 
     /// The file keys and replies arrive on.
@@ -861,134 +757,4 @@ test "primitive restoration output does not wait for a full descriptor" {
     try testing.expect(done.load(.acquire));
     const after = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
     try testing.expectEqual(before, after);
-}
-
-// A controlled pause after the handler has borrowed the descriptor. These
-// gates do not exist in a library build.
-const ResizePause = struct {
-    var enabled: bool = false;
-    var held: std.atomic.Value(bool) = .init(false);
-    var quiescing: std.atomic.Value(bool) = .init(false);
-    var released: std.atomic.Value(bool) = .init(false);
-
-    fn borrowed() void {
-        if (!enabled) return;
-        held.store(true, .release);
-        while (!released.load(.acquire)) std.atomic.spinLoopHint();
-    }
-};
-
-test "resize teardown waits for a handler that has borrowed its descriptor" {
-    if (is_windows) return error.SkipZigTest;
-    var t: Tty = .adopt(undefined);
-    try t.watchResize();
-    defer t.unwatchResize();
-    const fds = t.resize_pipe;
-    ResizePause.held.store(false, .release);
-    ResizePause.quiescing.store(false, .release);
-    ResizePause.released.store(false, .release);
-    ResizePause.enabled = true;
-    defer ResizePause.enabled = false;
-    const handler = try std.Thread.spawn(.{}, onWinch, .{std.posix.SIG.WINCH});
-    defer handler.join();
-    defer ResizePause.released.store(true, .release);
-    while (!ResizePause.held.load(.acquire)) std.atomic.spinLoopHint();
-
-    var done: std.atomic.Value(bool) = .init(false);
-    const teardown = try std.Thread.spawn(.{}, struct {
-        fn run(tty: *Tty, finished: *std.atomic.Value(bool)) void {
-            tty.unwatchResize();
-            finished.store(true, .release);
-        }
-    }.run, .{ &t, &done });
-    defer {
-        ResizePause.released.store(true, .release);
-        teardown.join();
-    }
-    // Teardown either reaches quiescence with the borrow held, or returns
-    // before the handler writes. No clock or scheduling guess decides it.
-    while (!ResizePause.quiescing.load(.acquire) and !done.load(.acquire)) std.atomic.spinLoopHint();
-    const returned_early = done.load(.acquire);
-    const read_open = std.posix.errno(std.posix.system.fcntl(fds[0], std.posix.F.GETFD, @as(u32, 0))) == .SUCCESS;
-    const write_open = std.posix.errno(std.posix.system.fcntl(fds[1], std.posix.F.GETFD, @as(u32, 0))) == .SUCCESS;
-    try testing.expect(!returned_early);
-    try testing.expect(read_open);
-    try testing.expect(write_open);
-}
-
-test "a resize handler preserves errno when its pipe is full" {
-    if (is_windows or std.posix.system != std.c) return error.SkipZigTest;
-    const errno_ptr = std.c._errno();
-    const saved = errno_ptr.*;
-    defer errno_ptr.* = saved;
-    var t: Tty = .adopt(undefined);
-    try t.watchResize();
-    defer t.unwatchResize();
-    const bytes: [4096]u8 = @splat('x');
-    while (true) {
-        const rc = std.posix.system.write(t.resize_pipe[1], &bytes, bytes.len);
-        if (std.posix.errno(rc) == .SUCCESS) continue;
-        try testing.expectEqual(std.posix.E.AGAIN, std.posix.errno(rc));
-        break;
-    }
-    const interrupted = @backingInt(std.posix.E.NOENT);
-    errno_ptr.* = interrupted;
-    onWinch(.WINCH);
-    const after = errno_ptr.*;
-    try testing.expectEqual(interrupted, after);
-}
-
-test "a resize pipe is close-on-exec and nonblocking at both ends" {
-    if (is_windows) return error.SkipZigTest;
-    var t: Tty = .adopt(undefined);
-    try t.watchResize();
-    defer t.unwatchResize();
-    for (t.resize_pipe) |fd| {
-        const fd_flags = std.posix.system.fcntl(fd, std.posix.F.GETFD, @as(usize, 0));
-        try testing.expectEqual(std.posix.E.SUCCESS, std.posix.errno(fd_flags));
-        try testing.expect(@as(usize, @intCast(fd_flags)) & std.posix.FD_CLOEXEC != 0);
-        const fl_flags = std.posix.system.fcntl(fd, std.posix.F.GETFL, @as(usize, 0));
-        try testing.expectEqual(std.posix.E.SUCCESS, std.posix.errno(fl_flags));
-        const nonblock: u32 = @bitCast(std.posix.O{ .NONBLOCK = true });
-        try testing.expect(@as(usize, @intCast(fl_flags)) & nonblock != 0);
-    }
-}
-
-test "a resize pipe is not made while conduit is starting a child" {
-    // Where the pipe and its flag are two calls, a child conduit starts in
-    // between would inherit both ends. conduit keeps its spawns out of that
-    // gap only for pipes made under its lock.
-    if (is_windows or !terminal.opening_is_two_calls) return error.SkipZigTest;
-
-    const Watch = struct {
-        fn run(tty: *Tty, outcome: *error{ SystemResources, Unexpected }!void, done: *std.atomic.Value(bool)) void {
-            outcome.* = tty.watchResize();
-            done.store(true, .release);
-        }
-
-        /// In the lock, as a child being started is: the watch asked for on
-        /// another thread meanwhile, and whether its pipe was made. Ample
-        /// time for a pipe made outside the lock to be made; the watcher can
-        /// only be joined once the lock is left, so the wait's own result
-        /// comes back with it.
-        fn whileStarting(
-            tty: *Tty,
-            outcome: *error{ SystemResources, Unexpected }!void,
-            done: *std.atomic.Value(bool),
-        ) std.Thread.SpawnError!struct { std.Thread, bool, Io.Cancelable!void } {
-            const watcher = try std.Thread.spawn(.{}, run, .{ tty, outcome, done });
-            const waited = Io.sleep(testing.io, .fromMilliseconds(50), .awake);
-            return .{ watcher, done.load(.acquire), waited };
-        }
-    };
-
-    var t: Tty = .adopt(undefined);
-    var watched: std.atomic.Value(bool) = .init(false);
-    var result: error{ SystemResources, Unexpected }!void = {};
-    const watcher, const made_while_starting, const waited = try terminal.ForkGap.hold(Watch.whileStarting, .{ &t, &result, &watched });
-    watcher.join();
-    try waited;
-    try result;
-    t.unwatchResize();
-    try testing.expect(!made_while_starting);
 }
