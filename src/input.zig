@@ -713,12 +713,14 @@ test "the pump hands over what the parser makes of the whole stream, however it 
 
 test "the pump's cases draw every fragment, raw bytes, every read size and long streams" {
     if (is_windows) return error.SkipZigTest;
+    // The assertions are about the cases `check` draws, not the fuzzer's.
+    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try shakedown.check(testing.allocator, &t, struct {
         fn body(tally: *Tally, case: *shakedown.Case) !void {
             try pumpMatchesParser(testing.allocator, case.source, tally);
         }
-    }.body, .{});
+    }.body, .{ .seed = 0x5eed, .cases = 1024 });
     try testing.expect(t.pieces.covers(0, fragments.len));
     try testing.expect(t.read_len.covers(1, 32));
     try testing.expect(t.bytes.least == 0);
