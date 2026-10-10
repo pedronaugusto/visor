@@ -1,5 +1,4 @@
 {
-  "package": "visor",
   "compile_step": "check",
   "targets": [
     "x86_64-linux-gnu",
@@ -11,5 +10,19 @@
     "aarch64-macos"
   ],
   "compile_once": true,
-  "sanitizer": "test"
+  "jobs": [
+    {
+      "name": "ThreadSanitizer (Linux)",
+      "step": "test",
+      "args": ["-Dthread-sanitizer=true", "-Doptimize=debug", "-Dci-lint=false"],
+      "tiers": ["release"]
+    },
+    {
+      "name": "conformance",
+      "step": "test",
+      "directory": "conformance",
+      "os": ["ubuntu-latest", "macos-latest"],
+      "setup": false
+    }
+  ]
 }
