@@ -25,19 +25,19 @@ permissions:
 jobs:
   skip:
     if: github.event_name != 'push' && !inputs.status-only
-    uses: pedronaugusto/preflight/.github/workflows/skip.yml@387e188a9b8e9f0a157d528606cc2db4175db7de
+    uses: pedronaugusto/preflight/.github/workflows/skip.yml@84cccbc0e7040c42c28a7333c22cf7261b04694e
     with:
       tier: ${{ github.event_name == 'workflow_dispatch' && inputs.tier || 'merge' }}
-      preflight-ref: 387e188a9b8e9f0a157d528606cc2db4175db7de
+      preflight-ref: 84cccbc0e7040c42c28a7333c22cf7261b04694e
       working-directory: "."
   gate:
     needs: skip
     if: always() && (github.event_name == 'push' || inputs.status-only || (needs.skip.result == 'success' && needs.skip.outputs.docs-only != 'true'))
-    uses: pedronaugusto/preflight/.github/workflows/zig.yml@387e188a9b8e9f0a157d528606cc2db4175db7de
+    uses: pedronaugusto/preflight/.github/workflows/zig.yml@84cccbc0e7040c42c28a7333c22cf7261b04694e
     with:
       tier: ${{ github.event_name == 'workflow_dispatch' && inputs.tier || 'merge' }}
       working-directory: "."
-      preflight-ref: 387e188a9b8e9f0a157d528606cc2db4175db7de
+      preflight-ref: 84cccbc0e7040c42c28a7333c22cf7261b04694e
       attest: ${{ github.event_name == 'push' || inputs.status-only }}
       fast-matrix: >-
         {"include":[{"os":"ubuntu-latest","name":"Linux Debug","step":"preflight-fast","args":"-Doptimize=debug","shard":"","setup":true,"job_timeout":20,"cache_key":"fast-linux-debug-0","artifact":"","operation":"execute"}]}
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pedronaugusto/preflight
-          ref: 387e188a9b8e9f0a157d528606cc2db4175db7de
+          ref: 84cccbc0e7040c42c28a7333c22cf7261b04694e
           path: .preflight
       # The conformance build is its own, under conformance/: the fetch
       # configures it, so the emulator it names is fetched here and in no

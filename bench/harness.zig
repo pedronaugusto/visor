@@ -16,10 +16,13 @@
 //! frame, since the stage of the next cannot come inside a batch.
 //!
 //! The check path (`visor-bench draw|ops <task> check ...`, in a process of
-//! its own) runs a few frames and prints what they made; the benchmark path
-//! builds the fixture in a row's setup, runs `units` frames in its run, and
-//! frees the fixture in its teardown. Neither reads a clock itself.
+//! its own) runs a few frames and prints what they made. The benchmark path
+//! is one row of shakedown's `bench`: the fixture is built once, before the
+//! row's first batch, and every batch of `frame`s (or every `stage`, `shot`
+//! and `settle`) meets it; it is freed after the last. Neither reads a clock
+//! itself.
 const std = @import("std");
+const bench = @import("shakedown").bench;
 const v = @import("visor");
 
 /// The Io the check lines go out through, set once by the check entry points:
@@ -183,6 +186,8 @@ pub const Bench = struct {
     ctx: Ctx,
     arena: std.heap.ArenaAllocator,
     slot: ?*anyopaque = null,
+    /// The frames staged so far, for a workload whose frames differ.
+    staged: usize = 0,
 };
 
 /// The error set of a callback that returns an error union.
@@ -190,7 +195,8 @@ fn ErrorsOf(comptime f: anytype) type {
     return @typeInfo(@typeInfo(@TypeOf(f)).@"fn".return_type.?).error_union.error_set;
 }
 
-/// `F` as the setup, run and teardown of a row.
+/// `F` as the fixture, run and stages of a row. The fixture lives as long as
+/// the row, so every batch meets the one a workload built before any clock.
 pub fn Hooks(comptime F: type) type {
     return struct {
         pub fn setup(x: *Bench) !void {
@@ -199,42 +205,60 @@ pub fn Hooks(comptime F: type) type {
             x.ctx.fixture = x.arena.allocator();
             x.ctx.count = 0;
             x.ctx.bytes = 0;
+            x.staged = 0;
             const f = try x.ctx.gpa.create(F);
             errdefer x.ctx.gpa.destroy(f);
             try F.init(f, &x.ctx);
-            errdefer F.deinit(f, &x.ctx);
-            // Where the frame has work the clock must not see, it is done
-            // here, so the sample is the timed part alone.
-            if (comptime @hasDecl(F, "shot")) try F.stage(f, &x.ctx, 0);
             x.slot = f;
         }
 
+        /// Where the frame has work the clock must not see, it is done here,
+        /// so the sample is the timed part alone.
+        pub fn stage(x: *Bench, _: u64) !void {
+            try F.stage(fixture(x), &x.ctx, x.staged);
+            x.staged += 1;
+        }
+
         pub fn run(x: *Bench, units: u64) !void {
-            const f: *F = @ptrCast(@alignCast(x.slot.?)); // safe: this same F's setup stored it
-            if (comptime @hasDecl(F, "shot")) {
-                try single(units);
-                return F.shot(f, &x.ctx);
-            }
+            const f = fixture(x);
+            if (comptime sampled(F)) return F.shot(f, &x.ctx);
             for (0..units) |n| try F.frame(f, &x.ctx, n);
         }
 
+        pub fn settle(x: *Bench, _: u64) !void {
+            try F.settle(fixture(x), &x.ctx);
+        }
+
         pub fn teardown(x: *Bench) !void {
-            const f: *F = @ptrCast(@alignCast(x.slot.?)); // safe: this same F's setup stored it
-            defer {
-                F.deinit(f, &x.ctx);
-                x.ctx.gpa.destroy(f);
-                x.arena.deinit();
-                x.slot = null;
-            }
-            if (comptime @hasDecl(F, "shot")) try F.settle(f, &x.ctx);
+            const f = fixture(x);
+            F.deinit(f, &x.ctx);
+            x.ctx.gpa.destroy(f);
+            x.arena.deinit();
+            x.slot = null;
             std.mem.doNotOptimizeAway(x.ctx.count + x.ctx.bytes);
+        }
+
+        fn fixture(x: *Bench) *F {
+            return @ptrCast(@alignCast(x.slot.?)); // safe: this same F's setup stored it
         }
     };
 }
 
-/// A row whose sample is one frame: the runner must not grow its batch.
-pub fn single(units: u64) error{SampleTooShort}!void {
-    if (units != 1) return error.SampleTooShort;
+/// The row of workload `F`, named `name`. A workload whose frame has work the
+/// clock must not see is staged before each frame and settled after it, and its
+/// sample is one frame, since the stage of the next cannot come inside a batch;
+/// the others are batched until a sample can be read.
+pub fn row(comptime F: type, comptime WorkloadError: type, name: []const u8) bench.Row(Bench, WorkloadError) {
+    const H = Hooks(F);
+    return .{
+        .name = name,
+        .unit = "frame",
+        .fixture = .{ .lifetime = .row, .setup = H.setup, .teardown = H.teardown },
+        .run = H.run,
+        .grow = !sampled(F),
+        .stage = if (comptime sampled(F)) H.stage else null,
+        .settle = if (comptime sampled(F)) H.settle else null,
+    };
 }
 
 /// The error set of every callback of `workloads`, a tuple of `.{ name, F }`.
@@ -243,6 +267,7 @@ pub fn ErrorOf(comptime workloads: anytype) type {
     inline for (workloads) |entry| {
         const H = Hooks(entry[1]);
         set = set || ErrorsOf(H.setup) || ErrorsOf(H.run) || ErrorsOf(H.teardown);
+        if (sampled(entry[1])) set = set || ErrorsOf(H.stage) || ErrorsOf(H.settle);
     }
     return set;
 }

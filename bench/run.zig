@@ -179,23 +179,13 @@ fn measureOne(init: std.process.Init, args: []const []const u8) !void {
     inline for (families) |family| {
         inline for (family[1]) |entry| {
             if (std.mem.eql(u8, args[0], family[0]) and std.mem.eql(u8, args[1], entry[0])) {
-                const H = harness.Hooks(entry[1]);
-                const row: bench.Row(harness.Bench, WorkloadError) = .{
-                    .name = name,
-                    .unit = "frame",
-                    .setup = H.setup,
-                    .run = H.run,
-                    .teardown = H.teardown,
-                };
                 // A sample here is at least ten milliseconds of frames, where
-                // a workload is quicker than that; a staged workload's sample
-                // is one frame, so its batch must never grow: a sample under
-                // ten clock ticks is an error, not a longer batch.
-                const options: bench.Options = if (comptime harness.sampled(entry[1]))
-                    .{ .smoke = smoke, .prefix = args[6], .samples = samples, .minimum = .zero, .resolution_multiple = 10 }
-                else
-                    .{ .smoke = smoke, .prefix = args[6], .samples = samples, .minimum = .fromMilliseconds(10) };
-                try bench.run(WorkloadError, init.gpa, init.io, &stdout.interface, &context, &.{row}, metadata, options);
+                // a workload is quicker than that. A staged workload's sample
+                // is one frame and is read at ten clock ticks: a frame
+                // shorter than that is an error, not a longer batch.
+                var options: bench.Options = .{ .smoke = smoke, .prefix = args[6], .samples = samples, .minimum = .fromMilliseconds(10) };
+                if (comptime harness.sampled(entry[1])) options.resolution_multiple = 10;
+                try bench.run(WorkloadError, init.gpa, init.io, &stdout.interface, &context, &.{harness.row(entry[1], WorkloadError, name)}, metadata, options);
                 try stdout.interface.flush();
                 return;
             }
@@ -266,6 +256,21 @@ test "the workloads: 55 operations, 8 drawing-core workloads, each named once" {
             if (i < j) try std.testing.expect(!std.mem.eql(u8, one[0], other[0]));
         }
     }
+}
+
+test "a staged workload's row takes one frame a sample and keeps its fixture, as every other row does" {
+    const all = draw.workloads ++ ops.workloads;
+    @setEvalBranchQuota(20_000);
+    inline for (all) |entry| {
+        const row = harness.row(entry[1], WorkloadError, entry[0]);
+        const staged = harness.sampled(entry[1]);
+        try std.testing.expectEqual(!staged, row.grow);
+        try std.testing.expect((row.stage != null) == staged and (row.settle != null) == staged);
+        try std.testing.expectEqual(bench.Lifetime.row, row.fixture.?.lifetime);
+    }
+    // The one staged workload is the one whose every frame restyles every cell.
+    try std.testing.expectEqualStrings("style_heavy", draw.workloads[4][0]);
+    try std.testing.expect(harness.sampled(draw.workloads[4][1]));
 }
 
 test "a prefix selects the tasks it names, or begins" {

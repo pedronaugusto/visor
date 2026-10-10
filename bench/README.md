@@ -46,7 +46,10 @@ program again, so that none meets the heap another left:
   <prefix>` measures one of them, which is what the pass runs for each row.
 
 `harness.zig` says what a workload is: a fixture built before any clock, the
-frame the clock reads, and the evidence of the frames a check ran. A check
+frame the clock reads, and the evidence of the frames a check ran. A row builds
+its fixture once, and every warmup, calibration and sample meets that one, warm
+(shakedown's row lifetime); a workload with `stage` and `settle` has them run
+outside the clock around each frame. A check
 prints its evidence and a last line, `result\t<frames>\t<count>\t<bytes>`; the
 checks do not trust visor's own emulator: `terminal.zig` is an independent
 decoder for the bytes visor writes (text, RGB and bold SGR, cursor, erase,
