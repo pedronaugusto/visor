@@ -85,8 +85,8 @@ pub const Canvas = struct {
         surface: *Surface,
         layers: *visor.Layers,
         writer: *std.Io.Writer,
-        image: u32,
-        placement: u32 = 1,
+        image: visor.ImageId,
+        placement: visor.PlacementId = .fromRaw(1),
         order: visor.Layer.Order = .{},
         /// Palette for sixel output. The caller chooses the quantization.
         sixel_palette: []const visor.morse.Rgb = &.{},
@@ -113,7 +113,7 @@ pub const Canvas = struct {
                 const p = c.raster(pic.surface);
                 for (shapes) |shape| drawShape(p, shape.geometry, shape.paint);
                 if (protocol == .kitty) {
-                    _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height });
+                    _ = try pic.layers.transmit(pic.writer, pic.image, pic.surface.pixels(), .{ .width = .fromRaw(pic.surface.dimensions().width), .height = .fromRaw(pic.surface.dimensions().height) });
                 } else {
                     try pic.layers.storeSixel(pic.image, .{ .width = pic.surface.dimensions().width, .height = pic.surface.dimensions().height, .pixels = .{ .rgba = pic.surface.pixels() }, .palette = pic.sixel_palette });
                 }

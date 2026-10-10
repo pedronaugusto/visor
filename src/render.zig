@@ -4351,7 +4351,7 @@ test "changing caps keeps the screen, and re-entering repaints every row and pic
     try f.renderer.enter(&f.out.writer, c, .alt, .{});
     for ("row one", 0..) |_, col| try f.screen.write(@intCast(col), 0, "row one"[col..][0..1], .{}, .none);
     for ("row two", 0..) |_, col| try f.screen.write(@intCast(col), 1, "row two"[col..][0..1], .{}, .none);
-    const picture: Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    const picture: Layer = .{ .image = .fromRaw(7), .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
     try layers.declare(picture);
     _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, c);
     f.out.clearRetainingCapacity();
@@ -4656,7 +4656,7 @@ test "picture frames keep cursor work and forced text rows" {
     defer layers.deinit();
     var caps = f.caps;
     caps.kitty_graphics = true;
-    const picture: Layer = .{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
+    const picture: Layer = .{ .image = .fromRaw(7), .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } };
     for ("text", 0..) |_, col| try f.screen.write(@intCast(col), 1, "text"[col..][0..1], .{}, .none);
     try layers.declare(picture);
     _ = try f.renderer.draw(&f.out.writer, &f.screen, &layers, caps);

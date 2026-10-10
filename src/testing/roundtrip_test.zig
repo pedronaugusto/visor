@@ -691,8 +691,8 @@ const layer = @import("../layer.zig");
 /// A picture the program is showing, as the program keeps it between
 /// frames; declared again every frame, because that is how the layers work.
 const Shown = struct {
-    image: u32,
-    placement: u32,
+    image: layer.ImageId,
+    placement: layer.PlacementId,
     rect: geom.Rect,
     under: bool,
     order: layer.Layer.Order,
@@ -775,7 +775,7 @@ const PictureRun = struct {
     side: std.Io.Writer.Allocating,
     /// The images sent or freed this frame, whose placements the terminal
     /// took down itself.
-    resent: std.ArrayList(u32) = .empty,
+    resent: std.ArrayList(layer.ImageId) = .empty,
     expected_commands: usize = 0,
     frames: usize = 0,
 
@@ -816,8 +816,8 @@ const PictureRun = struct {
             0, 1 => {
                 // A new picture, or the same one moved.
                 const shown: Shown = .{
-                    .image = dice.valueRangeAtMost(u32, 1, 4),
-                    .placement = dice.valueRangeAtMost(u32, 1, 3),
+                    .image = .fromRaw(dice.valueRangeAtMost(u32, 1, 4)),
+                    .placement = .fromRaw(dice.valueRangeAtMost(u32, 1, 3)),
                     .rect = randomRect(dice, size.cols, size.rows),
                     .under = dice.value(bool),
                     .order = .{
@@ -857,7 +857,7 @@ const PictureRun = struct {
             // Pixels sent under an id, perhaps one on screen, which the
             // terminal takes down while they land.
             0 => {
-                const id = dice.valueRangeAtMost(u32, 1, 4);
+                const id: layer.ImageId = .fromRaw(dice.valueRangeAtMost(u32, 1, 4));
                 const px = [_]u8{
                     0, 0, 0, 255,
                     0, 0, 0, 255,
@@ -865,8 +865,8 @@ const PictureRun = struct {
                     0, 0, 0, 255,
                 };
                 _ = try layers.transmit(&run.side.writer, id, &px, .{
-                    .width = 2,
-                    .height = 2,
+                    .width = .fromRaw(2),
+                    .height = .fromRaw(2),
                     .answer = dice.value(bool),
                     .now = ms(@intCast(run.frames * 16)),
                 });
@@ -880,7 +880,7 @@ const PictureRun = struct {
             // An image freed: its placements go with it, and nothing is
             // left for the frame to delete.
             2 => {
-                const id = dice.valueRangeAtMost(u32, 1, 4);
+                const id: layer.ImageId = .fromRaw(dice.valueRangeAtMost(u32, 1, 4));
                 try layers.deleteImage(&run.side.writer, id);
                 try run.resent.append(run.gpa, id);
                 var i: usize = 0;
@@ -925,7 +925,7 @@ const PictureRun = struct {
         // or freed, which the terminal took down itself.
         var left: usize = 0;
         for (previous) |was| {
-            if (std.mem.findScalar(u32, run.resent.items, was.image) != null) continue;
+            if (std.mem.findScalar(layer.ImageId, run.resent.items, was.image) != null) continue;
             for (run.showing.items) |now| {
                 if (now.image == was.image and now.placement == was.placement) break;
             } else left += 1;

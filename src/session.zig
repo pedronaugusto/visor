@@ -208,7 +208,7 @@ pub const Session = struct {
                     } else if (s.own_pending) |*next| redraw = next.update(event) or redraw else redraw = s.ws.update(event) or redraw;
                 },
                 .graphics => |response| {
-                    const held = if (response.id) |id| s.own_layers.image(id.raw()) != null else false;
+                    const held = if (response.id) |id| s.own_layers.image(id) != null else false;
                     s.own_layers.ack(response);
                     redraw = held or redraw;
                 },
@@ -304,7 +304,7 @@ test "a session repaints an unchanged in-band size, including pictures" {
     s.own_probe.caps.kitty_graphics = true;
     _ = try s.setCaps(&out.writer, s.own_probe.capabilities());
     try s.own_screen.write(0, 0, "x", .{}, .none);
-    const layer: layer_mod.Layer = .{ .image = 7, .rect = .{ .cols = 2, .rows = 2 } };
+    const layer: layer_mod.Layer = .{ .image = .fromRaw(7), .rect = .{ .cols = 2, .rows = 2 } };
     try s.own_layers.declare(layer);
     _ = try s.draw(&out.writer);
     out.clearRetainingCapacity();
@@ -477,7 +477,7 @@ test "session housekeeping survives failed capability output" {
         var bytes: [4096]u8 = undefined;
         var out: Writer = .fixed(&bytes);
         try s.renderer().enter(&out, .{}, .alt, .{});
-        _ = try s.layers().transmit(&out, 2, &.{ 0, 0, 0, 255 }, .{ .width = 1, .height = 1, .answer = true });
+        _ = try s.layers().transmit(&out, .fromRaw(2), &.{ 0, 0, 0, 255 }, .{ .width = .fromRaw(1), .height = .fromRaw(1), .answer = true });
         var refused: Writer = .fixed(&.{});
         const answer: morse.Event = .{ .reply = .{ .mode = .{ .mode = morse.inBandResize.number, .state = .reset } } };
         try testing.expectError(error.WriteFailed, s.handle(&refused, answer, ms(10)));
@@ -500,7 +500,7 @@ test "session housekeeping survives failed capability output" {
                     .cell_pixels => try testing.expectEqual(winsize.Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),
                     else => unreachable,
                 },
-                .graphics => try testing.expectEqual(layer_mod.Image.State.ready, s.layers().image(2).?.state),
+                .graphics => try testing.expectEqual(layer_mod.Image.State.ready, s.layers().image(.fromRaw(2)).?.state),
                 else => unreachable,
             },
             else => unreachable,

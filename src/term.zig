@@ -24,6 +24,7 @@
 
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
+const aegis = @import("dependencies.zig").aegis;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
@@ -491,7 +492,7 @@ pub const Term = struct {
         if (std.mem.eql(u8, csi.intermediates, " ") and csi.final == 'q') {
             // A shape this package does not name is not one a renderer
             // wrote, and leaves the cursor as it was.
-            const shape = std.math.cast(u8, csi.param(0) orelse 0) orelse return;
+            const shape = aegis.int.cast(u8, csi.param(0) orelse 0) catch return;
             t.scr.cursor.shape = std.enums.fromInt(morse.CursorShape, shape) orelse return;
             return;
         }
@@ -1105,7 +1106,7 @@ fn nonzeroParam(csi: morse.Csi, n: usize, fallback: u32) u32 {
 /// A parameter as a coordinate, saturating rather than wrapping: a number
 /// too large for the grid is clamped by `moveTo` anyway.
 fn clamp(n: u32) u16 {
-    return std.math.cast(u16, n) orelse std.math.maxInt(u16);
+    return aegis.int.cast(u16, n) catch std.math.maxInt(u16);
 }
 
 /// A one-based coordinate, with zero and a missing field both meaning one.

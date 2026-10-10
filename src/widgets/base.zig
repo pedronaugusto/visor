@@ -45,6 +45,8 @@ pub const wrap = text.wrap;
 pub const fit = text.fit;
 
 pub const Layer = layer.Layer;
+pub const ImageId = layer.ImageId;
+pub const PlacementId = layer.PlacementId;
 pub const Layers = layer.Layers;
 pub const Pixels = winsize.Pixels;
 

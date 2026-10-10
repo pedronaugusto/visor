@@ -121,9 +121,9 @@ fn Fixture(comptime kind: Kind) type {
             if (picture) {
                 var pixels: [16 * 16 * 4]u8 = undefined;
                 for (0..16 * 16) |i| pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
-                _ = try f.layers.transmit(&f.out.writer, 7, &pixels, .{ .width = 16, .height = 16, .compress = false });
+                _ = try f.layers.transmit(&f.out.writer, .fromRaw(7), &pixels, .{ .width = .fromRaw(16), .height = .fromRaw(16), .compress = false });
                 if (c.check) hex(f.out.written());
-                try f.layers.declare(.{ .image = 7, .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
+                try f.layers.declare(.{ .image = .fromRaw(7), .rect = .{ .col = 0, .row = 0, .cols = 2, .rows = 2 } });
             }
             if (!diff) {
                 f.out.clearRetainingCapacity();
@@ -175,7 +175,7 @@ fn Core(comptime kind: Kind) type {
             const s = &fx.screens[0];
             if (kind == .full_repaint) fx.renderer.repaint();
             if (kind == .unchanged_diff) s.damageAll();
-            if (picture) try fx.layers.declare(.{ .image = 7, .rect = .{
+            if (picture) try fx.layers.declare(.{ .image = .fromRaw(7), .rect = .{
                 .col = if (kind == .picture_layers) @intCast((n + 1) % 2) else 0,
                 .row = 0,
                 .cols = 2,

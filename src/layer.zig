@@ -32,6 +32,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
+const aegis = @import("dependencies.zig").aegis;
 
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
@@ -40,6 +41,13 @@ const Winsize = @import("winsize.zig").Winsize;
 
 const Allocator = std.mem.Allocator;
 const Rect = geom.Rect;
+
+/// The id of a picture, the protocol's `i=`: morse's, so a program's ids and the ones it asks the terminal about are the same type.
+pub const ImageId = morse.ImageId;
+/// Which placement of a picture, the protocol's `p=`.
+pub const PlacementId = morse.PlacementId;
+/// A size or an offset in pixels.
+pub const Pixels = morse.Pixels;
 const Writer = std.Io.Writer;
 
 /// Pixels the terminal was sent, under the id the program chose.
@@ -49,13 +57,13 @@ pub const Image = struct {
     /// pictures without a round trip, and a question it asks the terminal
     /// about graphics (`Caps.Probe.graphics_id`) can use one it never sends
     /// a picture under.
-    id: u32,
+    id: ImageId,
     /// Storage protocol; inline images live here until retired.
     protocol: Caps.Pictures = .kitty,
     /// How wide the image is, in pixels.
-    width: u32 = 0,
+    width: Pixels = .fromRaw(0),
     /// How tall it is, in pixels.
-    height: u32 = 0,
+    height: Pixels = .fromRaw(0),
     /// Whether the terminal has it.
     state: State = .ready,
     /// When it was sent, on the caller's clock.
@@ -79,20 +87,20 @@ pub const Image = struct {
 /// A picture on the screen.
 pub const Layer = struct {
     /// Which image, by its id.
-    image: u32,
+    image: ImageId,
     /// Which placement of it. Two layers of the same image need two of
     /// these; re-declaring the same pair moves the picture rather than
     /// making a second one.
-    placement: u32 = 1,
+    placement: PlacementId = .fromRaw(1),
     /// Where on the grid, in cells. A zero width and height draws the image
     /// at its own size from the top-left cell.
     rect: Rect,
     /// The part of the image to show, in pixels. All zero shows all of it.
     source: morse.GraphicsRect = .{},
     /// How far into the first cell the image starts, in pixels.
-    x_offset: u32 = 0,
+    x_offset: Pixels = .fromRaw(0),
     /// The same vertically.
-    y_offset: u32 = 0,
+    y_offset: Pixels = .fromRaw(0),
     /// Whether the picture goes under the text or over it.
     under: bool = true,
     /// Where in the stack, compared lexicographically so a nested layer
@@ -154,11 +162,11 @@ const SharedMemory = struct {
 // created it carries everything cleanup needs, even after reconfiguration:
 // its name, which is all an unlink takes.
 const SharedObject = struct {
-    id: u32,
+    id: ImageId,
     name: shm.Name,
     generation: u64,
 
-    fn init(policy: SharedMemory, id: u32, pixels: []const u8) shm.PutError!SharedObject {
+    fn init(policy: SharedMemory, id: ImageId, pixels: []const u8) shm.PutError!SharedObject {
         const name = shm.nextName();
         try shm.put(name, pixels);
         return .{ .id = id, .name = name, .generation = policy.generation };
@@ -174,9 +182,9 @@ pub const Transmit = struct {
     /// The shape of the bytes: RGBA, RGB or PNG.
     format: morse.GraphicsFormat = .rgba,
     /// How wide, in pixels. Required for RGBA and RGB.
-    width: u32 = 0,
+    width: Pixels = .fromRaw(0),
     /// How tall, in pixels.
-    height: u32 = 0,
+    height: Pixels = .fromRaw(0),
     /// Deflate the pixels before they go, and send them compressed when that
     /// made them smaller. A dark, sparse picture deflates to a few per cent
     /// of its size; a PNG is compressed already and is sent as it is.
@@ -194,35 +202,37 @@ pub const Transmit = struct {
 /// `Layers`, including those awaiting retirement.
 pub const ImageIds = struct {
     /// Private: the lowest id handed out.
-    first: u32,
+    first: ImageId,
     /// Private: the highest id handed out.
-    last: u32,
+    last: ImageId,
     /// Private: the probe's id, never handed out.
-    graphics_id: u32,
+    graphics_id: ImageId,
     /// Private: where the search for a free id starts.
-    next: u32,
+    next: ImageId,
 
     /// What `init` refuses: a range that is empty, starts at zero, or is
     /// only the graphics id.
     pub const InitError = error{InvalidIdRange};
 
     /// Ids from `first` to `last`, never handing out `graphics_id`.
-    pub fn init(first: u32, last: u32, graphics_id: u32) InitError!ImageIds {
-        if (first == 0 or first > last or (first == last and first == graphics_id)) return error.InvalidIdRange;
-        return .{ .first = first, .last = last, .graphics_id = graphics_id, .next = first };
+    pub fn init(first: ImageId, last: ImageId, graphics_id: morse.QueryImageId) InitError!ImageIds {
+        const probe: ImageId = .fromRaw(graphics_id.raw());
+        if (first.eql(.fromRaw(0)) or first.compare(last) == .gt or (first.eql(last) and first.eql(probe))) return error.InvalidIdRange;
+        return .{ .first = first, .last = last, .graphics_id = probe, .next = first };
     }
 
     /// What `acquire` fails with: every id in the range is taken.
     pub const AcquireError = error{NoImageId};
 
     /// A free id, or `NoImageId` while the range is wholly occupied.
-    pub fn acquire(ids: *ImageIds, layers: *const Layers) AcquireError!u32 {
+    pub fn acquire(ids: *ImageIds, layers: *const Layers) AcquireError!ImageId {
         const start = ids.next;
         while (true) {
             const id = ids.next;
-            ids.next = if (id == ids.last) ids.first else id + 1;
-            if (id != ids.graphics_id and layers.image(id) == null) return id;
-            if (ids.next == start) return error.NoImageId;
+            // unreachable: an id below `last` has a successor, and `last` is itself an id
+            ids.next = if (id.eql(ids.last)) ids.first else id.successor() catch unreachable;
+            if (!id.eql(ids.graphics_id) and layers.image(id) == null) return id;
+            if (ids.next.eql(start)) return error.NoImageId;
         }
     }
 };
@@ -234,19 +244,19 @@ pub const ImageIds = struct {
 /// grace period and any decision about when to produce another picture.
 pub const Replacement = struct {
     /// Private: the picture shown, once it is ready.
-    own_current: ?u32 = null,
+    own_current: ?ImageId = null,
     /// Private: the picture sent and not yet settled.
-    own_pending: ?u32 = null,
+    own_pending: ?ImageId = null,
     /// Private: whether a refusal or a failed write asks for a new picture.
     dirty: bool = false,
 
     /// The usable picture id, by value; retire it through this owner.
-    pub fn current(p: *const Replacement) ?u32 {
+    pub fn current(p: *const Replacement) ?ImageId {
         return p.own_current;
     }
 
     /// The picture still awaiting settlement, by value.
-    pub fn pending(p: *const Replacement) ?u32 {
+    pub fn pending(p: *const Replacement) ?ImageId {
         return p.own_pending;
     }
 
@@ -261,7 +271,7 @@ pub const Replacement = struct {
     /// Sends one new picture, returning its id and payload byte count.
     /// On a partial write the recorded image is retired at the next commit
     /// and `takeDirty` asks the owner to produce it again.
-    pub fn send(p: *Replacement, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!struct { id: u32, bytes: usize } {
+    pub fn send(p: *Replacement, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!struct { id: ImageId, bytes: usize } {
         const gpa = layers.gpa;
         if (!p.canSend()) return error.Busy;
         const id = try ids.acquire(layers);
@@ -350,7 +360,7 @@ pub const Replacement = struct {
 
 /// The protocol's S field must fit before any OS object is created.
 fn sharedSize(len: usize) error{PayloadTooLarge}!u32 {
-    return std.math.cast(u32, len) orelse error.PayloadTooLarge;
+    return aegis.int.cast(u32, len) catch error.PayloadTooLarge;
 }
 
 /// The z the terminal is given for a layer under the text.
@@ -361,7 +371,7 @@ fn sharedSize(len: usize) error{PayloadTooLarge}!u32 {
 const under_base: i32 = -1_000_000;
 
 const InlineImage = struct {
-    id: u32,
+    id: ImageId,
     data: []u8,
     scratch: []u8 = &.{},
     palette: []morse.Rgb = &.{},
@@ -390,7 +400,7 @@ pub const Layers = struct {
     /// Private: what the terminal is showing, after the last `emit`.
     shown: std.ArrayList(Layer) = .empty,
     /// Private: images freed only after a complete frame stopped declaring them.
-    retired: std.ArrayList(u32) = .empty,
+    retired: std.ArrayList(ImageId) = .empty,
     /// Private: whether this terminal answers a transmit: unknown until the first
     /// answer (true), or until a grace period runs out with no answer ever
     /// (false), after which direct transmissions are not waited for.
@@ -440,10 +450,10 @@ pub const Layers = struct {
     /// are written until the frame places it. Indexed pixels must name a
     /// palette entry (or the transparent index). Invalid input is rejected
     /// before changing the image. The palette is the caller's, as in morse.
-    pub fn storeSixel(l: *Layers, id: u32, image_data: morse.Sixel) StoreSixelError!void {
-        const pixel_count = std.math.mul(usize, image_data.width, image_data.height) catch return error.InvalidImage;
+    pub fn storeSixel(l: *Layers, id: ImageId, image_data: morse.Sixel) StoreSixelError!void {
+        const pixel_count = (aegis.int.Checked(usize).init(image_data.width).mul(image_data.height) catch return error.InvalidImage).raw();
         const channels: usize = if (image_data.pixels == .rgba) 4 else 1;
-        const len = std.math.mul(usize, pixel_count, channels) catch return error.InvalidImage;
+        const len = (aegis.int.Checked(usize).init(pixel_count).mul(channels) catch return error.InvalidImage).raw();
         const pixels = switch (image_data.pixels) {
             .indexed => |v| v,
             .rgba => |v| v,
@@ -454,20 +464,20 @@ pub const Layers = struct {
         };
         var held: InlineImage = .{ .id = id, .data = try l.gpa.dupe(u8, pixels) };
         errdefer held.deinit(l.gpa);
-        held.scratch = try l.gpa.alloc(u8, std.math.mul(usize, pixel_count, 4) catch return error.InvalidImage);
+        held.scratch = try l.gpa.alloc(u8, (aegis.int.Checked(usize).init(pixel_count).mul(4) catch return error.InvalidImage).raw());
         held.palette = try l.gpa.dupe(morse.Rgb, image_data.palette);
         var copied = image_data;
         copied.pixels = if (channels == 4) .{ .rgba = held.data } else .{ .indexed = held.data };
         copied.palette = held.palette;
         held.sixel = copied;
-        try l.storeInline(held, .{ .id = id, .width = copied.width, .height = copied.height, .protocol = .sixel });
+        try l.storeInline(held, .{ .id = id, .width = .fromRaw(copied.width), .height = .fromRaw(copied.height), .protocol = .sixel });
     }
 
     /// Retains an already encoded image file (PNG, JPEG, etc.) for iTerm2.
     /// Zero part_bytes uses File; otherwise morse's multipart writer is used.
     /// Files are fitted to the placement's cell rectangle without preserving
     /// aspect ratio. Source cropping belongs to the caller's image decoder.
-    pub fn storeIterm(l: *Layers, id: u32, file: []const u8, part_bytes: usize) Allocator.Error!void {
+    pub fn storeIterm(l: *Layers, id: ImageId, file: []const u8, part_bytes: usize) Allocator.Error!void {
         const held: InlineImage = .{ .id = id, .data = try l.gpa.dupe(u8, file), .part_bytes = part_bytes };
         errdefer held.deinit(l.gpa);
         try l.storeInline(held, .{ .id = id, .protocol = .iterm });
@@ -553,11 +563,11 @@ pub const Layers = struct {
     }
 
     /// What the program knows about an image, or null.
-    pub fn image(l: *const Layers, id: u32) ?Image {
+    pub fn image(l: *const Layers, id: ImageId) ?Image {
         return (l.find(id) orelse return null).*;
     }
 
-    fn find(l: *const Layers, id: u32) ?*Image {
+    fn find(l: *const Layers, id: ImageId) ?*Image {
         for (l.own_images.items) |*held| {
             if (held.id == id) return held;
         }
@@ -590,7 +600,7 @@ pub const Layers = struct {
     pub fn transmit(
         l: *Layers,
         w: *Writer,
-        id: u32,
+        id: ImageId,
         pixels: []const u8,
         how: Transmit,
     ) TransmitError!usize {
@@ -632,10 +642,10 @@ pub const Layers = struct {
 
         errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
-            .image = .{ .id = morse.ImageId.fromRaw(id) },
+            .image = .{ .id = id },
             .format = how.format,
-            .width = .fromRaw(how.width),
-            .height = .fromRaw(how.height),
+            .width = how.width,
+            .height = how.height,
             .compressed = compressed,
             .quiet = if (how.answer) .answers else .silent,
         }, payload);
@@ -662,7 +672,7 @@ pub const Layers = struct {
     /// could not be put there (the medium is then off, and the caller's
     /// picture goes in the escape code). While the medium is on trial the
     /// terminal is asked to answer, whatever the caller asked.
-    fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: u32, pixels: []const u8, how: Transmit) TransmitError!?usize {
+    fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: ImageId, pixels: []const u8, how: Transmit) TransmitError!?usize {
         const gpa = l.gpa;
         const size = try sharedSize(pixels.len);
         // Reserve before the OS object exists. Once it does, the image
@@ -685,11 +695,11 @@ pub const Layers = struct {
         l.shared_objects.appendAssumeCapacity(object);
         errdefer l.find(id).?.state = .failed;
         try morse.transmitImage(w, .{
-            .image = .{ .id = morse.ImageId.fromRaw(id) },
+            .image = .{ .id = id },
             .format = how.format,
             .medium = .shared_memory,
-            .width = .fromRaw(how.width),
-            .height = .fromRaw(how.height),
+            .width = how.width,
+            .height = how.height,
             .size = .fromRaw(size),
             .quiet = if (how.answer or trying) .answers else .silent,
         }, object.name.slice());
@@ -699,7 +709,7 @@ pub const Layers = struct {
     /// An image's shared memory object, unlinked if it is still there:
     /// the terminal unlinks what it reads, and what it could not read is
     /// this program's to take away.
-    fn sharedObject(l: *const Layers, id: u32) ?SharedObject {
+    fn sharedObject(l: *const Layers, id: ImageId) ?SharedObject {
         for (l.shared_objects.items) |object| {
             if (object.id == id) return object;
         }
@@ -739,7 +749,7 @@ pub const Layers = struct {
     /// A shared-memory trial needs its own answer: silence refuses the image
     /// and releases its object. A refused image is
     /// not ready; send it again.
-    pub fn ready(l: *Layers, id: u32, now: std.Io.Timestamp, grace: std.Io.Duration) bool {
+    pub fn ready(l: *Layers, id: ImageId, now: std.Io.Timestamp, grace: std.Io.Duration) bool {
         const held = l.find(id) orelse return false;
         switch (held.state) {
             .ready => return true,
@@ -775,10 +785,10 @@ pub const Layers = struct {
     /// changes nothing. A failed image stays refused until transmitted again.
     pub fn ack(l: *Layers, response: morse.GraphicsResponse) void {
         const id = response.id orelse return;
-        const held = l.find(id.raw()) orelse return;
+        const held = l.find(id) orelse return;
         l.answers = true;
         if (held.state != .failed) held.state = if (response.ok()) .ready else .failed;
-        if (l.sharedObject(id.raw())) |object| {
+        if (l.sharedObject(id)) |object| {
             l.release(held);
             if (l.policyFor(object)) |sm| {
                 if (sm.state == .trying) sm.state = if (response.ok()) .yes else .no;
@@ -793,8 +803,8 @@ pub const Layers = struct {
     /// terminal and here. What a program does with a picture it is finished
     /// with, so the terminal's memory and this list stay as small as what
     /// is alive.
-    pub fn deleteImage(l: *Layers, w: *Writer, id: u32) Writer.Error!void {
-        if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = morse.ImageId.fromRaw(id) } }, .free = true, .quiet = .silent });
+    pub fn deleteImage(l: *Layers, w: *Writer, id: ImageId) Writer.Error!void {
+        if (l.image(id) == null or l.image(id).?.protocol == .kitty) try morse.deleteImage(w, .{ .target = .{ .image = .{ .id = id } }, .free = true, .quiet = .silent });
         var i: usize = 0;
         while (i < l.own_images.items.len) {
             if (l.own_images.items[i].id == id) {
@@ -814,9 +824,9 @@ pub const Layers = struct {
 
     /// Frees `id` inside `commitFrame`, after placements and deletions.
     /// A still-declared image is kept until a later frame stops using it.
-    pub fn retire(l: *Layers, id: u32) Allocator.Error!void {
+    pub fn retire(l: *Layers, id: ImageId) Allocator.Error!void {
         const gpa = l.gpa;
-        if (std.mem.findScalar(u32, l.retired.items, id) != null) return;
+        if (std.mem.findScalar(ImageId, l.retired.items, id) != null) return;
         try l.retired.append(gpa, id);
     }
 
@@ -844,7 +854,7 @@ pub const Layers = struct {
     }
 
     /// Takes a layer off the frame it would otherwise still be in.
-    pub fn undeclare(l: *Layers, image_id: u32, placement: u32) void {
+    pub fn undeclare(l: *Layers, image_id: ImageId, placement: PlacementId) void {
         var i: usize = 0;
         while (i < l.declared.items.len) : (i += 1) {
             const held = l.declared.items[i];
@@ -855,7 +865,7 @@ pub const Layers = struct {
         }
     }
 
-    fn undeclareImage(l: *Layers, id: u32) void {
+    fn undeclareImage(l: *Layers, id: ImageId) void {
         var i: usize = 0;
         while (i < l.declared.items.len) {
             if (l.declared.items[i].image == id) {
@@ -866,7 +876,7 @@ pub const Layers = struct {
 
     /// Drops the record of an image's placements, which the terminal has
     /// taken down itself.
-    fn forgetShown(l: *Layers, id: u32) void {
+    fn forgetShown(l: *Layers, id: ImageId) void {
         var i: usize = 0;
         while (i < l.shown.items.len) {
             if (l.shown.items[i].image == id) {
@@ -1043,7 +1053,7 @@ pub const Layers = struct {
                 } else {
                     // iTerm2 has no source rectangle: its caller supplies a
                     // cropped file. Nonzero source/offsets are not representable.
-                    if (!std.meta.eql(layer.source, morse.GraphicsRect{}) or layer.x_offset != 0 or layer.y_offset != 0) continue;
+                    if (!std.meta.eql(layer.source, morse.GraphicsRect{}) or !layer.x_offset.eql(.fromRaw(0)) or !layer.y_offset.eql(.fromRaw(0))) continue;
                     try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
                     const file: morse.ItermFile = .{ .width = .{ .cells = cols }, .height = .{ .cells = rows }, .preserve_aspect_ratio = false, .do_not_move_cursor = true };
                     if (held.part_bytes == 0) try morse.itermImage(w, file, held.data) else try morse.itermImageMultipart(w, file, held.data, held.part_bytes);
@@ -1062,13 +1072,13 @@ pub const Layers = struct {
     fn writePlace(w: *Writer, layer: Layer, z: i32) Writer.Error!void {
         try morse.cursorTo(w, @as(u32, layer.rect.row) + 1, @as(u32, layer.rect.col) + 1);
         try morse.placeImage(w, .{
-            .image = .{ .id = morse.ImageId.fromRaw(layer.image) },
+            .image = .{ .id = layer.image },
             .quiet = .silent,
             .placement = .{
-                .id = morse.PlacementId.fromRaw(layer.placement),
+                .id = layer.placement,
                 .source = layer.source,
-                .x_offset = .fromRaw(layer.x_offset),
-                .y_offset = .fromRaw(layer.y_offset),
+                .x_offset = layer.x_offset,
+                .y_offset = layer.y_offset,
                 .columns = .fromRaw(layer.rect.cols),
                 .rows = .fromRaw(layer.rect.rows),
                 .z = z,
@@ -1083,7 +1093,7 @@ pub const Layers = struct {
     /// with the image's pixels kept.
     fn writeDelete(w: *Writer, layer: Layer) Writer.Error!void {
         try morse.deleteImage(w, .{
-            .target = .{ .image = .{ .id = morse.ImageId.fromRaw(layer.image), .placement = morse.PlacementId.fromRaw(layer.placement) } },
+            .target = .{ .image = .{ .id = layer.image, .placement = layer.placement } },
             .free = false,
             .quiet = .silent,
         });

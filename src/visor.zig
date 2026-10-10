@@ -164,6 +164,10 @@ pub const fitEnd = text_mod.fitEnd;
 // Pictures.
 //=========================================================================
 
+/// The id of a picture: morse's `ImageId`.
+pub const ImageId = layer_mod.ImageId;
+/// Which placement of a picture: morse's `PlacementId`.
+pub const PlacementId = layer_mod.PlacementId;
 /// Bytes the terminal was sent.
 pub const Image = layer_mod.Image;
 /// A picture on the screen: an image, a rectangle, and a place in the stack.
@@ -259,13 +263,13 @@ test {
 }
 
 test "transmission options have one public name" {
-    const how: Transmit = .{ .width = 1, .height = 1, .compress = false };
+    const how: Transmit = .{ .width = .fromRaw(1), .height = .fromRaw(1), .compress = false };
     try std.testing.expect(Transmit == layer_mod.Transmit);
     var layers = Layers.init(std.testing.allocator);
     defer layers.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    _ = try layers.transmit(&out.writer, 1, &.{ 0, 0, 0, 255 }, how);
+    _ = try layers.transmit(&out.writer, .fromRaw(1), &.{ 0, 0, 0, 255 }, how);
     try std.testing.expectEqual(@as(usize, 1), layers.images().len);
 }
 

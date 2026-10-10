@@ -916,8 +916,8 @@ fn placementCount(o: *const Oracle) usize {
 /// it has nothing else.
 fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
     for (h.layers.placements()) |layer| {
-        const at = placementOf(o, layer.image, layer.placement) orelse {
-            log.err("image {d}/{d}: drawn at {any}, the terminal has none", .{ layer.image, layer.placement, layer.rect });
+        const at = placementOf(o, layer.image.raw(), layer.placement.raw()) orelse {
+            log.err("image {d}/{d}: drawn at {any}, the terminal has none", .{ layer.image.raw(), layer.placement.raw(), layer.rect });
             return error.PlacementMissing;
         };
         if (!std.meta.eql(at, layer.rect)) {
@@ -932,7 +932,7 @@ fn expectLayersAgree(h: *const Harness, o: *const Oracle) !void {
 fn sendPicture(h: *Harness, o: *Oracle, id: u32) !void {
     const pixels: [4 * 4 * 4]u8 = @splat(0x80);
     h.out.clearRetainingCapacity();
-    _ = try h.layers.transmit(&h.out.writer, id, &pixels, .{ .width = 4, .height = 4 });
+    _ = try h.layers.transmit(&h.out.writer, .fromRaw(id), &pixels, .{ .width = .fromRaw(4), .height = .fromRaw(4) });
     o.feed(h.out.written());
 }
 
@@ -989,7 +989,7 @@ fn layerResizeTrip(gpa: Allocator, smith: *Smith) !void {
 
 /// This frame's layers: picture `i + 1` at `rects[i]`.
 fn layOut(h: *Harness, rects: []const visor.Rect) !void {
-    for (rects, 1..) |r, i| try h.layers.declare(.{ .image = @intCast(i), .rect = r });
+    for (rects, 1..) |r, i| try h.layers.declare(.{ .image = .fromRaw(@intCast(i)), .rect = r });
 }
 
 test "pictures stay where the program put them across resizes" {
@@ -1286,8 +1286,8 @@ test "inline picture corpus preserves text and cursor in the real emulator" {
         layers.configureSize(.{ .cells = size, .cell = .{ .width = 1, .height = 1 } });
         const caps: visor.Caps = .{ .width_method = .unicode, .picture_protocol = protocol };
         if (protocol == .sixel) {
-            try layers.storeSixel(7, .{ .width = 2, .height = 2, .pixels = .{ .indexed = &.{ 0, 0, 0, 0 } }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} });
-        } else try layers.storeIterm(7, "PNG", 3);
+            try layers.storeSixel(.fromRaw(7), .{ .width = 2, .height = 2, .pixels = .{ .indexed = &.{ 0, 0, 0, 0 } }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} });
+        } else try layers.storeIterm(.fromRaw(7), "PNG", 3);
         var out: std.Io.Writer.Allocating = .init(testing.allocator);
         defer out.deinit();
         const oracle = try Oracle.init(testing.allocator, size, .unicode);
@@ -1296,7 +1296,7 @@ test "inline picture corpus preserves text and cursor in the real emulator" {
         oracle.feed(out.written());
         for (0..5) |frame| {
             out.clearRetainingCapacity();
-            if (frame != 3) try layers.declare(.{ .image = 7, .rect = .{ .col = @intCast(frame % 2), .row = 0, .cols = 2, .rows = 2 } });
+            if (frame != 3) try layers.declare(.{ .image = .fromRaw(7), .rect = .{ .col = @intCast(frame % 2), .row = 0, .cols = 2, .rows = 2 } });
             if (frame == 2) _ = try screen.write(6, 2, "x", .{}, .none);
             if (frame == 4) renderer.repaint();
             _ = try renderer.draw(&out.writer, &screen, &layers, caps);

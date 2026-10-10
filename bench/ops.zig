@@ -1196,7 +1196,7 @@ const PictureTransmit = struct {
 
     pub fn frame(f: *PictureTransmit, c: *Ctx, _: usize) !void {
         f.out.clearRetainingCapacity();
-        const n = must(f.layers.transmit(&f.out.writer, 7, f.pixels, .{ .width = f.pw, .height = f.ph, .compress = false }));
+        const n = must(f.layers.transmit(&f.out.writer, .fromRaw(7), f.pixels, .{ .width = .fromRaw(f.pw), .height = .fromRaw(f.ph), .compress = false }));
         c.bytes += f.out.written().len;
         c.count += n;
     }
@@ -1239,9 +1239,9 @@ fn PictureFrame(comptime protocol: Protocol) type {
                 .cells => .cells,
             } };
             switch (protocol) {
-                .kitty => _ = must(f.layers.transmit(&f.out.writer, 7, f.pixels, .{ .width = f.width, .height = f.height, .compress = false })),
-                .sixel => must(f.layers.storeSixel(7, .{ .width = f.width, .height = f.height, .pixels = .{ .rgba = f.pixels }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} })),
-                .iterm => must(f.layers.storeIterm(7, c.file("picture.png"), 0)),
+                .kitty => _ = must(f.layers.transmit(&f.out.writer, .fromRaw(7), f.pixels, .{ .width = .fromRaw(f.width), .height = .fromRaw(f.height), .compress = false })),
+                .sixel => must(f.layers.storeSixel(.fromRaw(7), .{ .width = f.width, .height = f.height, .pixels = .{ .rgba = f.pixels }, .palette = &.{.{ .r = 255, .g = 0, .b = 0 }} })),
+                .iterm => must(f.layers.storeIterm(.fromRaw(7), c.file("picture.png"), 0)),
                 .cells => {},
             }
             if (c.check and protocol == .kitty) line("setup", f.out.written());
@@ -1262,7 +1262,7 @@ fn PictureFrame(comptime protocol: Protocol) type {
             if (protocol == .cells) {
                 f.screen.clear();
                 must((w.Sextants{ .width = f.width, .height = f.height, .pixels = f.pixels }).draw(f.screen.window().sub(.{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 })));
-            } else must(f.layers.declare(.{ .image = 7, .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
+            } else must(f.layers.declare(.{ .image = .fromRaw(7), .rect = .{ .col = col, .row = 0, .cols = c.cols - 1, .rows = c.rows - 1 } }));
             const stats = must(f.renderer.draw(&f.out.writer, &f.screen, if (protocol == .cells) null else &f.layers, f.policy));
             c.count += stats.placements;
             c.bytes += stats.bytes;
@@ -1292,7 +1292,7 @@ const PictureReplace = struct {
         f.r = must(v.Renderer.init(c.gpa, c.size()));
         f.layers = .init(c.gpa);
         f.out = .init(c.gpa);
-        f.ids = must(v.ImageIds.init(100, 107, 0));
+        f.ids = must(v.ImageIds.init(.fromRaw(100), .fromRaw(107), v.morse.QueryImageId.fromRaw(1) catch unreachable)); // unreachable: one is nonzero
         f.replacement = .{};
         for (0..16 * 16) |i| f.pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
         f.swaps = 0;
@@ -1309,8 +1309,8 @@ const PictureReplace = struct {
         f.out.clearRetainingCapacity();
         // A clock that moves 100 ms a frame, so every grace period runs out.
         const now: std.Io.Timestamp = .{ .nanoseconds = @as(i96, @intCast(n)) * 100 * std.time.ns_per_ms };
-        if (f.replacement.canSend()) _ = must(f.replacement.send(&f.layers, &f.out.writer, &f.ids, &f.pixels, .{ .width = 16, .height = 16, .compress = false, .now = now }));
-        _ = must(f.replacement.declare(&f.layers, .{ .image = 0, .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
+        if (f.replacement.canSend()) _ = must(f.replacement.send(&f.layers, &f.out.writer, &f.ids, &f.pixels, .{ .width = .fromRaw(16), .height = .fromRaw(16), .compress = false, .now = now }));
+        _ = must(f.replacement.declare(&f.layers, .{ .image = .fromRaw(0), .rect = .{ .col = @intCast(n % 2), .row = 0, .cols = 2, .rows = 2 } }, now.addDuration(.fromMilliseconds(60)), .fromMilliseconds(50)));
         _ = must(f.r.draw(&f.out.writer, &f.s, &f.layers, pic));
         if (f.replacement.current() != null) f.swaps += 1;
         c.bytes += f.out.written().len;
@@ -1318,7 +1318,7 @@ const PictureReplace = struct {
     }
 
     pub fn evidence(f: *PictureReplace, _: *Ctx) void {
-        emit("value\tcurrent={d} swaps={d} images={d}\n", .{ f.replacement.current() orelse 0, f.swaps, f.layers.images().len });
+        emit("value\tcurrent={d} swaps={d} images={d}\n", .{ if (f.replacement.current()) |id| id.raw() else 0, f.swaps, f.layers.images().len });
     }
 };
 

@@ -73,8 +73,8 @@ test "canvas shapes use sextant and braille fallback or the picture owner" {
     var out: std.Io.Writer.Allocating = .init(t.allocator);
     defer out.deinit();
     h.screen.clear();
-    try (Canvas{}).draw(h.window(), shapes, .{ .caps = .{ .kitty_graphics = true }, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = 10 } });
-    try t.expectEqual(@as(u32, 8), layers.image(10).?.width);
+    try (Canvas{}).draw(h.window(), shapes, .{ .caps = .{ .kitty_graphics = true }, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = .fromRaw(10) } });
+    try t.expectEqual(visor.morse.Pixels.fromRaw(8), layers.image(.fromRaw(10)).?.width);
     _ = try layers.commitFrame(&out.writer, .{ .kitty_graphics = true });
     try t.expectEqual(@as(usize, 1), layers.count());
     try h.expectFrame("\n");
@@ -137,8 +137,8 @@ test "canvas pictures follow the caller's sixel choice and retain the raster thr
     defer out.deinit();
     const caps: visor.Caps = .{ .kitty_graphics = true, .picture_protocol = .sixel };
     const shapes: []const Canvas.Shape = &.{.{ .geometry = .{ .line = .{ 0, 0.5, 1, 0.5 } } }};
-    try (Canvas{}).draw(h.window(), shapes, .{ .caps = caps, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = 7, .sixel_palette = &.{.{ .r = 255, .g = 255, .b = 255 }} } });
-    try t.expectEqual(visor.Caps.Pictures.sixel, layers.image(7).?.protocol);
+    try (Canvas{}).draw(h.window(), shapes, .{ .caps = caps, .picture = .{ .surface = &surface, .layers = &layers, .writer = &out.writer, .image = .fromRaw(7), .sixel_palette = &.{.{ .r = 255, .g = 255, .b = 255 }} } });
+    try t.expectEqual(visor.Caps.Pictures.sixel, layers.image(.fromRaw(7)).?.protocol);
     try t.expectEqual(@as(usize, 0), out.written().len);
     layers.configureSize(.{ .cells = .{ .cols = 2, .rows = 2 }, .cell = .{ .width = 4, .height = 8 } });
     try t.expectEqual(@as(usize, 1), try layers.emit(&out.writer, caps));

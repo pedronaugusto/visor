@@ -442,6 +442,7 @@ caller's grace period runs out, and a terminal that never answers is not waited
 for twice. A shared-memory trial needs its own answer; silence refuses that
 picture and releases its object.
 
+Image ids are morse's `ImageId` and `PlacementId` (`visor.ImageId`, built with `.fromRaw`), and sizes in pixels are its `Pixels`.
 `Replacement` keeps a current picture while a new one is in flight. Share an
 `ImageIds` range between replacements, with the probe's graphics id excluded.
 Construct it through `init` and issue ids through `acquire`; bounds and the
