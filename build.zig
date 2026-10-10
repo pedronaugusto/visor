@@ -245,7 +245,7 @@ pub fn build(b: *std.Build) !void {
     const ci = b.lazyImport(@This(), "preflight");
     // Both suites' clocks, fault plans and allocators.
     const shakedown_dep = try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    bindAegis(b, shakedown_dep, aegis.module("aegis"));
+    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown_dep, aegis.module("aegis"));
     const shakedown = shakedown_dep.module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
