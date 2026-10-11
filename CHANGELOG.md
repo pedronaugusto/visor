@@ -8,7 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
-- visor is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, examples, conformance run, checks and benchmarks are the development build's (`bay test`, `bay check`, `bay conformance`, `bay bench`). visor ships with aegis, morse, conduit, uucode, reactor and warp; what a project that depends on it builds is unchanged. conduit is pinned to the revision developed with bay.
+- visor is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, examples, conformance run, checks and benchmarks are the development build's (`bay test`, `bay check`, `bay conformance`, `bay bench`). visor ships with aegis, morse, conduit, uucode, reactor and warp; what a project that depends on it builds is unchanged. conduit is pinned to the revision developed with bay. The terminal emulator is a development dependency, and the build under `conformance/` with its own manifest is gone: `bay conformance -Dconformance` fetches the emulator and runs `conformance/conformance.zig` in the development build.
 - The panic restore writes to the Windows console through std's `NtWriteFile`, no longer through conduit's exported `WriteFile` binding.
 - Pictures are compressed with warp's level-1 `Compressor` over the whole buffer, where `std.compress.flate` ran over a 64 KiB window kept in `Layers` and every compressor failure came back as `OutOfMemory`: now only the compressor's one allocation can fail, and it fails as `OutOfMemory`. warp is a dependency of visor.
 - Resizes come through reactor's `Signals`, which owns the process's `SIGWINCH` handler: visor no longer installs a handler of its own, so a program's or reactor's other listeners keep hearing the signal while a `Tty` watches. `Tty.watchResize`, `unwatchResize`, `resized` and `drainResize` take the `Io`, and `resizeFile` is `resizeWake`, a reactor `Wake` that `Input` waits on beside the terminal. reactor is a dependency of visor, at the revision conduit waits through.
@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Layers.free` and `freeAll` are `deleteImage` and `deleteAll`, morse's word for the same command.
 - `Damage` keeps the allocator `init` was given: `deinit()` and `resize(rows)` take none.
 - `visor.version` and `visor.widgets.version` are gone: no other package in the family exports one, and the manifest says it.
-- visor no longer publishes a `corpus` module. The round trips count their draws with `src/testing/spread.zig`, test support rather than API; the conformance build makes its own module from it.
+- visor no longer publishes a `corpus` module. The round trips count their draws with `src/testing/spread.zig`, test support rather than API; the conformance suite imports it from there.
 - `Screen.intern` returns `TooLong` for more than 65535 bytes, and `Screen.link` for a target or parameters that long (`Screen.LinkError`); both returned `OutOfMemory`. `Term` and `Markdown` leave such a link out, and `Markdown` interns a span's link once rather than once a cluster.
 - Input.init returns error.EmptyReadBuffer for empty read storage; callers must handle its error union.
 - Renderer.enter and Session.enter refuse a second live or partial entry with AlreadyEntered; Error and Session.Error include it, and leave is required before re-entry.
