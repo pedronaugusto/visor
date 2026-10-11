@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- visor is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, examples, conformance run, checks and benchmarks are the development build's (`bay test`, `bay check`, `bay conformance`, `bay bench`). visor ships with aegis, morse, conduit, uucode, reactor and warp; what a project that depends on it builds is unchanged. conduit is pinned to the revision developed with bay.
 - The panic restore writes to the Windows console through std's `NtWriteFile`, no longer through conduit's exported `WriteFile` binding.
 - Pictures are compressed with warp's level-1 `Compressor` over the whole buffer, where `std.compress.flate` ran over a 64 KiB window kept in `Layers` and every compressor failure came back as `OutOfMemory`: now only the compressor's one allocation can fail, and it fails as `OutOfMemory`. warp is a dependency of visor.
 - Resizes come through reactor's `Signals`, which owns the process's `SIGWINCH` handler: visor no longer installs a handler of its own, so a program's or reactor's other listeners keep hearing the signal while a `Tty` watches. `Tty.watchResize`, `unwatchResize`, `resized` and `drainResize` take the `Io`, and `resizeFile` is `resizeWake`, a reactor `Wake` that `Input` waits on beside the terminal. reactor is a dependency of visor, at the revision conduit waits through.

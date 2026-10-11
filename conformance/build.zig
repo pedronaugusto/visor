@@ -6,8 +6,8 @@
 //! on `visor` should ever fetch or compile one. Zig compiles the build
 //! script of every package a manifest names once it is in the package
 //! cache, asked for or not, so a lazy dependency in `visor`'s manifest would
-//! not achieve that, and neither would one behind an option. `zig build
-//! conformance` in the package root runs this.
+//! not achieve that, and neither would one behind an option. `bay conformance`
+//! in the package root runs this.
 
 const std = @import("std");
 

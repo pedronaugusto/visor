@@ -70,7 +70,7 @@ with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 ## Usage
 
 The block below is a region of [`examples/usage.zig`](examples/usage.zig),
-which `zig build examples` builds and runs. CI compares the two.
+which `bay examples` builds and runs. CI compares the two.
 
 <!-- BEGIN GENERATED zig build docs -- usage -->
 ```zig
@@ -557,7 +557,7 @@ buffers and unread bytes internal.
 read's budget as a `std.Io.Duration`, or null when done; `now` is a
 `std.Io.Timestamp` and the spans are `std.Io.Duration`s. It owns no clock or read: an early
 key can be handled by the application while forwarded probe replies arrive.
-`examples/live.zig` shows the loop; run it with `zig build live`. The examples
+`examples/live.zig` shows the loop; run it with `bay live`. The examples
 step runs its `--check` path without a terminal.
 
 **A frame is one write.** `draw` writes to a `*std.Io.Writer` and never
@@ -798,7 +798,7 @@ own structural marks. `examples/gallery.zig` includes a themed document.
 | Windows | `windows-latest` in CI, the merge and release tiers |
 
 Everything but `tty` is arithmetic and bytes, so the same source builds
-wherever Zig does; `zig build check -Dtarget=...` compiles both suites and
+wherever Zig does; `bay check -Dtarget=...` compiles both suites and
 the examples without running them, and CI does that for `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `x86_64-windows-gnu`,
 `aarch64-windows-gnu`, `x86_64-macos` and `aarch64-macos`.
@@ -819,17 +819,22 @@ compiled and not run.
   `conduit.tty` makes the terminal's own calls;
   [uucode](https://github.com/jacobsandlund/uucode) segments and measures clusters.
 - [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
-  the tests and CI.
+  the tests and CI, and [shakedown](https://github.com/pedronaugusto/shakedown) holds the
+  tests' clocks and fault plans. Both are dev dependencies, which
+  [bay](https://github.com/pedronaugusto/bay) gives visor's own development and a project
+  that depends on visor never sees.
 - [Ghostty](https://github.com/ghostty-org/ghostty)'s `libghostty-vt` is the
   emulator the conformance build compares against, fetched only for that build.
 
 ## Testing
 
-`zig build check-consumer`, part of the lint `zig build ci` runs first,
+Development runs through bay.
+
+`bay check-consumer`, part of the lint `bay ci` runs first,
 builds a project that depends on visor with only visor's own dependencies
 present, so nothing visor fetches for its CI is needed to build on it.
 
-`zig build test` runs both suites and the examples under
+`bay test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather
 than the process. [CI](.github/workflows/ci.yml) runs in tiers. The fast
 tier runs the source checks and the Debug suite on `ubuntu-latest`; the merge
@@ -838,9 +843,9 @@ tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
 and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
 and compiles ReleaseSmall.
 
-`zig build bench` builds visor's own benchmarks in `bench/` in ReleaseFast and
+`bay bench` builds visor's own benchmarks in `bench/` in ReleaseFast and
 runs them: every drawing-core workload and every public operation, checked by
-an independent decoder before they are timed. `zig build test` checks and runs
+an independent decoder before they are timed. `bay test` checks and runs
 each once on the smallest grid, and runs the decoder's own tests.
 [`bench/README.md`](bench/README.md) says how to run them by hand.
 
@@ -864,7 +869,7 @@ frames drawn at the old size land after it, a drag passes through sizes the
 program never hears of, and the next frame at the size the program was told
 must leave the terminal showing exactly the screen.
 
-`zig build conformance` runs the same four properties again, over the same
+`bay conformance` runs the same four properties again, over the same
 inputs, against a terminal emulator that is not this one's. `Term` ships with
 this package, so a property that compares the renderer with it compares two
 readings of the same specifications by the same hand; the conformance build
@@ -919,7 +924,7 @@ checks the invariants and the damage map after every operation, a
 bytes, a frame in which one cell changed fewer than 64, and a frame in which
 nothing changed writes nothing. The round trips are shakedown `check`
 properties: on every run each takes 256 seeded cases, a failure shrinks to a
-minimal tape, and `zig build test --fuzz` keeps searching. Each property has a
+minimal tape, and `bay test --fuzz` keeps searching. Each property has a
 test beside it that counts its draws and fails unless they cover every size,
 every operation and every grapheme it can ask for.
 

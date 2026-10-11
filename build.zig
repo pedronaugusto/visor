@@ -1,9 +1,8 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) !void {
-    // lazyImport compares every package of the dependency tree at comptime;
-    // a large tree runs past the default quota of 1000 branches.
-    @setEvalBranchQuota(100_000);
+/// What a project that depends on visor builds: the `visor` module, and
+/// morse's, for a consumer who wants the writers separately.
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -44,7 +43,7 @@ pub fn build(b: *std.Build) !void {
     // on the files (ci/layers.zig).
     //=====================================================================
 
-    const module = b.addModule("visor", .{
+    _ = b.addModule("visor", .{
         .root_source_file = b.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
@@ -54,17 +53,36 @@ pub fn build(b: *std.Build) !void {
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
     b.modules.put(b.allocator, b.graph.dupeString("morse"), morse.module("morse")) catch @panic("OOM");
+}
 
-    // Everything below is visor's own tree: a program that depends on visor
-    // builds the module above and nothing else, and fetches nothing for it.
-    if (b.pkg_hash.len != 0) return;
+/// visor's development: its tests, examples, conformance run and benchmarks,
+/// under preflight's gate, with shakedown bound to visor's aegis. Run through bay.
+pub fn dev(b: *std.Build, tools: type) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const preflight = tools.preflight;
+    use_aegis = tools.shakedown.useAegis;
+    const package = b.dependency("visor", .{ .target = target, .optimize = optimize });
+    const p = package.builder;
+    const module = package.module("visor");
+    const morse = p.dependency("morse", .{ .target = target, .optimize = optimize });
+    const conduit = p.dependency("conduit", .{ .target = target, .optimize = optimize });
+    const uucode = p.dependency("uucode", .{
+        .target = target,
+        .optimize = optimize,
+        .fields = @as([]const []const u8, &uucode_fields),
+    });
+    const aegis = p.dependency("aegis", .{ .target = target, .optimize = optimize });
+    const reactor = p.dependency("reactor", .{ .target = target, .optimize = optimize });
+    const warp = p.dependency("warp", .{ .target = target, .optimize = optimize });
+    const imports = dependencies(morse, conduit, uucode, aegis, reactor, warp);
 
     // What the round-trip properties count of their draws. Its own module
     // because the suite inside the package and the conformance build outside
     // it count the same way, and a file belongs to one module. It is test
     // support, so it is not published: the conformance build makes its own
     // module from the same file.
-    const spread = b.createModule(.{ .root_source_file = b.path("src/testing/spread.zig"), .target = target, .optimize = optimize });
+    const spread = b.createModule(.{ .root_source_file = p.path("src/testing/spread.zig"), .target = target, .optimize = optimize });
 
     //=====================================================================
     // Tests. The suite lives beside the code it tests, so the root module's
@@ -76,7 +94,7 @@ pub fn build(b: *std.Build) !void {
 
     // Input is read by a task beside the caller's, handed over through a
     // queue, and stopped by a cancel; a race at that crossing is a claim a
-    // detector can check and a reader cannot: `zig build test
+    // detector can check and a reader cannot: `bay test
     // -Dthread-sanitizer`. The detector is an LLVM pass.
     const thread_sanitizer = b.option(
         bool,
@@ -90,7 +108,7 @@ pub fn build(b: *std.Build) !void {
         .filters = filters,
         .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests.zig"),
+            .root_source_file = p.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
             .sanitize_thread = sanitize,
@@ -105,7 +123,7 @@ pub fn build(b: *std.Build) !void {
 
     // Compiling without running is what a target this host cannot execute can
     // still be held to, and it is also the default step, so a bare
-    // `zig build -Dtarget=...` is the same check under another name. Both
+    // `bay install -Dtarget=...` is the same check under another name. Both
     // test binaries and every example are in it; the conformance build under
     // `conformance/` is not, being a build of its own with an emulator to
     // fetch.
@@ -121,7 +139,7 @@ pub fn build(b: *std.Build) !void {
     const domains = b.step("check-domains", "Reject mixed pool scalar domains");
     for ([_][]const u8{ "index", "bytes" }, [_][]const u8{ "u32,false)'", "found 'units.Bytes(u16)'" }) |name, diagnostic| {
         const rejected = b.addObject(.{ .name = b.fmt("domain-{s}", .{name}), .root_module = b.createModule(.{
-            .root_source_file = b.path(b.fmt("ci/domain_{s}.zig", .{name})),
+            .root_source_file = p.path(b.fmt("ci/domain_{s}.zig", .{name})),
             .target = target,
             .optimize = optimize,
             .imports = &.{.{ .name = "visor", .module = module }},
@@ -144,7 +162,7 @@ pub fn build(b: *std.Build) !void {
         .filters = filters,
         .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/widgets_test.zig"),
+            .root_source_file = p.path("src/widgets_test.zig"),
             .target = target,
             .optimize = optimize,
             .sanitize_thread = sanitize,
@@ -162,7 +180,7 @@ pub fn build(b: *std.Build) !void {
         .name = "visor-bench-tests",
         .filters = filters,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/run.zig"),
+            .root_source_file = p.path("bench/run.zig"),
             .target = target,
             .optimize = optimize,
             .imports = benchImports(b, target, optimize),
@@ -177,7 +195,7 @@ pub fn build(b: *std.Build) !void {
     // Built AND run, against the module a consumer gets. An example that is
     // only compiled proves the names still resolve; running it is what
     // proves the bytes are still the bytes. examples/usage.zig is also
-    // where README.md's Usage block comes from -- see zig build docs -- usage --
+    // where README.md's Usage block comes from -- see bay docs -- usage --
     // so the snippet a reader copies cannot drift from code CI executes.
     //=====================================================================
 
@@ -186,7 +204,7 @@ pub fn build(b: *std.Build) !void {
         const example = b.addExecutable(.{
             .name = std.Io.Dir.path.stem(source),
             .root_module = b.createModule(.{
-                .root_source_file = b.path(source),
+                .root_source_file = p.path(source),
                 .target = target,
                 .optimize = optimize,
                 .imports = &.{.{ .name = "visor", .module = module }},
@@ -226,7 +244,7 @@ pub fn build(b: *std.Build) !void {
         "Run the round trip against a second terminal emulator",
     );
     const conformance = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
-    conformance.setCwd(b.path("conformance"));
+    conformance.setCwd(p.path("conformance"));
     conformance.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
     if (test_filter) |f| conformance.addArg(b.fmt("-Dtest-filter={s}", .{f}));
     conformance.has_side_effects = true;
@@ -234,48 +252,47 @@ pub fn build(b: *std.Build) !void {
 
     //=====================================================================
     // CI wiring, and the test doubles
-    //
-    // preflight and shakedown are lazy, and only visor's own tree asks for
-    // them, both in one configure pass. A lazy package's build.zig can only
-    // be reached through `lazyImport`: a plain `@import` of it fails to
-    // compile in any project that depends on visor and has not fetched
-    // preflight, which is every such project.
     //=====================================================================
 
-    const ci = b.lazyImport(@This(), "preflight");
     // Both suites' clocks, fault plans and allocators.
-    const shakedown_dep = try b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown_dep, aegis.module("aegis"));
-    const shakedown = shakedown_dep.module("shakedown");
+    const shakedown = boundShakedown(b, target, optimize).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
-    bench_tests.root_module.addImport("shakedown", shakedown);
-    if (ci) |preflight| {
-        preflight.addCi(b, .{
-            .tests = test_step,
-            .portable_tests = true,
-            // visor's own measurements, in bench/: `zig build bench` builds
-            // the pass in ReleaseFast under zig-out/bench and runs it, and
-            // `zig build test` runs it once with `--smoke`.
-            .bench = .{
-                .programs = &.{.{ .name = "visor-bench", .source = "bench/run.zig" }},
-                .imports = benchImports,
-                .target = target,
-                .optimize = optimize,
-            },
-        });
-        // A project that depends on visor by path, built with fetching off
-        // and only morse, conduit and uucode beside it, so nothing visor
-        // fetches for its own CI can be reached. It is the build a consumer
-        // gets.
-        preflight.addConsumerCheck(b, .{
-            .package = "visor",
-            .program = b.path("ci/consumer.zig"),
-            .modules = &.{"visor"},
-            // conduit waits through reactor, and visor listens for a resize through it.
-            .packages = &.{ morse, conduit, reactor, warp, uucode, aegis },
-        });
-    }
+    preflight.addCi(b, p, .{
+        .tests = test_step,
+        .portable_tests = true,
+        // visor's own measurements, in bench/: `bay bench` builds
+        // the pass in ReleaseFast under zig-out/bench and runs it, and
+        // `bay test` runs it once with `--smoke`.
+        .bench = .{
+            .programs = &.{.{ .name = "visor-bench", .source = "bench/run.zig" }},
+            .imports = benchImports,
+            .target = target,
+            .optimize = optimize,
+        },
+    });
+    // A project that depends on visor by path, built with fetching off
+    // and only morse, conduit and uucode beside it, so nothing visor
+    // fetches for its own CI can be reached. It is the build a consumer
+    // gets.
+    preflight.addConsumerCheck(b, p, .{
+        .package = "visor",
+        .program = p.path("ci/consumer.zig"),
+        .modules = &.{"visor"},
+        // conduit waits through reactor, and visor listens for a resize through it.
+        .packages = &.{ morse, conduit, reactor, warp, uucode, aegis },
+    });
+}
+
+/// `tools.shakedown.useAegis`, set by `dev` for the benchmark imports, which are built without `tools`.
+var use_aegis: *const fn (*std.Build.Dependency, *std.Build.Module) void = undefined;
+
+/// shakedown bound to visor's aegis in this mode, so a binary links one aegis.
+fn boundShakedown(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Dependency {
+    const p = b.dependency("visor", .{ .target = target, .optimize = optimize }).builder;
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
+    use_aegis(shakedown, p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis"));
+    return shakedown;
 }
 
 /// The modules visor imports.
@@ -297,23 +314,25 @@ fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uu
 /// measures by, from a second uucode table: one program holds one uucode,
 /// and visor's table is the one a consumer builds, field for field.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
-    const uucode = b.dependency("uucode", .{
+    const p = b.dependency("visor", .{ .target = target, .optimize = optimize }).builder;
+    const uucode = p.dependency("uucode", .{
         .target = target,
         .optimize = optimize,
         .fields_0 = @as([]const []const u8, &uucode_fields),
         .fields_1 = @as([]const []const u8, &.{ "east_asian_width", "general_category", "canonical_combining_class" }),
     });
-    const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
-    const conduit = b.dependency("conduit", .{ .target = target, .optimize = optimize });
+    const morse = p.dependency("morse", .{ .target = target, .optimize = optimize });
+    const conduit = p.dependency("conduit", .{ .target = target, .optimize = optimize });
     const visor = b.createModule(.{
-        .root_source_file = b.path("src/visor.zig"),
+        .root_source_file = p.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &dependencies(morse, conduit, uucode, b.dependency("aegis", .{ .target = target, .optimize = optimize }), b.dependency("reactor", .{ .target = target, .optimize = optimize }), b.dependency("warp", .{ .target = target, .optimize = optimize })),
+        .imports = &dependencies(morse, conduit, uucode, p.dependency("aegis", .{ .target = target, .optimize = optimize }), p.dependency("reactor", .{ .target = target, .optimize = optimize }), p.dependency("warp", .{ .target = target, .optimize = optimize })),
     });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
         .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "shakedown", .module = boundShakedown(b, target, optimize).module("shakedown") },
     }) catch @panic("OOM");
 }
 
