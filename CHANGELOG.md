@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-12
+
+### Changed
+
+- Pins aegis 0.1.1, reactor 0.2.2, preflight 0.3.4 and shakedown 0.2.6.
+
 ## [0.5.0] - 2026-10-12
 
 ### Breaking
@@ -826,7 +832,8 @@ checks them with, and a second module of widgets drawn on the grid.
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
 
-[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/pedronaugusto/visor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pedronaugusto/visor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.3.0
