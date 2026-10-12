@@ -185,6 +185,8 @@ pub fn dev(b: *std.Build, tools: type) void {
             .imports = benchImports(b, target, optimize),
         }),
     });
+    // As preflight gives the benchmark program itself: the shakedown visor declares.
+    bench_tests.root_module.addImport("shakedown", b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown"));
     test_step.dependOn(&b.addRunArtifact(bench_tests).step);
     check_step.dependOn(&bench_tests.step);
 
@@ -333,7 +335,6 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
         .{ .name = "uucode", .module = uucode.module("uucode") },
-        .{ .name = "shakedown", .module = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown") },
     }) catch @panic("OOM");
 }
 
