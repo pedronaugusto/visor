@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
 ### Breaking
 
 - visor is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, examples, conformance run, checks and benchmarks are the development build's (`bay test`, `bay check`, `bay conformance`, `bay bench`). visor ships with aegis, morse, conduit, uucode, reactor and warp; what a project that depends on it builds is unchanged. conduit is pinned to the revision developed with bay.
@@ -824,7 +826,8 @@ checks them with, and a second module of widgets drawn on the grid.
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
 
-[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/pedronaugusto/visor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pedronaugusto/visor/releases/tag/v0.3.0
 [0.2.1]: https://github.com/pedronaugusto/visor/releases/tag/v0.2.1
