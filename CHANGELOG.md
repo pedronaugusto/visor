@@ -114,6 +114,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Keep dirty row counts with their spans so clean frames need no damage scan or clear.
 - Copy checked cell payloads in contiguous ranges and compare their words without dropping pool identities.
 - List selection finds its visible suffix in one backward height scan instead of repeatedly rescanning the range.
+- The conformance build is assembled under the cache and run there, its manifest written from visor's own pins (preflight's `addNestedBuild`), so it pins shakedown as visor does; its `build.zig.zon` is no longer kept in the tree.
+- Pins aegis 0.1.0, morse 0.8.0, conduit 0.6.0, reactor 0.2.0 and warp 0.2.0; developed with preflight 0.3.0 and shakedown 0.2.0.
 
 ### Fixed
 
