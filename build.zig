@@ -56,12 +56,11 @@ pub fn build(b: *std.Build) void {
 }
 
 /// visor's development: its tests, examples, conformance run and benchmarks,
-/// under preflight's gate, with shakedown bound to visor's aegis. Run through bay.
+/// under preflight's gate. Run through bay.
 pub fn dev(b: *std.Build, tools: type) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const preflight = tools.preflight;
-    use_aegis = tools.shakedown.useAegis;
     const package = b.dependency("visor", .{ .target = target, .optimize = optimize });
     const p = package.builder;
     const module = package.module("visor");
@@ -268,7 +267,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     //=====================================================================
 
     // Both suites' clocks, fault plans and allocators.
-    const shakedown = boundShakedown(b, target, optimize).module("shakedown");
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
     preflight.addCi(b, p, .{
@@ -295,17 +294,6 @@ pub fn dev(b: *std.Build, tools: type) void {
         // conduit waits through reactor, and visor listens for a resize through it.
         .packages = &.{ morse, conduit, reactor, warp, uucode, aegis },
     });
-}
-
-/// `tools.shakedown.useAegis`, set by `dev` for the benchmark imports, which are built without `tools`.
-var use_aegis: *const fn (*std.Build.Dependency, *std.Build.Module) void = undefined;
-
-/// shakedown bound to visor's aegis in this mode, so a binary links one aegis.
-fn boundShakedown(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Dependency {
-    const p = b.dependency("visor", .{ .target = target, .optimize = optimize }).builder;
-    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    use_aegis(shakedown, p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis"));
-    return shakedown;
 }
 
 /// The modules visor imports.
@@ -345,7 +333,7 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
         .{ .name = "uucode", .module = uucode.module("uucode") },
-        .{ .name = "shakedown", .module = boundShakedown(b, target, optimize).module("shakedown") },
+        .{ .name = "shakedown", .module = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown") },
     }) catch @panic("OOM");
 }
 

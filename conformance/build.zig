@@ -18,8 +18,7 @@ pub fn build(b: *std.Build) void {
     const visor = b.dependency("visor", .{ .target = target, .optimize = optimize });
     const ghostty = b.dependency("ghostty", .{ .target = target, .optimize = optimize });
     // The properties run under shakedown's `check`, on the aegis visor links.
-    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    @import("shakedown").useAegis(shakedown, visor.builder.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis"));
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
 
     const test_filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
     const filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
