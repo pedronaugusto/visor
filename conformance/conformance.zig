@@ -3,7 +3,7 @@
 //! `Term` ships with this package, so a bug in `Term` can hide the same bug
 //! in `draw`: the two were written by the same hand from the same reading of
 //! the same specifications, and a property that compares them agrees with
-//! itself. This suite compares the renderer against a terminal written by
+//! itself. This build compares the renderer against a terminal written by
 //! someone else -- the one inside a shipping terminal emulator, read through
 //! its own grid rather than through a formatted dump. Where the two
 //! disagree, the emulator is right and this package is wrong.

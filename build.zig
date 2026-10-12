@@ -78,9 +78,10 @@ pub fn dev(b: *std.Build, tools: type) void {
     const imports = dependencies(morse, conduit, uucode, aegis, reactor, warp);
 
     // What the round-trip properties count of their draws. Its own module
-    // because the suite inside the package and the conformance suite
-    // count the same way, and a file belongs to one module. It is test
-    // support, so it is not published.
+    // because the suite inside the package and the conformance build outside
+    // it count the same way, and a file belongs to one module. It is test
+    // support, so it is not published: the conformance build makes its own
+    // module from the same file.
     const spread = b.createModule(.{ .root_source_file = p.path("src/testing/spread.zig"), .target = target, .optimize = optimize });
 
     //=====================================================================
@@ -123,8 +124,9 @@ pub fn dev(b: *std.Build, tools: type) void {
     // Compiling without running is what a target this host cannot execute can
     // still be held to, and it is also the default step, so a bare
     // `bay install -Dtarget=...` is the same check under another name. Both
-    // test binaries and every example are in it; the conformance suite is
-    // not, having an emulator to fetch.
+    // test binaries and every example are in it; the conformance build under
+    // `conformance/` is not, being a build of its own with an emulator to
+    // fetch.
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
 
@@ -229,51 +231,33 @@ pub fn dev(b: *std.Build, tools: type) void {
     // read through its own grid. Where the two disagree, the emulator is
     // right.
     //
-    // The emulator is a development dependency, pinned by commit. Its build
-    // script accepts one Zig, and Zig fetches and compiles it for any build
-    // whose script asks for it, whichever step runs. Only a build that asks
-    // for conformance does: `bay conformance -Dconformance`.
+    // The emulator is a build of its own, under `conformance/`, with its
+    // own manifest pinning it by commit. Zig compiles the build script of
+    // every package a manifest names once it is in the package cache, asked
+    // for or not, so an emulator named in this package's manifest, even
+    // lazily, would be compiled by every build of a program on visor whose
+    // cache holds it.
+    //=====================================================================
+
+    const conformance_step = b.step(
+        "conformance",
+        "Run the round trip against a second terminal emulator",
+    );
+    const conformance = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
+    conformance.setCwd(p.path("conformance"));
+    conformance.addArg(b.fmt("-Doptimize={s}", .{@tagName(optimize)}));
+    if (test_filter) |f| conformance.addArg(b.fmt("-Dtest-filter={s}", .{f}));
+    conformance.has_side_effects = true;
+    conformance_step.dependOn(&conformance.step);
+
+    //=====================================================================
+    // CI wiring, and the test doubles
     //=====================================================================
 
     // Both suites' clocks, fault plans and allocators.
     const shakedown = boundShakedown(b, target, optimize).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
-
-    const conformance_step = b.step(
-        "conformance",
-        "Run the round trip against a second terminal emulator (needs -Dconformance)",
-    );
-    const with_emulator = b.option(bool, "conformance", "Fetch the terminal emulator and build the conformance properties") orelse false;
-    if (!with_emulator) {
-        conformance_step.dependOn(&b.addFail("the conformance step needs the emulator, which only a build asked with -Dconformance fetches: bay conformance -Dconformance").step);
-    } else if (b.dependencyLazy("ghostty", .{ .target = target, .optimize = optimize })) |ghostty| {
-        const conformance = b.addTest(.{
-            .name = "visor-conformance",
-            .filters = filters,
-            .root_module = b.createModule(.{
-                .root_source_file = p.path("conformance/conformance.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "visor", .module = module },
-                    // visor's test support, not a module it publishes: the same
-                    // file the package's own suite counts with.
-                    .{ .name = "spread", .module = spread },
-                    .{ .name = "shakedown", .module = shakedown },
-                    .{ .name = "ghostty-vt", .module = ghostty.module("ghostty-vt") },
-                },
-            }),
-        });
-        conformance_step.dependOn(&b.addRunArtifact(conformance).step);
-    } else |_| {
-        // Not fetched yet: Zig fetches the emulator and configures again.
-    }
-
-    //=====================================================================
-    // CI wiring, and the test doubles
-    //=====================================================================
-
     preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,

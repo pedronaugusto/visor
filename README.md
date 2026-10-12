@@ -824,7 +824,7 @@ compiled and not run.
   [bay](https://github.com/pedronaugusto/bay) gives visor's own development and a project
   that depends on visor never sees.
 - [Ghostty](https://github.com/ghostty-org/ghostty)'s `libghostty-vt` is the
-  emulator the conformance step compares against, a development dependency.
+  emulator the conformance build compares against, fetched only for that build.
 
 ## Testing
 
@@ -872,13 +872,13 @@ must leave the terminal showing exactly the screen.
 `bay conformance` runs the same four properties again, over the same
 inputs, against a terminal emulator that is not this one's. `Term` ships with
 this package, so a property that compares the renderer with it compares two
-readings of the same specifications by the same hand; the conformance step
+readings of the same specifications by the same hand; the conformance build
 compares the renderer with the terminal inside a shipping emulator, read
 through its own grid — every column's grapheme, its width, its style and its
-link, with two links that differ only by their `id` being two links. The emulator is
-a development dependency pinned by commit, so no build of a program on this package
-fetches or compiles one, and only a build asked with `-Dconformance` (`bay conformance
--Dconformance`) fetches it for this suite. The resize property runs there too, against the emulator's own resize,
+link, with two links that differ only by their `id` being two links. It is a
+build of its own under `conformance/`, with its own manifest pinning that
+emulator by commit, so no build of a program on this package fetches or
+compiles one. The resize property runs there too, against the emulator's own resize,
 with pictures placed and moved across it and checked where the emulator has
 them; and the probe's questions go to the emulator and its answers back. CI
 runs it on Linux and macOS.
