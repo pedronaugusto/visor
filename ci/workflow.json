@@ -1,6 +1,7 @@
 {
   "land": true,
   "attest": true,
+  "release": true,
   "compile_step": "check",
   "targets": [
     "x86_64-linux-gnu",
@@ -21,8 +22,7 @@
     },
     {
       "name": "conformance",
-      "step": "test",
-      "directory": "conformance",
+      "step": "conformance",
       "os": ["ubuntu-latest", "macos-latest"],
       "setup": false
     }
