@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-13
+
 ### Changed
 
 - Grapheme clusters and widths come from [xenoglyph](https://github.com/pedronaugusto/xenoglyph) 0.2.0, whose Unicode 18 tables are source in its package, in place of uucode, which is no longer a dependency: nothing is generated at build time, and a program that configured uucode's fields for visor no longer needs to. Pins xenoglyph 0.2.0, conduit 0.7.0 and aegis 0.1.3.
@@ -848,7 +850,8 @@ checks them with, and a second module of widgets drawn on the grid.
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
 
-[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/pedronaugusto/visor/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pedronaugusto/visor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pedronaugusto/visor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pedronaugusto/visor/compare/v0.4.0...v0.5.0
