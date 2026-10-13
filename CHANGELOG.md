@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-14
+
+### Changed
+
+- Pins aegis 0.1.6, conduit 0.7.1, morse 0.8.4, reactor 0.4.0, warp 0.3.1, xenoglyph 0.3.1.
+
 ## [0.5.3] - 2026-10-13
 
 ### Changed
