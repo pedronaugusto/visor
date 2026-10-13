@@ -1938,13 +1938,17 @@ test "bytes that are not UTF-8 are the replacement character, under every width 
     }
 }
 
-test "a cluster that takes a column only measured whole is printed, not refused" {
+test "a lone Hangul vowel takes a column only where the terminal is told it" {
+    // Measured by code point or whole, a vowel jamo with no leading consonant
+    // takes none, as a terminal in mode 2027 measures it; told the width, a
+    // terminal draws it in a cell of its own. Either way it is printed, not
+    // refused.
     for ([_]textmod.Method{ .wcwidth, .unicode, .explicit }) |method| {
         var t = try made(4, 1);
         defer t.deinit();
         t.setMethod(method);
         try t.feed("\u{1161}\u{85}x");
-        try testing.expectEqualStrings("x", textAt(&t, if (method == .wcwidth) 0 else 1, 0));
+        try testing.expectEqualStrings("x", textAt(&t, if (method == .explicit) 1 else 0, 0));
     }
 }
 

@@ -15,22 +15,18 @@ pub fn build(b: *std.Build) void {
     // and for programs that run a child on a pseudo-terminal alike. Only its
     // `conduit.tty` module is imported, which on Linux links no C library;
     // the suite also takes `conduit` whole for the pseudo-terminal it tests
-    // against. `uucode` is configured with the six fields this package uses
-    // and no others: the field list is printed in the README so a consumer
-    // who configures uucode themselves knows which to keep.
+    // against. `xenoglyph` segments text into grapheme clusters and measures
+    // them: Unicode 18 tables, committed in the package, so nothing is
+    // generated at build time.
     //=====================================================================
 
     const morse = b.dependency("morse", .{ .target = target, .optimize = optimize });
     const conduit = b.dependency("conduit", .{ .target = target, .optimize = optimize });
-    const uucode = b.dependency("uucode", .{
-        .target = target,
-        .optimize = optimize,
-        .fields = @as([]const []const u8, &uucode_fields),
-    });
+    const xenoglyph = b.dependency("xenoglyph", .{ .target = target, .optimize = optimize });
     const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize });
     const reactor = b.dependency("reactor", .{ .target = target, .optimize = optimize });
     const warp = b.dependency("warp", .{ .target = target, .optimize = optimize });
-    const imports = dependencies(morse, conduit, uucode, aegis, reactor, warp);
+    const imports = dependencies(morse, conduit, xenoglyph, aegis, reactor, warp);
 
     //=====================================================================
     // The module.
@@ -66,15 +62,11 @@ pub fn dev(b: *std.Build, tools: type) void {
     const module = package.module("visor");
     const morse = p.dependency("morse", .{ .target = target, .optimize = optimize });
     const conduit = p.dependency("conduit", .{ .target = target, .optimize = optimize });
-    const uucode = p.dependency("uucode", .{
-        .target = target,
-        .optimize = optimize,
-        .fields = @as([]const []const u8, &uucode_fields),
-    });
+    const xenoglyph = p.dependency("xenoglyph", .{ .target = target, .optimize = optimize });
     const aegis = p.dependency("aegis", .{ .target = target, .optimize = optimize });
     const reactor = p.dependency("reactor", .{ .target = target, .optimize = optimize });
     const warp = p.dependency("warp", .{ .target = target, .optimize = optimize });
-    const imports = dependencies(morse, conduit, uucode, aegis, reactor, warp);
+    const imports = dependencies(morse, conduit, xenoglyph, aegis, reactor, warp);
 
     // What the round-trip properties count of their draws. Its own module
     // because the suite inside the package and the conformance build outside
@@ -286,7 +278,7 @@ pub fn dev(b: *std.Build, tools: type) void {
         },
     });
     // A project that depends on visor by path, built with fetching off
-    // and only morse, conduit and uucode beside it, so nothing visor
+    // and only morse, conduit and xenoglyph beside it, so nothing visor
     // fetches for its own CI can be reached. It is the build a consumer
     // gets.
     preflight.addConsumerCheck(b, p, .{
@@ -294,16 +286,16 @@ pub fn dev(b: *std.Build, tools: type) void {
         .program = p.path("ci/consumer.zig"),
         .modules = &.{"visor"},
         // conduit waits through reactor, and visor listens for a resize through it.
-        .packages = &.{ morse, conduit, reactor, warp, uucode, aegis },
+        .packages = &.{ morse, conduit, reactor, warp, xenoglyph, aegis },
     });
 }
 
 /// The modules visor imports.
-fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uucode: *std.Build.Dependency, aegis: *std.Build.Dependency, reactor: *std.Build.Dependency, warp: *std.Build.Dependency) [6]std.Build.Module.Import {
+fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, xenoglyph: *std.Build.Dependency, aegis: *std.Build.Dependency, reactor: *std.Build.Dependency, warp: *std.Build.Dependency) [6]std.Build.Module.Import {
     return .{
         .{ .name = "aegis", .module = aegis.module("aegis") },
         .{ .name = "morse", .module = morse.module("morse") },
-        .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "xenoglyph", .module = xenoglyph.module("xenoglyph") },
         .{ .name = "conduit.tty", .module = conduit.module("conduit.tty") },
         .{ .name = "reactor", .module = reactor.module("reactor") },
         .{ .name = "warp", .module = warp.module("warp") },
@@ -313,28 +305,22 @@ fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, uu
 /// visor (widgets included) and the Unicode properties the checks read, in the
 /// mode a benchmark builds in: an imported module keeps its own mode, so a
 /// ReleaseFast benchmark over the Debug module would time the Debug module.
-/// The checks read properties of their own, independent of the rule visor
-/// measures by, from a second uucode table: one program holds one uucode,
-/// and visor's table is the one a consumer builds, field for field.
+/// The checks read the Unicode properties visor measures by (East Asian
+/// width, general category, combining class) from xenoglyph directly.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     const p = b.dependency("visor", .{ .target = target, .optimize = optimize }).builder;
-    const uucode = p.dependency("uucode", .{
-        .target = target,
-        .optimize = optimize,
-        .fields_0 = @as([]const []const u8, &uucode_fields),
-        .fields_1 = @as([]const []const u8, &.{ "east_asian_width", "general_category", "canonical_combining_class" }),
-    });
+    const xenoglyph = p.dependency("xenoglyph", .{ .target = target, .optimize = optimize });
     const morse = p.dependency("morse", .{ .target = target, .optimize = optimize });
     const conduit = p.dependency("conduit", .{ .target = target, .optimize = optimize });
     const visor = b.createModule(.{
         .root_source_file = p.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &dependencies(morse, conduit, uucode, p.dependency("aegis", .{ .target = target, .optimize = optimize }), p.dependency("reactor", .{ .target = target, .optimize = optimize }), p.dependency("warp", .{ .target = target, .optimize = optimize })),
+        .imports = &dependencies(morse, conduit, xenoglyph, p.dependency("aegis", .{ .target = target, .optimize = optimize }), p.dependency("reactor", .{ .target = target, .optimize = optimize }), p.dependency("warp", .{ .target = target, .optimize = optimize })),
     });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
-        .{ .name = "uucode", .module = uucode.module("uucode") },
+        .{ .name = "xenoglyph", .module = xenoglyph.module("xenoglyph") },
     }) catch @panic("OOM");
 }
 
@@ -346,18 +332,4 @@ const example_sources = [_][]const u8{
     "examples/gallery.zig",
     "examples/progress.zig",
     "examples/live.zig",
-};
-
-/// The `uucode` fields this package builds into its tables.
-///
-/// Grapheme segmentation needs the first two; measuring a cluster needs the
-/// rest. Nothing else is built, which is what keeps the tables small. A
-/// consumer configuring uucode themselves keeps these and adds their own.
-const uucode_fields = [_][]const u8{
-    "grapheme_break",
-    "grapheme_break_no_control",
-    "wcwidth_standalone",
-    "wcwidth_zero_in_grapheme",
-    "is_emoji_modifier_base",
-    "is_emoji_vs_base",
 };

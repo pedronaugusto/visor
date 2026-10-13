@@ -54,10 +54,10 @@ prints its evidence and a last line, `result\t<frames>\t<count>\t<bytes>`; the
 checks do not trust visor's own emulator: `terminal.zig` is an independent
 decoder for the bytes visor writes (text, RGB and bold SGR, cursor, erase,
 scroll regions, OSC 8, kitty upload and placement) that reads widths from
-uucode's tables rather than visor's rule, and every drawing-core frame is
+the raw Unicode properties (East Asian width, general category, combining
+class) xenoglyph gives, with a rule of its own rather than visor's, and every
+drawing-core frame is
 replayed through it. `ops_check.zig` checks each operation's grid, value or
 frames, and states an invariant where the layout is visor's own choice.
 `pictures.zig` decodes sixel bands and palettes and the PNG, so all four picture
-protocols agree on one red rectangle. The checks' Unicode properties are a
-second uucode table in the same program, so visor's own table is the one a
-consumer builds.
+protocols agree on one red rectangle.

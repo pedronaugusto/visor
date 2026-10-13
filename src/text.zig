@@ -1,8 +1,8 @@
 //! Measuring and breaking text: how many columns a string takes, where its
 //! grapheme clusters are, and where a line can be broken.
 //!
-//! The tables come from `uucode`, configured at build time with the fields
-//! this package uses and no others. Nothing here allocates, nothing here
+//! Segmentation and widths come from xenoglyph's Unicode tables. Nothing
+//! here allocates, nothing here
 //! holds state, and nothing here reads an environment variable: a caller who
 //! knows the terminal measures by codepoint rather than by cluster says so in
 //! `Caps.width_method` and this file obeys it.
@@ -13,7 +13,9 @@
 
 const std = @import("std");
 const corpus = @import("shakedown").corpus;
-const uucode = @import("dependencies.zig").uucode;
+const deps = @import("dependencies.zig");
+const xenoglyph = deps.xenoglyph;
+const aegis = deps.aegis;
 
 /// How the terminal measures text.
 pub const Method = enum {
@@ -44,63 +46,7 @@ pub const Wrap = enum {
 /// maximal subparts"). A byte that ends an ill-formed sequence by not
 /// continuing it is where the next codepoint starts, so `"\xe4\xb8"` before
 /// a flag is one replacement character and the flag is still a flag.
-const Utf8 = struct {
-    /// Where the next codepoint starts, which the grapheme iterator reads.
-    i: usize = 0,
-    bytes: []const u8,
-
-    fn init(bytes: []const u8) Utf8 {
-        return .{ .bytes = bytes };
-    }
-
-    pub fn next(it: *Utf8) ?u21 {
-        const bytes = it.bytes;
-        if (it.i >= bytes.len) return null;
-        const start = it.i;
-        const lead = bytes[start];
-        if (lead < 0x80) {
-            it.i += 1;
-            return lead;
-        }
-        // How many bytes follow, and the range the first of them must be
-        // in: the ranges past the lead are what rule out overlong forms,
-        // surrogates and codepoints past U+10FFFF.
-        const shape: struct { more: u8, lo: u8, hi: u8, bits: u8 } = switch (lead) {
-            0xc2...0xdf => .{ .more = 1, .lo = 0x80, .hi = 0xbf, .bits = 0x1f },
-            0xe0 => .{ .more = 2, .lo = 0xa0, .hi = 0xbf, .bits = 0x0f },
-            0xe1...0xec, 0xee, 0xef => .{ .more = 2, .lo = 0x80, .hi = 0xbf, .bits = 0x0f },
-            0xed => .{ .more = 2, .lo = 0x80, .hi = 0x9f, .bits = 0x0f },
-            0xf0 => .{ .more = 3, .lo = 0x90, .hi = 0xbf, .bits = 0x07 },
-            0xf1...0xf3 => .{ .more = 3, .lo = 0x80, .hi = 0xbf, .bits = 0x07 },
-            0xf4 => .{ .more = 3, .lo = 0x80, .hi = 0x8f, .bits = 0x07 },
-            else => {
-                it.i += 1;
-                return replacement;
-            },
-        };
-        var cp: u21 = lead & shape.bits;
-        var k: usize = 1;
-        while (k <= shape.more) : (k += 1) {
-            const at = start + k;
-            if (at >= bytes.len) {
-                it.i = at;
-                return replacement;
-            }
-            const b = bytes[at];
-            const lo: u8 = if (k == 1) shape.lo else 0x80;
-            const hi: u8 = if (k == 1) shape.hi else 0xbf;
-            if (b < lo or b > hi) {
-                it.i = at;
-                return replacement;
-            }
-            cp = (cp << 6) | (b & 0x3f);
-        }
-        it.i = start + 1 + shape.more;
-        return cp;
-    }
-
-    const replacement: u21 = 0xfffd;
-};
+const Utf8 = xenoglyph.utf8.Iterator;
 
 /// An iterator over the grapheme clusters of a string.
 ///
@@ -110,7 +56,7 @@ pub const Graphemes = struct {
     /// Private: the string walked.
     bytes: []const u8,
     /// Private: the cluster iterator for text that is not plain ASCII.
-    inner: uucode.grapheme.Iterator(Utf8),
+    inner: xenoglyph.grapheme.Iterator(cluster_rules),
     /// Private: for printable ASCII, the next byte, each one a cluster.
     ascii_at: ?usize = null,
 
@@ -118,7 +64,7 @@ pub const Graphemes = struct {
     pub fn init(bytes: []const u8) Graphemes {
         return .{
             .bytes = bytes,
-            .inner = .init(.init(bytes)),
+            .inner = .init(bytes),
             .ascii_at = if (printableAscii(bytes)) 0 else null,
         };
     }
@@ -129,7 +75,7 @@ pub const Graphemes = struct {
         const rest = g.bytes[at..];
         return .{
             .bytes = rest,
-            .inner = .init(.init(rest)),
+            .inner = .init(rest),
             .ascii_at = if (g.ascii_at != null) 0 else null,
         };
     }
@@ -141,8 +87,8 @@ pub const Graphemes = struct {
             g.ascii_at = at + 1;
             return g.bytes[at .. at + 1];
         }
-        const found = g.inner.nextGrapheme() orelse return null;
-        return g.bytes[found.start..found.end];
+        const found = g.inner.nextSpan() orelse return null;
+        return found.of(g.bytes);
     }
 
     /// The next cluster and where it starts, or null at the end.
@@ -152,8 +98,8 @@ pub const Graphemes = struct {
             g.ascii_at = at + 1;
             return .{ .bytes = g.bytes[at .. at + 1], .start = at };
         }
-        const found = g.inner.nextGrapheme() orelse return null;
-        return .{ .bytes = g.bytes[found.start..found.end], .start = found.start };
+        const found = g.inner.nextSpan() orelse return null;
+        return .{ .bytes = found.of(g.bytes), .start = found.start.raw() };
     }
 };
 
@@ -178,10 +124,10 @@ pub fn graphemeWidth(grapheme: []const u8, method: Method) u16 {
     switch (method) {
         .wcwidth => return codepointsWidth(grapheme),
         .unicode => {
-            const whole: u16 = @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2));
+            const whole = clusterColumns(grapheme);
             return if (whole != 0 and !standsAlone(grapheme, whole)) 0 else whole;
         },
-        .explicit => return @intCast(@min(uucode.grapheme.utf8Wcwidth(grapheme), 2)),
+        .explicit => return toldColumns(grapheme),
     }
 }
 
@@ -227,18 +173,18 @@ pub const Parts = struct {
     /// begins with a codepoint that takes none.
     pub fn next(p: *Parts) ?struct { bytes: []const u8, cols: u2 } {
         const bytes = p.it.bytes;
-        const start = p.it.i;
+        const start = p.it.index;
         const first = p.it.next() orelse return null;
         const cols = codepointWidth(first);
         while (true) {
-            const at = p.it.i;
+            const at = p.it.index;
             const cp = p.it.next() orelse break;
             if (codepointWidth(cp) != 0) {
-                p.it.i = at;
+                p.it.index = at;
                 break;
             }
         }
-        return .{ .bytes = bytes[start..p.it.i], .cols = @intCast(@min(cols, 2)) };
+        return .{ .bytes = bytes[start..p.it.index], .cols = @intCast(@min(cols, 2)) };
     }
 };
 
@@ -253,7 +199,9 @@ pub const Parts = struct {
 /// regional indicator beside another is a flag, a skin-tone modifier beside
 /// an emoji it can modify is that emoji's skin tone, and a spacing mark joins
 /// whatever is to its left. Ghostty, whose grid the conformance build reads,
-/// does exactly this, with the rules in uucode that this package measures by.
+/// does exactly this, by the rules this package measures by: xenoglyph's
+/// `Rules.terminal`, controls read as Other and a skin tone joining only an
+/// emoji modifier base.
 pub inline fn joinsCell(held: []const u8, next: []const u8) bool {
     // Printable ASCII is Grapheme_Cluster_Break Other, and no rule joins
     // Other to Other whatever came before it (GB999), so a cell of it beside
@@ -272,16 +220,13 @@ fn printable(byte: u8) bool {
 
 /// `joinsCell` without the shortcut: the break rules, codepoint by codepoint.
 fn joinsCellByRules(held: []const u8, next: []const u8) bool {
-    var state: uucode.grapheme.BreakState = .default;
+    var breaker: xenoglyph.grapheme.Breaker(.terminal) = .{};
     var it: Utf8 = .init(held);
-    var previous = it.next() orelse return false;
-    while (it.next()) |cp| {
-        _ = uucode.grapheme.isBreakNoControl(previous, cp, &state);
-        previous = cp;
-    }
+    _ = breaker.next(it.next() orelse return false);
+    while (it.next()) |cp| _ = breaker.next(cp);
     var rest: Utf8 = .init(next);
     const first = rest.next() orelse return false;
-    return !uucode.grapheme.isBreakNoControl(previous, first, &state);
+    return !breaker.next(first);
 }
 
 /// Whether every codepoint of a cluster after its first takes no column of
@@ -295,23 +240,46 @@ pub fn combinesOnly(grapheme: []const u8) bool {
     return true;
 }
 
-/// One codepoint's columns as `wcwidth(3)` counts them. uucode's
-/// zero-in-cluster set is the marks, the selectors, the joiner and the
-/// Hangul vowels and finals, which `wcwidth(3)` counts as nothing even
-/// alone; the emoji modifiers are in it too, and `wcwidth(3)` counts
-/// those as the emoji they are.
+/// One codepoint's columns as `wcwidth(3)` counts them: xenoglyph's
+/// `width.codepoint`, which gives the marks, the selectors, the joiner and
+/// the Hangul vowels and finals none even alone, a skin tone the two columns
+/// of the emoji it is, and a prepended mark its own column.
 fn codepointWidth(cp: u21) usize {
-    return switch (cp) {
-        // the five skin tones
-        0x1f3fb...0x1f3ff => uucode.get(.wcwidth_standalone, cp),
-        // Prepends disappear only inside a cluster; codepoint measurement
-        // gives them their standalone column, just as it gives a modifier.
-        else => if (uucode.get(.wcwidth_zero_in_grapheme, cp) and uucode.get(.grapheme_break, cp) != .prepend)
-            0
-        else
-            uucode.get(.wcwidth_standalone, cp),
-    };
+    return xenoglyph.width.codepoint(cp, .{}).raw();
 }
+
+/// One cluster's columns measured whole, as a terminal in mode 2027 does:
+/// xenoglyph's `width.cluster`, 0 to 2.
+fn clusterColumns(grapheme: []const u8) u16 {
+    const columns = xenoglyph.width.cluster(grapheme, .{}).convert(u16) catch aegis.assert.never("a cluster takes at most two columns");
+    return columns.raw();
+}
+
+/// What a terminal told the width draws a cluster in: its columns measured
+/// whole, and for a lone code point that takes none there but is drawn (a
+/// combining or enclosing mark, a Hangul vowel or final standing alone) one
+/// column, so the terminal gives it a cell of its own. A control or an
+/// invisible format character is still none.
+fn toldColumns(grapheme: []const u8) u16 {
+    const whole = clusterColumns(grapheme);
+    if (whole != 0) return whole;
+    var it: Utf8 = .init(grapheme);
+    const first = it.next() orelse return 0;
+    if (it.next() != null or xenoglyph.core(first).default_ignorable_code_point) return 0;
+    const drawn = switch (xenoglyph.generalCategory(first)) {
+        .nonspacing_mark, .enclosing_mark => true,
+        else => switch (xenoglyph.graphemeBreak(first)) {
+            .v, .t => true,
+            else => false,
+        },
+    };
+    return if (drawn) 1 else 0;
+}
+
+/// The rules visor segments printed text by: UAX #29's, with a skin tone
+/// joining only an emoji modifier base it directly follows (UTS #51), as the
+/// terminal draws it.
+const cluster_rules: xenoglyph.grapheme.Rules = .{ .modifiers = .after_base };
 
 /// The columns a string takes, by `method`.
 pub fn width(str: []const u8, method: Method) u16 {
@@ -809,7 +777,10 @@ test "prepend characters keep their standalone column in codepoint measurement" 
     try testing.expectEqual(@as(u16, 1), graphemeWidth(repha, .wcwidth));
     try testing.expectEqual(@as(u16, 1), graphemeWidth(repha, .unicode));
     try testing.expectEqual(@as(u16, 2), graphemeWidth(repha ++ "a", .wcwidth));
-    try testing.expectEqual(@as(u16, 1), graphemeWidth(repha ++ "a", .unicode));
+    // Measured whole, the prepend and the letter it joins are two columns,
+    // as a terminal in mode 2027 draws them: a code point after the first
+    // that takes a column of its own makes the cluster wide.
+    try testing.expectEqual(@as(u16, 2), graphemeWidth(repha ++ "a", .unicode));
     var parts = Parts.init(repha ++ "a");
     try testing.expectEqual(@as(u2, 1), parts.next().?.cols);
     try testing.expectEqual(@as(u2, 1), parts.next().?.cols);

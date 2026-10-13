@@ -14,8 +14,8 @@
 //!
 //! Every escape sequence this package writes comes from `morse`, which is
 //! re-exported whole, so a consumer fetches one thing and a reviewer can
-//! check the rule with `grep`. The width tables come from `uucode`, pinned
-//! with the field list the README prints.
+//! check the rule with `grep`. Segmentation and widths come from
+//! `xenoglyph`, whose Unicode tables are committed in its package.
 //!
 //! The drawing core reads no environment variable, starts no thread,
 //! installs no signal handler and keeps no clock. The optional terminal

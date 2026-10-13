@@ -29,22 +29,17 @@ program that draws no widget builds none. `morse` comes with it, re-exported
 as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
 program that wants the writers on their own.
 
-Four dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
+Its dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
 every escape sequence written and every reply parsed,
 [`conduit`](https://github.com/pedronaugusto/conduit) for the terminal's own
 calls — raw mode and the way back, the size, the device's name — of which only
-its `conduit.tty` module is imported, which on Linux links no C library, and
-`uucode` for grapheme segmentation and width, and
+its `conduit.tty` module is imported, which on Linux links no C library,
+[`xenoglyph`](https://github.com/pedronaugusto/xenoglyph) for grapheme
+segmentation and widths, whose Unicode 18 tables are source in its package, so
+nothing is generated at build time, and
 [`aegis`](https://github.com/pedronaugusto/aegis) for distinct pool identities,
-byte addresses, table positions and checked byte counts. All are pinned by commit. `uucode` builds its tables
-at build time, and visor asks for six fields and no more — `grapheme_break`
-and `grapheme_break_no_control` for where one cluster ends and the next begins,
-`wcwidth_standalone` and `wcwidth_zero_in_grapheme` for what a codepoint is
-worth on its own and inside a cluster, and `is_emoji_modifier_base` and
-`is_emoji_vs_base` for skin tone and the presentation selector. That is one
-slow first build and then a cached table. A program that configures `uucode`
-itself should keep these six and add its own, or the two configurations build
-two sets of tables.
+byte addresses, table positions and checked byte counts. All are pinned by
+release.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
 `draw` allocates nothing. With `commit = false`, `print` only measures and
@@ -181,94 +176,21 @@ to three and leaves its last frame in the history.
 
 ## Design
 
-`Date.init(year, month, day)` checks Gregorian month and day invariants and
-returns `InvalidDate` for a date that does not exist. `year()`, `month()` and
-`day()` read its components; today and selected days use these checked values.
+visor draws a program's screen into a terminal: a grid of cells the program
+writes, and a renderer that turns the difference between two frames into the
+bytes the terminal needs. Four things set it apart, and come first: the
+renderer prices every cursor move in bytes and writes the fewest; widths are
+correct for grapheme clusters, in the measure the terminal itself uses; what
+the terminal can do is asked of it, never guessed; and pictures are layers
+beside the text grid, never cells in it.
 
-`dumpScreenStyles` writes padded base-62 IDs, most significant digit first.
-Every ID in the legend and grid uses the fewest digits needed for the whole
-legend: one through 62 styles, two through 3,844, and more for larger legends.
+### The renderer writes the fewest bytes
 
-**A stored cell is thirty-two bytes and is compared as memory.** The grapheme lives
-in the cell when it is six bytes or fewer, which covers every
-single-codepoint cluster and a base with a combining mark, and in a pool the
-screen owns when it is longer. The style is `morse.Style`, which has a
-defined layout and no padding, so a whole row is one `memcmp` rather than a
-field comparison per cell. Nothing in a cell is undefined, and a colour's
-unused channels are zeroed on the way in, so comparing the memory and
-comparing the meaning are the same answer.
-
-A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
-`Text.offset()` returns `?GraphemeOffset`, `Text.length()` returns `ByteLength`,
-`Text.generation()` and `Link.generation()` return `PoolGeneration`, and
-`Link.index()` returns `?LinkIndex`. These aegis scalar domains preserve their
-integer layouts and cannot be assigned across meanings. Use `fromRaw` for an
-explicit import and `raw()` at a slice-index or encoding boundary. Importing a
-number does not establish that a handle belongs to a screen; resolution still
-checks its generation and bounds.
-`Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
-
-State documented `Private:` belongs to the value that holds it and is
-read and changed through that value's methods; the doc comments say what
-each lends and for how long. Pooled handles carry the generation of the pool
-that issued them, so a handle that outlived a compaction or came from another
-screen is refused with `InvalidHandle` rather than read. `copyCell` moves a
-live cell between screens, and the owned-copy helpers keep content through
-compaction.
-
-**A cell is a claim; text is content.** A hand-built `Cell` is checked by
-`Screen.cell` — one cluster, UTF-8, no control, a column or two by the
-screen's width method, a shape that matches — and refused with
-`InvalidCell` or `InvalidHandle` before the grid changes. Text handed to
-`write`, `print` or a widget is drawn the way a terminal would draw it:
-bytes that are not UTF-8 become the replacement character, and a control or
-a cluster that takes no column, such as a combining mark that begins a
-segment, is drawn as nothing. Only more than one cluster in one `write` is
-an error. Every fallible draw returns `DrawError`, which is `CellError` and
-`Allocator.Error`.
-
-`Screen.writeOwnedCellUnchecked` and its Window counterpart are the bridge
-for another terminal's measured cells: handles stay checked, while the
-caller guarantees the glyph, shape and canonical text bytes. The source
-terminal's width is kept even when the parent would measure it differently.
-
-`Window` checks the whole glyph or scaled cell extent before direct writes
-and copies. Multi-cell fills use the fill rectangle as their boundary.
-A placement that cannot fit leaves the grid alone.
-
-`Screen.link` refuses C0 controls and DEL in a URI or params with
-`error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
-
-`Layers.init(allocator)` captures the allocator for its images, placements and
-compression storage. `transmit`, `declare`, `retire` and `deinit`, and the
-`Replacement` operations using those layers, take no allocator. Metadata
-accessors return borrowed, read-only slices; fields prefixed `_` are internal.
-
-`Layers.configureSharedMemory(true)` allows pictures through shared memory;
-`false` disables it. Allowing it again while allowed keeps the terminal's
-learned answer. Each outstanding object is unlinked when it is done with,
-whatever the configuration is by then, and an older object's reply cannot
-settle a new configuration. No `std.Io` is kept or needed: an object is
-memory, made and unlinked as `shm_open` and `shm_unlink` do. Names come from
-one atomic process-wide namespace and are never reused.
-
-Window keeps its screen and clipped rectangle together behind `screen()` and
-`rect()`. `ink()` borrows the drawing policy. Construct views through `Screen.window()`, `child` and `sub`, and
-apply ink through `inked`. Recreate windows after their screen is resized.
-
-Damage owns its row storage behind marking and clearing methods; `rowCount()`
-returns its extent. Its allocation API is unmanaged: pass the init allocator
-to `resize` and `deinit`.
-
-Text and visual-row iterators keep their source, cursor and refill state
-internal. Construct them through `init` or `TextInput.rows`, and advance
-through `next` / `nextAt`. Reconstruct an iterator to start another traversal.
-
-**Damage is conservative.** A write marks a cell only when it changes it. If
-another write restores the displayed value before drawing, the mark remains:
-the screen does not duplicate the renderer's previous-frame baseline. The
-renderer compares every named row with that baseline and emits nothing when
-the row was restored. The grid fuzz checks that damage never under-reports.
+**The cursor move is a search.** Every candidate is costed in bytes — the
+absolute move, the column, the row, the four relative moves, the carriage
+return, and backspaces — and the shortest wins, with the absolute move as the
+tie-break, because it is the one that is right whatever the terminal did with
+the last one.
 
 **Changed cells go out as runs.** A contiguous run gets one cursor move and
 one style pen. Across an unchanged gap, the renderer counts the bytes for its
@@ -280,10 +202,6 @@ continues.
 counting their exact text, style, link, erase and cursor-move bytes, so the
 choice takes no extra emit pass.
 
-The renderer caches 1,024 SGR transitions in buckets of sixteen, checking
-both styles on every hit. Recurring RGB transitions can share a bucket
-without replacing one another; full buckets replace entries in turn.
-
 **A blank run is erased, not painted.** A row blank to its end is `EL`, four
 bytes whatever the width; a blank run longer than the sequence that erases it
 is `ECH`, which leaves the cursor where it was.
@@ -294,11 +212,46 @@ the count saves more than it costs. A cluster of more than one codepoint is
 never repeated, because what a terminal repeats after one is its last
 codepoint.
 
-**The cursor move is a search.** Every candidate is costed in bytes — the
-absolute move, the column, the row, the four relative moves, the carriage
-return, and backspaces — and the shortest wins, with the absolute move as the
-tie-break, because it is the one that is right whatever the terminal did with
-the last one.
+The renderer caches 1,024 SGR transitions in buckets of sixteen, checking
+both styles on every hit. Recurring RGB transitions can share a bucket
+without replacing one another; full buckets replace entries in turn.
+
+**Damage is conservative.** A write marks a cell only when it changes it. If
+another write restores the displayed value before drawing, the mark remains:
+the screen does not duplicate the renderer's previous-frame baseline. The
+renderer compares every named row with that baseline and emits nothing when
+the row was restored. The grid fuzz checks that damage never under-reports.
+
+**A frame is one write.** `draw` writes to a `*std.Io.Writer` and never
+flushes it, so batching is yours. `Stats.bytes` says how large the buffer
+wants to be.
+
+The writer is the caller's, and `draw` never flushes. Between frames, one-off
+sequences must not paint, move the cursor, change SGR or a link, or change
+tracked modes. Queries, clipboard writes and notifications fit that contract.
+After moving the cursor, call `Renderer.untrustCursor()` so the next move is
+absolute. Painting or changing SGR or a link also needs `repaint`; change
+tracked modes through `setModes` or `setCaps` so `leave` can undo them.
+
+**Synchronised output brackets a frame, not a session.** Mode 2026 left on for
+a program's lifetime makes the terminal repaint at whatever timeout it
+invented, which is ten frames a second on the tightest of them. `draw` writes
+the bracket, into its own buffer, and keeps it only when the frame turns out
+too large for the terminal to take in one read; `leave` writes the closing
+half whether or not it wrote the opening one.
+
+### Widths are right for grapheme clusters
+
+**Widths come from one model, held to a real terminal.** Clusters are cut and
+measured by [xenoglyph](https://github.com/pedronaugusto/xenoglyph): Unicode's
+grapheme rules, with a skin tone joining only an emoji it can modify, as a
+terminal draws it, and a cell-width model that states each of its rules. visor
+measures by the method the terminal uses: by codepoint (`wcwidth`), by cluster
+(mode 2027), or told (the text sizing protocol, where a lone mark or Hangul
+vowel is given a cell of its own). The conformance build feeds what visor
+writes to a real emulator and holds visor's grid to the one the emulator ends
+up with, under both measures, across resizes and for every grapheme of its
+corpus.
 
 **Measured by codepoint, the grid holds what such a terminal shows.** A
 terminal that measures by codepoint gives every codepoint that takes columns
@@ -332,62 +285,83 @@ cluster is a head and a covered column, always adjacent; overwriting either
 repairs the other; one with a single column left becomes a spacer, which the
 diff can tell from a space someone asked for.
 
-**Scaled text is a block the grid knows about.** `writeScaled` draws a
-grapheme at up to seven cells' height through the text sizing protocol: the
-head and a block of covered cells, as many rows tall as the scale and as many
-columns wide as the scale times the width. Writing into any cell of the block
-clears the whole of it, as a terminal does; the renderer writes the head as
-one sequence and never touches the block; and on a terminal without the
-protocol the grapheme is drawn at its own size with the rest of the block
-blank.
+### What the terminal can do is asked, never guessed
 
-`fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
-boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
-yourself only when the returned slice is shorter than the input.
+**Nothing is guessed.** No terminfo, no capability database, and no
+environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
+`Caps.Probe` writes morse's probe and folds the answers in, including the
+colour count `Co` into `Caps.colors`, and is settled
+when every question is answered or, after the device attributes, when the
+terminal has been quiet for the caller's quiet period; a caller who would
+rather trust the environment configures a separate `Caps` value, or hands
+`COLORTERM` and `NO_COLOR` to `Caps.guessColor`. Colours are drawn in what
+`Caps.colorProfile` says the terminal shows: direct colour, the 256-colour
+palette, the sixteen theme slots, or none. Every colour is fitted to it with
+`morse.Color.fit` before it is compared or written, matched against the
+terminal's own slots when `Palette.slots` has them. With nothing known it is
+the 256-colour palette; direct colour needs evidence. Probe
+questions and learned progress are internal; construct it with `init`, feed
+answers, and read copied capabilities and `hasAnswered` / `lastAnswer`. A mode the terminal
+answers set or reset is one it has: nothing has turned synchronised output or
+in-band resize reports on when the probe asks, so a terminal that has them
+answers reset.
 
-**Inline mode addresses nothing by row number.** A screen entered inline
-takes its rows from the row the cursor is on, the terminal scrolling for the
-ones that do not fit, and saves an origin there with `DECSC`. Every move after
-that is relative — to the cursor, or to the origin restored when the cursor
-is not trusted — and the cheaper of the two is what is written. Growing
-takes more rows the same way, shrinking gives them back blank, and `leave`
-puts the cursor on the row below with the last frame still showing. A
-scrolling region is an absolute thing, so scroll detection is off.
+`Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
+`Caps.Probe` and `Layers` together. Its component methods lend the owners; size, capabilities and probe progress
+are read through const queries.
+Pass terminal events to `handle(w, event, now)`, `now` a `std.Io.Timestamp`
+on the caller's clock, which says a frame is due;
+keys and application policy are still yours. Housekeeping is retained if
+capability output fails; a later event retries that output without replaying
+the input. Drain the batch, call `resize(w)` once, paint `screen()`, then
+`draw(w)` and flush your writer. Both grids follow
+the last resize; an unchanged in-band report repaints too, and each resize
+asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
+mouse parsing in step with the requested encoding. `setCaps` sets the
+caller's whole policy; a probe answer arriving later changes only the
+fields it learned, so overrides such as `osc8` survive it. With `Input`, use
+`renderer().setModes` and `Input.setMousePixels` together; `Session.setModes`
+is the convenience for a caller-owned morse parser. Input keeps its parser,
+buffers and unread bytes internal.
 
-`Renderer.printAbove(writer, lines, screen, layers, caps)` prints rows above
-an inline screen in the same frame that draws it: a line of log, a task that
-finished, a message done changing, above a view that is still live. The rows
-of `lines`, a grid as wide as the screen drawn with any window or widget, are
-written from the origin down, each ended by a carriage return and a line feed,
-so rows that reach the bottom of the terminal scroll it and go up into its
-scrollback like any other output; the screen's rows are then taken again under
-them and the screen drawn against the blank rows it stands on, priced as any
-frame is. Outside inline mode it returns `NotInline` and writes nothing.
+`ProbeWait.init(now, timeout, quiet).remaining(probe, now)` gives the next
+read's budget as a `std.Io.Duration`, or null when done; `now` is a
+`std.Io.Timestamp` and the spans are `std.Io.Duration`s. It owns no clock or read: an early
+key can be handled by the application while forwarded probe replies arrive.
+`examples/live.zig` shows the loop; run it with `bay live`. The examples
+step runs its `--check` path without a terminal.
 
-**The way out undoes the way in, and nothing else.** `enter` takes the
-screen and the input modes the program asked for; `leave` turns off exactly
-those, in reverse. The kitty keyboard flags are a stack per screen, so they
-are pushed after the switch to the alternate screen and popped before the
-switch back. The mouse is one motion and one encoding, as the terminal keeps
-it: `enter` puts it in exactly the state asked for, whatever was on before,
-`setModes` changes only the setting that differs, the old mode off before the
-new one on, and `leave` turns off that motion and that encoding. Focus
-reports are a mode of their own. A screen entered through `Tty.enter` is
-undone by `Tty.leave(io)` or `restore`; `restoreGlobal` and the panic handler
-restore every registered terminal from a buffer on the stack.
-`Tty` owns its descriptors, saved mode, renderer borrow and resize watcher.
-It keeps no `std.Io`: `close`, `enter`, `leave`, `writer` and `read` take the
-caller's, as `Input.next` and `nextWithin` do. Keep `Tty` at a stable address, and its entered renderer alive and at a stable
-address until restoration. Call terminal registration and restoration from
-one thread. A program that dies leaves the shell with its keyboard, its
-mouse and its cursor.
+**After a resize, nothing on the terminal is taken as known.** A terminal
+that changes size keeps what fitted, cuts it, moves its rows up with the
+cursor, or takes in a frame drawn at the old size after it changed, and says
+nothing about which. So `Renderer.resize`, like `repaint`, forgets the
+previous frame: the next `draw` writes every row whole, a row with nothing on
+it erased to the end of the line rather than taken to be blank already, and
+places every picture again, a placement with the same ids replacing the one
+the terminal kept wherever it went. There is no erase of the whole display
+first, because that takes every picture down with it. A program that hears of
+its size in band (mode 2048) hears of it after the terminal's grid changed,
+so its next frame lands on the new grid. The signal can come before the grid
+changes, and a frame drawn in that gap stays wrong until the next repaint, so
+`enter` turns 2048 on wherever `Caps.in_band_resize` says the terminal has
+it.
 
-**Synchronised output brackets a frame, not a session.** Mode 2026 left on for
-a program's lifetime makes the terminal repaint at whatever timeout it
-invented, which is ten frames a second on the tightest of them. `draw` writes
-the bracket, into its own buffer, and keeps it only when the frame turns out
-too large for the terminal to take in one read; `leave` writes the closing
-half whether or not it wrote the opening one.
+`Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
+place, writing only the mode differences and repainting on the next draw.
+Leaving and entering a renderer that has drawn also repaints text and pictures.
+
+**A cell's pixel size is the terminal's word, not a division.** The
+operating system and a resize report give the text area, which a terminal may
+pad, so the area divided by the grid is a little too large and the error grows
+toward the right edge. `Winsize` keeps the area and the cell apart, takes the
+cell only from the terminal's answer to `CSI 16 t`, and when it has to divide
+it says so.
+
+`Winsize.locate(mouse)` returns its zero-based column and row and fractions
+`x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
+cell reports point to the middle. Unknown pixel size returns null.
+
+### Pictures live in the layer model
 
 **The grid is text; the pictures are beside it.** A `Screen` holds cells
 and nothing else, and a program that shows pictures keeps its `Layers` next
@@ -466,35 +440,136 @@ is refused so the program sends it again in the escape code, which is what a
 terminal on another machine, over ssh, gets from then on. An object the
 terminal did not read is unlinked, never left behind.
 
-**After a resize, nothing on the terminal is taken as known.** A terminal
-that changes size keeps what fitted, cuts it, moves its rows up with the
-cursor, or takes in a frame drawn at the old size after it changed, and says
-nothing about which. So `Renderer.resize`, like `repaint`, forgets the
-previous frame: the next `draw` writes every row whole, a row with nothing on
-it erased to the end of the line rather than taken to be blank already, and
-places every picture again, a placement with the same ids replacing the one
-the terminal kept wherever it went. There is no erase of the whole display
-first, because that takes every picture down with it. A program that hears of
-its size in band (mode 2048) hears of it after the terminal's grid changed,
-so its next frame lands on the new grid. The signal can come before the grid
-changes, and a frame drawn in that gap stays wrong until the next repaint, so
-`enter` turns 2048 on wherever `Caps.in_band_resize` says the terminal has
-it.
+`Layers.init(allocator)` captures the allocator for its images, placements and
+compression storage. `transmit`, `declare`, `retire` and `deinit`, and the
+`Replacement` operations using those layers, take no allocator. Metadata
+accessors return borrowed, read-only slices; fields prefixed `_` are internal.
 
-`Renderer.setCaps(w, caps)` changes capabilities while the screen stays in
-place, writing only the mode differences and repainting on the next draw.
-Leaving and entering a renderer that has drawn also repaints text and pictures.
+`Layers.configureSharedMemory(true)` allows pictures through shared memory;
+`false` disables it. Allowing it again while allowed keeps the terminal's
+learned answer. Each outstanding object is unlinked when it is done with,
+whatever the configuration is by then, and an older object's reply cannot
+settle a new configuration. No `std.Io` is kept or needed: an object is
+memory, made and unlinked as `shm_open` and `shm_unlink` do. Names come from
+one atomic process-wide namespace and are never reused.
 
-**A cell's pixel size is the terminal's word, not a division.** The
-operating system and a resize report give the text area, which a terminal may
-pad, so the area divided by the grid is a little too large and the error grows
-toward the right edge. `Winsize` keeps the area and the cell apart, takes the
-cell only from the terminal's answer to `CSI 16 t`, and when it has to divide
-it says so.
+### The grid
 
-`Winsize.locate(mouse)` returns its zero-based column and row and fractions
-`x` and `y` within that cell. Pixel reports use the fractional `CellSize`;
-cell reports point to the middle. Unknown pixel size returns null.
+**A stored cell is thirty-two bytes and is compared as memory.** The grapheme lives
+in the cell when it is six bytes or fewer, which covers every
+single-codepoint cluster and a base with a combining mark, and in a pool the
+screen owns when it is longer. The style is `morse.Style`, which has a
+defined layout and no padding, so a whole row is one `memcmp` rather than a
+field comparison per cell. Nothing in a cell is undefined, and a colour's
+unused channels are zeroed on the way in, so comparing the memory and
+comparing the meaning are the same answer.
+
+A checked cell copies forty-eight bytes and binds pooled text and links to their issuing generation; the grid keeps thirty-two bytes per cell.
+`Text.offset()` returns `?GraphemeOffset`, `Text.length()` returns `ByteLength`,
+`Text.generation()` and `Link.generation()` return `PoolGeneration`, and
+`Link.index()` returns `?LinkIndex`. These aegis scalar domains preserve their
+integer layouts and cannot be assigned across meanings. Use `fromRaw` for an
+explicit import and `raw()` at a slice-index or encoding boundary. Importing a
+number does not establish that a handle belongs to a screen; resolution still
+checks its generation and bounds.
+`Screen.diff` yields changed positions without copying checked cells; `Row.diff` yields changed columns and `Row.eql` compares whole rows. They use the same pool identity semantics as `Cell.eql`: equal pooled contents in different generations differ. The iterators borrow both screens until iteration ends; neither screen may change, compact, resize or be destroyed during that borrow.
+
+State documented `Private:` belongs to the value that holds it and is
+read and changed through that value's methods; the doc comments say what
+each lends and for how long. Pooled handles carry the generation of the pool
+that issued them, so a handle that outlived a compaction or came from another
+screen is refused with `InvalidHandle` rather than read. `copyCell` moves a
+live cell between screens, and the owned-copy helpers keep content through
+compaction.
+
+**A cell is a claim; text is content.** A hand-built `Cell` is checked by
+`Screen.cell` — one cluster, UTF-8, no control, a column or two by the
+screen's width method, a shape that matches — and refused with
+`InvalidCell` or `InvalidHandle` before the grid changes. Text handed to
+`write`, `print` or a widget is drawn the way a terminal would draw it:
+bytes that are not UTF-8 become the replacement character, and a control or
+a cluster that takes no column, such as a combining mark that begins a
+segment, is drawn as nothing. Only more than one cluster in one `write` is
+an error. Every fallible draw returns `DrawError`, which is `CellError` and
+`Allocator.Error`.
+
+`Screen.writeOwnedCellUnchecked` and its Window counterpart are the bridge
+for another terminal's measured cells: handles stay checked, while the
+caller guarantees the glyph, shape and canonical text bytes. The source
+terminal's width is kept even when the parent would measure it differently.
+
+`Window` checks the whole glyph or scaled cell extent before direct writes
+and copies. Multi-cell fills use the fill rectangle as their boundary.
+A placement that cannot fit leaves the grid alone.
+
+`Screen.link` refuses C0 controls and DEL in a URI or params with
+`error.ControlInText` before interning. Ordinary UTF-8 is kept unchanged.
+
+Window keeps its screen and clipped rectangle together behind `screen()` and
+`rect()`. `ink()` borrows the drawing policy. Construct views through `Screen.window()`, `child` and `sub`, and
+apply ink through `inked`. Recreate windows after their screen is resized.
+
+Damage owns its row storage behind marking and clearing methods; `rowCount()`
+returns its extent. Its allocation API is unmanaged: pass the init allocator
+to `resize` and `deinit`.
+
+Text and visual-row iterators keep their source, cursor and refill state
+internal. Construct them through `init` or `TextInput.rows`, and advance
+through `next` / `nextAt`. Reconstruct an iterator to start another traversal.
+
+**Scaled text is a block the grid knows about.** `writeScaled` draws a
+grapheme at up to seven cells' height through the text sizing protocol: the
+head and a block of covered cells, as many rows tall as the scale and as many
+columns wide as the scale times the width. Writing into any cell of the block
+clears the whole of it, as a terminal does; the renderer writes the head as
+one sequence and never touches the block; and on a terminal without the
+protocol the grapheme is drawn at its own size with the rest of the block
+blank.
+
+`fitEnd(text, cols, ellipsis, method)` keeps the suffix, cut at a grapheme
+boundary, with room for a leading ellipsis. As with `fit`, write the ellipsis
+yourself only when the returned slice is shorter than the input.
+
+### Inline screens and the way out
+
+**Inline mode addresses nothing by row number.** A screen entered inline
+takes its rows from the row the cursor is on, the terminal scrolling for the
+ones that do not fit, and saves an origin there with `DECSC`. Every move after
+that is relative — to the cursor, or to the origin restored when the cursor
+is not trusted — and the cheaper of the two is what is written. Growing
+takes more rows the same way, shrinking gives them back blank, and `leave`
+puts the cursor on the row below with the last frame still showing. A
+scrolling region is an absolute thing, so scroll detection is off.
+
+`Renderer.printAbove(writer, lines, screen, layers, caps)` prints rows above
+an inline screen in the same frame that draws it: a line of log, a task that
+finished, a message done changing, above a view that is still live. The rows
+of `lines`, a grid as wide as the screen drawn with any window or widget, are
+written from the origin down, each ended by a carriage return and a line feed,
+so rows that reach the bottom of the terminal scroll it and go up into its
+scrollback like any other output; the screen's rows are then taken again under
+them and the screen drawn against the blank rows it stands on, priced as any
+frame is. Outside inline mode it returns `NotInline` and writes nothing.
+
+**The way out undoes the way in, and nothing else.** `enter` takes the
+screen and the input modes the program asked for; `leave` turns off exactly
+those, in reverse. The kitty keyboard flags are a stack per screen, so they
+are pushed after the switch to the alternate screen and popped before the
+switch back. The mouse is one motion and one encoding, as the terminal keeps
+it: `enter` puts it in exactly the state asked for, whatever was on before,
+`setModes` changes only the setting that differs, the old mode off before the
+new one on, and `leave` turns off that motion and that encoding. Focus
+reports are a mode of their own. A screen entered through `Tty.enter` is
+undone by `Tty.leave(io)` or `restore`; `restoreGlobal` and the panic handler
+restore every registered terminal from a buffer on the stack.
+`Tty` owns its descriptors, saved mode, renderer borrow and resize watcher.
+It keeps no `std.Io`: `close`, `enter`, `leave`, `writer` and `read` take the
+caller's, as `Input.next` and `nextWithin` do. Keep `Tty` at a stable address, and its entered renderer alive and at a stable
+address until restoration. Call terminal registration and restoration from
+one thread. A program that dies leaves the shell with its keyboard, its
+mouse and its cursor.
+
+### Input
 
 **Input is morse's events, read.** `Input.next` reads the terminal, frames
 the bytes with `morse.KeyParser` and hands back the parser's events as they
@@ -516,60 +591,7 @@ second task or a cancelled read.
 must hold at least `morse.KeyParser.min_buffer` bytes, and the read buffer
 at least one. Both buffers and the `Tty` must outlive the reader.
 
-**Nothing is guessed.** No terminfo, no capability database, and no
-environment variable read — not `TERM`, not `COLORTERM`, not `NO_COLOR`.
-`Caps.Probe` writes morse's probe and folds the answers in, including the
-colour count `Co` into `Caps.colors`, and is settled
-when every question is answered or, after the device attributes, when the
-terminal has been quiet for the caller's quiet period; a caller who would
-rather trust the environment configures a separate `Caps` value, or hands
-`COLORTERM` and `NO_COLOR` to `Caps.guessColor`. Colours are drawn in what
-`Caps.colorProfile` says the terminal shows: direct colour, the 256-colour
-palette, the sixteen theme slots, or none. Every colour is fitted to it with
-`morse.Color.fit` before it is compared or written, matched against the
-terminal's own slots when `Palette.slots` has them. With nothing known it is
-the 256-colour palette; direct colour needs evidence. Probe
-questions and learned progress are internal; construct it with `init`, feed
-answers, and read copied capabilities and `hasAnswered` / `lastAnswer`. A mode the terminal
-answers set or reset is one it has: nothing has turned synchronised output or
-in-band resize reports on when the probe asks, so a terminal that has them
-answers reset.
-
-`Session.init(gpa, winsize, questions)` holds the screen, renderer, `Winsize`,
-`Caps.Probe` and `Layers` together. Its component methods lend the owners; size, capabilities and probe progress
-are read through const queries.
-Pass terminal events to `handle(w, event, now)`, `now` a `std.Io.Timestamp`
-on the caller's clock, which says a frame is due;
-keys and application policy are still yours. Housekeeping is retained if
-capability output fails; a later event retries that output without replaying
-the input. Drain the batch, call `resize(w)` once, paint `screen()`, then
-`draw(w)` and flush your writer. Both grids follow
-the last resize; an unchanged in-band report repaints too, and each resize
-asks for the cell's pixel size again. `setModes(w, parser, modes)` keeps pixel
-mouse parsing in step with the requested encoding. `setCaps` sets the
-caller's whole policy; a probe answer arriving later changes only the
-fields it learned, so overrides such as `osc8` survive it. With `Input`, use
-`renderer().setModes` and `Input.setMousePixels` together; `Session.setModes`
-is the convenience for a caller-owned morse parser. Input keeps its parser,
-buffers and unread bytes internal.
-
-`ProbeWait.init(now, timeout, quiet).remaining(probe, now)` gives the next
-read's budget as a `std.Io.Duration`, or null when done; `now` is a
-`std.Io.Timestamp` and the spans are `std.Io.Duration`s. It owns no clock or read: an early
-key can be handled by the application while forwarded probe replies arrive.
-`examples/live.zig` shows the loop; run it with `bay live`. The examples
-step runs its `--check` path without a terminal.
-
-**A frame is one write.** `draw` writes to a `*std.Io.Writer` and never
-flushes it, so batching is yours. `Stats.bytes` says how large the buffer
-wants to be.
-
-The writer is the caller's, and `draw` never flushes. Between frames, one-off
-sequences must not paint, move the cursor, change SGR or a link, or change
-tracked modes. Queries, clipboard writes and notifications fit that contract.
-After moving the cursor, call `Renderer.untrustCursor()` so the next move is
-absolute. Painting or changing SGR or a link also needs `repaint`; change
-tracked modes through `setModes` or `setCaps` so `leave` can undo them.
+### Widgets
 
 **A widget is a value, and the caller keeps what survives the frame.** It is
 built where it is drawn, handed a window, and gone by the end of the call.
@@ -614,6 +636,14 @@ its own.
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeWake`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`, `DumpStylesError`. `expectScreensEqual`, `dumpScreen` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |
+
+`Date.init(year, month, day)` checks Gregorian month and day invariants and
+returns `InvalidDate` for a date that does not exist. `year()`, `month()` and
+`day()` read its components; today and selected days use these checked values.
+
+`dumpScreenStyles` writes padded base-62 IDs, most significant digit first.
+Every ID in the legend and grid uses the fewest digits needed for the whole
+legend: one through 62 styles, two through 3,844, and more for larger legends.
 
 ### `visor.widgets`
 
@@ -817,7 +847,7 @@ compiled and not run.
 - [morse](https://github.com/pedronaugusto/morse) writes every escape sequence and
   parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
   `conduit.tty` makes the terminal's own calls;
-  [uucode](https://github.com/jacobsandlund/uucode) segments and measures clusters.
+  [xenoglyph](https://github.com/pedronaugusto/xenoglyph) segments and measures clusters.
 - [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
   the tests and CI, and [shakedown](https://github.com/pedronaugusto/shakedown) holds the
   tests' clocks and fault plans. Both are dev dependencies, which

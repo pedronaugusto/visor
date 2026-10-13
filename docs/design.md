@@ -8,7 +8,7 @@ builds none. The layering stays at file level, enforced by gantry's layer
 check in `ci/layers.zig`: widgets look down at the base through
 `src/widgets/base.zig`, `src/visor.zig` names `widgets.zig` last, and no file
 of the base imports a widget. `src/dependencies.zig` is the single seam to
-morse, conduit, uucode and aegis. The allocator belongs to each
+morse, conduit, xenoglyph and aegis. The allocator belongs to each
 allocating owner; blocking operations receive the caller's `std.Io`.
 
 ## Pool identities and bytes

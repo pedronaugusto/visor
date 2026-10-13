@@ -1938,13 +1938,16 @@ test "screen fills keep whole glyph extents inside their rectangle" {
 }
 
 test "a cell's glyph is printable by the screen's own width method" {
-    // A Hangul vowel takes a column measured whole and none measured by
-    // codepoint.
+    // A lone Hangul vowel is a column only when the terminal was told it:
+    // measured whole or by codepoint it takes none.
     var s = try made(2, 1);
     defer s.deinit();
     const c: Cell = .{ .text = .inlined("\u{1161}") };
+    s.method = .explicit;
     try s.writeOwnedCell(0, 0, c);
     try testing.expectEqualStrings("\u{1161}", s.textAt(0, 0));
+    s.method = .unicode;
+    try testing.expectError(error.InvalidCell, s.writeOwnedCell(1, 0, c));
     s.method = .wcwidth;
     try testing.expectError(error.InvalidCell, s.writeOwnedCell(1, 0, c));
     // A lone combining mark is a column only when the terminal was told

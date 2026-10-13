@@ -100,14 +100,14 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "warp",
         "shakedown",
         "std",
-        "uucode",
+        "xenoglyph",
     } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },
     .{ .name = "aegis owner", .target = "aegis", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit owner", .target = "conduit", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit.tty owner", .target = "conduit.tty", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "morse owner", .target = "morse", .except_from = &.{"src/dependencies.zig"} },
-    .{ .name = "uucode owner", .target = "uucode", .except_from = &.{"src/dependencies.zig"} },
+    .{ .name = "xenoglyph owner", .target = "xenoglyph", .except_from = &.{"src/dependencies.zig"} },
 };
 
 /// The roots the builds compile, the conformance build's included, and the

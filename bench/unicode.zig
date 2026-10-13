@@ -1,13 +1,13 @@
 //! The few Unicode properties the corpus and the decoder measure by, read
-//! from uucode's tables of the Unicode Character Database: never from visor's
-//! own width rule, which is what the checks hold visor to.
+//! from xenoglyph's tables of the Unicode Character Database: never from
+//! visor's own width rule, which is what the checks hold visor to.
 
 const std = @import("std");
-const uucode = @import("uucode");
+const xenoglyph = @import("xenoglyph");
 
 /// East Asian Wide or Fullwidth: two columns.
 pub fn wide(cp: u21) bool {
-    return switch (uucode.get(.east_asian_width, cp)) {
+    return switch (xenoglyph.eastAsianWidth(cp)) {
         .wide, .fullwidth => true,
         else => false,
     };
@@ -16,24 +16,24 @@ pub fn wide(cp: u21) bool {
 /// A combining mark (nonzero combining class, Mn or Me): it joins the cell
 /// before it and takes no column of its own.
 pub fn mark(cp: u21) bool {
-    if (uucode.get(.canonical_combining_class, cp) != 0) return true;
-    return switch (uucode.get(.general_category, cp)) {
-        .mark_nonspacing, .mark_enclosing => true,
+    if (xenoglyph.normalize.combiningClass(cp) != 0) return true;
+    return switch (xenoglyph.generalCategory(cp)) {
+        .nonspacing_mark, .enclosing_mark => true,
         else => false,
     };
 }
 
 /// A format character (Cf), such as the zero-width joiner.
 pub fn format(cp: u21) bool {
-    return uucode.get(.general_category, cp) == .other_format;
+    return xenoglyph.generalCategory(cp) == .format;
 }
 
 /// A regular-expression word character: a letter, a number or `_`.
 pub fn word(cp: u21) bool {
     if (cp == '_') return true;
-    return switch (uucode.get(.general_category, cp)) {
-        .letter_uppercase, .letter_lowercase, .letter_titlecase, .letter_modifier, .letter_other => true,
-        .number_decimal_digit, .number_letter, .number_other => true,
+    return switch (xenoglyph.generalCategory(cp)) {
+        .uppercase_letter, .lowercase_letter, .titlecase_letter, .modifier_letter, .other_letter => true,
+        .decimal_number, .letter_number, .other_number => true,
         else => false,
     };
 }

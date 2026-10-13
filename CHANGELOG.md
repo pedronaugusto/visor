@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Grapheme clusters and widths come from [xenoglyph](https://github.com/pedronaugusto/xenoglyph) 0.2.0, whose Unicode 18 tables are source in its package, in place of uucode, which is no longer a dependency: nothing is generated at build time, and a program that configured uucode's fields for visor no longer needs to. Pins xenoglyph 0.2.0, conduit 0.7.0 and aegis 0.1.3.
+- Segmentation is unchanged: printed text is cut by UAX #29 with a skin tone joining only an emoji modifier base (xenoglyph's `.after_base`), and `joinsCell` reads the terminal's rules (`Rules.terminal`). Both agree with what visor did before on every one of two million random sequences of the code points the rules treat specially.
+- Measured by codepoint, widths are unchanged but for U+2E3A TWO-EM DASH and U+2E3B THREE-EM DASH, one column each as East_Asian_Width (Neutral) has them and terminals that measure by `wcwidth` draw them, where they were two and three. The conformance emulator draws both in two columns, as visor measured U+2E3A before; the corpus holds neither.
+- Measured whole (mode 2027), a cluster is the width a terminal in that mode gives it, xenoglyph's model: its first code point's columns, two where a later code point has columns of its own or a skin tone or VS16 asks for emoji presentation, one where VS15 asks for text. Where this differs from before, visor now agrees with the conformance emulator's own measure, which it disagreed with before: an emoji zwj sequence whose first emoji is text by default (U+1F590 U+200D U+2764) is two columns, was one; a prepended mark with what it joins (U+0600 or U+0D4E and a letter or digit) is two, was one; a lone Hangul vowel or final (U+1161) takes no column, as a terminal measuring clusters draws it over the cell to its left, where it took one, so a cell holding one is valid only under `.explicit`. Over four million random clusters the measure disagreed with the emulator's on 576,051 before and on 272,352 now. Of those, 258,798 hold one of the two dashes, one column now where the emulator and visor before gave two; 6,901 are a skin tone after an emoji that is text by default, two columns as before (UTS #51 gives a modifier sequence emoji presentation) where the emulator gives one; and 6,653 are two prepended marks in a row, two columns where the emulator gives one.
+- Told the width (`.explicit`), a lone combining or enclosing mark, or a lone Hangul vowel or final, is still one column, so the terminal gives it a cell of its own: one code point that measures none whole but is drawn. A lone U+20E3 is now one column there, two before.
+- conduit 0.7 builds visor as before; nothing in visor used `aegis(dependency)`.
+- The README's Design opens with what the renderer, the width model, the capability probe and the picture layers do, and `Date.init` and the style-ID notes move to API.
+
 ## [0.5.2] - 2026-10-13
 
 ### Changed
