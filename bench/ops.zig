@@ -1172,40 +1172,46 @@ const TermFeed = struct {
     }
 };
 
-const PictureTransmit = struct {
-    layers: v.Layers,
-    out: std.Io.Writer.Allocating,
-    pixels: []u8,
-    pw: u32,
-    ph: u32,
+/// A picture sent as raw pixels, or deflated through warp's level-1 compressor
+/// when the terminal is told it may be.
+fn PictureTransmit(comptime compress: bool) type {
+    return struct {
+        const Self = @This();
 
-    pub fn init(f: *PictureTransmit, c: *Ctx) !void {
-        f.layers = .init(c.gpa);
-        f.out = .init(c.gpa);
-        f.pw = @as(u32, c.cols) * 4;
-        f.ph = @as(u32, c.rows) * 8;
-        f.pixels = c.fixture.alloc(u8, @as(usize, f.pw) * f.ph * 4) catch @panic("oom");
-        for (f.pixels, 0..) |*p, i| p.* = @truncate(i *% 31 +% i / 4096);
-        must(f.out.ensureTotalCapacity(f.pixels.len * 2 + 8192));
-    }
+        layers: v.Layers,
+        out: std.Io.Writer.Allocating,
+        pixels: []u8,
+        pw: u32,
+        ph: u32,
 
-    pub fn deinit(f: *PictureTransmit, _: *Ctx) void {
-        f.out.deinit();
-        f.layers.deinit();
-    }
+        pub fn init(f: *Self, c: *Ctx) !void {
+            f.layers = .init(c.gpa);
+            f.out = .init(c.gpa);
+            f.pw = @as(u32, c.cols) * 4;
+            f.ph = @as(u32, c.rows) * 8;
+            f.pixels = c.fixture.alloc(u8, @as(usize, f.pw) * f.ph * 4) catch @panic("oom");
+            for (f.pixels, 0..) |*p, i| p.* = @truncate(i *% 31 +% i / 4096);
+            must(f.out.ensureTotalCapacity(f.pixels.len * 2 + 8192));
+        }
 
-    pub fn frame(f: *PictureTransmit, c: *Ctx, _: usize) !void {
-        f.out.clearRetainingCapacity();
-        const n = must(f.layers.transmit(&f.out.writer, .fromRaw(7), f.pixels, .{ .width = .fromRaw(f.pw), .height = .fromRaw(f.ph), .compress = false }));
-        c.bytes += f.out.written().len;
-        c.count += n;
-    }
+        pub fn deinit(f: *Self, _: *Ctx) void {
+            f.out.deinit();
+            f.layers.deinit();
+        }
 
-    pub fn evidence(f: *PictureTransmit, _: *Ctx) void {
-        const digest = digestOf(f.out.written());
-        emit("value\tbytes={d} sha256={x}\n", .{ f.out.written().len, digest });
-    }
-};
+        pub fn frame(f: *Self, c: *Ctx, _: usize) !void {
+            f.out.clearRetainingCapacity();
+            const n = must(f.layers.transmit(&f.out.writer, .fromRaw(7), f.pixels, .{ .width = .fromRaw(f.pw), .height = .fromRaw(f.ph), .compress = compress }));
+            c.bytes += f.out.written().len;
+            c.count += n;
+        }
+
+        pub fn evidence(f: *Self, _: *Ctx) void {
+            const digest = digestOf(f.out.written());
+            emit("value\tbytes={d} sha256={x}\n", .{ f.out.written().len, digest });
+        }
+    };
+}
 
 const Protocol = enum { kitty, sixel, iterm, cells };
 
@@ -1411,7 +1417,8 @@ pub const workloads = .{
     .{ "sextants", Widget("sextants", sextants) },
     .{ "input_events", InputEvents },
     .{ "term_feed", TermFeed },
-    .{ "picture_transmit", PictureTransmit },
+    .{ "picture_transmit", PictureTransmit(false) },
+    .{ "picture_transmit_deflated", PictureTransmit(true) },
     .{ "picture_frame_kitty", PictureFrame(.kitty) },
     .{ "picture_frame_sixel", PictureFrame(.sixel) },
     .{ "picture_frame_iterm", PictureFrame(.iterm) },

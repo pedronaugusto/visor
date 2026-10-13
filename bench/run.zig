@@ -246,8 +246,8 @@ fn check(a: Allocator, io: Io, env: *const std.process.Environ.Map, program: []c
     };
 }
 
-test "the workloads: 55 operations, 8 drawing-core workloads, each named once" {
-    try std.testing.expectEqual(@as(usize, 55), ops.workloads.len);
+test "the workloads: 56 operations, 8 drawing-core workloads, each named once" {
+    try std.testing.expectEqual(@as(usize, 56), ops.workloads.len);
     try std.testing.expectEqual(@as(usize, 8), draw.workloads.len);
     const all = draw.workloads ++ ops.workloads;
     @setEvalBranchQuota(20_000);
