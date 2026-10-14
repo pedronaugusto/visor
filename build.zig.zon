@@ -13,8 +13,8 @@
         },
 
         .conduit = .{
-            .url = "git+https://github.com/pedronaugusto/conduit?ref=v0.7.1#e796d0b16159144c66513ab27b687b430444b45d",
-            .hash = "conduit-0.7.1-4rIA7-YQFAATySoRAxkMY8Z1Fe64Xe1CYDIeF3yI_l5y",
+            .url = "git+https://github.com/pedronaugusto/conduit?ref=v0.8.0#ce496e9d41d842036a4a7bdc50ede1fcba34c8e3",
+            .hash = "conduit-0.8.0-4rIA78chFABxU-qL36_fBkrO9qOg3Zb-6mIWm1Xz8vFm",
         },
 
         .reactor = .{
@@ -23,8 +23,8 @@
         },
 
         .warp = .{
-            .url = "git+https://github.com/pedronaugusto/warp?ref=v0.3.1#943b5188d31dacdd2a2d8cef4f6312e85a76d89a",
-            .hash = "warp-0.3.1-JASxFdFEEQDaCNoyxHxZKBAO9tlBpaFG_1p_tu2Udfmi",
+            .url = "git+https://github.com/pedronaugusto/warp?ref=v0.4.0#874a05a5cd94e9a76001cef2420cb8213464abf1",
+            .hash = "warp-0.4.0-JASxFYVYEQCFzy2g8yp2DD60kAUM687eHI6yIp8dW6uK",
         },
 
         .xenoglyph = .{
@@ -45,8 +45,8 @@
     },
     .dev_dependencies = .{
         .preflight = .{
-            .url = "git+https://github.com/pedronaugusto/preflight?ref=v0.5.3#5518e92aa5a1e587392477dc4b6e08296562f5ee",
-            .hash = "preflight-0.5.3-LX1Zwq_aDwA3R2OIbpL6xl-BmoDw8NyTOcq3vV-Q5G2u",
+            .url = "git+https://github.com/pedronaugusto/preflight?ref=v0.5.6#7d5f97b670c7f777392f180187dbf079efc59910",
+            .hash = "preflight-0.5.6-LX1ZwlDqDwBqvy5JbO7G7U-lhZRhdEJLquePX7jFF2Ht",
         },
 
         .shakedown = .{
