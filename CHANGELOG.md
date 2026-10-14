@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-14
+
+### Changed
+
+- Pins conduit 0.8.0 and warp 0.4.0.
+
 ## [0.5.4] - 2026-10-14
 
 ### Changed
@@ -856,7 +862,8 @@ checks them with, and a second module of widgets drawn on the grid.
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
 
-[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/pedronaugusto/visor/compare/v0.5.3...v0.5.5
 [0.5.3]: https://github.com/pedronaugusto/visor/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pedronaugusto/visor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pedronaugusto/visor/compare/v0.5.0...v0.5.1
