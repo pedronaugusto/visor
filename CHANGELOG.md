@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-10-17
+
+### Changed
+
+- Pins warp 0.4.1: its AVX2 checksum kernels faulted in a Debug build on x86-64 Linux, which crashed visor's compressed image transfer there.
+
 ## [0.5.5] - 2026-10-14
 
 ### Changed
