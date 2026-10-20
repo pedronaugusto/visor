@@ -870,8 +870,11 @@ than the process. [CI](.github/workflows/ci.yml) runs in tiers. The fast
 tier runs the source checks and the Debug suite on `ubuntu-latest`; the merge
 tier, on the candidate for `main`, adds the Debug suite on `macos-latest` and
 `windows-latest`; the release tier, before a cut, runs the suites in Debug
-and ReleaseSafe on all three, plus ReleaseFast and ThreadSanitizer on Ubuntu,
-and compiles ReleaseSmall.
+and ReleaseSafe on all three, plus ReleaseFast on Ubuntu, compiles
+ReleaseSmall, and runs the hardened profile: `bay hardened` (the suites with
+safety on and `std.testing.allocator` on shakedown's quarantine),
+`bay hardened-fuzz` (the properties under Zig's fuzzer) and, on x86_64 or
+aarch64 Linux, `bay hardened-tsan` (the suites under ThreadSanitizer).
 
 `bay bench` builds visor's own benchmarks in `bench/` in ReleaseFast and
 runs them: every drawing-core workload and every public operation, checked by

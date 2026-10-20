@@ -83,26 +83,13 @@ pub fn dev(b: *std.Build, tools: type) void {
     const test_filter = b.option([]const u8, "test-filter", "Run tests whose names contain this text");
     const filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
 
-    // Input is read by a task beside the caller's, handed over through a
-    // queue, and stopped by a cancel; a race at that crossing is a claim a
-    // detector can check and a reader cannot: `bay test
-    // -Dthread-sanitizer`. The detector is an LLVM pass.
-    const thread_sanitizer = b.option(
-        bool,
-        "thread-sanitizer",
-        "Build the tests with ThreadSanitizer",
-    ) orelse false;
-    const sanitize: ?bool = if (thread_sanitizer) true else null;
-
     const tests = b.addTest(.{
         .name = "visor-tests",
         .filters = filters,
-        .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
             .root_source_file = p.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
-            .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "spread", .module = spread },
                 .{ .name = "conduit", .module = conduit.module("conduit") },
@@ -170,12 +157,10 @@ pub fn dev(b: *std.Build, tools: type) void {
     const widget_tests = b.addTest(.{
         .name = "visor-widget-tests",
         .filters = filters,
-        .use_llvm = if (thread_sanitizer) true else null,
         .root_module = b.createModule(.{
             .root_source_file = p.path("src/widgets_test.zig"),
             .target = target,
             .optimize = optimize,
-            .sanitize_thread = sanitize,
             .imports = &(imports ++ [_]std.Build.Module.Import{
                 .{ .name = "spread", .module = spread },
             }),
@@ -287,6 +272,12 @@ pub fn dev(b: *std.Build, tools: type) void {
     preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,
+        // The release tier fuzzes the properties and runs the suites under
+        // ThreadSanitizer. Input is read by a task beside the caller's,
+        // handed over through a queue, and stopped by a cancel; a race at
+        // that crossing is a claim a detector checks and a reader cannot
+        // (`bay hardened-tsan` on Linux).
+        .hardened = .{ .fuzz_step = "test", .tsan_step = "test" },
         // visor's own measurements, in bench/: `bay bench` builds
         // the pass in ReleaseFast under zig-out/bench and runs it, and
         // `bay test` runs it once with `--smoke`.
