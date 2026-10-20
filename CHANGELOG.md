@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Pins the family's newest lines, so visor forms one graph with the packages that build on them: conduit 0.9.3 (the two-way channel), reactor 0.7.1 (on shuttle 0.3), xenoglyph 0.4.1, aegis 0.1.14 and morse 0.8.5; preflight 0.11.0 and shakedown 0.4.13 for development.
+
 ## [0.5.6] - 2026-10-17
 
 ### Changed
