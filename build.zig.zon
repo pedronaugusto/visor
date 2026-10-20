@@ -1,6 +1,6 @@
 .{
     .name = .visor,
-    .version = "0.5.7",
+    .version = "0.5.8",
     .dependencies = .{
         .aegis = .{
             .url = "git+https://github.com/pedronaugusto/aegis?ref=v0.1.14#5852ab956e97a47926af73abbb7dced5361f9267",

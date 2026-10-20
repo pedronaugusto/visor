@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-10-20
+
 ### Fixed
 
 - A build that links libc compiles for Windows again. Shared memory for pictures is offered only where the build can put a picture there (Linux, and macOS or a BSD with libc): elsewhere `Layers.configureSharedMemory(true)` leaves it off and pictures go in the escape code. 0.5.7 named its objects with the process id even where it makes none, and on Windows with libc `getpid` is a handle.
