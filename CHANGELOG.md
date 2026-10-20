@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Development: the suites run under the release tier's hardened profile (`bay hardened`, `bay hardened-fuzz`, `bay hardened-tsan`), which takes the place of the `thread-sanitizer` build option and its declared ThreadSanitizer job.
+- Development: the tests that count what `check` draws stay off the fuzzer with `.fuzz = false` instead of skipping in a fuzzing build: found as fuzz tests in the unfuzzed run, they never called the fuzzer in the fuzzing one, which selected them forever.
 
 ## [0.5.8] - 2026-10-20
 

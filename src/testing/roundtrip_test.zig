@@ -941,14 +941,12 @@ fn checked(comptime property: anytype, args: anytype, tally: ?*Tally) !void {
             try @call(.auto, property, .{ testing.allocator, case.source } ++ r.args ++ .{r.tally});
         }
     }.run;
-    // Counted runs use one seed: what they assert is about the generators, so
-    // the cases are the same on every run.
-    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{ .seed = if (tally != null) counting_seed else null });
+    // Counted runs use one seed and stay off the fuzzer: what they assert is
+    // about the generators, so the cases are `check`'s own, the same on every run.
+    try shakedown.check(testing.allocator, Run{ .args = args, .tally = tally }, body, .{ .seed = if (tally != null) counting_seed else null, .fuzz = tally == null });
 }
 
 test "the round trip's cases draw every size, every operation and every grapheme" {
-    // The assertions are about the cases `check` draws, not the fuzzer's.
-    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try checked(roundTrip, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
@@ -959,8 +957,6 @@ test "the round trip's cases draw every size, every operation and every grapheme
 }
 
 test "the inline round trip's cases draw every width, prompt and height, and resizes" {
-    // The assertions are about the cases `check` draws, not the fuzzer's.
-    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try checked(roundTripInline, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
@@ -973,8 +969,6 @@ test "the inline round trip's cases draw every width, prompt and height, and res
 }
 
 test "the resize round trip's cases draw every size and several steps" {
-    // The assertions are about the cases `check` draws, not the fuzzer's.
-    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try checked(roundTripResize, .{textmod.Method.unicode}, &t);
     try testing.expect(t.cols.covers(1, 24));
@@ -985,8 +979,6 @@ test "the resize round trip's cases draw every size and several steps" {
 }
 
 test "the picture property's cases draw every size and every picture operation" {
-    // The assertions are about the cases `check` draws, not the fuzzer's.
-    if (@import("builtin").fuzz) return error.SkipZigTest;
     var t: Tally = .{};
     try checked(imageRoundTrip, .{}, &t);
     try testing.expect(t.cols.covers(2, 24));
