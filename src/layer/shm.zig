@@ -57,9 +57,11 @@ pub fn nextSequence() u64 {
 }
 
 /// Hex keeps a full 32-bit pid and 64-bit sequence within macOS's limit.
+/// A build without shared memory makes no object, so its names have no
+/// process in them.
 fn nameOf(seq: u64) Name {
     var n: Name = .{};
-    const pid: u32 = if (builtin.link_libc) @intCast(std.c.getpid()) else if (builtin.target.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+    const pid: u32 = if (!supported) 0 else if (builtin.link_libc) @intCast(std.c.getpid()) else @intCast(std.os.linux.getpid()); // safe: a POSIX pid is positive and fits 32 bits
     comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
     // unreachable: the longest name, a u32 and a u64 in hex, fits, as asserted above
     const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq }) catch unreachable;

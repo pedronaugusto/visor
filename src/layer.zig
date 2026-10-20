@@ -532,14 +532,17 @@ pub const Layers = struct {
         return l.fallbacks;
     }
 
-    /// Allows shared memory, or disables it. This changes future
+    /// Allows shared memory, or disables it. A build that cannot put a
+    /// picture there (`supported` in `layer/shm.zig`: Windows, Android, a
+    /// BSD or macOS without libc) never offers the medium, and its pictures
+    /// go in the escape code. This changes future
     /// transmissions; live objects are still unlinked when they are done
     /// with. Allowing it again while allowed keeps the terminal's learned
     /// answer; disable and allow again to retry a refused medium. Nothing
     /// is kept but the choice: an object is memory, put and unlinked
     /// without a `std.Io`.
     pub fn configureSharedMemory(l: *Layers, allowed: bool) void {
-        if (!allowed) {
+        if (!allowed or !shm.supported) {
             l.shared_memory = null;
             return;
         }
@@ -606,7 +609,7 @@ pub const Layers = struct {
         how: Transmit,
     ) TransmitError!usize {
         const gpa = l.gpa;
-        if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
+        if (shm.supported) if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(w, sm, id, pixels, how)) |n| return n;
         };
         var payload = pixels;

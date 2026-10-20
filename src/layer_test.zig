@@ -697,6 +697,7 @@ test "a retired first picture is freed even when the frame has no text or placem
 }
 
 test "shared memory reserves ownership before creating a name" {
+    if (!shm.supported) return error.SkipZigTest;
     var fail = std.testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     var l: Layers = .init(fail.allocator());
     l.configureSharedMemory(true);
@@ -712,7 +713,7 @@ test "shared memory reserves ownership before creating a name" {
 
 test "shared memory validates the protocol size before any ownership or output" {
     try testing.expectEqual(std.math.maxInt(u32), try layer_access.sharedSize(std.math.maxInt(u32)));
-    if (@bitSizeOf(usize) <= 32) return error.SkipZigTest;
+    if (@bitSizeOf(usize) <= 32 or !shm.supported) return error.SkipZigTest;
     const oversized: usize = @as(usize, std.math.maxInt(u32)) + 1;
     try testing.expectError(error.PayloadTooLarge, layer_access.sharedSize(oversized));
     var fail = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });

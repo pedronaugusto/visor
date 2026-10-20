@@ -120,6 +120,25 @@ pub fn dev(b: *std.Build, tools: type) void {
     // fetch.
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
+    // A consumer's build links libc or does not, and the package's code
+    // branches on it (shared memory through `shm_open`, or the system's own
+    // calls, or not at all): the check compiles the suite both ways, so every
+    // target is held to what either kind of consumer reaches.
+    const libc_tests = b.addTest(.{
+        .name = "visor-tests-libc",
+        .filters = filters,
+        .root_module = b.createModule(.{
+            .root_source_file = p.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &(imports ++ [_]std.Build.Module.Import{
+                .{ .name = "spread", .module = spread },
+                .{ .name = "conduit", .module = conduit.module("conduit") },
+            }),
+        }),
+    });
+    check_step.dependOn(&libc_tests.step);
 
     // The spread is a separate module: name its own test artifact so its
     // tests are reached without depending on incidental member uses.
@@ -263,6 +282,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     // Both suites' clocks, fault plans and allocators.
     const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
+    libc_tests.root_module.addImport("shakedown", shakedown);
     widget_tests.root_module.addImport("shakedown", shakedown);
     preflight.addCi(b, p, .{
         .tests = test_step,
