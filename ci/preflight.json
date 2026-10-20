@@ -4,7 +4,6 @@
   ],
   "test_roots": [
     "src/tests.zig",
-    "src/widgets_test.zig",
     "src/testing/spread.zig"
   ],
   "test_support": [

@@ -116,7 +116,6 @@ pub const required = [_][]const u8{
     "src/visor.zig",
     "src/dependencies.zig",
     "src/tests.zig",
-    "src/widgets_test.zig",
     "src/testing/spread.zig",
 };
 

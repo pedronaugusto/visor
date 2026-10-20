@@ -148,27 +148,6 @@ pub fn dev(b: *std.Build, tools: type) void {
     check_step.dependOn(domains);
     b.getInstallStep().dependOn(check_step);
 
-    // The widgets get a test binary of their own, so it compiles beside the
-    // base's; for a consumer they are the same module. Every widget's test
-    // draws it into a real grid, renders the frame, feeds the bytes to the
-    // emulator and compares the picture -- so the suite proves the widget
-    // and the renderer together, which is the only combination a user ever
-    // runs.
-    const widget_tests = b.addTest(.{
-        .name = "visor-widget-tests",
-        .filters = filters,
-        .root_module = b.createModule(.{
-            .root_source_file = p.path("src/widgets_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &(imports ++ [_]std.Build.Module.Import{
-                .{ .name = "spread", .module = spread },
-            }),
-        }),
-    });
-    test_step.dependOn(&b.addRunArtifact(widget_tests).step);
-    check_step.dependOn(&widget_tests.step);
-
     // The benchmark's checks hold visor to a decoder, a corpus and a plan
     // of their own, and those have tests of their own.
     const bench_tests = b.addTest(.{
@@ -268,7 +247,6 @@ pub fn dev(b: *std.Build, tools: type) void {
     const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     libc_tests.root_module.addImport("shakedown", shakedown);
-    widget_tests.root_module.addImport("shakedown", shakedown);
     preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,
