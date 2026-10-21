@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-10-21
+
 ### Added
 
 - A picture written where it is sent from: `Layers.prepare(id, len, how)` returns `len` bytes to fill and `Layers.transmitPrepared(w)` sends them as `transmit` sends a copy, and `discardPrepared` takes them back unsent. Through shared memory the bytes are the object's, mapped, so a frame is copied once (into the object) instead of twice; in the escape code they are a buffer kept and reused. `Replacement.prepare` and `Replacement.sendPrepared` do the same for a replacement, and `Replacement.Sent` names what `send` returns. A prepared picture's id is taken: `ImageIds.acquire` skips it.
@@ -894,8 +896,13 @@ checks them with, and a second module of widgets drawn on the grid.
   the spacing anyway and placed the later parts past the edge. Positions are
   clamped to the area, and a part with no room left is empty.
 
-[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.5...HEAD
-[0.5.5]: https://github.com/pedronaugusto/visor/compare/v0.5.3...v0.5.5
+[Unreleased]: https://github.com/pedronaugusto/visor/compare/v0.5.9...HEAD
+[0.5.9]: https://github.com/pedronaugusto/visor/compare/v0.5.8...v0.5.9
+[0.5.8]: https://github.com/pedronaugusto/visor/compare/v0.5.7...v0.5.8
+[0.5.7]: https://github.com/pedronaugusto/visor/compare/v0.5.6...v0.5.7
+[0.5.6]: https://github.com/pedronaugusto/visor/compare/v0.5.5...v0.5.6
+[0.5.5]: https://github.com/pedronaugusto/visor/compare/v0.5.4...v0.5.5
+[0.5.4]: https://github.com/pedronaugusto/visor/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/pedronaugusto/visor/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pedronaugusto/visor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pedronaugusto/visor/compare/v0.5.0...v0.5.1
