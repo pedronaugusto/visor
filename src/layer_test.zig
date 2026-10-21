@@ -7,7 +7,6 @@ const shm = @import("layer/shm.zig");
 const Allocator = std.mem.Allocator;
 const Rect = geom.Rect;
 const Writer = std.Io.Writer;
-const under_base: i32 = -1_000_000;
 const Image = @import("layer.zig").Image;
 const ImageId = @import("layer.zig").ImageId;
 const Pixels = @import("layer.zig").Pixels;

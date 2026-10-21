@@ -663,7 +663,6 @@ fn Widget(comptime task: []const u8, comptime draw: fn (*Ctx, v.Window, usize) v
 
 const State = struct {
     var items: []w.Item = &.{};
-    var item_text: [][]u8 = &.{};
     var table_rows: []w.Table.Row = &.{};
     var prose: []const u8 = "";
     var series: []u64 = &.{};

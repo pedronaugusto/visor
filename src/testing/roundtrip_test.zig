@@ -54,7 +54,6 @@ const render = @import("../render.zig");
 const textmod = @import("../text.zig");
 const term = @import("../term.zig");
 const Caps = @import("../caps.zig").Caps;
-const Cell = cellmod.Cell;
 const Renderer = render.Renderer;
 const Screen = @import("../screen.zig").Screen;
 const Term = term.Term;

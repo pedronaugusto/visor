@@ -48,11 +48,6 @@ const Viewer = struct {
         v.scroll = @min(v.scroll + v.page, v.rows -| v.page);
     }
 
-    /// One screenful up.
-    fn pageUp(v: *Viewer) void {
-        v.scroll -|= v.page;
-    }
-
     /// A different file, from the top.
     fn choose(v: *Viewer, which: usize) void {
         v.list.select(which);

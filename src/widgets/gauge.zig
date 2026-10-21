@@ -10,7 +10,6 @@ const corpus = @import("shakedown").corpus;
 const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
-const Align = layout.Align;
 const Style = visor.Style;
 
 /// The eight widths a cell of a horizontal bar can be drawn at, an eighth
