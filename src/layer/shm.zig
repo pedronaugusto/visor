@@ -3,7 +3,8 @@
 //! picture. POSIX shared memory objects, named the way the kitty graphics
 //! protocol takes them (`t=s`): a slash and no other. The terminal opens
 //! the object, reads it and unlinks it; a program that learns the terminal
-//! could not (an error, no answer) unlinks it itself.
+//! could not (an error, no answer) unlinks it itself. A picture is written
+//! into the object where it is mapped (`create`), or copied there (`put`).
 //!
 //! With libc, `shm_open`; on Linux without it, the file under `/dev/shm`
 //! that `shm_open` names there. Elsewhere, nothing: `put` says so, and the
@@ -69,24 +70,52 @@ fn nameOf(seq: u64) Name {
     return n;
 }
 
-/// A new object named `name`, holding `bytes`. Fails when one of the name
-/// exists (never overwritten: it may be one the terminal has not read).
+/// A new object's memory, mapped for writing: what goes in `bytes` is what
+/// the terminal reads.
+pub const Mapping = struct {
+    memory: []align(std.heap.page_size_min) u8,
+    len: usize,
+
+    /// The object's bytes, as long as it was made.
+    pub fn bytes(m: Mapping) []u8 {
+        return m.memory[0..m.len];
+    }
+
+    /// Gives the address space back. The object stays, named, for the
+    /// terminal to read.
+    pub fn unmap(m: Mapping) void {
+        // unreachable: a build without shared memory makes no mapping (`create`)
+        if (supported) std.posix.munmap(m.memory) else unreachable;
+    }
+};
+
+/// A new object named `name`, `len` bytes long, mapped for the caller to
+/// fill: a picture written there is in the object, with no copy. Fails
+/// when one of the name exists (never overwritten: it may be one the
+/// terminal has not read).
 ///
-/// The object is memory, mapped and copied into, as `shm_open` makes it,
-/// so it takes no `std.Io`: with libc through `shm_open`, and on Linux
-/// without it through the same calls, on the file under `/dev/shm`.
-pub fn put(name: Name, bytes: []const u8) PutError!void {
+/// The object is memory, as `shm_open` makes it, so it takes no
+/// `std.Io`: with libc through `shm_open`, and on Linux without it through
+/// the same calls, on the file under `/dev/shm`.
+pub fn create(name: Name, len: usize) PutError!Mapping {
     if (!supported) return error.Unsupported;
     var z: [path_max]u8 = undefined;
-    const fd = try create(&z, name);
+    const fd = try open(&z, name);
     defer closeFd(fd);
     errdefer unlink(name);
     // an object is sized once, and a zero-sized one cannot be mapped
-    const size = @max(bytes.len, 1);
+    const size = @max(len, 1);
     try truncate(fd, size);
     const map = std.posix.mmap(null, size, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, 0) catch return error.SharedMemory;
-    defer std.posix.munmap(map);
-    @memcpy(map[0..bytes.len], bytes);
+    return .{ .memory = map, .len = len };
+}
+
+/// A new object named `name`, holding a copy of `bytes`; `create`'s
+/// refusals.
+pub fn put(name: Name, bytes: []const u8) PutError!void {
+    const map = try create(name, bytes.len);
+    defer map.unmap();
+    @memcpy(map.bytes(), bytes);
 }
 
 /// Removes the object, if it is still there. What a program does with a
@@ -123,7 +152,7 @@ fn devShmPath(z: *[path_max]u8, name: Name) [*:0]const u8 {
 
 /// Creates the object for reading and writing by this user alone, refusing
 /// one that exists.
-fn create(z: *[path_max]u8, name: Name) PutError!std.posix.fd_t {
+fn open(z: *[path_max]u8, name: Name) PutError!std.posix.fd_t {
     if (builtin.link_libc) {
         const fd = std.c.shm_open(zOf(z, name), @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDWR, .CREAT = true, .EXCL = true })), @as(std.c.mode_t, 0o600));
         if (fd < 0) return error.SharedMemory;
@@ -159,6 +188,17 @@ test "a picture put in shared memory reads back whole, and is gone once unlinked
     try std.testing.expectEqualSlices(u8, &pixels, try readBack(name, pixels.len));
     unlink(name);
     try std.testing.expectError(error.SharedMemory, readBack(name, pixels.len));
+}
+
+test "a picture written where an object is mapped is the object's" {
+    if (!supported) return error.SkipZigTest;
+    const name = nextName();
+    const map = try create(name, 6);
+    defer unlink(name);
+    @memcpy(map.bytes(), "pixels");
+    map.unmap();
+    try std.testing.expectEqualSlices(u8, "pixels", try readBack(name, 6));
+    try std.testing.expectError(error.SharedMemory, create(name, 6));
 }
 
 test "a name is a slash and no other, and fits every system" {

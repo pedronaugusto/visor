@@ -584,6 +584,129 @@ test "a terminal that cannot read shared memory gets the picture again in the es
     try testing.expect(q.image(.fromRaw(8)).?.shm == null);
 }
 
+test "a picture written where it is sent from: shared memory's own bytes, nothing staged" {
+    if (!shm.supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    var l: Layers = .init(gpa);
+    l.configureSharedMemory(true);
+    defer l.deinit();
+    const room = try l.prepare(.fromRaw(5), 4, .{ .width = .fromRaw(1), .height = .fromRaw(1) });
+    try testing.expectEqual(@as(usize, 4), room.len);
+    @memcpy(room, &[_]u8{ 9, 8, 7, 6 });
+    // nothing reaches the terminal, and nothing is recorded, until it is sent
+    try testing.expectEqual(@as(usize, 0), out.written().len);
+    try testing.expect(l.image(.fromRaw(5)) == null);
+    try testing.expectError(error.Busy, l.prepare(.fromRaw(6), 4, .{}));
+    const n = try l.transmitPrepared(&out.writer);
+    try testing.expect(std.mem.find(u8, out.written(), "t=s") != null);
+    try testing.expect(std.mem.find(u8, out.written(), "S=4") != null);
+    const name = l.image(.fromRaw(5)).?.shm.?;
+    try testing.expectEqual(name.len, n);
+    try testing.expectEqual(@as(usize, 0), l.staged.items.len);
+    // the terminal's word settles it, as for a picture copied in
+    l.ack(.{ .id = .fromRaw(5), .message = "OK" });
+    try testing.expect(l.shared_memory.?.state == .yes);
+    try shm.put(name, "gone");
+    shm.unlink(name);
+}
+
+test "a picture written where it is sent from goes in the escape code as transmit sends it" {
+    const gpa = testing.allocator;
+    var pixels: [32 * 32 * 4]u8 = undefined;
+    for (&pixels, 0..) |*b, i| b.* = @truncate(i *% 7);
+    var direct: std.Io.Writer.Allocating = .init(gpa);
+    defer direct.deinit();
+    var a: Layers = .init(gpa);
+    defer a.deinit();
+    const sent = try a.transmit(&direct.writer, .fromRaw(3), &pixels, .{ .width = .fromRaw(32), .height = .fromRaw(32) });
+
+    var prepared: std.Io.Writer.Allocating = .init(gpa);
+    defer prepared.deinit();
+    var b: Layers = .init(gpa);
+    defer b.deinit();
+    for (0..2) |_| {
+        prepared.clearRetainingCapacity();
+        @memcpy(try b.prepare(.fromRaw(3), pixels.len, .{ .width = .fromRaw(32), .height = .fromRaw(32) }), &pixels);
+        try testing.expectEqual(sent, try b.transmitPrepared(&prepared.writer));
+        try testing.expectEqualStrings(direct.written(), prepared.written());
+    }
+    try testing.expect(b.image(.fromRaw(3)).?.state == .ready);
+}
+
+test "a prepared picture holds its id, and taken back leaves nothing" {
+    const gpa = testing.allocator;
+    var l: Layers = .init(gpa);
+    l.configureSharedMemory(true);
+    defer l.deinit();
+    var ids = try ImageIds.init(.fromRaw(1), .fromRaw(3), try morse.QueryImageId.fromRaw(3));
+    _ = try l.prepare(.fromRaw(1), 8, .{ .width = .fromRaw(2), .height = .fromRaw(1) });
+    const name = if (l.prepared.?.shared) |created| created.object.name else null;
+    // the id is taken while it is prepared, though no image has it yet
+    try testing.expectEqual(ImageId.fromRaw(2), try ids.acquire(&l));
+    l.discardPrepared();
+    try testing.expect(l.prepared == null);
+    try testing.expect(l.image(.fromRaw(1)) == null);
+    try testing.expectEqual(@as(usize, 0), l.shared_objects.items.len);
+    // its object was unlinked: the name can be put again
+    if (name) |n| {
+        try shm.put(n, "gone");
+        shm.unlink(n);
+    }
+    l.discardPrepared();
+    // and a prepared picture that is never sent is unlinked by deinit
+    _ = try l.prepare(.fromRaw(1), 8, .{ .width = .fromRaw(2), .height = .fromRaw(1) });
+}
+
+test "a medium turned off while a picture was prepared sends it in the escape code" {
+    if (!shm.supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    var l: Layers = .init(gpa);
+    l.configureSharedMemory(true);
+    defer l.deinit();
+    @memcpy(try l.prepare(.fromRaw(4), 4, .{ .width = .fromRaw(1), .height = .fromRaw(1), .compress = false }), "abcd");
+    const name = l.prepared.?.shared.?.object.name;
+    l.configureSharedMemory(false);
+    try testing.expectEqual(@as(usize, 4), try l.transmitPrepared(&out.writer));
+    try testing.expect(std.mem.find(u8, out.written(), "t=s") == null);
+    try testing.expect(std.mem.find(u8, out.written(), "YWJjZA==") != null);
+    try testing.expect(l.image(.fromRaw(4)).?.shm == null);
+    try shm.put(name, "gone");
+    shm.unlink(name);
+}
+
+test "a replacement written where it is sent from: one in flight, a failed write asks again" {
+    var f: Fixture = try .init(testing.allocator, 20, 6);
+    defer f.deinit();
+    var ids = try ImageIds.init(.fromRaw(6), .fromRaw(9), try morse.QueryImageId.fromRaw(8));
+    var p: Replacement = .{};
+    var sink: Writer.Discarding = .init(&.{});
+    const at: Layer = .{ .image = .fromRaw(0), .rect = .{ .col = 2, .row = 1, .cols = 8, .rows = 4 } };
+    @memset(try p.prepare(&f.layers, &ids, 16, .{ .width = .fromRaw(2), .height = .fromRaw(2) }), 0);
+    const first = try p.sendPrepared(&f.layers, &sink.writer);
+    try testing.expectEqual(ImageId.fromRaw(6), first.id);
+    try testing.expectError(error.Busy, p.prepare(&f.layers, &ids, 16, .{}));
+    _ = try p.declare(&f.layers, at, ms(0), .fromMilliseconds(250));
+    try testing.expectEqual(@as(?ImageId, .fromRaw(6)), p.current());
+    try testing.expectEqual(@as(u32, 1), (try f.draw()).placements);
+
+    @memset(try p.prepare(&f.layers, &ids, 16, .{ .width = .fromRaw(2), .height = .fromRaw(2) }), 1);
+    var no_room: [0]u8 = .{};
+    var blocked: Writer = .fixed(&no_room);
+    try testing.expectError(error.WriteFailed, p.sendPrepared(&f.layers, &blocked));
+    try testing.expect(p.takeDirty());
+    try testing.expect(p.canSend());
+    try testing.expect(f.layers.prepared == null);
+    // the half-sent picture is freed at the next frame; the shown one stays
+    _ = try p.declare(&f.layers, at, ms(10), .fromMilliseconds(250));
+    _ = try f.draw();
+    try testing.expect(f.layers.image(.fromRaw(7)) == null);
+    try testing.expectEqual(@as(?ImageId, .fromRaw(6)), p.current());
+}
+
 test "a replacement lands over the old picture, placed before dropped before freed" {
     var f: Fixture = try .init(testing.allocator, 20, 6);
     defer f.deinit();

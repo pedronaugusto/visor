@@ -167,15 +167,28 @@ const SharedObject = struct {
     name: shm.Name,
     generation: u64,
 
-    fn init(policy: SharedMemory, id: ImageId, pixels: []const u8) shm.PutError!SharedObject {
+    /// An object and its memory, mapped for the picture to be written in.
+    const Created = struct { object: SharedObject, mapping: shm.Mapping };
+
+    fn create(policy: SharedMemory, id: ImageId, len: usize) shm.PutError!Created {
         const name = shm.nextName();
-        try shm.put(name, pixels);
-        return .{ .id = id, .name = name, .generation = policy.generation };
+        const mapping = try shm.create(name, len);
+        return .{ .object = .{ .id = id, .name = name, .generation = policy.generation }, .mapping = mapping };
     }
 
     fn deinit(object: SharedObject) void {
         shm.unlink(object.name);
     }
+};
+
+/// A picture being written where it is sent from (`Layers.prepare`).
+const Prepared = struct {
+    id: ImageId,
+    how: Transmit,
+    len: usize,
+    /// The object it is written into, or null when it is written into
+    /// `Layers.staged` and goes in the escape code.
+    shared: ?SharedObject.Created,
 };
 
 /// How an image is sent.
@@ -200,7 +213,7 @@ pub const Transmit = struct {
 
 /// Rotating image ids in an inclusive range, shared by any number of
 /// replacements. Skips zero, the probe id and every image still held by
-/// `Layers`, including those awaiting retirement.
+/// `Layers`, including those awaiting retirement and the one prepared.
 pub const ImageIds = struct {
     /// Private: the lowest id handed out.
     first: ImageId,
@@ -232,7 +245,7 @@ pub const ImageIds = struct {
             const id = ids.next;
             // unreachable: an id below `last` has a successor, and `last` is itself an id
             ids.next = if (id.eql(ids.last)) ids.first else id.successor() catch unreachable;
-            if (!id.eql(ids.graphics_id) and layers.image(id) == null) return id;
+            if (!id.eql(ids.graphics_id) and !layers.holds(id)) return id;
             if (ids.next.eql(start)) return error.NoImageId;
         }
     }
@@ -263,6 +276,10 @@ pub const Replacement = struct {
 
     pub const Error = Writer.Error || Allocator.Error || error{ Busy, NoImageId, PayloadTooLarge };
 
+    /// A picture sent: its id, and how many bytes went through the
+    /// terminal's input (`Layers.transmit`'s count).
+    pub const Sent = struct { id: ImageId, bytes: usize };
+
     /// Whether another picture can be sent. Call `settle` or `declare` to settle a
     /// ready or refused pending picture before sending the next one.
     pub fn canSend(p: *const Replacement) bool {
@@ -272,13 +289,48 @@ pub const Replacement = struct {
     /// Sends one new picture, returning its id and payload byte count.
     /// On a partial write the recorded image is retired at the next commit
     /// and `takeDirty` asks the owner to produce it again.
-    pub fn send(p: *Replacement, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!struct { id: ImageId, bytes: usize } {
+    pub fn send(p: *Replacement, layers: *Layers, w: *Writer, ids: *ImageIds, pixels: []const u8, how: Transmit) Error!Sent {
         const gpa = layers.gpa;
         if (!p.canSend()) return error.Busy;
         const id = try ids.acquire(layers);
         // Reserve cleanup before any command can reach the terminal.
         try layers.retired.ensureUnusedCapacity(gpa, 1);
         const bytes = layers.transmit(w, id, pixels, how) catch |err| {
+            if (layers.image(id) != null) layers.retired.appendAssumeCapacity(id);
+            p.dirty = true;
+            return err;
+        };
+        p.own_pending = id;
+        return .{ .id = id, .bytes = bytes };
+    }
+
+    /// What `prepare` fails with: `Layers.prepare`'s refusals, a picture
+    /// still in flight (`Busy`), or no free id.
+    pub const PrepareError = Layers.PrepareError || ImageIds.AcquireError;
+
+    /// `send` without the copy: an unused id, and room for `len` bytes of
+    /// the new picture where it is sent from, for the caller to write
+    /// (`Layers.prepare`). `sendPrepared` sends it; `Layers.discardPrepared`
+    /// takes it back unsent.
+    pub fn prepare(p: *Replacement, layers: *Layers, ids: *ImageIds, len: usize, how: Transmit) PrepareError![]u8 {
+        if (!p.canSend()) return error.Busy;
+        const id = try ids.acquire(layers);
+        return layers.prepare(id, len, how);
+    }
+
+    /// Sends the picture `prepare` gave out, as `send` sends one. A failure
+    /// leaves nothing prepared and `takeDirty` asking for the picture again.
+    /// Asserts a picture is prepared.
+    pub fn sendPrepared(p: *Replacement, layers: *Layers, w: *Writer) Error!Sent {
+        // unreachable: a picture is prepared, as asserted above
+        const id = (layers.prepared orelse unreachable).id;
+        // Reserve cleanup before any command can reach the terminal.
+        layers.retired.ensureUnusedCapacity(layers.gpa, 1) catch |err| {
+            layers.discardPrepared();
+            p.dirty = true;
+            return err;
+        };
+        const bytes = layers.transmitPrepared(w) catch |err| {
             if (layers.image(id) != null) layers.retired.appendAssumeCapacity(id);
             p.dirty = true;
             return err;
@@ -425,6 +477,12 @@ pub const Layers = struct {
     shared_memory: ?SharedMemory = null,
     /// Private: the shared memory objects still to unlink, one per picture sent that way.
     shared_objects: std.ArrayList(SharedObject) = .empty,
+    /// Private: the picture `prepare` gave out to be written, until it is
+    /// sent or taken back.
+    prepared: ?Prepared = null,
+    /// Private: where a prepared picture that goes in the escape code is
+    /// written, kept and reused for the next.
+    staged: std.ArrayList(u8) = .empty,
     /// Private: the sixel and iTerm2 pictures kept to draw again.
     own_inline: std.ArrayList(InlineImage) = .empty,
     /// Private: the grid and cell size inline pictures are clipped to.
@@ -550,9 +608,11 @@ pub const Layers = struct {
     }
 
     /// Gives the lists and the window back, and unlinks any picture still
-    /// in shared memory.
+    /// in shared memory, a prepared one too.
     pub fn deinit(l: *Layers) void {
         const gpa = l.gpa;
+        l.discardPrepared();
+        l.staged.deinit(gpa);
         for (l.shared_objects.items) |object| object.deinit();
         l.shared_objects.deinit(gpa);
         for (l.own_inline.items) |held| held.deinit(gpa);
@@ -569,6 +629,12 @@ pub const Layers = struct {
     /// What the program knows about an image, or null.
     pub fn image(l: *const Layers, id: ImageId) ?Image {
         return (l.find(id) orelse return null).*;
+    }
+
+    /// Whether `id` is taken: an image, or the picture being prepared.
+    fn holds(l: *const Layers, id: ImageId) bool {
+        if (l.prepared) |p| if (p.id == id) return true;
+        return l.image(id) != null;
     }
 
     fn find(l: *const Layers, id: ImageId) ?*Image {
@@ -608,10 +674,78 @@ pub const Layers = struct {
         pixels: []const u8,
         how: Transmit,
     ) TransmitError!usize {
-        const gpa = l.gpa;
         if (shm.supported) if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
             if (try l.transmitShared(w, sm, id, pixels, how)) |n| return n;
         };
+        return l.transmitEscape(w, id, pixels, how);
+    }
+
+    /// What `prepare` fails with: memory, a picture prepared and not yet
+    /// sent (`Busy`), or a shared-memory payload past the protocol's u32
+    /// size.
+    pub const PrepareError = Allocator.Error || error{ Busy, PayloadTooLarge };
+
+    /// Room for `len` bytes of a picture to be sent under `id`, where it is
+    /// sent from, for the caller to write: `transmit` without the copy.
+    /// Through shared memory (`configureSharedMemory`) the bytes are the
+    /// object's, mapped, so a picture written there — a GPU's download, say
+    /// — reaches the terminal with no copy of this program's; in the escape
+    /// code they are a buffer kept here and reused for the next.
+    ///
+    /// The bytes are the caller's until `transmitPrepared` sends them or
+    /// `discardPrepared` takes them back. One picture is prepared at a
+    /// time. Nothing is written to the terminal and no image is recorded
+    /// until it is sent.
+    pub fn prepare(l: *Layers, id: ImageId, len: usize, how: Transmit) PrepareError![]u8 {
+        if (l.prepared != null) return error.Busy;
+        if (shm.supported) if (l.shared_memory) |*sm| if (sm.state != .no and how.format != .png) {
+            _ = try sharedSize(len);
+            try l.reserveShared(id);
+            if (SharedObject.create(sm.*, id, len)) |created| {
+                l.prepared = .{ .id = id, .how = how, .len = len, .shared = created };
+                return created.mapping.bytes();
+            } else |_| sm.state = .no;
+        };
+        try l.staged.resize(l.gpa, len);
+        l.prepared = .{ .id = id, .how = how, .len = len, .shared = null };
+        return l.staged.items;
+    }
+
+    /// Sends the picture `prepare` gave out, as `transmit` sends one, and
+    /// returns the same count. A picture written into shared memory goes
+    /// as its name unless the medium was turned off or refused since it was
+    /// prepared; then its bytes go in the escape code from where they were
+    /// written, and the object is unlinked. Either way nothing is prepared
+    /// after. Asserts a picture is prepared.
+    pub fn transmitPrepared(l: *Layers, w: *Writer) TransmitError!usize {
+        // unreachable: a picture is prepared, as asserted above
+        const p = l.prepared orelse unreachable;
+        l.prepared = null;
+        const created = p.shared orelse return l.transmitEscape(w, p.id, l.staged.items[0..p.len], p.how);
+        if (l.policyFor(created.object)) |sm| if (sm.state != .no) {
+            created.mapping.unmap();
+            // unreachable: `prepare` checked the size before making the object
+            const size = sharedSize(p.len) catch unreachable;
+            return l.sendShared(w, sm, created.object, size, p.how);
+        };
+        defer created.object.deinit();
+        defer created.mapping.unmap();
+        return l.transmitEscape(w, p.id, created.mapping.bytes(), p.how);
+    }
+
+    /// Takes back the picture `prepare` gave out, unsent, and unlinks its
+    /// object. Nothing reached the terminal. Without one prepared, nothing.
+    pub fn discardPrepared(l: *Layers) void {
+        const p = l.prepared orelse return;
+        l.prepared = null;
+        const created = p.shared orelse return;
+        created.mapping.unmap();
+        created.object.deinit();
+    }
+
+    /// The picture chunked in the escape code, deflated when that helps.
+    fn transmitEscape(l: *Layers, w: *Writer, id: ImageId, pixels: []const u8, how: Transmit) TransmitError!usize {
+        const gpa = l.gpa;
         var payload = pixels;
         var compressed = false;
         if (how.compress and how.format != .png and pixels.len > 64) {
@@ -669,15 +803,35 @@ pub const Layers = struct {
     /// picture goes in the escape code). While the medium is on trial the
     /// terminal is asked to answer, whatever the caller asked.
     fn transmitShared(l: *Layers, w: *Writer, sm: *SharedMemory, id: ImageId, pixels: []const u8, how: Transmit) TransmitError!?usize {
-        const gpa = l.gpa;
         const size = try sharedSize(pixels.len);
         // Reserve before the OS object exists. Once it does, the image
         // record can take its name without any further allocation.
-        if (l.find(id) == null) try l.own_images.ensureUnusedCapacity(gpa, 1);
-        if (l.sharedObject(id) == null) try l.shared_objects.ensureUnusedCapacity(gpa, 1);
-        const object = SharedObject.init(sm.*, id, pixels) catch {
+        try l.reserveShared(id);
+        const created = SharedObject.create(sm.*, id, pixels.len) catch {
             sm.state = .no;
             return null;
+        };
+        @memcpy(created.mapping.bytes(), pixels);
+        created.mapping.unmap();
+        return try l.sendShared(w, sm, created.object, size, how);
+    }
+
+    /// Room for an image's record and its object's, so `sendShared` takes
+    /// them without allocating.
+    fn reserveShared(l: *Layers, id: ImageId) Allocator.Error!void {
+        const gpa = l.gpa;
+        if (l.find(id) == null) try l.own_images.ensureUnusedCapacity(gpa, 1);
+        if (l.sharedObject(id) == null) try l.shared_objects.ensureUnusedCapacity(gpa, 1);
+    }
+
+    /// The name of an object holding the picture, sent, and the object
+    /// recorded as the image's to unlink. Owns `object` from the call: a
+    /// reservation that fails unlinks it.
+    fn sendShared(l: *Layers, w: *Writer, sm: *SharedMemory, object: SharedObject, size: u32, how: Transmit) TransmitError!usize {
+        const id = object.id;
+        l.reserveShared(id) catch |err| {
+            object.deinit();
+            return err;
         };
         const trying = sm.state == .trying;
         l.recordReserved(.{

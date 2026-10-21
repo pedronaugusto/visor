@@ -440,6 +440,17 @@ is refused so the program sends it again in the escape code, which is what a
 terminal on another machine, over ssh, gets from then on. An object the
 terminal did not read is unlinked, never left behind.
 
+**A picture can be written where it is sent from.** `Layers.prepare(id, len,
+how)` hands back `len` bytes to fill and `transmitPrepared(w)` sends them, as
+`transmit` would have sent a copy: through shared memory the bytes are the
+object's, mapped, so a frame a GPU downloads there reaches the terminal with
+no copy of the program's; in the escape code they are a buffer `Layers` keeps
+and reuses. `Replacement.prepare` and `sendPrepared` do the same for a
+replacement. One picture is prepared at a time; `discardPrepared` takes it
+back unsent and unlinks its object. If the medium is turned off or refused
+before the picture goes, its bytes go in the escape code from where they were
+written.
+
 `Layers.init(allocator)` captures the allocator for its images, placements and
 compression storage. `transmit`, `declare`, `retire` and `deinit`, and the
 `Replacement` operations using those layers, take no allocator. Metadata
@@ -632,7 +643,7 @@ its own.
 | Measuring text | `Method`, `Wrap`, `Graphemes`, `width`, `graphemeWidth`, `Parts`, `combinesOnly`, `disagrees`, `wrap`, `Row`, `fit`, `fitEnd`. |
 | The render pass | `Renderer` — `init`, `deinit`, `dimensions`, `entered`, `resize`, `draw`, `printAbove`, `repaint`, `repaintRow`, `enter`, `setCaps`, `setModes`, `untrustCursor`, `leave`. `Renderer.Stats`, `Renderer.PrintError`, `Mode`, `Modes`. |
 | What the terminal can do | `Caps`, `Caps.Pictures`, `Caps.pictures`, `Caps.termProgram`, `Caps.Probe` — `init`, `questions`, `capabilities`, `hasAnswered`, `lastAnswer`, `write`, `feed`, `complete`, `settled`. |
-| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `ready`, `ack`, `deleteImage`, `deleteAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
+| Pictures | `Image`, `Image.State`, `Layer`, `Layer.Order`, `Layers` — `init`, `deinit`, `images`, `declarations`, `placements`, `hasFrameWork`, `answerPolicy`, `fallbackCount`, `configureSharedMemory`, `configureSize`, `storeSixel`, `storeIterm`, `inlineChanged`, `transmit`, `prepare`, `transmitPrepared`, `discardPrepared`, `ready`, `ack`, `deleteImage`, `deleteAll`, `retire`, `declare`, `undeclare`, `image`, `clear`, `repaint`, `count`, `emit`, `commitFrame` — `Transmit`, `Replacement` — `send`, `prepare`, `sendPrepared`, `Sent`, `settle`, `declare`, `canSend`, `current`, `pending`, `takeDirty`, `retire` — `ImageIds`. |
 | This program's terminal | `Tty` — `open`, `adopt`, `close`, `raw`, `restore`, `enter`, `leave`, `size`, `writer`, `read`, `inputFile`, `watchResize`, `unwatchResize`, `resized`, `resizeWake`, `drainResize`. `restoreGlobal`, `Panic`. `Input` — `init`, `next`, `nextWithin`, `mousePixels`, `setMousePixels`, `Input.Options`. `Winsize` — `cellSize`, `locate`, `update`, `resized` — `Pixels`, `CellSize`, `MouseLocation`. `Session`, `ProbeWait`. |
 | Testing your own screens | `Term` — `init`, `deinit`, `setMethod`, `feed`, `screen`, `position`, `savedCursor`, `graphics`, `resize`, `dump`, `dumpStyles`, `DumpStylesError`. `expectScreensEqual`, `dumpScreen` and `DumpOptions`, `dumpScreenStyles`, `firstDifference`. |
 | Everything under it | `visor.morse`, whole. |

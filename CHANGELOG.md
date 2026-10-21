@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A picture written where it is sent from: `Layers.prepare(id, len, how)` returns `len` bytes to fill and `Layers.transmitPrepared(w)` sends them as `transmit` sends a copy, and `discardPrepared` takes them back unsent. Through shared memory the bytes are the object's, mapped, so a frame is copied once (into the object) instead of twice; in the escape code they are a buffer kept and reused. `Replacement.prepare` and `Replacement.sendPrepared` do the same for a replacement, and `Replacement.Sent` names what `send` returns. A prepared picture's id is taken: `ImageIds.acquire` skips it.
+
 ### Changed
 
 - Development: the suites run under the release tier's hardened profile (`bay hardened`, `bay hardened-fuzz`, `bay hardened-tsan`), which takes the place of the `thread-sanitizer` build option and its declared ThreadSanitizer job.
