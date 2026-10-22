@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Development: the conformance step pins ghostty's main (f54340a), where its Zig 0.17 port landed (ghostty-org/ghostty#14519), instead of the port's branch.
+
 ## [0.5.9] - 2026-10-21
 
 ### Added
