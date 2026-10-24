@@ -25,6 +25,7 @@
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
 const aegis = @import("dependencies.zig").aegis;
+const xenoglyph = @import("dependencies.zig").xenoglyph;
 
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
@@ -1064,19 +1065,12 @@ fn incompleteTail(run: []const u8) usize {
     return 0;
 }
 
-/// The first codepoint of a grapheme: U+FFFD when its first bytes are not
-/// UTF-8, and null for no bytes.
+/// The first codepoint of a grapheme, decoded as a terminal decodes
+/// (xenoglyph): U+FFFD when its first bytes are not UTF-8, and null for no
+/// bytes.
 fn firstCodepoint(grapheme: []const u8) ?u21 {
     if (grapheme.len == 0) return null;
-    const len = std.unicode.utf8ByteSequenceLength(grapheme[0]) catch return 0xfffd;
-    if (len > grapheme.len) return 0xfffd;
-    const decoded = switch (len) {
-        1 => grapheme[0],
-        2 => std.unicode.utf8Decode2(grapheme[0..2].*),
-        3 => std.unicode.utf8Decode3(grapheme[0..3].*),
-        else => std.unicode.utf8Decode4(grapheme[0..4].*),
-    };
-    return decoded catch 0xfffd;
+    return xenoglyph.utf8.decode(grapheme).code_point;
 }
 
 /// How many copies of `copy` a repeat of `count` prints (`Term.repeat`).
