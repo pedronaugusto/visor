@@ -73,8 +73,6 @@ pub const internal = struct {
         if (n >= s.dimensions().rows) return &.{};
         return s.own_cells[@as(usize, n) * s.dimensions().cols ..][0..s.dimensions().cols];
     }
-    // Stored cells passed Screen import
-    // checks, so the measured pool resolution/compaction kernel only slices bytes.
     pub fn textOf(s: *const Screen, c: *const StoredCell) []const u8 {
         if (!c.text.isPooled()) return c.text.inlineSlice().?;
         return s.graphemes.bytes.items[c.text.offset().?.raw()..][0..c.text.length().raw()];

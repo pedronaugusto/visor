@@ -40,8 +40,6 @@ pub const Color = morse.Color;
 /// Which underline a cell carries.
 pub const Underline = morse.Underline;
 
-// LinkType packs a generation and index, not a scalar ID.
-// Resolution checks the issuing Screen generation before extracting the index.
 /// An OSC 8 handle bound to the link pool that issued it.
 /// `.none` is portable; every other handle is valid only in its pool generation.
 fn LinkType(comptime checked: bool) type {
@@ -138,8 +136,6 @@ const CellShape = packed struct(u8) {
     reserved: u2 = 0,
 };
 
-// TextType preserves the packed six-byte encoding.
-// Its accessors return distinct domains; Screen checks identities and bounds.
 /// The grapheme: up to six bytes stored in the cell, an offset into the
 /// screen's pool beyond.
 ///

@@ -31,8 +31,6 @@ const ByteLength = cellmod.ByteLength;
 
 // Identities never wrap: exhaustion refuses creation instead of reusing a
 // handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
-// The issuer checks the 48-bit ceiling before each exchange, so what it hands
-// out never wraps.
 var generations: aegis.Atomic(PoolGeneration) = .init(.fromRaw(1));
 
 pub fn nextGeneration() PoolGeneration {
@@ -82,8 +80,6 @@ pub const Graphemes = struct {
 
     /// Hashing and equality for an `Entry`, which both have to read the
     /// bytes it points at.
-    // intern validates every Entry before publication.
-    // Hash/equality extract its byte address only for slicing that owned pool.
     pub const Context = struct {
         bytes: []const u8,
 
@@ -249,8 +245,6 @@ pub const Links = struct {
     /// Where a link's two strings are.
     pub const Entry = struct { uri_off: LinkOffset, uri_len: ByteLength, params_off: LinkOffset, params_len: ByteLength };
 
-    // This index contains only published LinkIndex values.
-    // Resolution bounds them against this table before extracting byte offsets.
     pub const Context = struct {
         links: *const Links,
 
