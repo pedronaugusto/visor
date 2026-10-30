@@ -80,6 +80,9 @@ pub const Tty = struct {
     own_renderer: ?*Renderer = null,
     /// Private: the next raw terminal in the panic registrations.
     next_raw: ?*Tty = null,
+    /// Private: the terminal `open` opened, which `close` closes; null for one
+    /// adopted, whose file `close` closes itself.
+    controlling: ?terminal.Controlling = null,
     /// Private: this terminal's listener for the resize signal, while it watches for one.
     resize: ?reactor.Signals = null,
 
@@ -98,9 +101,11 @@ pub const Tty = struct {
     /// a terminal, and a program drawing a screen wants the terminal rather
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
-        const own = try terminal.openControlling(io);
-        if (is_windows) return .{ .file = own.output, .input = own.input };
-        return .{ .file = own.output, .input = {} };
+        var t: Tty = .{ .file = undefined, .input = undefined, .controlling = try terminal.openControlling(io) };
+        const own = &t.controlling.?;
+        t.file = own.output();
+        t.input = if (is_windows) own.input() else {};
+        return t;
     }
 
     /// A terminal the program already has open: a descriptor it was handed,
@@ -114,8 +119,12 @@ pub const Tty = struct {
     pub fn close(t: *Tty, io: Io) void {
         t.restore();
         t.unwatchResize(io);
-        t.file.close(io);
-        if (is_windows and t.input.handle != t.file.handle) t.input.close(io);
+        if (t.controlling) |*own| {
+            own.close(io);
+        } else {
+            t.file.close(io);
+            if (is_windows and t.input.handle != t.file.handle) t.input.close(io);
+        }
         t.* = undefined;
     }
 

@@ -31,15 +31,15 @@ const ByteLength = cellmod.ByteLength;
 
 // Identities never wrap: exhaustion refuses creation instead of reusing a
 // handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
-// aegis: safe-type-internals: this atomic issuer validates the 48-bit ceiling
-// before CAS; its public result is PoolGeneration and can never wrap.
-var generations: std.atomic.Value(u64) = .init(1);
+// The issuer checks the 48-bit ceiling before each exchange, so what it hands
+// out never wraps.
+var generations: aegis.Atomic(PoolGeneration) = .init(.fromRaw(1));
 
 pub fn nextGeneration() PoolGeneration {
     var next = generations.load(.monotonic);
     while (true) {
-        if (next > std.math.maxInt(u48)) @panic("pool identities exhausted");
-        next = generations.cmpxchgWeak(next, next + 1, .monotonic, .monotonic) orelse return .fromRaw(next);
+        if (next.raw() > std.math.maxInt(u48)) @panic("pool identities exhausted");
+        next = generations.cmpxchgWeak(next, .fromRaw(next.raw() + 1), .monotonic, .monotonic) orelse return next;
     }
 }
 
@@ -82,7 +82,7 @@ pub const Graphemes = struct {
 
     /// Hashing and equality for an `Entry`, which both have to read the
     /// bytes it points at.
-    // aegis: safe-type-internals: intern validates every Entry before publication.
+    // intern validates every Entry before publication.
     // Hash/equality extract its byte address only for slicing that owned pool.
     pub const Context = struct {
         bytes: []const u8,
@@ -249,7 +249,7 @@ pub const Links = struct {
     /// Where a link's two strings are.
     pub const Entry = struct { uri_off: LinkOffset, uri_len: ByteLength, params_off: LinkOffset, params_len: ByteLength };
 
-    // aegis: safe-type-internals: this index contains only published LinkIndex values.
+    // This index contains only published LinkIndex values.
     // Resolution bounds them against this table before extracting byte offsets.
     pub const Context = struct {
         links: *const Links,
@@ -383,7 +383,7 @@ fn appendEnd(current: usize, added: usize) Allocator.Error!aegis.units.Bytes(u32
 
 /// The offset of a slice borrowed from `storage`, saved across a possible
 /// reallocation. Empty slices need no preservation.
-// aegis: no-danger: addresses are compared to preserve a borrowed slice across
+// Addresses are compared to preserve a borrowed slice across
 // growth; the result is only a local offset, never a public identity or pointer.
 fn aliasOffset(storage: []const u8, bytes: []const u8) ?usize {
     if (bytes.len == 0 or storage.len == 0) return null;

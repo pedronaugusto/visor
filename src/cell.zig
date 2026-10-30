@@ -40,7 +40,7 @@ pub const Color = morse.Color;
 /// Which underline a cell carries.
 pub const Underline = morse.Underline;
 
-// aegis: safe-type-internals: LinkType packs a generation and index, not a scalar ID.
+// LinkType packs a generation and index, not a scalar ID.
 // Resolution checks the issuing Screen generation before extracting the index.
 /// An OSC 8 handle bound to the link pool that issued it.
 /// `.none` is portable; every other handle is valid only in its pool generation.
@@ -138,7 +138,7 @@ const CellShape = packed struct(u8) {
     reserved: u2 = 0,
 };
 
-// aegis: safe-type-internals: TextType preserves the packed six-byte encoding.
+// TextType preserves the packed six-byte encoding.
 // Its accessors return distinct domains; Screen checks identities and bounds.
 /// The grapheme: up to six bytes stored in the cell, an offset into the
 /// screen's pool beyond.
@@ -399,13 +399,13 @@ pub const internal = struct {
         @memcpy(bytes[checked_len..][0..payload_len], raw[stored_len..][0..payload_len]);
         if (c.text.isPooled()) {
             const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
-            // glint-ignore: A004 -- safe-type-internals: docs/design.md; the atomic pool issuer bounds generation to 48 bits before this packed encoding.
+            // aegis: boundary(A004): the exported cell's bytes; the pool's issuer bounds a generation to 48 bits before it is packed (docs/design.md).
             std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation.raw()), .little); // safe: pool issuance bounds identities to 48 bits
         }
         return std.mem.bytesToValue(Cell, &bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: PoolGeneration) Link {
-        // glint-ignore: A004 -- safe-type-internals: docs/design.md; the bounded 48-bit generation occupies the upper bits of this composite checked handle.
+        // aegis: boundary(A004, A010): the exported link handle; the bounded 48-bit generation fills its upper bits above the 16-bit index (docs/design.md).
         return if (link == .none) .none else @fromBackingInt(@intCast((generation.raw() << 16) | @backingInt(link)));
     }
 };
