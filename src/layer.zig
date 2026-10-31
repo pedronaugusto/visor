@@ -65,9 +65,9 @@ pub const Image = struct {
     width: Pixels = .fromRaw(0),
     /// How tall it is, in pixels.
     height: Pixels = .fromRaw(0),
-    /// Whether the terminal has it.
-    // aegis: design(A017): the terminal's word on a picture, which callers read: loading until it answers or the grace period ends, then ready or failed, and a failed picture is sent again as a new record
-    state: State = .ready,
+    /// Private: whether the terminal has it, which `state` reads; moved only
+    /// along `Status`'s edges.
+    status: Status.Runtime(void) = sending(false),
     /// When it was sent, on the caller's clock.
     sent: std.Io.Timestamp = .zero,
     /// The name it was sent through, until the terminal answers. This is
@@ -84,6 +84,51 @@ pub const Image = struct {
         /// The terminal refused it. Send it again.
         failed,
     };
+
+    /// Whether the terminal has it.
+    pub fn state(image: Image) State {
+        return image.status.current();
+    }
+
+    /// What moves a picture's state: the terminal's word, or silence the
+    /// program takes for it.
+    const Word = enum { has, refused };
+
+    /// A picture refused stays refused: sent again, it is a new record.
+    const Status = aegis.state.Machine(State, Word, .{
+        .initial = .loading,
+        .terminal = &.{.failed},
+        .edges = &.{
+            .{ .from = .loading, .on = .has, .to = .ready },
+            .{ .from = .loading, .on = .refused, .to = .failed },
+            .{ .from = .ready, .on = .has, .to = .ready },
+            .{ .from = .ready, .on = .refused, .to = .failed },
+        },
+    });
+
+    /// A picture's state as it is sent: loading when the terminal is asked
+    /// to answer, ready when it is not.
+    fn sending(asks: bool) Status.Runtime(void) {
+        var status: Status.Runtime(void) = .init({});
+        if (!asks) _ = status.step(.has) catch unreachable; // unreachable: loading takes `has`
+        return status;
+    }
+
+    /// The terminal has it, or its silence is taken for that.
+    fn has(image: *Image) void {
+        _ = image.status.step(.has) catch |err| switch (err) {
+            // A refused picture stays refused.
+            error.IllegalEvent => {},
+        };
+    }
+
+    /// The terminal refused it, or sending it failed.
+    fn refuse(image: *Image) void {
+        _ = image.status.step(.refused) catch |err| switch (err) {
+            // Refused already.
+            error.IllegalEvent => {},
+        };
+    }
 };
 
 /// A picture on the screen.
@@ -346,12 +391,12 @@ pub const Replacement = struct {
     /// On allocation failure, current and pending ownership stay unchanged.
     pub fn settle(p: *Replacement, layers: *Layers, now: std.Io.Timestamp, grace: std.Io.Duration) Allocator.Error!bool {
         // Reserve every retirement before changing either ownership slot.
-        const current_failed = if (p.own_current) |id| if (layers.image(id)) |img| img.state == .failed else true else false;
+        const current_failed = if (p.own_current) |id| if (layers.image(id)) |img| img.state() == .failed else true else false;
         const reserve: usize = if (p.own_pending != null) 1 + @as(usize, @intFromBool(p.own_current != null)) else @intFromBool(current_failed);
         try layers.retired.ensureUnusedCapacity(layers.gpa, reserve);
         if (p.own_pending) |id| {
             const ready = layers.ready(id, now, grace);
-            const failed = if (layers.image(id)) |img| img.state == .failed else true;
+            const failed = if (layers.image(id)) |img| img.state() == .failed else true;
             if (failed) {
                 try layers.retire(id);
                 p.own_pending = null;
@@ -363,7 +408,7 @@ pub const Replacement = struct {
             }
         }
         if (p.own_current) |id| {
-            const failed = if (layers.image(id)) |img| img.state == .failed else true;
+            const failed = if (layers.image(id)) |img| img.state() == .failed else true;
             if (failed) {
                 try layers.retire(id);
                 p.own_current = null;
@@ -767,11 +812,11 @@ pub const Layers = struct {
             .id = id,
             .width = how.width,
             .height = how.height,
-            .state = if (how.answer) .loading else .ready,
+            .status = Image.sending(how.answer),
             .sent = how.now,
         });
 
-        errdefer l.find(id).?.state = .failed;
+        errdefer l.find(id).?.refuse();
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
             .format = how.format,
@@ -839,12 +884,12 @@ pub const Layers = struct {
             .id = id,
             .width = how.width,
             .height = how.height,
-            .state = if (how.answer or trying) .loading else .ready,
+            .status = Image.sending(how.answer or trying),
             .sent = how.now,
             .shm = object.name,
         });
         l.shared_objects.appendAssumeCapacity(object);
-        errdefer l.find(id).?.state = .failed;
+        errdefer l.find(id).?.refuse();
         try morse.transmitImage(w, .{
             .image = .{ .id = id },
             .format = how.format,
@@ -902,7 +947,7 @@ pub const Layers = struct {
     /// not ready; send it again.
     pub fn ready(l: *Layers, id: ImageId, now: std.Io.Timestamp, grace: std.Io.Duration) bool {
         const held = l.find(id) orelse return false;
-        switch (held.state) {
+        switch (held.state()) {
             .ready => return true,
             .failed => return false,
             .loading => {
@@ -910,7 +955,7 @@ pub const Layers = struct {
                 // to be taken on trust. Shared memory needs its own proof.
                 const shared = l.sharedObject(id);
                 if (shared == null and l.answers == false) {
-                    held.state = .ready;
+                    held.has();
                     return true;
                 }
                 if (now.nanoseconds -| held.sent.nanoseconds < grace.nanoseconds) return false;
@@ -920,10 +965,10 @@ pub const Layers = struct {
                 if (shared) |object| {
                     l.release(held);
                     if (l.policyFor(object)) |sm| sm.state = .no;
-                    held.state = .failed;
+                    held.refuse();
                     return false;
                 }
-                held.state = .ready;
+                held.has();
                 l.fallbacks += 1;
                 if (l.answers == null) l.answers = false;
                 return true;
@@ -938,7 +983,7 @@ pub const Layers = struct {
         const id = response.id orelse return;
         const held = l.find(id) orelse return;
         l.answers = true;
-        if (held.state != .failed) held.state = if (response.ok()) .ready else .failed;
+        if (response.ok()) held.has() else held.refuse();
         if (l.sharedObject(id)) |object| {
             l.release(held);
             if (l.policyFor(object)) |sm| {

@@ -207,7 +207,7 @@ test "an image sent quietly is ready at once, compressed when that is smaller" {
     try testing.expect(std.mem.startsWith(u8, bytes, "\x1b_Gq=2,i=9,"));
     try testing.expect(std.mem.find(u8, bytes, "o=z") != null);
     try testing.expect(l.ready(.fromRaw(9), ms(0), .fromMilliseconds(250)));
-    try testing.expectEqual(Image.State.ready, l.image(.fromRaw(9)).?.state);
+    try testing.expectEqual(Image.State.ready, l.image(.fromRaw(9)).?.state());
 
     // Noise does not deflate, and goes as it is.
     out.clearRetainingCapacity();
@@ -277,7 +277,7 @@ test "an image sent asking for an answer is ready on the word, or when the grace
     _ = try l.transmit(&out.writer, .fromRaw(7), &px, .{ .width = .fromRaw(1), .height = .fromRaw(1), .answer = true, .now = ms(2000) });
     l.ack(.{ .id = .fromRaw(7), .message = "EBADPNG: bad data" });
     try testing.expect(!l.ready(.fromRaw(7), ms(5000), .fromMilliseconds(250)));
-    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state);
+    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state());
 
     // An answer about an id never sent here -- a probe's -- changes nothing.
     l.ack(.{ .id = .fromRaw(31), .message = "OK" });
@@ -632,7 +632,7 @@ test "a picture written where it is sent from goes in the escape code as transmi
         try testing.expectEqual(sent, try b.transmitPrepared(&prepared.writer));
         try testing.expectEqualStrings(direct.written(), prepared.written());
     }
-    try testing.expect(b.image(.fromRaw(3)).?.state == .ready);
+    try testing.expect(b.image(.fromRaw(3)).?.state() == .ready);
 }
 
 test "a prepared picture holds its id, and taken back leaves nothing" {
@@ -881,7 +881,7 @@ test "shared memory names belong to the process rather than each Layers" {
     try testing.expect(b.image(.fromRaw(1)).?.shm != null);
     const second = b.image(.fromRaw(1)).?.shm.?;
     try testing.expect(!std.mem.eql(u8, first.slice(), second.slice()));
-    try testing.expectEqual(Image.State.loading, b.image(.fromRaw(1)).?.state);
+    try testing.expectEqual(Image.State.loading, b.image(.fromRaw(1)).?.state());
 }
 
 test "shared memory reconfiguration cannot lose owners or accept an old policy reply" {
@@ -930,7 +930,7 @@ test "shared memory keeps ownership through every allocation and partial output 
             const name = l.image(.fromRaw(7)).?.shm.?;
             defer shm.unlink(name);
             try testing.expectEqual(@as(usize, 1), l.shared_objects.items.len);
-            try testing.expect(l.image(.fromRaw(7)).?.state == .failed);
+            try testing.expect(l.image(.fromRaw(7)).?.state() == .failed);
             try testing.expect(!l.ready(.fromRaw(7), ms(1000), .fromMilliseconds(10)));
             l.configureSharedMemory(false);
             l.deinit();
@@ -954,7 +954,7 @@ test "direct transmission silence cannot make an unread shared picture ready" {
     defer shm.unlink(name);
     try testing.expect(!l.ready(.fromRaw(2), ms(10), .fromMilliseconds(10)));
     try testing.expect(!l.ready(.fromRaw(2), ms(20), .fromMilliseconds(10)));
-    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(2)).?.state);
+    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(2)).?.state());
     try testing.expect(l.image(.fromRaw(2)).?.shm == null);
     try shm.put(name, "gone");
 }
@@ -1045,17 +1045,17 @@ test "a late graphics answer cannot revive a failed transmission" {
     var blocked: Writer = .fixed(&.{});
     try testing.expectError(error.WriteFailed, l.transmit(&blocked, .fromRaw(7), "pixels", .{ .compress = false, .answer = true }));
     l.ack(.{ .id = .fromRaw(7), .message = "OK" });
-    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state);
+    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state());
     try testing.expect(!l.ready(.fromRaw(7), ms(1000), .fromMilliseconds(10)));
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, .fromRaw(7), "pixels", .{ .compress = false, .answer = true });
-    try testing.expectEqual(Image.State.loading, l.image(.fromRaw(7)).?.state);
+    try testing.expectEqual(Image.State.loading, l.image(.fromRaw(7)).?.state());
     l.ack(.{ .id = .fromRaw(7), .message = "OK" });
     try testing.expect(l.ready(.fromRaw(7), ms(1000), .fromMilliseconds(10)));
     // A terminal refusal also requires a new transmission before readiness.
     l.ack(.{ .id = .fromRaw(7), .message = "EBADPNG:bad data" });
     l.ack(.{ .id = .fromRaw(7), .message = "OK" });
-    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state);
+    try testing.expectEqual(Image.State.failed, l.image(.fromRaw(7)).?.state());
     try l.deleteImage(&sink.writer, .fromRaw(7));
     try testing.expect(l.image(.fromRaw(7)) == null);
 }
@@ -1070,7 +1070,7 @@ test "failed direct transmission stays refused through grace and can be retried"
             try testing.expectError(error.WriteFailed, layers.transmit(&blocked, .fromRaw(42), "rgba", .{ .answer = answer, .compress = false }));
             try testing.expect(layers.image(.fromRaw(42)) != null);
             try testing.expect(!layers.ready(.fromRaw(42), ms(1000), .fromMilliseconds(10)));
-            try testing.expect(layers.image(.fromRaw(42)).?.state == .failed);
+            try testing.expect(layers.image(.fromRaw(42)).?.state() == .failed);
             var sink: Writer.Discarding = .init(&.{});
             _ = try layers.transmit(&sink.writer, .fromRaw(42), "rgba", .{ .compress = false });
             try testing.expect(layers.ready(.fromRaw(42), ms(1000), .fromMilliseconds(10)));

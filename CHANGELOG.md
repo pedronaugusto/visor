@@ -10,6 +10,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Development: the conformance step pins ghostty's main (f54340a), where its Zig 0.17 port landed (ghostty-org/ghostty#14519), instead of the port's branch.
 
+### Breaking
+
+- An `Image`'s state is read with `Image.state()`; the field it was is private, an aegis `state.Machine` from loading to ready or failed, so nothing outside `Layers` can move a refused picture back to ready. A refused picture still stays refused until it is sent again.
+
 ## [0.5.9] - 2026-10-21
 
 ### Added

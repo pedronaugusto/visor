@@ -2,6 +2,7 @@
 //! probe and pictures. The caller owns input, output, time and the loop.
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
+const aegis = @import("dependencies.zig").aegis;
 const Screen = @import("screen.zig").Screen;
 const render = @import("render.zig");
 const Renderer = render.Renderer;
@@ -19,33 +20,43 @@ const Io = std.Io;
 /// the session before asking for the next wait.
 pub const ProbeWait = struct {
     /// Private: when the whole probe gives up.
-    end: Io.Timestamp,
+    end: Span,
     /// Private: how long after the last answer the probe counts as settled.
-    quiet: Io.Duration,
+    quiet: Span,
+
+    /// Time on the caller's clock as aegis carries it: an instant is the
+    /// span since the clock's zero, and the probe's sums saturate.
+    const Span = aegis.units.Duration(.nanosecond, i96);
 
     /// A wait from `now` that gives up after `timeout`, and settles once the
     /// device attributes are in and `quiet` passes with nothing more.
     pub fn init(now: Io.Timestamp, timeout: Io.Duration, quiet: Io.Duration) ProbeWait {
         return .{
-            // aegis: design(A011): std's Io.Timestamp and Io.Duration carry the unit; a probe's deadline saturates at their bounds, which their own add and aegis's Instant, whose time is a clock's, do not
-            .end = .{ .nanoseconds = now.nanoseconds +| @max(timeout.nanoseconds, 0) },
-            // aegis: design(A011): as above
-            .quiet = .{ .nanoseconds = @max(quiet.nanoseconds, 0) },
+            .end = sinceZero(now).saturatingAdd(noneBelow(.fromIoDuration(timeout, .exact))),
+            .quiet = noneBelow(.fromIoDuration(quiet, .exact)),
         };
     }
 
     /// The next read's budget, or null once complete, quiet after DA1, or
     /// at the overall deadline. DA1 alone does not end the probe.
     pub fn remaining(wait: ProbeWait, probe: *const Caps.Probe, now: Io.Timestamp) ?Io.Duration {
-        if (now.nanoseconds >= wait.end.nanoseconds or probe.settled(now, wait.quiet)) return null;
-        const until = if (probe.hasAnswered(.device_attributes))
-            // aegis: design(A011): as `init`'s
-            @min(wait.end.nanoseconds, (probe.lastAnswer() orelse now).nanoseconds +| wait.quiet.nanoseconds)
-        else
-            // aegis: design(A011): as `init`'s
-            wait.end.nanoseconds;
-        // aegis: design(A011): as `init`'s
-        return .{ .nanoseconds = @max(until -| now.nanoseconds, 0) };
+        const at = sinceZero(now);
+        if (at.compare(wait.end) != .lt or probe.settled(now, wait.quiet.toIoDuration())) return null;
+        var until = wait.end;
+        if (probe.hasAnswered(.device_attributes)) {
+            const settles = sinceZero(probe.lastAnswer() orelse now).saturatingAdd(wait.quiet);
+            if (settles.compare(until) == .lt) until = settles;
+        }
+        return noneBelow(until.saturatingSub(at)).toIoDuration();
+    }
+
+    fn sinceZero(t: Io.Timestamp) Span {
+        return .fromIoDuration(Io.Timestamp.zero.durationTo(t), .exact);
+    }
+
+    /// `span`, or none where it is negative.
+    fn noneBelow(span: Span) Span {
+        return if (span.compare(.fromRaw(0)) == .lt) .fromRaw(0) else span;
     }
 };
 
@@ -505,7 +516,7 @@ test "session housekeeping survives failed capability output" {
                     .cell_pixels => try testing.expectEqual(winsize.Pixels{ .width = 10, .height = 20 }, s.windowSize().cell),
                     else => unreachable,
                 },
-                .graphics => try testing.expectEqual(layer_mod.Image.State.ready, s.layers().image(.fromRaw(2)).?.state),
+                .graphics => try testing.expectEqual(layer_mod.Image.State.ready, s.layers().image(.fromRaw(2)).?.state()),
                 else => unreachable,
             },
             else => unreachable,
