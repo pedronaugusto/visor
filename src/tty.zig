@@ -44,6 +44,7 @@ const is_windows = builtin.target.os.tag == .windows;
 
 /// Raw terminals registered for panic restoration. Each terminal owns its
 /// saved mode and renderer association; the list only makes them reachable.
+// aegis: design(A007): a panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
 var open_ttys: ?*Tty = null;
 
 fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
@@ -70,6 +71,7 @@ const Saved = if (is_windows) struct {
 /// `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
     /// Private: the terminal itself.
+    // aegis: design(A015): lent by `controlling` when `open` made it, owned when adopted; `close` closes it once, through whichever holds it
     file: Io.File,
     /// Private: on Windows, the input handle, which is a second descriptor.
     input: if (is_windows) Io.File else void,
@@ -423,6 +425,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
             // One synchronous write, as the console takes it; std's own, with no `Io` in the way.
             var status_block: windows.IO_STATUS_BLOCK = undefined;
             const n: u32 = @intCast(@min(left.len, std.math.maxInt(u32)));
+            // aegis: boundary(A019): NtWriteFile fills the status block where it succeeds, and it is read only then
             const status = windows.ntdll.NtWriteFile(handle, null, null, null, &status_block, left.ptr, n, null, null);
             if (status != .SUCCESS or status_block.Information == 0) return;
             left = left[status_block.Information..];
@@ -612,6 +615,7 @@ pub const PipeError = error{Unexpected};
 /// A pipe, for a test that wants a file that is not a terminal.
 pub fn pipe() PipeError![2]std.posix.fd_t {
     var fds: [2]std.posix.fd_t = undefined;
+    // aegis: boundary(A019): pipe fills both descriptors where it succeeds
     if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
     return fds;
 }

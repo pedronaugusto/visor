@@ -294,7 +294,8 @@ fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, xe
 /// mode a benchmark builds in: an imported module keeps its own mode, so a
 /// ReleaseFast benchmark over the Debug module would time the Debug module.
 /// The checks read the Unicode properties visor measures by (East Asian
-/// width, general category, combining class) from xenoglyph directly.
+/// width, general category, combining class) from xenoglyph directly, and
+/// read the corpus's files through aegis.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     const p = b.dependency("visor", .{ .target = target, .optimize = optimize }).builder;
     const xenoglyph = p.dependency("xenoglyph", .{ .target = target, .optimize = optimize });
@@ -308,6 +309,7 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
     });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
+        .{ .name = "aegis", .module = p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis") },
         .{ .name = "xenoglyph", .module = xenoglyph.module("xenoglyph") },
     }) catch @panic("OOM");
 }

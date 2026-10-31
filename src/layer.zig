@@ -66,6 +66,7 @@ pub const Image = struct {
     /// How tall it is, in pixels.
     height: Pixels = .fromRaw(0),
     /// Whether the terminal has it.
+    // aegis: design(A017): the terminal's word on a picture, which callers read: loading until it answers or the grace period ends, then ready or failed, and a failed picture is sent again as a new record
     state: State = .ready,
     /// When it was sent, on the caller's clock.
     sent: std.Io.Timestamp = .zero,
@@ -156,7 +157,7 @@ pub const Layer = struct {
 /// that picture refused so the caller sends it again, in the escape code.
 const SharedMemory = struct {
     state: enum { trying, yes, no } = .trying,
-    generation: u64,
+    generation: shm.Namespace,
 };
 
 // This is the owner, not the image snapshot or the current policy. Once
@@ -165,7 +166,7 @@ const SharedMemory = struct {
 const SharedObject = struct {
     id: ImageId,
     name: shm.Name,
-    generation: u64,
+    generation: shm.Namespace,
 
     /// An object and its memory, mapped for the picture to be written in.
     const Created = struct { object: SharedObject, mapping: shm.Mapping };
@@ -886,7 +887,7 @@ pub const Layers = struct {
     // current medium's trial or turn that medium off.
     fn policyFor(l: *Layers, object: SharedObject) ?*SharedMemory {
         const policy = if (l.shared_memory) |*sm| sm else return null;
-        return if (policy.generation == object.generation) policy else null;
+        return if (policy.generation.eql(object.generation)) policy else null;
     }
 
     /// Whether the terminal has the image, so a layer can show it.

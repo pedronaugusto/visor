@@ -21,6 +21,7 @@ const std = @import("std");
 const morse = @import("dependencies.zig").morse;
 const geom = @import("geom.zig");
 const aegis = @import("dependencies.zig").aegis;
+const native_endian = @import("builtin").cpu.arch.endian();
 
 /// Identity of one complete screen pool; compaction issues a new identity.
 pub const PoolGeneration = aegis.id.Id(struct {}, u64);
@@ -121,6 +122,7 @@ const CellKind = enum(u2) {
 /// width models disagree about it, and how many cells tall it is drawn.
 const CellShape = packed struct(u8) {
     /// What the cell is.
+    // aegis: design(A017): two bits of the cell's packed byte, compared as memory; what the cell holds, which each cell written sets, not a state one cell moves through
     kind: CellKind = .narrow,
     /// Whether measuring this cluster by codepoint and by cluster give
     /// different answers. Worked out once, when the cell is written, and
@@ -292,8 +294,9 @@ fn CellType(comptime checked: bool) type {
 
         inline fn equalValue(a: Self, b: Self) bool {
             if (!checked) return sameBytes(Self, &a, &b);
-            const aw: *const [6]u64 = @ptrCast(&a); // safe: a checked cell is six aligned words, no padding (asserted below)
-            const bw: *const [6]u64 = @ptrCast(&b); // safe: as above
+            // A checked cell is six aligned words, no padding (asserted below).
+            const aw = std.mem.bytesAsValue([6]u64, std.mem.asBytes(&a));
+            const bw = std.mem.bytesAsValue([6]u64, std.mem.asBytes(&b));
             inline for (aw, bw) |av, bv| if (av != bv) return false;
             return true;
         }
@@ -425,9 +428,9 @@ pub fn sameBytes(comptime T: type, a: *const T, b: *const T) bool {
     var differ: u64 = 0;
     inline for (.{ u64, u32, u16, u8 }) |Word| {
         inline while (at + @sizeOf(Word) <= @sizeOf(T)) : (at += @sizeOf(Word)) {
-            const xw: *align(1) const Word = @ptrCast(x[at..][0..@sizeOf(Word)]); // safe: any bytes are a valid integer
-            const yw: *align(1) const Word = @ptrCast(y[at..][0..@sizeOf(Word)]); // safe: as above
-            differ |= xw.* ^ yw.*;
+            const xw = std.mem.readInt(Word, x[at..][0..@sizeOf(Word)], native_endian);
+            const yw = std.mem.readInt(Word, y[at..][0..@sizeOf(Word)], native_endian);
+            differ |= xw ^ yw;
         }
     }
     return differ == 0;

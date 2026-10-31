@@ -27,7 +27,9 @@ pub const ProbeWait = struct {
     /// device attributes are in and `quiet` passes with nothing more.
     pub fn init(now: Io.Timestamp, timeout: Io.Duration, quiet: Io.Duration) ProbeWait {
         return .{
+            // aegis: design(A011): std's Io.Timestamp and Io.Duration carry the unit; a probe's deadline saturates at their bounds, which their own add and aegis's Instant, whose time is a clock's, do not
             .end = .{ .nanoseconds = now.nanoseconds +| @max(timeout.nanoseconds, 0) },
+            // aegis: design(A011): as above
             .quiet = .{ .nanoseconds = @max(quiet.nanoseconds, 0) },
         };
     }
@@ -37,9 +39,12 @@ pub const ProbeWait = struct {
     pub fn remaining(wait: ProbeWait, probe: *const Caps.Probe, now: Io.Timestamp) ?Io.Duration {
         if (now.nanoseconds >= wait.end.nanoseconds or probe.settled(now, wait.quiet)) return null;
         const until = if (probe.hasAnswered(.device_attributes))
+            // aegis: design(A011): as `init`'s
             @min(wait.end.nanoseconds, (probe.lastAnswer() orelse now).nanoseconds +| wait.quiet.nanoseconds)
         else
+            // aegis: design(A011): as `init`'s
             wait.end.nanoseconds;
+        // aegis: design(A011): as `init`'s
         return .{ .nanoseconds = @max(until -| now.nanoseconds, 0) };
     }
 };
@@ -562,5 +567,5 @@ test "a session is small enough to return and hold by value" {
 
 /// A test's clock reading, in milliseconds.
 fn ms(n: i64) std.Io.Timestamp {
-    return .{ .nanoseconds = @as(i96, n) * std.time.ns_per_ms };
+    return std.Io.Timestamp.zero.addDuration(.fromMilliseconds(n));
 }

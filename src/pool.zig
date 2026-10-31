@@ -32,12 +32,14 @@ const ByteLength = cellmod.ByteLength;
 // Identities never wrap: exhaustion refuses creation instead of reusing a
 // handle. The 48-bit namespace fits in Link's upper bits and Text's bytes.
 var generations: aegis.Atomic(PoolGeneration) = .init(.fromRaw(1));
+const last_generation: PoolGeneration = .fromRaw(std.math.maxInt(u48));
 
 pub fn nextGeneration() PoolGeneration {
     var next = generations.load(.monotonic);
     while (true) {
-        if (next.raw() > std.math.maxInt(u48)) @panic("pool identities exhausted");
-        next = generations.cmpxchgWeak(next, .fromRaw(next.raw() + 1), .monotonic, .monotonic) orelse return next;
+        if (next.compare(last_generation) == .gt) @panic("pool identities exhausted");
+        const after = next.successor() catch @panic("pool identities exhausted");
+        next = generations.cmpxchgWeak(next, after, .monotonic, .monotonic) orelse return next;
     }
 }
 

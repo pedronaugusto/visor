@@ -2012,7 +2012,7 @@ const StyleSequenceCache = struct {
     victims: [count / ways]u4 = @splat(0),
 
     fn bucket(from: Style, to: Style) usize {
-        var hash = styleHash(from) *% 0x9e3779b185ebca87 ^ styleHash(to) *% 0xc2b2ae3d27d4eb4f;
+        var hash = (styleHash(from) *% 0x9e3779b185ebca87) ^ (styleHash(to) *% 0xc2b2ae3d27d4eb4f);
         hash ^= hash >> 33;
         hash *%= 0xff51afd7ed558ccd;
         hash ^= hash >> 33;
@@ -2044,10 +2044,10 @@ const StyleSequenceCache = struct {
     fn styleHash(style: Style) u64 {
         const bytes = std.mem.asBytes(&style);
         comptime std.debug.assert(@sizeOf(Style) == 22);
-        return std.mem.readInt(u64, bytes[0..8], .little) *% 0x9e3779b185ebca87 ^
-            std.mem.readInt(u64, bytes[8..16], .little) *% 0xc2b2ae3d27d4eb4f ^
-            @as(u64, std.mem.readInt(u32, bytes[16..20], .little)) *% 0x165667b19e3779f9 ^
-            @as(u64, std.mem.readInt(u16, bytes[20..22], .little)) *% 0x85ebca77c2b2ae63;
+        return (std.mem.readInt(u64, bytes[0..8], .little) *% 0x9e3779b185ebca87) ^
+            (std.mem.readInt(u64, bytes[8..16], .little) *% 0xc2b2ae3d27d4eb4f) ^
+            (@as(u64, std.mem.readInt(u32, bytes[16..20], .little)) *% 0x165667b19e3779f9) ^
+            (@as(u64, std.mem.readInt(u16, bytes[20..22], .little)) *% 0x85ebca77c2b2ae63);
     }
 
     fn get(cache: *StyleSequenceCache, from: Style, to: Style) ?[]const u8 {
@@ -3079,7 +3079,7 @@ test "a small frame is not bracketed and a large one is" {
     for (0..40) |row| {
         for (0..120) |col| {
             try f.screen.write(@intCast(col), @intCast(row), "\u{e9}", .{
-                .fg = .rgb(@intCast(col * 2 % 256), 1, 2),
+                .fg = .rgb(@intCast((col * 2) % 256), 1, 2),
             }, .none);
         }
     }

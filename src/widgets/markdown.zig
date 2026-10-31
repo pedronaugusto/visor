@@ -404,7 +404,7 @@ pub const RowIterator = struct {
             };
             if (b.kind == .table) return it.tableRow(b, @as(u64, b.depth) * 2);
             const prefix = @as(u64, b.depth) * 2 + b.indent + b.marker.len + @as(u64, if (b.task != null) task_width else 0);
-            if (b.kind != .prose and b.kind != .heading or prefix >= it.cols) {
+            if ((b.kind != .prose and b.kind != .heading) or prefix >= it.cols) {
                 const r = it.row(b, b.start, b.end, true);
                 it.block += 1;
                 return r;

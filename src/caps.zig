@@ -730,5 +730,5 @@ test "a disabled colour count changes neither caps nor quiet time" {
 
 /// A test's clock reading, in milliseconds.
 fn ms(n: i64) std.Io.Timestamp {
-    return .{ .nanoseconds = @as(i96, n) * std.time.ns_per_ms };
+    return std.Io.Timestamp.zero.addDuration(.fromMilliseconds(n));
 }

@@ -22,6 +22,8 @@
 //! and `settle`) meets it; it is freed after the last. Neither reads a clock
 //! itself.
 const std = @import("std");
+const aegis = @import("aegis");
+const file_limit = @import("corpus.zig").file_limit;
 const bench = @import("shakedown").bench;
 const v = @import("visor");
 
@@ -112,7 +114,7 @@ pub const Ctx = struct {
 
     pub fn file(c: *Ctx, name: []const u8) []const u8 {
         const path = c.fixture.print("{s}/{d}x{d}/{s}", .{ c.corpus, c.cols, c.rows, name }) catch @panic("oom");
-        return std.Io.Dir.cwd().readFileAlloc(c.io, path, c.fixture, .unlimited) catch |err| std.debug.panic("corpus {s}: {s}", .{ path, @errorName(err) });
+        return aegis.own.readFile(c.io, .cwd(), path, c.fixture, file_limit) catch |err| std.debug.panic("corpus {s}: {s}", .{ path, @errorName(err) });
     }
 
     pub fn lines(c: *Ctx, name: []const u8) [][]const u8 {

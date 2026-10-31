@@ -267,8 +267,8 @@ pub fn WindowApi(comptime screen_module: type) type {
                 const asked: Rect = .{
                     .col = w.own_rect.col +| options.col,
                     .row = w.own_rect.row +| options.row,
-                    .cols = options.cols orelse w.own_rect.cols -| options.col,
-                    .rows = options.rows orelse w.own_rect.rows -| options.row,
+                    .cols = options.cols orelse (w.own_rect.cols -| options.col),
+                    .rows = options.rows orelse (w.own_rect.rows -| options.row),
                 };
                 const outer = asked.intersect(w.own_rect);
                 var c: Window = .{ .own_screen = w.own_screen, .own_rect = outer, .own_ink = w.own_ink };

@@ -606,7 +606,7 @@ fn delimiterEnd(body: []const u8, start: usize, count: usize, ch: u8) ?usize {
         while (i + run < body.len and body[i + run] == ch) run += 1;
         if (ch == '`') {
             if (run == count) return i;
-        } else if (run == count or run > count and run % 2 != 0) {
+        } else if (run == count or (run > count and run % 2 != 0)) {
             const end = i + run - count;
             if (!(ch == '_' and end > 0 and end + count < body.len and wordByte(body[end - 1]) and wordByte(body[end + count]))) return end;
         }

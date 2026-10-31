@@ -12,6 +12,7 @@
 //! same, and the deflate stream is std's at level 6 instead of zlib's.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const unicode = @import("unicode.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -65,10 +66,14 @@ fn asciiLine(a: Allocator, out: *std.ArrayList(u8), cols: usize, seed: usize) !v
 fn logLine(a: Allocator, out: *std.ArrayList(u8), i: usize, cols: usize) !void {
     const start = out.items.len;
     try out.print(a, "2026-10-03T12:{d:0>2}:{d:0>2}.{d:0>3}Z INFO worker-{d} request {d} handled in {d} ms", .{
-        i / 60 % 60, i % 60, i % 1000, i % 8, i * 7919 % 100000, i % 97,
+        (i / 60) % 60, i % 60, i % 1000, i % 8, (i * 7919) % 100000, i % 97,
     });
     out.shrinkRetainingCapacity(start + @min(cols, out.items.len - start));
 }
+
+/// The most bytes a corpus file is read with, far past any file of the sizes
+/// the benchmark checks (200 by 60 at most).
+pub const file_limit: aegis.units.Bytes(u64) = .literal("16MiB");
 
 /// The files of one grid size, by name, in the order they are written.
 pub const File = struct { name: []const u8, data: []const u8 };
@@ -146,7 +151,7 @@ pub fn files(a: Allocator, cols: usize, rows: usize) ![]File {
         for (0..rows) |r| {
             if (r > 0) try tables.append(a, '\n');
             try tables.print(a, "| row {d} **{s}** | {d} | \u{6f22}\u{5b57} `{d}` | a \\| pipe and [link](https://example.com/{d}) |", .{
-                r, words[r % words.len], r * 7919 % 1000, r, r,
+                r, words[r % words.len], (r * 7919) % 1000, r, r,
             });
         }
         try tables.append(a, '\n');

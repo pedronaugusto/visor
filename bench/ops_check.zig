@@ -7,9 +7,11 @@
 //! decoder and must rebuild the workload's own grid.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const terminal = @import("terminal.zig");
 const pictures = @import("pictures.zig");
 const unicode = @import("unicode.zig");
+const file_limit = @import("corpus.zig").file_limit;
 const Terminal = terminal.Terminal;
 const Allocator = std.mem.Allocator;
 const json = std.json;
@@ -199,7 +201,7 @@ fn invariant(a: Allocator, task: []const u8, ev: *const Evidence, cols: usize, r
     if (is(task, "paragraph")) {
         const g = try grid(a, ev);
         for (try splitLines(a, g)) |l| try check((try unicode.codepoints(a, l)).len <= cols);
-        const prose = try corpus.readFileAlloc(io, "prose.txt", a, .unlimited);
+        const prose = try aegis.own.readFile(io, corpus, "prose.txt", a, file_limit);
         try e.put(a, "words_shown", int(try wordsPrefix(a, g, prose)));
     } else if (is(task, "table")) {
         const g = try splitLines(a, try grid(a, ev));
@@ -310,7 +312,7 @@ fn invariant(a: Allocator, task: []const u8, ev: *const Evidence, cols: usize, r
         try e.put(a, "bytes", int(wire.len));
     } else if (is(task, "text_wrap")) {
         const n = try afterEquals((try ev.need("value"))[0]);
-        const prose = try corpus.readFileAlloc(io, "prose.txt", a, .unlimited);
+        const prose = try aegis.own.readFile(io, corpus, "prose.txt", a, file_limit);
         try check(n >= (try unicode.codepoints(a, prose)).len / cols);
         try e.put(a, "rows", int(n));
     } else if (is(task, "markdown_parse")) {
@@ -378,7 +380,7 @@ fn ownWire(a: Allocator, task: []const u8, ev: *Evidence, cols: usize, rows: usi
         _ = try std.mem.print(hexed, "{x}", .{text});
         try ev.set(a, "grid", hexed);
     } else if (std.mem.eql(u8, task, "scroll_repaint")) {
-        const log_text = try corpus.readFileAlloc(io, "log.txt", a, .unlimited);
+        const log_text = try aegis.own.readFile(io, corpus, "log.txt", a, file_limit);
         const log = try splitLines(a, std.mem.trimEnd(u8, log_text, "\n"));
         for (wires, 0..) |w, k| {
             try t.feed(try terminal.unhex(a, w));
@@ -407,7 +409,7 @@ pub fn verify(a: Allocator, io: std.Io, task: []const u8, cols: usize, rows: usi
     var ev: Evidence = try .parse(a, lines);
     var e: json.ObjectMap = .empty;
     if (std.mem.startsWith(u8, task, "picture_frame_")) {
-        const png = try corpus.readFileAlloc(io, "picture.png", a, .unlimited);
+        const png = try aegis.own.readFile(io, corpus, "picture.png", a, file_limit);
         return (try pictures.verify(a, task, cols, rows, &ev, png)).object;
     }
     const wired = among(task, &.{ "wide_repaint", "scroll_repaint", "links", "print_above" });
