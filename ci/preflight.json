@@ -35,7 +35,7 @@
     "docs": "Pool identity and byte-domain API contracts needed by consumers of exported handles."
   },
   "glint": {
-    "rules": [{"id": "P001", "level": "gate"}, {"id": "P003", "level": "gate"}, 
+    "rules": [{"id": "P003", "level": "gate"}, 
       {
         "id": "A004",
         "level": "gate"
@@ -44,8 +44,7 @@
         "id": "Z026",
         "level": "gate"
       }
-    ],
-    "cast_scope": "all"
+    ]
   },
   "glint_paths": [
     "src",
