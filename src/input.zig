@@ -24,6 +24,7 @@
 //! a decision about what an event means.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 
@@ -131,6 +132,7 @@ pub const Input = struct {
             // when the signal came, because another may have followed it.
             if (in.resize_due) {
                 in.resize_due = false;
+                // glint-ignore: Z026 -- a size the terminal will not tell is no resize to report; the next read goes on
                 if (in.tty.size()) |ws| return .{ .resize = .{
                     .rows = ws.cells.rows,
                     .cols = ws.cells.cols,
@@ -313,7 +315,7 @@ fn inputOver(tty: *Tty, parser: []u8, read: []u8, escape_ms: i64) error{EmptyRea
     return .init(tty, .{
         .parser_buffer = parser,
         .read_buffer = read,
-        .escape = .fromMilliseconds(escape_ms),
+        .escape = aegis.units.Duration(.millisecond, i64).fromRaw(escape_ms).toIoDuration(),
     });
 }
 

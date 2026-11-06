@@ -17,6 +17,7 @@
 //! images, which no question asks about.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const morse = @import("dependencies.zig").morse;
 const textmod = @import("text.zig");
 
@@ -730,5 +731,5 @@ test "a disabled colour count changes neither caps nor quiet time" {
 
 /// A test's clock reading, in milliseconds.
 fn ms(n: i64) std.Io.Timestamp {
-    return std.Io.Timestamp.zero.addDuration(.fromMilliseconds(n));
+    return std.Io.Timestamp.zero.addDuration(aegis.units.Duration(.millisecond, i64).fromRaw(n).toIoDuration());
 }

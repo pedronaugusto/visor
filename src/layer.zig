@@ -116,16 +116,16 @@ pub const Image = struct {
 
     /// The terminal has it, or its silence is taken for that.
     fn has(image: *Image) void {
+        // glint-ignore: Z026 -- a refused picture stays refused
         _ = image.status.step(.has) catch |err| switch (err) {
-            // A refused picture stays refused.
             error.IllegalEvent => {},
         };
     }
 
     /// The terminal refused it, or sending it failed.
     fn refuse(image: *Image) void {
+        // glint-ignore: Z026 -- refused already
         _ = image.status.step(.refused) catch |err| switch (err) {
-            // Refused already.
             error.IllegalEvent => {},
         };
     }

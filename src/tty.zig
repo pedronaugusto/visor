@@ -323,6 +323,7 @@ pub const Tty = struct {
         if (is_windows) return false;
         const listener = &(t.resize orelse return false);
         var any = false;
+        // glint-ignore: Z026 -- the listener's error ends the drain: what was taken so far is the answer
         while (listener.next(io, .{ .duration = .{ .raw = .zero, .clock = .awake } })) |_| {
             any = true;
         } else |_| {}
@@ -572,6 +573,7 @@ test "leaving through the terminal releases its renderer before destruction" {
 test "opening this program's terminal compiles and fails cleanly without one" {
     // `open` is analysed only where it is called, and nothing else in the
     // suite calls it: a platform it did not compile on went unnoticed.
+    // glint-ignore: Z026 -- a test machine with no controlling terminal cannot open one; the test asks only that open compiles and closes what it opens
     if (Tty.open(testing.io)) |opened| {
         var t = opened;
         t.close(testing.io);
