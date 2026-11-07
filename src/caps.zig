@@ -17,7 +17,7 @@
 //! images, which no question asks about.
 
 const std = @import("std");
-const aegis = @import("aegis");
+const aegis = @import("dependencies.zig").aegis;
 const morse = @import("dependencies.zig").morse;
 const textmod = @import("text.zig");
 

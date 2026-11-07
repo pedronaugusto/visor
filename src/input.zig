@@ -24,7 +24,7 @@
 //! a decision about what an event means.
 
 const std = @import("std");
-const aegis = @import("aegis");
+const aegis = @import("dependencies.zig").aegis;
 const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 
