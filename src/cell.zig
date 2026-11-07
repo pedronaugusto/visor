@@ -122,7 +122,7 @@ const CellKind = enum(u2) {
 /// width models disagree about it, and how many cells tall it is drawn.
 const CellShape = packed struct(u8) {
     /// What the cell is.
-    // aegis: design(A017): two bits of the cell's packed byte, compared as memory; what the cell holds, which each cell written sets, not a state one cell moves through
+    // two bits of the cell's packed byte, compared as memory; what the cell holds, which each cell written sets, not a state one cell moves through
     kind: CellKind = .narrow,
     /// Whether measuring this cluster by codepoint and by cluster give
     /// different answers. Worked out once, when the cell is written, and

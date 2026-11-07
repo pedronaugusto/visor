@@ -426,7 +426,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
             // One synchronous write, as the console takes it; std's own, with no `Io` in the way.
             var status_block: windows.IO_STATUS_BLOCK = undefined;
             const n: u32 = @intCast(@min(left.len, std.math.maxInt(u32)));
-            // aegis: boundary(A019): NtWriteFile fills the status block where it succeeds, and it is read only then
+            // NtWriteFile fills the status block where it succeeds, and it is read only then
             const status = windows.ntdll.NtWriteFile(handle, null, null, null, &status_block, left.ptr, n, null, null);
             if (status != .SUCCESS or status_block.Information == 0) return;
             left = left[status_block.Information..];
@@ -617,7 +617,7 @@ pub const PipeError = error{Unexpected};
 /// A pipe, for a test that wants a file that is not a terminal.
 pub fn pipe() PipeError![2]std.posix.fd_t {
     var fds: [2]std.posix.fd_t = undefined;
-    // aegis: boundary(A019): pipe fills both descriptors where it succeeds
+    // pipe fills both descriptors where it succeeds
     if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
     return fds;
 }
