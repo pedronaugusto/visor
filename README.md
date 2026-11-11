@@ -62,6 +62,12 @@ pool slices too. `dupeTextAt` and `dupeTextOf` make copies the caller frees
 with the copy's allocator; `dupeTarget` returns an `OwnedTarget` whose
 `target()` lends const URI and params and `deinit` frees them. These copies survive later drawing.
 
+## Stability
+
+visor is 0.x and tracks Zig 0.17.x. A breaking change comes only in a minor release
+(0.5 to 0.6), with a CHANGELOG entry saying what changed and what to write instead; a
+patch release never breaks.
+
 ## Usage
 
 The block below is a region of [`examples/usage.zig`](examples/usage.zig),
