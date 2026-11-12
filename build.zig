@@ -260,7 +260,7 @@ pub fn dev(b: *std.Build, tools: type) void {
         // `bay test` runs it once with `--smoke`.
         .bench = .{
             .programs = &.{.{ .name = "visor-bench", .source = "bench/run.zig" }},
-            .imports = benchImports,
+            .imports = tools.preflight.Bench.importsFrom(benchImports),
             .target = target,
             .optimize = optimize,
         },

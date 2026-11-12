@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Pins aegis c8982a8, still 0.2.4: six additive commits after 3c0b13e (the role declarations a linter reads, `lint_rules`), the aegis the development build's preflight selects. Nothing visor calls changed.
+- Pins xenoglyph d643260, the commit the development build's preflight selects (bay tidy), where it pinned .
 - Development: the conformance step pins ghostty's main (f54340a), where its Zig 0.17 port landed (ghostty-org/ghostty#14519), instead of the port's branch.
 
 ### Breaking
