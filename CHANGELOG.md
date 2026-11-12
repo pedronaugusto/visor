@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `Tty.inputFile` takes `*Tty`, where it took `*const Tty`: a terminal `open` made borrows its files from the console's owner at each use, which needs the owner mutable. A caller holding `*Tty` changes nothing.
 - Pins aegis c8982a8, still 0.2.4: six additive commits after 3c0b13e (the role declarations a linter reads, `lint_rules`), the aegis the development build's preflight selects. Nothing visor calls changed.
 - Pins xenoglyph d643260, the commit the development build's preflight selects (bay tidy), where it pinned .
 - Development: the conformance step pins ghostty's main (f54340a), where its Zig 0.17 port landed (ghostty-org/ghostty#14519), instead of the port's branch.
@@ -15,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Breaking
 
 - An `Image`'s state is read with `Image.state()`; the field it was is private, an aegis `state.Machine` from loading to ready or failed, so nothing outside `Layers` can move a refused picture back to ready. A refused picture still stays refused until it is sent again.
+
+### Fixed
+
+- A terminal `Tty.open` made, moved before its first use and closed, stopped the program in aegis's owner check (Windows, where the runner has a console): `open` borrowed the console's output into the `Tty` it then returned by value. It borrows nothing now; the files are borrowed at each use, so the `Tty` binds where the caller keeps it.
 
 ## [0.5.9] - 2026-10-21
 

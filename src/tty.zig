@@ -70,10 +70,12 @@ const Saved = if (is_windows) struct {
 /// thread. An entered renderer must stay alive and at the same address until
 /// `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
-    /// Private: the terminal itself.
-    // aegis: design(A015): lent by `controlling` when `open` made it, owned when adopted; `close` closes it once, through whichever holds it
+    /// Private: the terminal itself when adopted; unused when `open` made it, whose files are
+    /// borrowed from `controlling` at each use (`outputFile`, `inputFile`), so a `Tty` is a value
+    /// that moves until its first use, as an aegis owner is.
+    // aegis: design(A015): owned when adopted, and `close` closes it once; never a borrow kept from `controlling`
     file: Io.File,
-    /// Private: on Windows, the input handle, which is a second descriptor.
+    /// Private: on Windows, the input handle of an adopted terminal, which is a second descriptor.
     input: if (is_windows) Io.File else void,
     /// Private: what the terminal was before `raw`, or null when it has not been
     /// changed.
@@ -103,11 +105,8 @@ pub const Tty = struct {
     /// a terminal, and a program drawing a screen wants the terminal rather
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
-        var t: Tty = .{ .file = undefined, .input = undefined, .controlling = try terminal.openControlling(io) };
-        const own = &t.controlling.?;
-        t.file = own.output();
-        t.input = if (is_windows) own.input() else {};
-        return t;
+        // Nothing is borrowed here: the owner binds where the caller keeps the `Tty`, at its first use.
+        return .{ .file = undefined, .input = undefined, .controlling = try terminal.openControlling(io) };
     }
 
     /// A terminal the program already has open: a descriptor it was handed,
@@ -138,15 +137,15 @@ pub const Tty = struct {
     pub fn raw(t: *Tty) ModeError!void {
         if (t.saved != null) return;
         if (is_windows) {
-            const input_mode = terminal.rawMode(t.input.handle) catch |err| return modeError(err);
-            const output_mode = terminal.rawMode(t.file.handle) catch |err| {
+            const input_mode = terminal.rawMode(t.inputFile().handle) catch |err| return modeError(err);
+            const output_mode = terminal.rawMode(t.outputFile().handle) catch |err| {
                 // glint-ignore: Z026 -- the output's failure is the one reported; a second has nowhere to go
-                terminal.restore(t.input.handle, input_mode) catch {};
+                terminal.restore(t.inputFile().handle, input_mode) catch {};
                 return modeError(err);
             };
             const saved: Saved = .{
-                .input = t.input.handle,
-                .output = t.file.handle,
+                .input = t.inputFile().handle,
+                .output = t.outputFile().handle,
                 .input_mode = input_mode,
                 .output_mode = output_mode,
             };
@@ -154,8 +153,8 @@ pub const Tty = struct {
             t.register();
             return;
         }
-        const was = terminal.rawMode(t.file.handle) catch |err| return modeError(err);
-        const saved: Saved = .{ .handle = t.file.handle, .mode = was };
+        const was = terminal.rawMode(t.outputFile().handle) catch |err| return modeError(err);
+        const saved: Saved = .{ .handle = t.outputFile().handle, .mode = was };
         t.saved = saved;
         t.register();
     }
@@ -240,7 +239,7 @@ pub const Tty = struct {
     /// the input stream, in step with everything else, rather than out of
     /// band and after the fact.
     pub fn size(t: *Tty) SizeError!Winsize {
-        const got = terminal.winSize(t.file.handle) catch |err| return switch (err) {
+        const got = terminal.winSize(t.outputFile().handle) catch |err| return switch (err) {
             error.NotATerminal => error.NotATerminal,
             error.Unexpected => error.Unexpected,
         };
@@ -256,7 +255,7 @@ pub const Tty = struct {
     /// to be at least as large as `Renderer.Stats.bytes` says a frame is.
     /// Nothing in this package flushes it.
     pub fn writer(t: *Tty, io: Io, buf: []u8) Io.File.Writer {
-        return .initStreaming(t.file, io, buf);
+        return .initStreaming(t.outputFile(), io, buf);
     }
 
     /// Anything reading from the terminal can fail with.
@@ -264,8 +263,7 @@ pub const Tty = struct {
 
     /// Reads whatever is there, into a buffer the caller owns.
     pub fn read(t: *Tty, io: Io, buf: []u8) ReadError!usize {
-        const file = if (is_windows) t.input else t.file;
-        return file.readStreaming(io, &.{buf});
+        return t.inputFile().readStreaming(io, &.{buf});
     }
 
     /// What `watchResize` fails with: no listener could be had.
@@ -339,8 +337,15 @@ pub const Tty = struct {
     }
 
     /// The file keys and replies arrive on.
-    pub fn inputFile(t: *const Tty) Io.File {
+    pub fn inputFile(t: *Tty) Io.File {
+        if (t.controlling) |*own| return if (is_windows) own.input() else own.output();
         return if (is_windows) t.input else t.file;
+    }
+
+    /// The file the terminal is written to and asked its size and mode through.
+    fn outputFile(t: *Tty) Io.File {
+        if (t.controlling) |*own| return own.output();
+        return t.file;
     }
 };
 
@@ -570,12 +575,19 @@ test "leaving through the terminal releases its renderer before destruction" {
     t.restore();
 }
 
-test "opening this program's terminal compiles and fails cleanly without one" {
+test "this program's terminal opens as a value that moves until its first use, and fails cleanly without one" {
     // `open` is analysed only where it is called, and nothing else in the
     // suite calls it: a platform it did not compile on went unnoticed.
-    // glint-ignore: Z026 -- a test machine with no controlling terminal cannot open one; the test asks only that open compiles and closes what it opens
+    // glint-ignore: Z026 -- a test machine with no controlling terminal cannot open one, which is the clean failure asked of it
     if (Tty.open(testing.io)) |opened| {
-        var t = opened;
+        // Moved twice before any use, as a value returned and kept is: nothing was borrowed in
+        // `open`, so the owner binds here, where it is used and closed (Windows' runner has a
+        // console, where `open` once bound inside itself and `close` stopped the program).
+        var first = opened;
+        var t = first;
+        first = undefined;
+        _ = t.size() catch {};
+        _ = t.inputFile();
         t.close(testing.io);
     } else |_| {}
 }
