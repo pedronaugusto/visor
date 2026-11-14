@@ -294,10 +294,13 @@ fn CellType(comptime checked: bool) type {
 
         inline fn equalValue(a: Self, b: Self) bool {
             if (!checked) return sameBytes(Self, &a, &b);
-            // A checked cell is six aligned words, no padding (asserted below).
-            const aw = std.mem.bytesAsValue([6]u64, std.mem.asBytes(&a));
-            const bw = std.mem.bytesAsValue([6]u64, std.mem.asBytes(&b));
-            inline for (aw, bw) |av, bv| if (av != bv) return false;
+            // A checked cell is six aligned words, no padding (asserted below), read as words
+            // at offsets known when it compiles.
+            const x = std.mem.asBytes(&a);
+            const y = std.mem.asBytes(&b);
+            inline for (0..6) |i| {
+                if (std.mem.readInt(u64, x[i * 8 ..][0..8], .native) != std.mem.readInt(u64, y[i * 8 ..][0..8], .native)) return false;
+            }
             return true;
         }
 

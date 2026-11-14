@@ -30,6 +30,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const intake = @import("intake.zig");
+const system = @import("system.zig");
 const terminal = @import("dependencies.zig").tty;
 const reactor = @import("dependencies.zig").reactor;
 
@@ -40,7 +41,6 @@ const Renderer = render.Renderer;
 
 const Io = std.Io;
 const Writer = std.Io.Writer;
-const windows = std.os.windows;
 const is_windows = builtin.target.os.tag == .windows;
 
 /// Raw terminals registered for panic restoration. Each terminal owns its
@@ -48,16 +48,11 @@ const is_windows = builtin.target.os.tag == .windows;
 // A panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
 var open_ttys: ?*Tty = null;
 
-fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
-    const rc = std.posix.system.fcntl(fd, cmd, @as(usize, arg));
-    if (std.posix.errno(rc) != .SUCCESS) return error.Unexpected;
-}
-
 /// What the terminal was before this program touched it: the mode of each
 /// handle, which on Windows is two.
 const Saved = if (is_windows) struct {
-    input: windows.HANDLE,
-    output: windows.HANDLE,
+    input: system.Handle,
+    output: system.Handle,
     input_mode: terminal.Saved,
     output_mode: terminal.Saved,
 } else struct {
@@ -417,39 +412,24 @@ fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
 /// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
 /// error, because the caller may be a panic handler with a broken `Io` and
 /// nothing to report a failure to.
-fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: []const u8) void {
+fn writeRaw(handle: system.Handle, bytes: []const u8) void {
     // Best effort: a full terminal must never hold up panic restoration.
-    const flags = if (!is_windows) std.posix.system.fcntl(handle, std.posix.F.GETFL, @as(u32, 0)) else 0;
+    const flags: u32 = if (is_windows) 0 else system.statusFlags(handle) orelse return;
     if (!is_windows) {
-        if (std.posix.errno(flags) != .SUCCESS) return;
         const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
-        fcntlSet(handle, std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock) catch return; // glint-ignore: Z026 -- best effort: a write that could block on a full terminal is skipped, since nothing may hold up panic restoration
+        system.setStatusFlags(handle, flags | nonblock) catch return; // glint-ignore: Z026 -- best effort: a write that could block on a full terminal is skipped, since nothing may hold up panic restoration
     }
     // glint-ignore: Z026 -- putting the flags back is best effort after the write has finished or failed; the write's own result is the one returned
-    defer if (!is_windows) fcntlSet(handle, std.posix.F.SETFL, @intCast(flags)) catch {};
+    defer if (!is_windows) system.setStatusFlags(handle, flags) catch {};
     var left = bytes;
-    while (left.len != 0) {
-        if (is_windows) {
-            // One synchronous write, as the console takes it; std's own, with no `Io` in the way.
-            var status_block: windows.IO_STATUS_BLOCK = undefined;
-            const n: u32 = @intCast(@min(left.len, std.math.maxInt(u32)));
-            // NtWriteFile fills the status block where it succeeds, and it is read only then
-            const status = windows.ntdll.NtWriteFile(handle, null, null, null, &status_block, left.ptr, n, null, null);
-            if (status != .SUCCESS or status_block.Information == 0) return;
-            left = left[status_block.Information..];
-            continue;
-        }
-        const rc = std.posix.system.write(handle, left.ptr, left.len);
-        switch (std.posix.errno(rc)) {
-            .SUCCESS => {
-                const n: usize = @intCast(rc);
-                if (n == 0) return;
-                left = left[n..];
-            },
-            .INTR => continue,
-            else => return,
-        }
-    }
+    while (left.len != 0) switch (system.writeOnce(handle, left)) {
+        .bytes => |n| {
+            if (n == 0) return;
+            left = left[n..];
+        },
+        .interrupted => continue,
+        .failed => return,
+    };
 }
 
 const testing = std.testing;
@@ -629,10 +609,7 @@ pub const PipeError = error{Unexpected};
 
 /// A pipe, for a test that wants a file that is not a terminal.
 pub fn pipe() PipeError![2]std.posix.fd_t {
-    var fds: [2]std.posix.fd_t = undefined;
-    // pipe fills both descriptors where it succeeds
-    if (std.posix.errno(std.posix.system.pipe(&fds)) != .SUCCESS) return error.Unexpected;
-    return fds;
+    return system.pipe();
 }
 
 test "two terminals cannot borrow the same entered renderer" {
@@ -737,7 +714,7 @@ test "a failed leave flush still restores the entered modes on the saved termina
     try testing.expect(t.saved == null);
     try testing.expect(r.own_entered == null);
     const master = pair.readFile().handle;
-    try fcntlSet(master, std.posix.F.SETFL, @bitCast(std.posix.O{ .NONBLOCK = true }));
+    try system.setStatusFlags(master, @bitCast(std.posix.O{ .NONBLOCK = true }));
     const n = std.posix.system.read(master, &seen, seen.len);
     try testing.expect(std.posix.errno(n) == .SUCCESS);
     const count: usize = @intCast(n);
@@ -754,7 +731,7 @@ test "primitive restoration output does not wait for a full descriptor" {
     const flags = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
     try testing.expect(std.posix.errno(flags) == .SUCCESS);
     const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
-    try fcntlSet(fds[1], std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock);
+    try system.setStatusFlags(fds[1], @as(u32, @intCast(flags)) | nonblock);
     var bytes: [4096]u8 = @splat('x');
     while (true) {
         const rc = std.posix.system.write(fds[1], &bytes, bytes.len);
@@ -762,7 +739,7 @@ test "primitive restoration output does not wait for a full descriptor" {
         try testing.expect(std.posix.errno(rc) == .AGAIN);
         break;
     }
-    try fcntlSet(fds[1], std.posix.F.SETFL, @intCast(flags));
+    try system.setStatusFlags(fds[1], @intCast(flags));
     const before = std.posix.system.fcntl(fds[1], std.posix.F.GETFL, @as(u32, 0));
     try testing.expect(std.posix.errno(before) == .SUCCESS);
     var started: std.atomic.Value(bool) = .init(false);

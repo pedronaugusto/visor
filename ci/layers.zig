@@ -8,6 +8,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/dependencies.zig",
         "src/geom.zig",
         "src/intake.zig",
+        "src/system.zig",
         "src/layer/**",
     } },
     .{ .name = "text and geometry", .patterns = &.{

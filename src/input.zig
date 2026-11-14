@@ -32,6 +32,7 @@ const morse = @import("dependencies.zig").morse;
 
 const tty_mod = @import("tty.zig");
 const intake = @import("intake.zig");
+const system = @import("system.zig");
 const Tty = tty_mod.Tty;
 
 const Io = std.Io;
@@ -300,16 +301,15 @@ const Piped = struct {
 
     fn send(p: *Piped, bytes: []const u8) void {
         var left = bytes;
-        while (left.len > 0) {
-            const rc = std.posix.system.write(p.write_end, left.ptr, left.len);
-            if (std.posix.errno(rc) != .SUCCESS) return;
-            left = left[@intCast(rc)..];
-        }
+        while (left.len > 0) switch (system.writeOnce(p.write_end, left)) {
+            .bytes => |n| left = left[n..],
+            .interrupted, .failed => return,
+        };
     }
 
     fn hangUp(p: *Piped) void {
         if (!p.open_write) return;
-        _ = std.posix.system.close(p.write_end);
+        system.close(p.write_end);
         p.open_write = false;
     }
 };

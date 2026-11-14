@@ -6,6 +6,20 @@
         "A009"
       ],
       "reason": "where bytes from outside enter visor: what the terminal sends, which morse's parsers refine, and a terminal's shared-memory picture read back in a test"
+    },
+    {
+      "file": "src/system.zig",
+      "rules": [
+        "P007"
+      ],
+      "reason": "the calls visor makes past std's checked layer, one each: a descriptor's status flags, one raw write for a panic handler with no Io, and a pipe and its close for tests"
+    },
+    {
+      "file": "src/layer/shm.zig",
+      "rules": [
+        "P007"
+      ],
+      "reason": "POSIX shared memory for pictures, the kitty protocol's t=s: shm_open, ftruncate, mmap and unlink, or the file under /dev/shm without libc"
     }
   ]
 }
