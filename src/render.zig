@@ -3905,7 +3905,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
 }
 
 const shakedown = @import("shakedown");
-const aegis = @import("aegis");
+const aegis = @import("dependencies.zig").aegis;
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 const repeat = shakedown.corpus.repeat;

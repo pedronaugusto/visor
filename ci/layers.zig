@@ -7,6 +7,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/damage.zig",
         "src/dependencies.zig",
         "src/geom.zig",
+        "src/intake.zig",
         "src/layer/**",
     } },
     .{ .name = "text and geometry", .patterns = &.{

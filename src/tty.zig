@@ -29,6 +29,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const intake = @import("intake.zig");
 const terminal = @import("dependencies.zig").tty;
 const reactor = @import("dependencies.zig").reactor;
 
@@ -44,7 +45,7 @@ const is_windows = builtin.target.os.tag == .windows;
 
 /// Raw terminals registered for panic restoration. Each terminal owns its
 /// saved mode and renderer association; the list only makes them reachable.
-// glint-ignore: A007 -- design: a panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
+// A panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
 var open_ttys: ?*Tty = null;
 
 fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
@@ -76,6 +77,7 @@ pub const Tty = struct {
     // glint-ignore: A015 -- design: owned when adopted, and `close` closes it once; never a borrow kept from `controlling`
     file: Io.File,
     /// Private: on Windows, the input handle of an adopted terminal, which is a second descriptor.
+    // glint-ignore: A015 -- design: owned with `file` when adopted, and `close` closes it once where it is not `file`
     input: if (is_windows) Io.File else void,
     /// Private: what the terminal was before `raw`, or null when it has not been
     /// changed.
@@ -263,7 +265,7 @@ pub const Tty = struct {
 
     /// Reads whatever is there, into a buffer the caller owns.
     pub fn read(t: *Tty, io: Io, buf: []u8) ReadError!usize {
-        return t.inputFile().readStreaming(io, &.{buf});
+        return intake.readStreaming(t.inputFile(), io, &.{buf});
     }
 
     /// What `watchResize` fails with: no listener could be had.
@@ -421,7 +423,7 @@ fn writeRaw(handle: if (is_windows) windows.HANDLE else std.posix.fd_t, bytes: [
     if (!is_windows) {
         if (std.posix.errno(flags) != .SUCCESS) return;
         const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
-        fcntlSet(handle, std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock) catch return;
+        fcntlSet(handle, std.posix.F.SETFL, @as(u32, @intCast(flags)) | nonblock) catch return; // glint-ignore: Z026 -- best effort: a write that could block on a full terminal is skipped, since nothing may hold up panic restoration
     }
     // glint-ignore: Z026 -- putting the flags back is best effort after the write has finished or failed; the write's own result is the one returned
     defer if (!is_windows) fcntlSet(handle, std.posix.F.SETFL, @intCast(flags)) catch {};
@@ -470,7 +472,7 @@ test "the panic handler is a type to install, not something installed" {
 fn readAtLeast(io: Io, file: Io.File, buf: []u8, want: usize) ![]const u8 {
     var got: usize = 0;
     while (got < want) {
-        const n = try file.readStreaming(io, &.{buf[got..]});
+        const n = try intake.readStreaming(file, io, &.{buf[got..]});
         if (n == 0) break;
         got += n;
     }
@@ -483,7 +485,7 @@ fn readUntil(io: Io, file: Io.File, buf: []u8, part: []const u8) ![]const u8 {
     var got: usize = 0;
     while (std.mem.find(u8, buf[0..got], part) == null) {
         if (got == buf.len) return error.NoSpaceLeft;
-        const n = try file.readStreaming(io, &.{buf[got..]});
+        const n = try intake.readStreaming(file, io, &.{buf[got..]});
         if (n == 0) break;
         got += n;
     }

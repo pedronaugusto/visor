@@ -33,7 +33,7 @@ const pool = @import("pool.zig");
 const textmod = @import("text.zig");
 const damage_mod = @import("damage.zig");
 const window = @import("window.zig");
-const aegis = @import("aegis");
+const aegis = @import("dependencies.zig").aegis;
 const Damage = damage_mod.Damage;
 
 const Allocator = std.mem.Allocator;

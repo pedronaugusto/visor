@@ -288,7 +288,7 @@ pub const Painter = struct {
                     @intCast(cp - braille_base)
                 else
                     0;
-                const n = std.unicode.utf8Encode(braille_base + (had | bit), &bytes) catch return;
+                const n = std.unicode.utf8Encode(braille_base + (had | bit), &bytes) catch return; // glint-ignore: Z026 -- braille_base plus a byte is U+2800 to U+28FF, every one a scalar value
                 try p.win.write(col, row, bytes[0..n], style, .none);
             },
             .sextant => {

@@ -19,7 +19,7 @@ const std = @import("std");
 const cellmod = @import("cell.zig");
 
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 const Text = cellmod.internal.StoredCell.Text;
 const Link = @TypeOf(@as(cellmod.internal.StoredCell, .{}).link);
 const PoolGeneration = cellmod.PoolGeneration;
@@ -53,8 +53,8 @@ fn pooledText(offset: GraphemeOffset, len: ByteLength) Text {
     std.mem.writeInt(u32, t.buf[0..4], offset.raw(), .little);
     std.mem.writeInt(u16, t.buf[4..6], len.raw(), .little);
     // What `Text.offset` and `Text.length` read back is what was written.
-    assert(t.offset().? == offset);
-    assert(t.length() == len);
+    assert(t.offset().? == offset, "t.offset().? == offset");
+    assert(t.length() == len, "t.length() == len");
     return t;
 }
 
@@ -62,7 +62,7 @@ fn pooledLink(index: LinkIndex) Link {
     // Zero is `.none`, so the last index has no handle.
     const next = index.successor() catch unreachable; // glint-ignore: Z026 -- the last index has no handle, and is refused when interning
     const link: Link = @fromBackingInt(next.raw());
-    assert(link.index().? == index);
+    assert(link.index().? == index, "link.index().? == index");
     return link;
 }
 
@@ -127,7 +127,7 @@ pub const Graphemes = struct {
     pub fn intern(p: *Graphemes, grapheme: []const u8) Allocator.Error!Text {
         const gpa = p.gpa;
         if (grapheme.len <= Text.max_inline) return .inlined(grapheme);
-        assert(grapheme.len <= max_len);
+        assert(grapheme.len <= max_len, "grapheme.len <= max_len");
         const byte_len: ByteLength = .fromRaw(@intCast(grapheme.len)); // safe: Screen checked max_len before interning
 
         const found = p.index.getEntryAdapted(grapheme, Adapted{ .bytes = p.bytes.items });
@@ -141,7 +141,7 @@ pub const Graphemes = struct {
         const source = if (borrowed) |off| p.bytes.items[off..][0..grapheme.len] else grapheme;
         p.bytes.appendSliceAssumeCapacity(source);
         // The entry names the bytes just appended, the end of the pool.
-        assert(end.convert(usize).eql(.fromRaw(p.bytes.items.len)));
+        assert(end.convert(usize).eql(.fromRaw(p.bytes.items.len)), "end.convert(usize).eql(.fromRaw(p.bytes.items.len))");
         const entry: Entry = .{ .offset = offset, .len = byte_len };
         p.index.putAssumeCapacityContext(entry, {}, .{ .bytes = p.bytes.items });
         return pooledText(offset, byte_len);
@@ -308,8 +308,8 @@ pub const Links = struct {
     // register set. A miss alone needs this path and its larger stack frame.
     noinline fn append(l: *Links, uri: []const u8, params: []const u8) Allocator.Error!Link {
         const gpa = l.gpa;
-        assert(uri.len <= max_len);
-        assert(params.len <= max_len);
+        assert(uri.len <= max_len, "uri.len <= max_len");
+        assert(params.len <= max_len, "params.len <= max_len");
         const uri_len: ByteLength = .fromRaw(@intCast(uri.len)); // safe: Screen checked max_len before interning
         const params_len: ByteLength = .fromRaw(@intCast(params.len)); // safe: Screen checked max_len before interning
         const uri_off: LinkOffset = .fromRaw(aegis.int.cast(u32, l.bytes.items.len) catch return error.OutOfMemory);
@@ -333,7 +333,7 @@ pub const Links = struct {
         l.bytes.appendSliceAssumeCapacity(params_source);
         // The two strings sit back to back at the end of the pool, which is
         // where `get` reads them from.
-        assert(end.convert(usize).eql(.fromRaw(l.bytes.items.len)));
+        assert(end.convert(usize).eql(.fromRaw(l.bytes.items.len)), "end.convert(usize).eql(.fromRaw(l.bytes.items.len))");
         l.entries.appendAssumeCapacity(.{
             .uri_off = uri_off,
             .uri_len = uri_len,

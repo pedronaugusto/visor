@@ -41,7 +41,7 @@ const Color = cellmod.Color;
 const Style = cellmod.Style;
 const Writer = std.Io.Writer;
 const log = std.log.scoped(.visor);
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 
 /// The terminal.
 pub const Term = struct {
@@ -172,11 +172,11 @@ pub const Term = struct {
     fn assertCursor(t: *const Term) void {
         const size = t.scr.dimensions();
         if (size.cols == 0 or size.rows == 0) return;
-        assert(t.col < size.cols);
-        assert(t.own_row < size.rows);
-        assert(!t.wrap_pending or t.col == size.cols - 1);
-        assert(t.scroll_top <= t.scroll_bottom);
-        assert(t.scroll_bottom < size.rows);
+        assert(t.col < size.cols, "t.col < size.cols");
+        assert(t.own_row < size.rows, "t.own_row < size.rows");
+        assert(!t.wrap_pending or t.col == size.cols - 1, "!t.wrap_pending or t.col == size.cols - 1");
+        assert(t.scroll_top <= t.scroll_bottom, "t.scroll_top <= t.scroll_bottom");
+        assert(t.scroll_bottom < size.rows, "t.scroll_bottom < size.rows");
     }
 
     //=====================================================================
@@ -396,7 +396,7 @@ pub const Term = struct {
     fn repeat(t: *Term, count: u32) Allocator.Error!void {
         const cp = t.previous orelse return;
         var buf: [4]u8 = undefined;
-        const len = std.unicode.utf8Encode(cp, &buf) catch return;
+        const len = std.unicode.utf8Encode(cp, &buf) catch return; // glint-ignore: Z026 -- the previous codepoint was decoded from UTF-8, so it is never a surrogate; there is nothing else to repeat
         const copy = buf[0..len];
         const n = repeatCount(count, t.scr.dimensions(), copy, t.scr.method);
         var i: usize = 0;
@@ -493,7 +493,7 @@ pub const Term = struct {
         if (std.mem.eql(u8, csi.intermediates, " ") and csi.final == 'q') {
             // A shape this package does not name is not one a renderer
             // wrote, and leaves the cursor as it was.
-            const shape = aegis.int.cast(u8, csi.param(0) orelse 0) catch return;
+            const shape = aegis.int.cast(u8, csi.param(0) orelse 0) catch return; // glint-ignore: Z026 -- a shape past a byte is none a renderer wrote, and leaves the cursor as it was
             t.scr.cursor.shape = std.enums.fromInt(morse.CursorShape, shape) orelse return;
             return;
         }

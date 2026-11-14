@@ -151,7 +151,7 @@ pub const Calendar = struct {
             const text = std.mem.print(&buf, "{s} {d}", .{
                 month_names[c.month - 1],
                 c.year,
-            }) catch return;
+            }) catch return; // glint-ignore: Z026 -- the longest month name, a space and any i32 year are 21 bytes, inside 32
             const taken = @min(win.width(text), win.cols());
             _ = try win.printSegment(
                 .{ .text = text, .style = c.header_style },

@@ -648,7 +648,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                         .kind = if (cluster == 2) .wide else .narrow,
                         .drift = textmod.disagrees(glyph),
                     },
-                }) catch return;
+                }) catch return; // glint-ignore: Z026 -- a border's glyph is inline and its style canonical, so the cell names no handle and is valid
             }
         };
     };

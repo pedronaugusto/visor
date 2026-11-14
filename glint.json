@@ -1,0 +1,11 @@
+{
+  "seams": [
+    {
+      "file": "src/intake.zig",
+      "rules": [
+        "A009"
+      ],
+      "reason": "where bytes from outside enter visor: what the terminal sends, which morse's parsers refine, and a terminal's shared-memory picture read back in a test"
+    }
+  ]
+}

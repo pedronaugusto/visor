@@ -19,7 +19,7 @@ const std = @import("std");
 const morse = @import("../dependencies.zig").morse;
 const cellmod = @import("../cell.zig");
 const screen = @import("../screen.zig");
-const aegis = @import("aegis");
+const aegis = @import("../dependencies.zig").aegis;
 const Caps = @import("../caps.zig").Caps;
 
 const Cell = cellmod.internal.StoredCell;

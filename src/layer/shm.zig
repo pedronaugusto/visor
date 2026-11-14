@@ -11,6 +11,7 @@
 //! picture goes in the escape code instead.
 const std = @import("std");
 const builtin = @import("builtin");
+const intake = @import("../intake.zig");
 const aegis = @import("../dependencies.zig").aegis;
 
 /// The longest name, the slash included: macOS takes 31 bytes
@@ -231,7 +232,7 @@ fn readBack(back: *[64]u8, name: Name, len: usize) ![]const u8 {
     const p = try std.mem.print(&path, "/dev/shm{s}", .{name.slice()});
     const file = std.Io.Dir.openFileAbsolute(std.testing.io, p, .{}) catch return error.SharedMemory;
     defer file.close(std.testing.io);
-    const n = try file.readPositionalAll(std.testing.io, back[0..len], 0);
+    const n = try intake.readPositionalAll(file, std.testing.io, back[0..len], 0);
     return back[0..n];
 }
 

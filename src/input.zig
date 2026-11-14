@@ -25,10 +25,13 @@
 
 const std = @import("std");
 const aegis = @import("dependencies.zig").aegis;
+/// A span of std's clock, in aegis's units.
+const Span = aegis.units.Duration(.nanosecond, i96);
 const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 
 const tty_mod = @import("tty.zig");
+const intake = @import("intake.zig");
 const Tty = tty_mod.Tty;
 
 const Io = std.Io;
@@ -185,7 +188,7 @@ pub const Input = struct {
         // sequence: the one case the escape timeout settles, by `flush`.
         if (in.parser.undecided()) {
             const escape: Io.Clock.Duration = .{ .raw = in.escape, .clock = .awake };
-            if (left) |l| if (l.raw.nanoseconds < in.escape.nanoseconds) return .{ .timeout = .{ .duration = l }, .expires = true };
+            if (left) |l| if (Span.fromIoDuration(l.raw, .exact).compare(.fromIoDuration(in.escape, .exact)) == .lt) return .{ .timeout = .{ .duration = l }, .expires = true };
             return .{ .timeout = .{ .duration = escape }, .expires = false };
         }
         const l = left orelse return .{ .timeout = .none, .expires = false };
@@ -249,7 +252,7 @@ pub const Input = struct {
 
     /// One read with nothing beside it.
     fn readBlocking(in: *Input, io: Io, file: Io.File) Error!Woke {
-        const n = file.readStreaming(io, &.{in.read_buffer}) catch |err| switch (err) {
+        const n = intake.readStreaming(file, io, &.{in.read_buffer}) catch |err| switch (err) {
             error.EndOfStream => return .ended,
             else => |e| return e,
         };

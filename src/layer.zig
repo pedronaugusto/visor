@@ -34,6 +34,8 @@ const builtin = @import("builtin");
 const morse = @import("dependencies.zig").morse;
 const warp = @import("dependencies.zig").warp;
 const aegis = @import("dependencies.zig").aegis;
+/// A reading of the caller's clock, the one its timestamps are taken on.
+const Reading = aegis.units.Instant(.caller, .nanosecond, i96);
 
 const geom = @import("geom.zig");
 const Caps = @import("caps.zig").Caps;
@@ -958,7 +960,7 @@ pub const Layers = struct {
                     held.has();
                     return true;
                 }
-                if (now.nanoseconds -| held.sent.nanoseconds < grace.nanoseconds) return false;
+                if (Reading.fromTimestamp(held.sent, .exact).saturatingDurationTo(.fromTimestamp(now, .exact)).compare(.fromIoDuration(grace, .exact)) == .lt) return false;
                 // A picture in shared memory is not taken on trust: a
                 // terminal that never said it read one is one that is
                 // not given another, and this one is sent again.

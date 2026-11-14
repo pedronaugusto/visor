@@ -18,6 +18,8 @@
 
 const std = @import("std");
 const aegis = @import("dependencies.zig").aegis;
+/// A reading of the caller's clock, the one its timestamps are taken on.
+const Reading = aegis.units.Instant(.caller, .nanosecond, i96);
 const morse = @import("dependencies.zig").morse;
 const textmod = @import("text.zig");
 
@@ -335,7 +337,7 @@ pub const Caps = struct {
                     var it = c.iterator();
                     while (it.next()) |capability| {
                         var name: [8]u8 = undefined;
-                        const n = capability.decodeName(&name) catch continue;
+                        const n = capability.decodeName(&name) catch continue; // glint-ignore: Z026 -- a name that does not decode into 8 bytes is none of the capabilities asked
                         if (c.known and
                             (std.mem.eql(u8, n, "Tc") or std.mem.eql(u8, n, "RGB")))
                         {
@@ -343,8 +345,8 @@ pub const Caps = struct {
                         }
                         if (c.known and p.own_questions.color_count and std.mem.eql(u8, n, "Co")) {
                             var value: [10]u8 = undefined;
-                            const v = capability.decodeValue(&value) catch continue;
-                            p.caps.colors = std.fmt.parseInt(u32, v, 10) catch continue;
+                            const v = capability.decodeValue(&value) catch continue; // glint-ignore: Z026 -- a value longer than 10 bytes is no colour count a terminal reports
+                            p.caps.colors = std.fmt.parseInt(u32, v, 10) catch continue; // glint-ignore: Z026 -- a value that is not a decimal number is no colour count; the count stays unknown
                         }
                     }
                 },
@@ -373,7 +375,8 @@ pub const Caps = struct {
             if (p.complete()) return true;
             if (!p.answered.contains(.device_attributes)) return false;
             const last = p.last_answer orelse now;
-            return now.nanoseconds -| last.nanoseconds >= quiet.nanoseconds;
+            const waited = Reading.fromTimestamp(last, .exact).saturatingDurationTo(.fromTimestamp(now, .exact));
+            return waited.compare(.fromIoDuration(quiet, .exact)) != .lt;
         }
     };
 };

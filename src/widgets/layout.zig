@@ -419,7 +419,7 @@ pub fn offset(outer: u16, inner: u16, how: Align) u16 {
 const std_testing = std.testing;
 const Spread = @import("spread").Spread;
 const shakedown = @import("shakedown");
-const aegis = @import("aegis");
+const aegis = @import("../dependencies.zig").aegis;
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 

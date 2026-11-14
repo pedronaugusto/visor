@@ -16,7 +16,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const aegis = @import("aegis");
+const aegis = @import("dependencies.zig").aegis;
 const assert = aegis.assert.invariant;
 
 /// The columns of one row that changed, both ends inside the range.

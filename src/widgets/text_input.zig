@@ -734,7 +734,7 @@ const testing = std.testing;
 const Harness = @import("../testing/widget_harness.zig").Harness;
 const Spread = @import("spread").Spread;
 const shakedown = @import("shakedown");
-const aegis = @import("aegis");
+const aegis = @import("../dependencies.zig").aegis;
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 
