@@ -8,8 +8,8 @@
         },
 
         .morse = .{
-            .url = "git+https://github.com/pedronaugusto/morse?ref=v0.8.6#a8edf0bf2b169c3497a1e4cebc047197c9749c00",
-            .hash = "morse-0.8.6-OKnGoXCYEQCdzW97Rbu91cFbYMcoJXh_oCo6whqFlFjl",
+            .url = "git+https://github.com/pedronaugusto/morse#12584121f4ed54750e7ebc1b447e4f16df09ef15",
+            .hash = "morse-0.8.6-OKnGoWeqEQDuPDOdmCQ0xnFBWG-tl1qnuyoMuVpm_PH9",
         },
 
         .conduit = .{
