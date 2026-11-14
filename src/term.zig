@@ -577,7 +577,7 @@ pub const Term = struct {
     /// before or inline, and no link, the link Term holds in that screen, or
     /// a link read from one of its cells.
     fn setCell(t: *Term, col: u16, row: u16, c: Cell) void {
-        // unreachable: the handles are this screen's own and live, as above
+        // glint-ignore: Z026 -- the handles are this screen's own and live, as above
         t.scr.writeOwnedCellUnchecked(col, row, c) catch unreachable;
     }
 

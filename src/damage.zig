@@ -16,7 +16,8 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const assert = std.debug.assert;
+const aegis = @import("aegis");
+const assert = aegis.assert.invariant;
 
 /// The columns of one row that changed, both ends inside the range.
 pub const Span = struct {
@@ -98,7 +99,7 @@ pub const Damage = struct {
         if (e.first > e.last) d.dirty += 1;
         if (first < e.first) e.first = first;
         if (last > e.last) e.last = last;
-        assert(d.dirty <= d.rows.len);
+        assert(d.dirty <= d.rows.len, "d.dirty <= d.rows.len");
     }
 
     /// Records that every cell of every row changed.
@@ -116,7 +117,7 @@ pub const Damage = struct {
         if (d.dirty == 0) {
             // The count is kept with the spans, so none dirty is every row
             // clean, and there is nothing to write.
-            if (builtin.optimize.runtimeSafety()) for (d.rows) |e| assert(e.first > e.last);
+            if (builtin.optimize.runtimeSafety()) for (d.rows) |e| assert(e.first > e.last, "e.first > e.last");
             return;
         }
         @memset(d.rows, .{});

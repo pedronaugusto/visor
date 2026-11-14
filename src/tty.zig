@@ -44,7 +44,7 @@ const is_windows = builtin.target.os.tag == .windows;
 
 /// Raw terminals registered for panic restoration. Each terminal owns its
 /// saved mode and renderer association; the list only makes them reachable.
-// aegis: design(A007): a panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
+// glint-ignore: A007 -- design: a panic handler walks it, which can take no lock and may run on any thread; every change is on the one thread `Tty`'s contract names
 var open_ttys: ?*Tty = null;
 
 fn fcntlSet(fd: std.posix.fd_t, cmd: i32, arg: u32) error{Unexpected}!void {
@@ -73,7 +73,7 @@ pub const Tty = struct {
     /// Private: the terminal itself when adopted; unused when `open` made it, whose files are
     /// borrowed from `controlling` at each use (`outputFile`, `inputFile`), so a `Tty` is a value
     /// that moves until its first use, as an aegis owner is.
-    // aegis: design(A015): owned when adopted, and `close` closes it once; never a borrow kept from `controlling`
+    // glint-ignore: A015 -- design: owned when adopted, and `close` closes it once; never a borrow kept from `controlling`
     file: Io.File,
     /// Private: on Windows, the input handle of an adopted terminal, which is a second descriptor.
     input: if (is_windows) Io.File else void,
@@ -578,7 +578,6 @@ test "leaving through the terminal releases its renderer before destruction" {
 test "this program's terminal opens as a value that moves until its first use, and fails cleanly without one" {
     // `open` is analysed only where it is called, and nothing else in the
     // suite calls it: a platform it did not compile on went unnoticed.
-    // glint-ignore: Z026 -- a test machine with no controlling terminal cannot open one, which is the clean failure asked of it
     if (Tty.open(testing.io)) |opened| {
         // Moved twice before any use, as a value returned and kept is: nothing was borrowed in
         // `open`, so the owner binds here, where it is used and closed (Windows' runner has a

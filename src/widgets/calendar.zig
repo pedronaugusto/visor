@@ -181,10 +181,10 @@ pub const Calendar = struct {
         var column: u16 = first_column;
         while (day <= last) : (day += 1) {
             if (row >= win.rows()) return;
-            // unreachable: day runs from the first to the month's last, and a month that does not exist returned above
+            // glint-ignore: Z026 -- day runs from the first to the month's last, and a month that does not exist returned above
             const date = Date.init(c.year, c.month, day) catch unreachable;
             var buf: [2]u8 = undefined;
-            // unreachable: a day is at most 31, two digits
+            // glint-ignore: Z026 -- a day is at most 31, two digits
             const text = std.mem.print(&buf, "{d:>2}", .{day}) catch unreachable;
             _ = try win.printSegment(
                 .{ .text = text, .style = c.styleOf(date) },
@@ -200,7 +200,7 @@ pub const Calendar = struct {
 
     /// Which column of the first week the first of the month falls in.
     fn firstColumn(c: Calendar) u16 {
-        // unreachable: both callers return first for a month that does not exist, and every month has a first
+        // glint-ignore: Z026 -- both callers return first for a month that does not exist, and every month has a first
         const first = Date.init(c.year, c.month, 1) catch unreachable;
         const weekday = @backingInt(weekdayOf(first));
         return (@as(u16, weekday) + 7 - @backingInt(c.starts_on)) % 7;

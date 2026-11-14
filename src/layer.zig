@@ -110,7 +110,7 @@ pub const Image = struct {
     /// to answer, ready when it is not.
     fn sending(asks: bool) Status.Runtime(void) {
         var status: Status.Runtime(void) = .init({});
-        if (!asks) _ = status.step(.has) catch unreachable; // unreachable: loading takes `has`
+        if (!asks) _ = status.step(.has) catch unreachable; // glint-ignore: Z026 -- loading takes `has`
         return status;
     }
 
@@ -289,7 +289,7 @@ pub const ImageIds = struct {
         const start = ids.next;
         while (true) {
             const id = ids.next;
-            // unreachable: an id below `last` has a successor, and `last` is itself an id
+            // glint-ignore: Z026 -- an id below `last` has a successor, and `last` is itself an id
             ids.next = if (id.eql(ids.last)) ids.first else id.successor() catch unreachable;
             if (!id.eql(ids.graphics_id) and !layers.holds(id)) return id;
             if (ids.next.eql(start)) return error.NoImageId;
@@ -770,7 +770,7 @@ pub const Layers = struct {
         const created = p.shared orelse return l.transmitEscape(w, p.id, l.staged.items[0..p.len], p.how);
         if (l.policyFor(created.object)) |sm| if (sm.state != .no) {
             created.mapping.unmap();
-            // unreachable: `prepare` checked the size before making the object
+            // glint-ignore: Z026 -- `prepare` checked the size before making the object
             const size = sharedSize(p.len) catch unreachable;
             return l.sendShared(w, sm, created.object, size, p.how);
         };
@@ -798,7 +798,7 @@ pub const Layers = struct {
             if (l.compressor == null) l.compressor = try .init(gpa, .{ .level = 1 });
             const frame: warp.Compressor.Frame = .{ .container = .zlib };
             try l.deflated.resize(gpa, warp.Compressor.bound(pixels.len, frame));
-            // unreachable: the output is as long as the longest stream `compress` writes
+            // glint-ignore: Z026 -- the output is as long as the longest stream `compress` writes
             const n = l.compressor.?.compress(pixels, l.deflated.items, frame) catch unreachable;
             if (n < pixels.len) {
                 payload = l.deflated.items[0..n];

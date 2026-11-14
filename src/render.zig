@@ -419,8 +419,8 @@ pub const Renderer = struct {
     // Moves only storage. Terminal mode intent and the renderer's stable
     // address stay with their owner; the prepared value frees the old storage.
     fn resizePrepared(r: *Renderer, prepared: *Renderer) void {
-        std.debug.assert(r.gpa.ptr == prepared.gpa.ptr);
-        std.debug.assert(r.gpa.vtable == prepared.gpa.vtable);
+        aegis.assert.invariant(r.gpa.ptr == prepared.gpa.ptr, "r.gpa.ptr == prepared.gpa.ptr");
+        aegis.assert.invariant(r.gpa.vtable == prepared.gpa.vtable, "r.gpa.vtable == prepared.gpa.vtable");
         inline for (.{ "size", "prev", "force", "drifted", "untrusted", "hashes", "buf" }) |field| {
             std.mem.swap(@TypeOf(@field(r.*, field)), &@field(r.*, field), &@field(prepared.*, field));
         }
@@ -940,9 +940,9 @@ pub const Renderer = struct {
         r.buf = try gpa.alloc(u8, sync_gate);
         // The last frame is one cell for each place on the grid; every
         // per-row record is one a row, and the scroll search two.
-        std.debug.assert(r.prev.len == size.area());
-        std.debug.assert(r.force.len == size.rows);
-        std.debug.assert(r.hashes.len == 2 * @as(usize, size.rows));
+        aegis.assert.invariant(r.prev.len == size.area(), "r.prev.len == size.area()");
+        aegis.assert.invariant(r.force.len == size.rows, "r.force.len == size.rows");
+        aegis.assert.invariant(r.hashes.len == 2 * @as(usize, size.rows), "r.hashes.len == 2 * @as(usize, size.rows)");
     }
 
     /// Gives all of it back.
@@ -2043,7 +2043,7 @@ const StyleSequenceCache = struct {
     /// on every hit, so a collision changes only how often a cost is rebuilt.
     fn styleHash(style: Style) u64 {
         const bytes = std.mem.asBytes(&style);
-        comptime std.debug.assert(@sizeOf(Style) == 22);
+        comptime aegis.assert.invariant(@sizeOf(Style) == 22, "@sizeOf(Style) == 22");
         return (std.mem.readInt(u64, bytes[0..8], .little) *% 0x9e3779b185ebca87) ^
             (std.mem.readInt(u64, bytes[8..16], .little) *% 0xc2b2ae3d27d4eb4f) ^
             (@as(u64, std.mem.readInt(u32, bytes[16..20], .little)) *% 0x165667b19e3779f9) ^
@@ -2063,7 +2063,7 @@ const StyleSequenceCache = struct {
     }
 
     fn put(cache: *StyleSequenceCache, from: Style, to: Style, sequence: []const u8) void {
-        std.debug.assert(sequence.len <= max_len);
+        aegis.assert.invariant(sequence.len <= max_len, "sequence.len <= max_len");
         const found = cache.entry(from, to);
         found.from = from;
         found.to = to;
@@ -2075,7 +2075,7 @@ const StyleSequenceCache = struct {
     }
 
     fn putCost(cache: *StyleSequenceCache, from: Style, to: Style, cost: usize) void {
-        std.debug.assert(cost <= max_len);
+        aegis.assert.invariant(cost <= max_len, "cost <= max_len");
         const found = cache.entry(from, to);
         found.from = from;
         found.to = to;
@@ -3905,6 +3905,7 @@ test "leaving inline mode puts the cursor below the screen and keeps the frame" 
 }
 
 const shakedown = @import("shakedown");
+const aegis = @import("aegis");
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 const repeat = shakedown.corpus.repeat;

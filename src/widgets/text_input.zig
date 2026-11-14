@@ -609,16 +609,16 @@ pub const TextInput = struct {
         /// the edits' own, back to back in order, which is how undo and redo
         /// read them back.
         fn assertState(b: *const Buffer) void {
-            std.debug.assert(b.own_cursor <= b.own_text.items.len);
-            if (b.anchor) |a| std.debug.assert(a <= b.own_text.items.len);
-            std.debug.assert(b.done <= b.edits.items.len);
+            aegis.assert.invariant(b.own_cursor <= b.own_text.items.len, "b.own_cursor <= b.own_text.items.len");
+            if (b.anchor) |a| aegis.assert.invariant(a <= b.own_text.items.len, "a <= b.own_text.items.len");
+            aegis.assert.invariant(b.done <= b.edits.items.len, "b.done <= b.edits.items.len");
             if (!builtin.optimize.runtimeSafety()) return;
             var end: usize = 0;
             for (b.edits.items) |e| {
-                std.debug.assert(e.bytes == end);
+                aegis.assert.invariant(e.bytes == end, "e.bytes == end");
                 end = e.bytes + e.removed + e.inserted;
             }
-            std.debug.assert(end == b.bytes.items.len);
+            aegis.assert.invariant(end == b.bytes.items.len, "end == b.bytes.items.len");
         }
 
         fn endEdit(b: *Buffer) void {
@@ -687,7 +687,7 @@ pub const TextInput = struct {
                 b.done += 1;
             }
             b.trim();
-            std.debug.assert(b.bytes.items.len <= b.history_limit);
+            aegis.assert.invariant(b.bytes.items.len <= b.history_limit, "b.bytes.items.len <= b.history_limit");
         }
 
         /// Whether an edit joins the last one: typing that goes on where the
@@ -734,6 +734,7 @@ const testing = std.testing;
 const Harness = @import("../testing/widget_harness.zig").Harness;
 const Spread = @import("spread").Spread;
 const shakedown = @import("shakedown");
+const aegis = @import("aegis");
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 

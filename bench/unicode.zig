@@ -42,7 +42,7 @@ pub fn word(cp: u21) bool {
 /// two, everything else one.
 pub fn columns(text: []const u8) usize {
     var total: usize = 0;
-    // unreachable: every caller measures text it generated or decoded as UTF-8
+    // glint-ignore: Z026 -- every caller measures text it generated or decoded as UTF-8
     var it = (std.unicode.Utf8View.init(text) catch unreachable).iterator();
     while (it.nextCodepoint()) |cp| {
         if (mark(cp)) continue;

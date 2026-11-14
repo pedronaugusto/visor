@@ -49,7 +49,7 @@ pub fn line(tag: []const u8, bytes: []const u8) void {
     var i: usize = 0;
     while (i < bytes.len) {
         const take = @min(bytes.len - i, buf.len / 2);
-        const hexed = std.mem.print(&buf, "{x}", .{bytes[i..][0..take]}) catch unreachable; // unreachable: take is half the buffer
+        const hexed = std.mem.print(&buf, "{x}", .{bytes[i..][0..take]}) catch unreachable; // glint-ignore: Z026 -- take is half the buffer
         raw(hexed);
         i += take;
     }

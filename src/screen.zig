@@ -33,6 +33,7 @@ const pool = @import("pool.zig");
 const textmod = @import("text.zig");
 const damage_mod = @import("damage.zig");
 const window = @import("window.zig");
+const aegis = @import("aegis");
 const Damage = damage_mod.Damage;
 
 const Allocator = std.mem.Allocator;
@@ -97,7 +98,7 @@ pub const internal = struct {
     }
     /// `intern` for bytes the caller has already bounded by `pool.max_len`.
     pub fn internShort(s: *Screen, bytes: []const u8) Allocator.Error!Cell.Text {
-        std.debug.assert(bytes.len <= pool.max_len);
+        aegis.assert.invariant(bytes.len <= pool.max_len, "bytes.len <= pool.max_len");
         return s.internShort(bytes);
     }
 };
@@ -233,8 +234,8 @@ pub const Screen = struct {
         s.damage = resized.damage;
         s.size = size;
         // One cell and one damage span for every place on the new grid.
-        std.debug.assert(s.own_cells.len == size.area());
-        std.debug.assert(s.damage.rowCount() == size.rows);
+        aegis.assert.invariant(s.own_cells.len == size.area(), "s.own_cells.len == size.area()");
+        aegis.assert.invariant(s.damage.rowCount() == size.rows, "s.damage.rowCount() == size.rows");
 
         s.clampCursor();
         s.damageAll();
@@ -302,11 +303,11 @@ pub const Screen = struct {
         // already in the new pools.
         for (cells) |*c| {
             if (c.text.isPooled()) {
-                // unreachable: preparePools interned it, so this finds it and allocates nothing
+                // glint-ignore: Z026 -- preparePools interned it, so this finds it and allocates nothing
                 c.text = graphemes.intern(internal.textOf(s, c)) catch unreachable;
             }
             if (internal.target(s, c.link)) |t| {
-                // unreachable: preparePools interned it, so this finds it and allocates nothing
+                // glint-ignore: Z026 -- preparePools interned it, so this finds it and allocates nothing
                 c.link = links.intern(t.uri, t.params) catch unreachable;
             }
         }
@@ -571,7 +572,7 @@ pub const Screen = struct {
             return;
         }
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
-        std.debug.assert(w > 0);
+        aegis.assert.invariant(w > 0, "w > 0");
         return s.writeOne(col, row, grapheme, @intCast(w), style, to);
     }
 
@@ -620,7 +621,7 @@ pub const Screen = struct {
         // is not one glyph to scale.
         if (!ascii and s.method == .wcwidth and !textmod.combinesOnly(grapheme)) return false;
         const w = if (ascii) 1 else textmod.graphemeWidth(grapheme, s.method);
-        std.debug.assert(w > 0);
+        aegis.assert.invariant(w > 0, "w > 0");
         if (@as(u32, col) + @as(u32, w) * scale > s.dimensions().cols) return false;
         if (@as(u32, row) + scale > s.dimensions().rows) return false;
         const t = try s.internShort(grapheme);
@@ -687,7 +688,7 @@ pub const Screen = struct {
         const blank: StoredCell = .blank(.{});
 
         if (distance >= r.rows) {
-            // unreachable: a default blank holds no handle and a space, which fill never refuses
+            // glint-ignore: Z026 -- a default blank holds no handle and a space, which fill never refuses
             s.fill(r, .blank(.{})) catch unreachable;
             return;
         }
@@ -907,8 +908,8 @@ pub const Screen = struct {
 
     /// Where a cell is in `cells`.
     pub fn index(s: *const Screen, col: u16, row_n: u16) usize {
-        std.debug.assert(col < s.dimensions().cols);
-        std.debug.assert(row_n < s.dimensions().rows);
+        aegis.assert.invariant(col < s.dimensions().cols, "col < s.dimensions().cols");
+        aegis.assert.invariant(row_n < s.dimensions().rows, "row_n < s.dimensions().rows");
         return @as(usize, row_n) * s.dimensions().cols + col;
     }
 

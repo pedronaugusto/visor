@@ -178,7 +178,7 @@ pub const Layout = struct {
         if (builtin.optimize.runtimeSafety()) {
             var sum: u128 = 0;
             for (out[0..n]) |r| sum += l.axisOf(r);
-            std.debug.assert(sum <= total);
+            aegis.assert.invariant(sum <= total, "sum <= total");
         }
 
         // And where each part starts.
@@ -263,7 +263,7 @@ pub const Layout = struct {
             left = spare;
         }
         // The parts gained what was handed out, and no more than the room.
-        std.debug.assert(l.axisSum(parts) == before + (room - left));
+        aegis.assert.invariant(l.axisSum(parts) == before + (room - left), "l.axisSum(parts) == before + (room - left)");
     }
 
     /// How much of the axis the parts take between them.
@@ -279,7 +279,7 @@ pub const Layout = struct {
     /// Asserts there are exactly `n` constraints, which a `comptime` length
     /// makes a compile-time-known mistake at every call site that has one.
     pub fn splitFixed(l: Layout, comptime n: usize, area: visor.Rect) [n]visor.Rect {
-        std.debug.assert(l.constraints.len == n);
+        aegis.assert.invariant(l.constraints.len == n, "l.constraints.len == n");
         var out: [n]visor.Rect = @splat(.{});
         _ = l.split(area, &out);
         return out;
@@ -419,6 +419,7 @@ pub fn offset(outer: u16, inner: u16, how: Align) u16 {
 const std_testing = std.testing;
 const Spread = @import("spread").Spread;
 const shakedown = @import("shakedown");
+const aegis = @import("aegis");
 const gen = shakedown.gen;
 const Source = shakedown.Source;
 

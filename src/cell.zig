@@ -398,13 +398,13 @@ pub const internal = struct {
         @memcpy(bytes[checked_len..][0..payload_len], raw[stored_len..][0..payload_len]);
         if (c.text.isPooled()) {
             const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
-            // aegis: boundary(A004): the exported cell's bytes; the pool's issuer bounds a generation to 48 bits before it is packed (docs/design.md).
+            // glint-ignore: A004 -- boundary: the exported cell's bytes; the pool's issuer bounds a generation to 48 bits before it is packed (docs/design.md).
             std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation.raw()), .little); // safe: pool issuance bounds identities to 48 bits
         }
         return std.mem.bytesToValue(Cell, &bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: PoolGeneration) Link {
-        // aegis: boundary(A004, A010): the exported link handle; the bounded 48-bit generation fills its upper bits above the 16-bit index (docs/design.md).
+        // glint-ignore: A004 -- boundary: the exported link handle; the bounded 48-bit generation fills its upper bits above the 16-bit index (docs/design.md).
         return if (link == .none) .none else @fromBackingInt(@intCast((generation.raw() << 16) | @backingInt(link)));
     }
 };

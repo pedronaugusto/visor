@@ -19,13 +19,14 @@ const std = @import("std");
 const morse = @import("../dependencies.zig").morse;
 const cellmod = @import("../cell.zig");
 const screen = @import("../screen.zig");
+const aegis = @import("aegis");
 const Caps = @import("../caps.zig").Caps;
 
 const Cell = cellmod.internal.StoredCell;
 const Profile = morse.Color.Profile;
 const Screen = screen.Screen;
 const Writer = std.Io.Writer;
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 
 /// The fewest rows an offset must explain before a scroll is worth writing.
 const min_moved_rows = 2;
@@ -76,7 +77,7 @@ pub fn Rows(comptime render: type) type {
             for (r.force) |f| if (f) return null;
 
             // Two hashes a row, this frame's and the last one's, sized at resize.
-            assert(r.hashes.len == @as(usize, rows) * 2);
+            assert(r.hashes.len == @as(usize, rows) * 2, "r.hashes.len == @as(usize, rows) * 2");
             const now = r.hashes[0..rows];
             const was = r.hashes[rows..][0..rows];
             for (0..rows) |i| {
@@ -111,9 +112,9 @@ pub fn Rows(comptime render: type) type {
             if (bottom + 1 < rows and (tallAcross(render.internal.prevRow(r, bottom), render.internal.prevRow(r, bottom + 1)) or tallAcross(screen.internal.row(s, bottom), screen.internal.row(s, bottom + 1)))) return null;
             // The region holds the band and the rows it moves into: inside the
             // screen, and longer than the distance, or nothing would stay.
-            assert(distance > 0);
-            assert(bottom < rows);
-            assert(bottom - top + 1 > distance);
+            assert(distance > 0, "distance > 0");
+            assert(bottom < rows, "bottom < rows");
+            assert(bottom - top + 1 > distance, "bottom - top + 1 > distance");
             return .{ .top = top, .bottom = bottom, .distance = distance, .up = up };
         }
 
