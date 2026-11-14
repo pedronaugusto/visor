@@ -182,7 +182,7 @@ fn TextType(comptime checked: bool) type {
 
         /// A grapheme short enough to live in the cell. Asserts it fits.
         pub fn inlined(bytes: []const u8) Self {
-            std.debug.assert(bytes.len <= max_inline);
+            aegis.assert.invariant(bytes.len <= max_inline, "a grapheme inlined fits the cell");
             var t: Self = .{ .buf = @splat(0), .len = @intCast(bytes.len) };
             @memcpy(t.buf[0..bytes.len], bytes);
             return t;
