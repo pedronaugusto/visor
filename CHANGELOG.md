@@ -8,12 +8,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 
+- `Tty.restore` returns `Tty.Restored`, what it put back step by step (the terminal's own mode; the modes a renderer entered, every byte written), where it returned nothing and dropped each failure. Each step is still tried whatever the one before did. `Tty.close` and `restoreGlobal` pass the record over: a caller that wants it calls `restore` first.
+- `Tty.ModeError` names `InputLeftRaw`: on Windows, the output would not go raw and the input, made raw before it, would not come back, which `raw` dropped while reporting the output's failure. `Tty.raw`, `Tty.enter` and `Tty.EnterError` carry it; a switch over their errors names it.
+- `Tty.file` and `Tty.input`, private, are one `Tty.adopted`, an `aegis.own.OwnedIo` of the adopted terminal that `close` releases once; Windows' second handle was always the same file.
 - `Tty.inputFile` takes `*Tty`, where it took `*const Tty`: a terminal `open` made borrows its files from the console's owner at each use, which needs the owner mutable. A caller holding `*Tty` changes nothing.
 - `ProbeWait.end` and `ProbeWait.quiet` are aegis spans (`aegis.units.Duration(.nanosecond, i96)`), where they were an `Io.Timestamp` and an `Io.Duration`: `init` still takes std's, and `remaining` answers in std's.
 - `Tty.saved`, private as its doc says, spells its Windows handles `system.Handle`, the same `HANDLE`, where it named `windows.HANDLE`.
 
 ### Changed
 
+- The family move: visor pins aegis f52eabe, the one aegis the family moves to, with the dependencies on it moved (morse 4b8ed54, conduit 867bde9, reactor 60e8f45, warp 4649084, xenoglyph ab4d381); the development build pins shakedown b168f3a, shakedown's move to that aegis. A cold consumer built with plain Zig and an empty cache holds one aegis.
+- No `glint-ignore` is left in visor: every error the code holds impossible is an `aegis.assert.never` with its reason, checked in every build; a terminal's capability answers that do not decode are passed over as absent values; a picture's state is stepped only from a state that takes the step; and the exported cell and link carry a pool generation through the id's own bytes, its 48-bit bound checked there.
 - The development build pins preflight ci-standard f991816 and shakedown 327bc61, whose fuzz runner takes the options preflight passes it; ci.yml regenerated (`bay generate`).
 - Pins aegis dc3ed602, still 0.2.4: additive commits after 3c0b13e (the role declarations a linter reads, `lint_rules`; `eql` and `compare` on the checked integers; Duration's ratio, mod, negate and abs), the aegis reactor, airlock and the packages built with them pin, so a plain build holds one aegis. Nothing this package calls changed.
 - Pins xenoglyph d643260, the commit the development build's preflight selects (bay tidy), where it pinned .

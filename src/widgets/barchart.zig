@@ -6,6 +6,7 @@
 //! what each bar is.
 
 const std = @import("std");
+const aegis = @import("../dependencies.zig").aegis;
 const corpus = @import("shakedown").corpus;
 const visor = @import("base.zig");
 
@@ -140,7 +141,7 @@ pub const BarChart = struct {
     /// What a bar says about itself, on the bar.
     fn drawValue(c: BarChart, win: visor.Window, b: Bar, col: u16, row: u16) visor.DrawError!void {
         var digits: [20]u8 = undefined;
-        const text = b.text orelse (std.mem.print(&digits, "{d}", .{b.value}) catch return); // glint-ignore: Z026 -- 20 bytes hold any u64 in decimal
+        const text = b.text orelse (std.mem.print(&digits, "{d}", .{b.value}) catch aegis.assert.never("20 bytes hold any u64 in decimal"));
         if (text.len == 0) return;
         _ = try win.printSegment(
             .{ .text = text, .style = c.text_style },

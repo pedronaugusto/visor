@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const morse = @import("dependencies.zig").morse;
+const aegis = @import("dependencies.zig").aegis;
 const cellmod = @import("cell.zig");
 const geom = @import("geom.zig");
 const textmod = @import("text.zig");
@@ -411,7 +412,7 @@ pub fn WindowApi(comptime screen_module: type) type {
 
             /// Every cell of the window blank and default.
             pub fn clear(w: Window) void {
-                w.fill(.fromSize(w.size()), .blank(.{})) catch unreachable; // glint-ignore: Z026 -- a default blank holds no handle and a space
+                w.fill(.fromSize(w.size()), .blank(.{})) catch aegis.assert.never("a default blank holds no handle and a space");
             }
 
             /// The window's rows moved by `n`, the vacated rows blank. A positive
@@ -638,9 +639,10 @@ pub fn WindowApi(comptime screen_module: type) type {
             /// One glyph, where a border's glyphs are short enough to live in a cell
             /// and an allocation would be a surprise.
             fn put(w: Window, col: u16, row: u16, glyph: []const u8, style: Style) void {
-                if (glyph.len > Cell.Text.max_inline) return;
+                // A custom glyph that is not one cluster drawn in a column is refused:
+                // the cell stays as it was.
+                if (glyph.len > Cell.Text.max_inline or !screen_module.internal.isGlyph(w.own_screen, glyph)) return;
                 const cluster = textmod.graphemeWidth(glyph, w.own_screen.method);
-                if (cluster == 0) return;
                 w.writeOwnedCell(col, row, .{
                     .text = .inlined(glyph),
                     .style = cellmod.canonical(style),
@@ -648,7 +650,7 @@ pub fn WindowApi(comptime screen_module: type) type {
                         .kind = if (cluster == 2) .wide else .narrow,
                         .drift = textmod.disagrees(glyph),
                     },
-                }) catch return; // glint-ignore: Z026 -- a border's glyph is inline and its style canonical, so the cell names no handle and is valid
+                }) catch aegis.assert.never("the glyph is one inline cluster of its width and the style canonical, so the cell names no handle and is valid");
             }
         };
     };

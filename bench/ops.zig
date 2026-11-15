@@ -319,7 +319,7 @@ const Links = struct {
         const src = c.lines("ascii.txt");
         var uri_buf: [64]u8 = undefined;
         for (0..c.rows) |y| {
-            const uri = std.mem.print(&uri_buf, "https://example.com/row/{d}", .{y}) catch unreachable; // glint-ignore: Z026 -- a row number fits
+            const uri = must(std.mem.print(&uri_buf, "https://example.com/row/{d}", .{y}));
             const l = must(f.s.link(uri, ""));
             _ = must(f.s.window().printSegment(.{ .text = src[y % src.len], .link = l }, .{ .row = @intCast(y), .wrap = .none }));
         }
@@ -1014,7 +1014,7 @@ const PrintAbove = struct {
         f.lines.clear();
         var buf: [64]u8 = undefined;
         for (0..2) |k| {
-            const text = std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }) catch unreachable; // glint-ignore: Z026 -- two corpus words fit
+            const text = must(std.mem.print(&buf, "log {d:0>6} {s} {s}", .{ 2 * n + k, words[(2 * n + k) % words.len], words[(2 * n + k + 3) % words.len] }));
             _ = must(f.lines.window().printSegment(.{ .text = text }, .{ .row = @intCast(k), .wrap = .none }));
         }
         drawView(&f.view, n + 1);
@@ -1032,8 +1032,7 @@ fn drawView(view: *v.Screen, n: usize) void {
     view.clear();
     const win = view.window();
     var buf: [32]u8 = undefined;
-    // glint-ignore: Z026 -- a frame number fits
-    _ = must(win.printSegment(.{ .text = std.mem.print(&buf, "working {d:0>6}", .{n}) catch unreachable, .style = .{ .bold = true } }, .{ .wrap = .none }));
+    _ = must(win.printSegment(.{ .text = must(std.mem.print(&buf, "working {d:0>6}", .{n})), .style = .{ .bold = true } }, .{ .wrap = .none }));
     const bar: [512]u8 = @splat('#');
     var y: u16 = 1;
     while (y < win.rows()) : (y += 1) {
@@ -1297,7 +1296,7 @@ const PictureReplace = struct {
         f.r = must(v.Renderer.init(c.gpa, c.size()));
         f.layers = .init(c.gpa);
         f.out = .init(c.gpa);
-        f.ids = must(v.ImageIds.init(.fromRaw(100), .fromRaw(107), v.morse.QueryImageId.fromRaw(1) catch unreachable)); // glint-ignore: Z026 -- one is nonzero
+        f.ids = must(v.ImageIds.init(.fromRaw(100), .fromRaw(107), must(v.morse.QueryImageId.fromRaw(1))));
         f.replacement = .{};
         for (0..16 * 16) |i| f.pixels[i * 4 ..][0..4].* = .{ 31, 63, 127, 255 };
         f.swaps = 0;

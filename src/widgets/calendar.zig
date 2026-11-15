@@ -6,6 +6,7 @@
 //! which column a day falls in.
 
 const std = @import("std");
+const aegis = @import("../dependencies.zig").aegis;
 const visor = @import("base.zig");
 
 const layout = @import("layout.zig");
@@ -151,7 +152,7 @@ pub const Calendar = struct {
             const text = std.mem.print(&buf, "{s} {d}", .{
                 month_names[c.month - 1],
                 c.year,
-            }) catch return; // glint-ignore: Z026 -- the longest month name, a space and any i32 year are 21 bytes, inside 32
+            }) catch aegis.assert.never("the longest month name, a space and any i32 year are 21 bytes, inside 32");
             const taken = @min(win.width(text), win.cols());
             _ = try win.printSegment(
                 .{ .text = text, .style = c.header_style },
@@ -181,11 +182,9 @@ pub const Calendar = struct {
         var column: u16 = first_column;
         while (day <= last) : (day += 1) {
             if (row >= win.rows()) return;
-            // glint-ignore: Z026 -- day runs from the first to the month's last, and a month that does not exist returned above
-            const date = Date.init(c.year, c.month, day) catch unreachable;
+            const date = Date.init(c.year, c.month, day) catch aegis.assert.never("day runs from the first to the month's last, and a month that does not exist returned above");
             var buf: [2]u8 = undefined;
-            // glint-ignore: Z026 -- a day is at most 31, two digits
-            const text = std.mem.print(&buf, "{d:>2}", .{day}) catch unreachable;
+            const text = std.mem.print(&buf, "{d:>2}", .{day}) catch aegis.assert.never("a day is at most 31, two digits");
             _ = try win.printSegment(
                 .{ .text = text, .style = c.styleOf(date) },
                 .{ .col = @intCast(column * 3), .row = row, .wrap = .none },
@@ -200,8 +199,7 @@ pub const Calendar = struct {
 
     /// Which column of the first week the first of the month falls in.
     fn firstColumn(c: Calendar) u16 {
-        // glint-ignore: Z026 -- both callers return first for a month that does not exist, and every month has a first
-        const first = Date.init(c.year, c.month, 1) catch unreachable;
+        const first = Date.init(c.year, c.month, 1) catch aegis.assert.never("both callers return first for a month that does not exist, and every month has a first");
         const weekday = @backingInt(weekdayOf(first));
         return (@as(u16, weekday) + 7 - @backingInt(c.starts_on)) % 7;
     }

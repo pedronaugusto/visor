@@ -136,13 +136,13 @@ pub const Input = struct {
             // when the signal came, because another may have followed it.
             if (in.resize_due) {
                 in.resize_due = false;
-                // glint-ignore: Z026 -- a size the terminal will not tell is no resize to report; the next read goes on
-                if (in.tty.size()) |ws| return .{ .resize = .{
+                // A size the terminal will not tell is no resize to report; the next read goes on.
+                if (in.tty.size() catch null) |ws| return .{ .resize = .{
                     .rows = ws.cells.rows,
                     .cols = ws.cells.cols,
                     .ypixels = ws.area.height,
                     .xpixels = ws.area.width,
-                } } else |_| {}
+                } };
             }
 
             if (in.ended) {

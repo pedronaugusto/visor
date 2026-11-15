@@ -70,8 +70,7 @@ fn nameOf(seq: Namespace) Name {
     var n: Name = .{};
     const pid: u32 = if (!supported) 0 else if (builtin.link_libc) @intCast(std.c.getpid()) else @intCast(std.os.linux.getpid()); // safe: a POSIX pid is positive and fits 32 bits
     comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
-    // glint-ignore: Z026 -- the longest name, a u32 and a u64 in hex, fits, as asserted above
-    const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq.raw() }) catch unreachable;
+    const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq.raw() }) catch aegis.assert.never("the longest name, a u32 and a u64 in hex, fits, as asserted above");
     n.len = @intCast(s.len);
     return n;
 }

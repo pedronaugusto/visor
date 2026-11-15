@@ -33,6 +33,7 @@ const intake = @import("intake.zig");
 const system = @import("system.zig");
 const terminal = @import("dependencies.zig").tty;
 const reactor = @import("dependencies.zig").reactor;
+const aegis = @import("dependencies.zig").aegis;
 
 const Winsize = @import("winsize.zig").Winsize;
 const render = @import("render.zig");
@@ -66,14 +67,11 @@ const Saved = if (is_windows) struct {
 /// thread. An entered renderer must stay alive and at the same address until
 /// `leave`, `restore` or `close` releases it.
 pub const Tty = struct {
-    /// Private: the terminal itself when adopted; unused when `open` made it, whose files are
-    /// borrowed from `controlling` at each use (`outputFile`, `inputFile`), so a `Tty` is a value
-    /// that moves until its first use, as an aegis owner is.
-    // glint-ignore: A015 -- design: owned when adopted, and `close` closes it once; never a borrow kept from `controlling`
-    file: Io.File,
-    /// Private: on Windows, the input handle of an adopted terminal, which is a second descriptor.
-    // glint-ignore: A015 -- design: owned with `file` when adopted, and `close` closes it once where it is not `file`
-    input: if (is_windows) Io.File else void,
+    /// Private: the terminal itself when adopted, its keys and replies read from it too, which
+    /// `close` closes once; null when `open` made it, whose files are borrowed from
+    /// `controlling` at each use (`outputFile`, `inputFile`). So a `Tty` is a value that moves
+    /// until its first use, as an aegis owner is.
+    adopted: ?aegis.own.OwnedIo(Io.File, closeFile) = null,
     /// Private: what the terminal was before `raw`, or null when it has not been
     /// changed.
     saved: ?Saved = null,
@@ -90,7 +88,24 @@ pub const Tty = struct {
     /// Anything opening the terminal can fail with.
     pub const OpenError = terminal.OpenControllingError;
     /// Anything changing its mode can fail with.
-    pub const ModeError = error{ NotATerminal, Unexpected };
+    pub const ModeError = error{
+        NotATerminal,
+        Unexpected,
+        /// On Windows: the output would not go raw, and the input, made raw before it, would
+        /// not come back: the terminal's input is left raw.
+        InputLeftRaw,
+    };
+
+    /// What `restore` put back, step by step: each step is tried whatever the one before
+    /// did, so a failure here is reported, never a reason to stop.
+    pub const Restored = struct {
+        /// The terminal's own mode is the one found before raw mode (on Windows, both the
+        /// input's and the output's).
+        mode: bool = true,
+        /// The modes a renderer entered are undone: every byte of the sequences that do so
+        /// was written, with nothing left over from a full buffer.
+        screen: bool = true,
+    };
     /// Anything asking its size can fail with.
     pub const SizeError = error{ NotATerminal, Unexpected };
 
@@ -103,26 +118,24 @@ pub const Tty = struct {
     /// than whatever its output was redirected to.
     pub fn open(io: Io) OpenError!Tty {
         // Nothing is borrowed here: the owner binds where the caller keeps the `Tty`, at its first use.
-        return .{ .file = undefined, .input = undefined, .controlling = try terminal.openControlling(io) };
+        return .{ .controlling = try terminal.openControlling(io) };
     }
 
     /// A terminal the program already has open: a descriptor it was handed,
     /// or the far end of a pseudo-terminal it made. Everything `open` gives
     /// works on it, and `close` closes the file.
     pub fn adopt(file: Io.File) Tty {
-        return .{ .file = file, .input = if (is_windows) file else {} };
+        return .{ .adopted = .init(file) };
     }
 
     /// Gives the terminal back, restoring its mode first if it was changed.
     pub fn close(t: *Tty, io: Io) void {
-        t.restore();
+        // Closing gives the terminal back whatever its restoration did; a caller that wants
+        // to know calls `restore` first.
+        _ = t.restore();
         t.unwatchResize(io);
-        if (t.controlling) |*own| {
-            own.close(io);
-        } else {
-            t.file.close(io);
-            if (is_windows and t.input.handle != t.file.handle) t.input.close(io);
-        }
+        if (t.controlling) |*own| own.close(io);
+        if (t.adopted) |*own| own.deinit(io);
         t.* = undefined;
     }
 
@@ -136,8 +149,8 @@ pub const Tty = struct {
         if (is_windows) {
             const input_mode = terminal.rawMode(t.inputFile().handle) catch |err| return modeError(err);
             const output_mode = terminal.rawMode(t.outputFile().handle) catch |err| {
-                // glint-ignore: Z026 -- the output's failure is the one reported; a second has nowhere to go
-                terminal.restore(t.inputFile().handle, input_mode) catch {};
+                // The output's failure is the one reported, unless the input stays raw.
+                terminal.restore(t.inputFile().handle, input_mode) catch return error.InputLeftRaw;
                 return modeError(err);
             };
             const saved: Saved = .{
@@ -159,13 +172,14 @@ pub const Tty = struct {
     /// The mode as it was found, and the screen and input modes a renderer
     /// entered through `enter` undone as well. Safe to call when nothing
     /// was changed; POSIX output is best effort when the terminal is full.
-    pub fn restore(t: *Tty) void {
-        const was = t.saved orelse return;
+    /// What was put back, step by step.
+    pub fn restore(t: *Tty) Restored {
+        const was = t.saved orelse return .{};
         const r = t.own_renderer;
         t.own_renderer = null;
         t.saved = null;
         t.unregister();
-        restoreSaved(was, r);
+        return restoreSaved(was, r);
     }
 
     fn register(t: *Tty) void {
@@ -214,10 +228,10 @@ pub const Tty = struct {
     /// and then the terminal's mode as it was found.
     pub fn leave(t: *Tty, io: Io) Renderer.Error!void {
         const r = t.own_renderer orelse {
-            t.restore();
+            _ = t.restore();
             return;
         };
-        defer t.restore();
+        defer _ = t.restore();
         // Keep the restoration intent until the terminal accepts the leave
         // bytes, including the flush. On failure `restore` retries through
         // the saved descriptor using the still-entered renderer.
@@ -318,11 +332,11 @@ pub const Tty = struct {
         if (is_windows) return false;
         const listener = &(t.resize orelse return false);
         var any = false;
-        // glint-ignore: Z026 -- the listener's error ends the drain: what was taken so far is the answer
-        while (listener.next(io, .{ .duration = .{ .raw = .zero, .clock = .awake } })) |_| {
+        // The listener's error ends the drain: what was taken so far is the answer.
+        while (true) {
+            _ = listener.next(io, .{ .duration = .{ .raw = .zero, .clock = .awake } }) catch return any;
             any = true;
-        } else |_| {}
-        return any;
+        }
     }
 
     /// The wake a delivery of the resize signal sets, to wait on beside the
@@ -336,13 +350,19 @@ pub const Tty = struct {
     /// The file keys and replies arrive on.
     pub fn inputFile(t: *Tty) Io.File {
         if (t.controlling) |*own| return if (is_windows) own.input() else own.output();
-        return if (is_windows) t.input else t.file;
+        return t.adoptedFile();
     }
 
     /// The file the terminal is written to and asked its size and mode through.
     fn outputFile(t: *Tty) Io.File {
         if (t.controlling) |*own| return own.output();
-        return t.file;
+        return t.adoptedFile();
+    }
+
+    /// The file `adopt` was given: a `Tty` is either opened or adopted.
+    fn adoptedFile(t: *Tty) Io.File {
+        if (t.adopted) |*own| return own.borrow().*;
+        aegis.assert.never("a terminal `open` did not make was adopted");
     }
 };
 
@@ -362,7 +382,8 @@ fn modeError(err: terminal.RawModeError) Tty.ModeError {
 /// Allocates nothing, fails at nothing, and is safe from a panic handler or
 /// an atexit hook. A terminal that was never put in raw mode is left alone.
 pub fn restoreGlobal() void {
-    while (open_ttys) |t| t.restore();
+    // From a panic nothing can be reported: each terminal's outcome is passed over.
+    while (open_ttys) |t| _ = t.restore();
 }
 
 /// A panic handler that puts the terminal back — screen, input modes and
@@ -384,52 +405,74 @@ pub const Panic = std.debug.FullPanic(struct {
     }
 }.call);
 
+fn closeFile(file: *Io.File, io: Io) void {
+    file.close(io);
+}
+
 /// The way back, from whatever remembered it: the modes a renderer entered,
 /// undone through a buffer on the stack and output that may fail. On POSIX,
 /// raw mode comes back first and the output never waits for space.
-fn restoreSaved(was: Saved, renderer: ?*Renderer) void {
+fn restoreSaved(was: Saved, renderer: ?*Renderer) Tty.Restored {
     // Raw mode must come back even when output cannot accept a byte. Every
-    // step is best effort: the caller may be a panic handler, nothing here
-    // can report a failure, and a step that fails must not stop the next.
-    // glint-ignore: Z026 -- best effort, see above
-    if (!is_windows) terminal.restore(was.handle, was.mode) catch {};
+    // step is tried and its outcome kept: the caller may be a panic handler,
+    // and a step that fails must not stop the next.
+    var done: Tty.Restored = .{};
+    if (!is_windows) done.mode = succeeded(terminal.restore(was.handle, was.mode));
     if (renderer) |r| {
         var buffer: [512]u8 = undefined;
         var out: Writer = .fixed(&buffer);
-        // glint-ignore: Z026 -- a full buffer still holds the sequences that fit, which are written
-        r.leave(&out) catch {};
-        writeRaw(if (is_windows) was.output else was.handle, out.buffered());
+        // A full buffer still holds the sequences that fit, which are written.
+        const whole = succeeded(r.leave(&out));
+        const wrote = writeRaw(if (is_windows) was.output else was.handle, out.buffered());
+        done.screen = whole and wrote.all and wrote.flags_back;
     }
     if (is_windows) {
-        // glint-ignore: Z026 -- best effort, see above
-        terminal.restore(was.input, was.input_mode) catch {};
-        // glint-ignore: Z026 -- best effort, see above
-        terminal.restore(was.output, was.output_mode) catch {};
-        return;
+        const input = succeeded(terminal.restore(was.input, was.input_mode));
+        const output = succeeded(terminal.restore(was.output, was.output_mode));
+        done.mode = input and output;
     }
+    return done;
 }
+
+/// Whether a step of the way back did what it was asked.
+fn succeeded(result: anytype) bool {
+    return if (result) |_| true else |_| false;
+}
+
+/// What `writeRaw` did: whether every byte went, and whether the descriptor's flags are as it
+/// found them.
+const Wrote = struct { all: bool, flags_back: bool };
 
 /// Bytes to a descriptor with nothing in between: no `Io`, no buffer, no
 /// error, because the caller may be a panic handler with a broken `Io` and
 /// nothing to report a failure to.
-fn writeRaw(handle: system.Handle, bytes: []const u8) void {
+fn writeRaw(handle: system.Handle, bytes: []const u8) Wrote {
     // Best effort: a full terminal must never hold up panic restoration.
-    const flags: u32 = if (is_windows) 0 else system.statusFlags(handle) orelse return;
+    const flags: u32 = if (is_windows) 0 else system.statusFlags(handle) orelse return .{ .all = false, .flags_back = true };
     if (!is_windows) {
+        // A write that could block on a full terminal is skipped: nothing may hold up panic
+        // restoration.
         const nonblock = @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true }));
-        system.setStatusFlags(handle, flags | nonblock) catch return; // glint-ignore: Z026 -- best effort: a write that could block on a full terminal is skipped, since nothing may hold up panic restoration
+        system.setStatusFlags(handle, flags | nonblock) catch return .{ .all = false, .flags_back = true };
     }
-    // glint-ignore: Z026 -- putting the flags back is best effort after the write has finished or failed; the write's own result is the one returned
-    defer if (!is_windows) system.setStatusFlags(handle, flags) catch {};
+    const all = writeAll(handle, bytes);
+    // The flags go back after the write has finished or failed.
+    const flags_back = is_windows or succeeded(system.setStatusFlags(handle, flags));
+    return .{ .all = all, .flags_back = flags_back };
+}
+
+/// `bytes` to `handle` until written, the descriptor full, or a failure: whether every one went.
+fn writeAll(handle: system.Handle, bytes: []const u8) bool {
     var left = bytes;
     while (left.len != 0) switch (system.writeOnce(handle, left)) {
         .bytes => |n| {
-            if (n == 0) return;
+            if (n == 0) return false;
             left = left[n..];
         },
         .interrupted => continue,
-        .failed => return,
+        .failed => return false,
     };
+    return true;
 }
 
 const testing = std.testing;
@@ -488,7 +531,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     var pair = try conduit.Pty.open(testing.allocator, testing.io, .{});
     defer pair.close(testing.io);
     var t: Tty = .adopt(pair.slaveFile());
-    const before = try attributesOf(t.file.handle);
+    const before = try attributesOf(t.adoptedFile().handle);
 
     var r: Renderer = try .init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
@@ -523,7 +566,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     const undone = try readUntil(testing.io, pair.readFile(), &out, "\x1b[<u\x1b[?1049l");
     try testing.expect(std.mem.endsWith(u8, undone, want.buffered()));
     try testing.expect(std.mem.endsWith(u8, undone, "\x1b[<u\x1b[?1049l"));
-    var after = try attributesOf(t.file.handle);
+    var after = try attributesOf(t.adoptedFile().handle);
     // A BSD kernel marks input for retyping whenever canonical mode comes
     // back without a flush that waits on the output; it clears on the next
     // read and is not part of the mode that was found.
@@ -531,7 +574,7 @@ test "entering through the terminal arms the way back, and the panic path undoes
     try testing.expectEqual(before.lflag, after.lflag);
     try testing.expectEqual(before.iflag, after.iflag);
     try testing.expect(t.saved == null);
-    t.restore();
+    _ = t.restore();
 }
 
 test "leaving through the terminal releases its renderer before destruction" {
@@ -554,7 +597,7 @@ test "leaving through the terminal releases its renderer before destruction" {
     try testing.expect(std.mem.find(u8, undone, "\x1b[?2004l") != null);
 
     r.deinit();
-    t.restore();
+    _ = t.restore();
 }
 
 test "this program's terminal opens as a value that moves until its first use, and fails cleanly without one" {
@@ -622,8 +665,8 @@ test "two terminals cannot borrow the same entered renderer" {
     var b: Tty = .adopt(second.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
-    defer a.restore();
-    defer b.restore();
+    defer _ = a.restore();
+    defer _ = b.restore();
     try a.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
     try testing.expectError(error.AlreadyEntered, b.enter(testing.io, &r, .{}, .alt, .{ .focus = true }));
     try testing.expect(b.saved == null);
@@ -643,14 +686,14 @@ test "restoring one entered terminal leaves the other renderer armed" {
     defer ra.deinit();
     var rb = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer rb.deinit();
-    defer a.restore();
-    defer b.restore();
+    defer _ = a.restore();
+    defer _ = b.restore();
     try a.enter(testing.io, &ra, .{}, .alt, .{ .paste = true });
     try b.enter(testing.io, &rb, .{}, .alt, .{ .focus = true });
     var seen: [1024]u8 = undefined;
     _ = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?2004h");
     _ = try readUntil(testing.io, second.readFile(), &seen, "\x1b[?1004h");
-    a.restore();
+    _ = a.restore();
     try testing.expect(ra.own_entered == null);
     try testing.expect(rb.own_entered != null);
     const left = try readUntil(testing.io, first.readFile(), &seen, "\x1b[?1049l");
@@ -671,8 +714,8 @@ test "panic restoration restores every raw terminal and clears its registration"
     defer second.close(testing.io);
     var a: Tty = .adopt(first.slaveFile());
     var b: Tty = .adopt(second.slaveFile());
-    defer a.restore();
-    defer b.restore();
+    defer _ = a.restore();
+    defer _ = b.restore();
     try a.raw();
     try b.raw();
     restoreGlobal();
@@ -687,7 +730,7 @@ test "an entered terminal refuses to replace its renderer association" {
     var t: Tty = .adopt(pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
-    defer t.restore();
+    defer _ = t.restore();
     try t.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
     try testing.expectError(error.AlreadyEntered, t.enter(testing.io, &r, .{}, .alt, .{ .focus = true }));
     try testing.expect(r.own_entered.?.modes.paste);
@@ -701,15 +744,16 @@ test "a failed leave flush still restores the entered modes on the saved termina
     var t: Tty = .adopt(pair.slaveFile());
     var r = try Renderer.init(testing.allocator, .{ .cols = 4, .rows = 2 });
     defer r.deinit();
-    defer t.restore();
+    defer _ = t.restore();
     try t.enter(testing.io, &r, .{}, .alt, .{ .paste = true });
     var seen: [1024]u8 = undefined;
     _ = try readUntil(testing.io, pair.readFile(), &seen, "\x1b[?25l");
     // Fail the buffered writer, while the saved terminal remains usable by
     // the primitive restoration path. Nothing closes the real descriptor.
-    const file = t.file;
-    t.file.handle = -1;
-    defer t.file = file;
+    const file = t.adopted.?.borrowMut();
+    const handle = file.handle;
+    file.handle = -1;
+    defer file.handle = handle;
     try testing.expectError(error.WriteFailed, t.leave(testing.io));
     try testing.expect(t.saved == null);
     try testing.expect(r.own_entered == null);
@@ -747,7 +791,7 @@ test "primitive restoration output does not wait for a full descriptor" {
     const worker = try std.Thread.spawn(.{}, struct {
         fn run(fd: std.posix.fd_t, began: *std.atomic.Value(bool), finished: *std.atomic.Value(bool)) void {
             began.store(true, .release);
-            writeRaw(fd, "restoring");
+            _ = writeRaw(fd, "restoring");
             finished.store(true, .release);
         }
     }.run, .{ fds[1], &started, &done });

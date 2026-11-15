@@ -396,7 +396,7 @@ pub const Term = struct {
     fn repeat(t: *Term, count: u32) Allocator.Error!void {
         const cp = t.previous orelse return;
         var buf: [4]u8 = undefined;
-        const len = std.unicode.utf8Encode(cp, &buf) catch return; // glint-ignore: Z026 -- the previous codepoint was decoded from UTF-8, so it is never a surrogate; there is nothing else to repeat
+        const len = std.unicode.utf8Encode(cp, &buf) catch aegis.assert.never("the previous codepoint was decoded from UTF-8, so it is a scalar value");
         const copy = buf[0..len];
         const n = repeatCount(count, t.scr.dimensions(), copy, t.scr.method);
         var i: usize = 0;
@@ -493,7 +493,7 @@ pub const Term = struct {
         if (std.mem.eql(u8, csi.intermediates, " ") and csi.final == 'q') {
             // A shape this package does not name is not one a renderer
             // wrote, and leaves the cursor as it was.
-            const shape = aegis.int.cast(u8, csi.param(0) orelse 0) catch return; // glint-ignore: Z026 -- a shape past a byte is none a renderer wrote, and leaves the cursor as it was
+            const shape = aegis.int.narrow(u8, csi.param(0) orelse 0) orelse return;
             t.scr.cursor.shape = std.enums.fromInt(morse.CursorShape, shape) orelse return;
             return;
         }
@@ -577,8 +577,7 @@ pub const Term = struct {
     /// before or inline, and no link, the link Term holds in that screen, or
     /// a link read from one of its cells.
     fn setCell(t: *Term, col: u16, row: u16, c: Cell) void {
-        // glint-ignore: Z026 -- the handles are this screen's own and live, as above
-        t.scr.writeOwnedCellUnchecked(col, row, c) catch unreachable;
+        t.scr.writeOwnedCellUnchecked(col, row, c) catch aegis.assert.never("the handles are this screen's own and live, as above");
     }
 
     fn erased(t: *const Term) Cell {

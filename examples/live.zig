@@ -15,9 +15,16 @@ pub fn main(init: std.process.Init) !void {
     defer tty.close(io);
     var session = try visor.Session.init(init.gpa, try tty.size(), .{ .graphics_id = try morse.QueryImageId.fromRaw(1) });
     defer session.deinit();
-    // Register the way out before entry, including a partial entry.
-    // glint-ignore: Z026 -- leaving is best effort at the end of the program; a failure has nowhere left to be reported
-    defer tty.leave(io) catch {};
+    // The way out is taken however the session ended, a partial entry included,
+    // and a failure to leave is the program's error, after the session's own.
+    const ran = run(io, &tty, &session);
+    const left = tty.leave(io);
+    try ran;
+    try left;
+}
+
+/// Enters the screen and runs the loop until a quit key.
+fn run(io: std.Io, tty: *visor.Tty, session: *visor.Session) !void {
     try tty.enter(io, session.renderer(), session.capabilities(), .alt, .{ .paste = true });
     try tty.watchResize(io);
     var output_buffer: [16 * 1024]u8 = undefined;
@@ -25,7 +32,7 @@ pub fn main(init: std.process.Init) !void {
     const w = &output.interface;
     var parser_buffer: [4096]u8 = undefined;
     var read_buffer: [4096]u8 = undefined;
-    var input = try visor.Input.init(&tty, .{
+    var input = try visor.Input.init(tty, .{
         .parser_buffer = &parser_buffer,
         .read_buffer = &read_buffer,
         .escape = .fromMilliseconds(20),
@@ -51,7 +58,7 @@ pub fn main(init: std.process.Init) !void {
     });
     while (true) {
         _ = try session.resize(w);
-        try paint(&session, count);
+        try paint(session, count);
         _ = try session.draw(w);
         try w.flush();
         var event = try input.next(io);

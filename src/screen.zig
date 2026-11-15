@@ -63,6 +63,10 @@ pub const internal = struct {
     pub fn printable(text: []const u8, method: textmod.Method) Screen.PrintableError!?[]const u8 {
         return Screen.printable(text, method);
     }
+    /// Whether `bytes` are one cluster `s` draws in at least one column, as a cell's text must be.
+    pub fn isGlyph(s: *const Screen, bytes: []const u8) bool {
+        return Screen.isGlyph(bytes, s.method);
+    }
     pub fn placeCell(s: *Screen, col: u16, row_n: u16, checked: Cell) void {
         s.placeOwnedCell(col, row_n, cellmod.internal.store(checked));
     }
@@ -303,12 +307,10 @@ pub const Screen = struct {
         // already in the new pools.
         for (cells) |*c| {
             if (c.text.isPooled()) {
-                // glint-ignore: Z026 -- preparePools interned it, so this finds it and allocates nothing
-                c.text = graphemes.intern(internal.textOf(s, c)) catch unreachable;
+                c.text = graphemes.intern(internal.textOf(s, c)) catch aegis.assert.never("preparePools interned it, so this finds it and allocates nothing");
             }
             if (internal.target(s, c.link)) |t| {
-                // glint-ignore: Z026 -- preparePools interned it, so this finds it and allocates nothing
-                c.link = links.intern(t.uri, t.params) catch unreachable;
+                c.link = links.intern(t.uri, t.params) catch aegis.assert.never("preparePools interned it, so this finds it and allocates nothing");
             }
         }
         s.graphemes.deinit();
@@ -430,12 +432,18 @@ pub const Screen = struct {
     /// not a cluster that takes no column, which is a different set of
     /// clusters under each method.
     fn checkGlyph(bytes: []const u8, method: textmod.Method) error{InvalidCell}!void {
-        if (bytes.len == 1 and bytes[0] >= 0x20 and bytes[0] < 0x7f) return;
-        if (bytes.len == 0 or !std.unicode.utf8ValidateSlice(bytes)) return error.InvalidCell;
-        if (hasControl(bytes)) return error.InvalidCell;
+        if (!isGlyph(bytes, method)) return error.InvalidCell;
+    }
+
+    /// `checkGlyph`'s answer as a value, for a caller that refuses a glyph by
+    /// leaving its cell as it was.
+    fn isGlyph(bytes: []const u8, method: textmod.Method) bool {
+        if (bytes.len == 1 and bytes[0] >= 0x20 and bytes[0] < 0x7f) return true;
+        if (bytes.len == 0 or !std.unicode.utf8ValidateSlice(bytes)) return false;
+        if (hasControl(bytes)) return false;
         var clusters = textmod.Graphemes.init(bytes);
-        if ((clusters.next() orelse return error.InvalidCell).len != bytes.len or
-            textmod.graphemeWidth(bytes, method) == 0) return error.InvalidCell;
+        const first = clusters.next() orelse return false;
+        return first.len == bytes.len and textmod.graphemeWidth(bytes, method) != 0;
     }
 
     fn hasControl(bytes: []const u8) bool {
@@ -461,7 +469,7 @@ pub const Screen = struct {
         var clusters = textmod.Graphemes.init(grapheme);
         if (clusters.next().?.len != grapheme.len) return error.InvalidCell;
         // UTF-8 and one cluster by now, so a refusal is a control or no width.
-        checkGlyph(grapheme, method) catch return null;
+        if (!isGlyph(grapheme, method)) return null;
         return grapheme;
     }
 
@@ -688,8 +696,7 @@ pub const Screen = struct {
         const blank: StoredCell = .blank(.{});
 
         if (distance >= r.rows) {
-            // glint-ignore: Z026 -- a default blank holds no handle and a space, which fill never refuses
-            s.fill(r, .blank(.{})) catch unreachable;
+            s.fill(r, .blank(.{})) catch aegis.assert.never("a default blank holds no handle and a space, which fill never refuses");
             return;
         }
         const shift: u16 = @intCast(distance);

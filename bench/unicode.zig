@@ -3,6 +3,7 @@
 //! visor's own width rule, which is what the checks hold visor to.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const xenoglyph = @import("xenoglyph");
 
 /// East Asian Wide or Fullwidth: two columns.
@@ -42,8 +43,7 @@ pub fn word(cp: u21) bool {
 /// two, everything else one.
 pub fn columns(text: []const u8) usize {
     var total: usize = 0;
-    // glint-ignore: Z026 -- every caller measures text it generated or decoded as UTF-8
-    var it = (std.unicode.Utf8View.init(text) catch unreachable).iterator();
+    var it = (std.unicode.Utf8View.init(text) catch aegis.assert.never("every caller measures text it generated or decoded as UTF-8")).iterator();
     while (it.nextCodepoint()) |cp| {
         if (mark(cp)) continue;
         total += if (wide(cp)) 2 else 1;

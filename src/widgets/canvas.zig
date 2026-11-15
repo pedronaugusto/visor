@@ -3,6 +3,7 @@
 //! Layers owns transmission and placement of its pixels.
 
 const std = @import("std");
+const aegis = @import("../dependencies.zig").aegis;
 const visor = @import("base.zig");
 
 const raster_mod = @import("canvas/raster.zig");
@@ -288,7 +289,7 @@ pub const Painter = struct {
                     @intCast(cp - braille_base)
                 else
                     0;
-                const n = std.unicode.utf8Encode(braille_base + (had | bit), &bytes) catch return; // glint-ignore: Z026 -- braille_base plus a byte is U+2800 to U+28FF, every one a scalar value
+                const n = std.unicode.utf8Encode(braille_base + (had | bit), &bytes) catch aegis.assert.never("braille_base plus a byte is U+2800 to U+28FF, every one a scalar value");
                 try p.win.write(col, row, bytes[0..n], style, .none);
             },
             .sextant => {

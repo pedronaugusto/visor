@@ -401,14 +401,25 @@ pub const internal = struct {
         @memcpy(bytes[checked_len..][0..payload_len], raw[stored_len..][0..payload_len]);
         if (c.text.isPooled()) {
             const identity = checked_text + @offsetOf(Cell.Text, "pool_generation");
-            // glint-ignore: A004 -- boundary: the exported cell's bytes; the pool's issuer bounds a generation to 48 bits before it is packed (docs/design.md).
-            std.mem.writeInt(u48, bytes[identity..][0..6], @intCast(generation.raw()), .little); // safe: pool issuance bounds identities to 48 bits
+            bytes[identity..][0..6].* = generation48(generation);
         }
         return std.mem.bytesToValue(Cell, &bytes);
     }
     pub fn exportLink(link: LinkType(false), generation: PoolGeneration) Link {
-        // glint-ignore: A004 -- boundary: the exported link handle; the bounded 48-bit generation fills its upper bits above the 16-bit index (docs/design.md).
-        return if (link == .none) .none else @fromBackingInt(@intCast((generation.raw() << 16) | @backingInt(link)));
+        if (link == .none) return .none;
+        // The 16-bit index below the generation's 48 bits, little-endian as the handle's integer.
+        var handle: [8]u8 = undefined;
+        handle[0..2].* = std.mem.toBytes(std.mem.nativeToLittle(u16, @backingInt(link)));
+        handle[2..8].* = generation48(generation);
+        return @fromBackingInt(std.mem.readInt(u64, &handle, .little));
+    }
+
+    /// A generation's 48 bits, little-endian: the pool's issuer bounds every generation to 48
+    /// bits (docs/design.md), which the two bytes above them show.
+    fn generation48(generation: PoolGeneration) [6]u8 {
+        const all = generation.toBytes(.little);
+        aegis.assert.invariant(std.mem.allEqual(u8, all[6..], 0), "a pool generation fits 48 bits");
+        return all[0..6].*;
     }
 };
 

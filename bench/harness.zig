@@ -49,7 +49,7 @@ pub fn line(tag: []const u8, bytes: []const u8) void {
     var i: usize = 0;
     while (i < bytes.len) {
         const take = @min(bytes.len - i, buf.len / 2);
-        const hexed = std.mem.print(&buf, "{x}", .{bytes[i..][0..take]}) catch unreachable; // glint-ignore: Z026 -- take is half the buffer
+        const hexed = std.mem.print(&buf, "{x}", .{bytes[i..][0..take]}) catch aegis.assert.never("take is half the buffer");
         raw(hexed);
         i += take;
     }
@@ -265,13 +265,13 @@ pub fn row(comptime F: type, comptime WorkloadError: type, name: []const u8) ben
 
 /// The error set of every callback of `workloads`, a tuple of `.{ name, F }`.
 pub fn ErrorOf(comptime workloads: anytype) type {
-    var set: type = error{};
+    var Set: type = error{};
     inline for (workloads) |entry| {
         const H = Hooks(entry[1]);
-        set = set || ErrorsOf(H.setup) || ErrorsOf(H.run) || ErrorsOf(H.teardown);
-        if (sampled(entry[1])) set = set || ErrorsOf(H.stage) || ErrorsOf(H.settle);
+        Set = Set || ErrorsOf(H.setup) || ErrorsOf(H.run) || ErrorsOf(H.teardown);
+        if (sampled(entry[1])) Set = Set || ErrorsOf(H.stage) || ErrorsOf(H.settle);
     }
-    return set;
+    return Set;
 }
 
 /// Whether a workload's sample is one frame.

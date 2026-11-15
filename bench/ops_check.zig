@@ -97,7 +97,7 @@ fn words(a: Allocator, text: []const u8) ![]const []const u8 {
     var it = (std.unicode.Utf8View.init(text) catch return error.InvalidUtf8).iterator();
     var at: usize = 0;
     while (it.nextCodepointSlice()) |slice| {
-        const cp = unicode.decode(slice) catch unreachable; // glint-ignore: Z026 -- the view checked the text is UTF-8
+        const cp = unicode.decode(slice) catch aegis.assert.never("the view checked the text is UTF-8");
         if (isSpace(cp)) {
             if (start) |s| try out.append(a, text[s..at]);
             start = null;

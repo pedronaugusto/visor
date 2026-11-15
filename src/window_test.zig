@@ -468,10 +468,14 @@ test "printing and measurement treat CRLF as one line break" {
 }
 
 test "custom borders refuse malformed glyphs without changing the grid" {
-    var s = try made(4, 3);
-    defer s.deinit();
-    _ = s.window().child(.{ .border = .{ .where = .{ .top = true }, .glyphs = .{ .horizontal = "ab" } } });
-    for (0..4) |col| try testing.expectEqualStrings(" ", s.textAt(@intCast(col), 0));
+    // Two clusters, a control, bytes that are not UTF-8, a mark that takes no column.
+    for ([_][]const u8{ "ab", "\x01", "\xff", "\u{301}" }) |glyph| {
+        var s = try made(4, 3);
+        defer s.deinit();
+        _ = s.window().child(.{ .border = .{ .where = .{ .top = true, .left = true }, .glyphs = .{ .horizontal = glyph, .vertical = glyph, .top_left = glyph } } });
+        for (0..4) |col| try testing.expectEqualStrings(" ", s.textAt(@intCast(col), 0));
+        for (0..3) |row| try testing.expectEqualStrings(" ", s.textAt(0, @intCast(row)));
+    }
 }
 
 test "window geometry stays with the screen that clipped it" {

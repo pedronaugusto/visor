@@ -60,7 +60,7 @@ fn pooledText(offset: GraphemeOffset, len: ByteLength) Text {
 
 fn pooledLink(index: LinkIndex) Link {
     // Zero is `.none`, so the last index has no handle.
-    const next = index.successor() catch unreachable; // glint-ignore: Z026 -- the last index has no handle, and is refused when interning
+    const next = index.successor() catch aegis.assert.never("the last index has no handle, and is refused when interning");
     const link: Link = @fromBackingInt(next.raw());
     assert(link.index().? == index, "link.index().? == index");
     return link;
