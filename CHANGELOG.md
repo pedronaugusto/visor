@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- visor builds on warp main 79a4611, the zstd decoder's out-of-bounds read fix (GHSA-9r52-p7vw-225m). visor uses warp's zlib compressor alone, so no visor path reached the read.
 - A terminal `Tty.open` made, moved before its first use and closed, stopped the program in aegis's owner check (Windows, where the runner has a console): `open` borrowed the console's output into the `Tty` it then returned by value. It borrows nothing now; the files are borrowed at each use, so the `Tty` binds where the caller keeps it.
 
 ## [0.5.9] - 2026-10-21

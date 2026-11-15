@@ -23,8 +23,8 @@
         },
 
         .warp = .{
-            .url = "git+https://github.com/pedronaugusto/warp#3bd046819a84039698a6b6a57cab0b622b30dde6",
-            .hash = "warp-0.4.5-JASxFcUxLQDYfBlPLy0CZE51DYqhQCGqMSfyR0SAkY0_",
+            .url = "git+https://github.com/pedronaugusto/warp#79a4611d2189a355afd5cf6af89bbbd5025fbea1",
+            .hash = "warp-0.4.5-JASxFVJULgAVkMEA-ELTZWZq3mSEwYCUywr0x51UMUTB",
         },
 
         .xenoglyph = .{
