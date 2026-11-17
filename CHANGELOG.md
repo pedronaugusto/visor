@@ -17,6 +17,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The development build pins preflight ci-standard 9c18016 and shakedown b99b768, the family's target, where it pinned preflight f991816 and shakedown b168f3a; ci.yml regenerated (`bay dev generate`). Pins warp 0e8a04d, one commit past 4649084, the warp the development build's preflight selects (`bay tidy`).
 - The family move: visor pins aegis f52eabe, the one aegis the family moves to, with the dependencies on it moved (morse 4b8ed54, conduit 867bde9, reactor 60e8f45, warp 4649084, xenoglyph ab4d381); the development build pins shakedown b168f3a, shakedown's move to that aegis. A cold consumer built with plain Zig and an empty cache holds one aegis.
 - No `glint-ignore` is left in visor: every error the code holds impossible is an `aegis.assert.never` with its reason, checked in every build; a terminal's capability answers that do not decode are passed over as absent values; a picture's state is stepped only from a state that takes the step; and the exported cell and link carry a pool generation through the id's own bytes, its 48-bit bound checked there.
 - The development build pins preflight ci-standard f991816 and shakedown 327bc61, whose fuzz runner takes the options preflight passes it; ci.yml regenerated (`bay generate`).
