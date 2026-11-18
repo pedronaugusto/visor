@@ -21,16 +21,20 @@ const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimiz
 exe.root_module.addImport("visor", visor_dep.module("visor"));
 // For the Markdown widget:
 exe.root_module.addImport("visor.markdown", visor_dep.module("visor.markdown"));
+// For pictures as sixels and iTerm2 files:
+exe.root_module.addImport("visor.pictures", visor_dep.module("visor.pictures"));
 ```
 
-One fetch, two modules. `visor` is the grid and the renderer, and
+One fetch, three modules. `visor` is the grid and the renderer, and
 `visor.widgets` inside it is the layout solver and the widgets. Those widgets
 bring no dependency and link nothing the base does not, and Zig compiles only
 what a program names, so a program that draws no widget builds none.
 `visor.markdown` is the Markdown widget, a module of its own because it brings
 a dependency, [datapad](https://github.com/pedronaugusto/datapad), which reads
 the Markdown: `visor` never imports it, so a program on `visor` alone compiles
-nothing of datapad. `morse` comes with it, re-exported as `visor.morse`, and
+nothing of datapad. `visor.pictures` is the same for
+[aperture](https://github.com/pedronaugusto/aperture), which makes the PNG
+files and sixel palettes picture protocols take from an image. `morse` comes with it, re-exported as `visor.morse`, and
 is also available as `visor_dep.module("morse")` for a program that wants the
 writers on their own.
 
@@ -46,8 +50,9 @@ nothing is generated at build time,
 byte addresses, table positions and checked byte counts, and
 [`datapad`](https://github.com/pedronaugusto/datapad), for `visor.markdown`
 alone, a lazy dependency: fetched with visor, compiled only in a program that
-imports that module. All are pinned by release but datapad,
-which has none yet and is pinned by commit.
+imports that module. [`aperture`](https://github.com/pedronaugusto/aperture) is the same
+for `visor.pictures`. All are pinned by release but datapad and aperture,
+which have none yet and are pinned by commit.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
 `draw` allocates nothing. With `commit = false`, `print` only measures and
@@ -394,6 +399,13 @@ or another terminal-supported file. Zero `part_bytes` uses one OSC; a
 nonzero value uses morse's multipart writer. Declare and retire these ids
 through the same `Layer` and `Layers` methods as kitty pictures. Encoders
 and protocol byte counts remain morse's; visor adds no protocol encoder.
+
+`visor.pictures` makes those two from an image of any pixel format,
+aperture's borrowed `aperture.View`: `pictures.storeSixel(gpa, &layers, id,
+image, quantize_options)` quantizes it into at most 256 registers through
+aperture (a pixel whose register is less than half opaque is left undrawn),
+and `pictures.storeIterm(gpa, &layers, id, image, part_bytes)` encodes it as
+a PNG. Kitty takes pixels as they are, so it needs neither.
 Pass `Layers.configureSize(winsize)` the probe's geometry before drawing;
 `Session.layers()` supplies its current size. Sixels are clipped to the
 placement's explicit cell rectangle and terminal pixel limits, using
@@ -685,6 +697,12 @@ legend: one through 62 styles, two through 3,844, and more for larger legends.
 |---|---|
 | The widget | `Markdown` (owned `Document` with its `cells` and `alignments`, and `Document.InitError`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GitHub Flavored Markdown read by datapad). |
 
+### `visor.pictures`
+
+| | |
+|---|---|
+| Encoding | `storeSixel` (an image quantized into a sixel's palette and registers), `storeIterm` (an image as a PNG file), both from an `aperture.View`. |
+
 ### Canvas
 
 `Canvas` draws points, lines, rectangle outlines, circles, discs, polylines
@@ -843,7 +861,7 @@ structural marks. `examples/gallery.zig` includes a themed document.
 - **No widget whose substance is handling keys, focus or a clock.** Those are three quarters event handling, and the program has the loop. `Keys` shows which keys work and handles none; `TextInput` says where the cursor lands, and `TextInput.Buffer` does the edit a key asks for (insert, delete by a motion, select, undo, redo, on whole clusters), but which key asks for which is the program's.
 - **No constraint solver.** Fixed, percent, floor, ceiling and share cover what a screen layer owes.
 - **No colour guessed from the environment.** Every colour is fitted to the profile the caller or the probe chose (`Caps.colorProfile`); one already in that form is written as given.
-- **Pictures without decoding.** Kitty placements, sixel pixels and iTerm2 encoded image files share `Layers`; cell pictures use the widgets. Visor does not decode or encode image files. iTerm2 source cropping and pixel offsets must be applied by the caller before storage; inline protocols paint in declaration order and do not offer kitty's independent text-underlay placements.
+- **Pictures without decoding.** Kitty placements, sixel pixels and iTerm2 encoded image files share `Layers`; cell pictures use the widgets. Visor decodes no image file; `visor.pictures` encodes the two forms sixel and iTerm2 take, through aperture. iTerm2 source cropping and pixel offsets must be applied by the caller before storage; inline protocols paint in declaration order and do not offer kitty's independent text-underlay placements.
 - **Two places for a screen.** The alternate screen, or inline at the prompt, with rows printed above it into the scrollback. Inline mode knows no row of the terminal by number: it has no scroll detection, and after the terminal itself is resized its origin is wherever the terminal put the saved cursor.
 
 ## Platforms
@@ -875,7 +893,8 @@ compiled and not run.
   parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
   `conduit.tty` makes the terminal's own calls;
   [xenoglyph](https://github.com/pedronaugusto/xenoglyph) segments and measures clusters;
-  [datapad](https://github.com/pedronaugusto/datapad) reads Markdown for `visor.markdown`.
+  [datapad](https://github.com/pedronaugusto/datapad) reads Markdown for `visor.markdown`;
+  [aperture](https://github.com/pedronaugusto/aperture) makes PNG files and sixel palettes for `visor.pictures`.
 - [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
   the tests and CI, and [shakedown](https://github.com/pedronaugusto/shakedown) holds the
   tests' clocks and fault plans. Both are dev dependencies, which
@@ -894,6 +913,7 @@ present, so nothing visor fetches for its CI is needed to build on it.
 `bay check-markdown-consumer` holds datapad outside a program on `visor`
 alone: no module datapad's build made is in `visor`'s module graph, and a
 program that imports `visor` and nothing else builds.
+`bay check-pictures-consumer` holds aperture outside it the same way.
 
 `bay test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather

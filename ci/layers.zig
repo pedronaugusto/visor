@@ -90,6 +90,10 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "markdown widget", .patterns = &.{
         "src/markdown/markdown.zig",
     } },
+    // `visor.pictures`, a module of its own on `visor` and aperture.
+    .{ .name = "pictures", .patterns = &.{
+        "src/pictures/pictures.zig",
+    } },
 };
 
 pub const entries: []const []const u8 = &.{};
@@ -100,6 +104,7 @@ pub const modules: []const gantry.NamedModule = &.{
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
         "aegis",
+        "aperture",
         "builtin",
         "conduit",
         "conduit.tty",
@@ -113,12 +118,13 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "xenoglyph",
     } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },
-    .{ .name = "aegis owner", .target = "aegis", .except_from = &.{"src/dependencies.zig"} },
+    .{ .name = "aegis owner", .target = "aegis", .except_from = &.{ "src/dependencies.zig", "src/pictures/pictures.zig" } },
     .{ .name = "conduit owner", .target = "conduit", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "conduit.tty owner", .target = "conduit.tty", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "morse owner", .target = "morse", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "xenoglyph owner", .target = "xenoglyph", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "datapad owner", .target = "datapad", .except_from = &.{"src/markdown/reader.zig"} },
+    .{ .name = "aperture owner", .target = "aperture", .except_from = &.{"src/pictures/pictures.zig"} },
 };
 
 /// The roots the builds compile, the conformance build's included, and the
@@ -130,6 +136,8 @@ pub const required = [_][]const u8{
     "src/testing/spread.zig",
     "src/markdown/markdown.zig",
     "src/markdown/tests.zig",
+    "src/pictures/pictures.zig",
+    "src/pictures/tests.zig",
 };
 
 /// Tokens only their owners may spell. The console and the terminal's

@@ -23,8 +23,8 @@
         },
 
         .warp = .{
-            .url = "git+https://github.com/pedronaugusto/warp#0e8a04d94b898d416b6fd9fa653bfb6aca84710e",
-            .hash = "warp-0.4.5-JASxFQzYLgCen6Fje5NOSjprQVRSX9KN1D-oIAU40Sfk",
+            .url = "git+https://github.com/pedronaugusto/warp#46a58d2114119dcc7fd11909f0ec0132ab3452c8",
+            .hash = "warp-0.4.5-JASxFRUkMQB8ykX0LPgn4v7CQjDdgZu6XC2uB79kyTR7",
         },
 
         .xenoglyph = .{
@@ -34,6 +34,11 @@
         .datapad = .{
             .url = "git+https://github.com/pedronaugusto/datapad#fef78ef0c8bf5ed4bfbfb9f4f75de27f0d6e15a5",
             .hash = "datapad-0.0.0-vurZe9vdBwB5KVRmLPlQgwZPqCGU1TgGbQcIB5MHDbEQ",
+            .lazy = true,
+        },
+        .aperture = .{
+            .url = "git+https://github.com/pedronaugusto/aperture#437817b6ad08b59d925d42cae47259d4977aeeb0",
+            .hash = "aperture-0.0.0-a2Jfsi7-BwBQbTeOIpgrm0E_njjORBIyvd1O3EImCSaT",
             .lazy = true,
         },
     },

@@ -11,6 +11,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `visor.markdown`, the Markdown widget's module, on `visor` and datapad.
 - `Markdown.Theme.strikethrough`, the style struck-through text (`~~so~~`) takes: `.{ .strikethrough = true }` draws the line (SGR 9).
 - `Markdown.Document.InitError`, what `Markdown.Document.init` fails with.
+- `visor.pictures`, on `visor` and aperture (437817b, a lazy dependency like datapad): `pictures.storeSixel` quantizes an `aperture.View` into a sixel's palette and registers, a pixel whose register is less than half opaque left undrawn, and `pictures.storeIterm` encodes it as a PNG, each stored through `Layers`.
 
 ### Breaking
 
@@ -26,6 +27,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Pins warp 46a58d2, where it pinned 0e8a04d: warp main, the one warp a program on visor and aperture links (aegis f52eabe for all). Nothing visor calls changed.
+- The development build adds `check-pictures-consumer`: no module aperture's build made is in the module graph of a program on `visor` alone.
 - `Markdown.Document` reads GitHub Flavored Markdown as datapad reads it (datapad fef78ef, a lazy dependency, fetched with visor and compiled only in a program that imports `visor.markdown`), where it read a subset by rules of its own: CommonMark's blocks and inlines, with GitHub's tables, task lists, strikethrough and autolinks. Setext headings, link reference definitions, character references, images (their text, linked to the image), inline HTML as written, and a hard line break as a row of its own under the text it breaks. A list's continuation paragraphs hang under the item's text. `Markdown.Quoted` keeps its own rules.
 - The development build adds `check-markdown-consumer`: no module datapad's build made is in the module graph of a program on `visor` alone.
 - The development build pins preflight ci-standard 9c18016 and shakedown b99b768, the family's target, where it pinned preflight f991816 and shakedown b168f3a; ci.yml regenerated (`bay dev generate`). Pins warp 0e8a04d, one commit past 4649084, the warp the development build's preflight selects (`bay tidy`).

@@ -6,6 +6,7 @@ const std = @import("std");
 const visor = @import("visor");
 const widgets = visor.widgets;
 const Markdown = @import("visor.markdown").Markdown;
+const pictures = @import("visor.pictures");
 
 pub fn main() !void {
     var screen: visor.Screen = try .init(std.heap.page_allocator, .{ .cols = 8, .rows = 1 });
@@ -19,4 +20,8 @@ pub fn main() !void {
     var document = try Markdown.Document.init(std.heap.page_allocator, "~~x~~ [l](https://x)");
     defer document.deinit();
     try (Markdown{ .document = &document, .theme = .{} }).draw(screen.window());
+    var layers: visor.Layers = .init(std.heap.page_allocator);
+    defer layers.deinit();
+    const pixel = [_]u8{ 1, 2, 3, 255 };
+    try pictures.storeSixel(std.heap.page_allocator, &layers, .fromRaw(1), .{ .width = .literal(1), .height = .literal(1), .format = .rgba8, .stride = .fromRaw(4), .pixels = &pixel }, .{});
 }

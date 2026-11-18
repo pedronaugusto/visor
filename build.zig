@@ -31,6 +31,9 @@ pub fn build(b: *std.Build) void {
     // with visor, and compiled only in a program that imports
     // `visor.markdown`.
     const datapad: ?*std.Build.Module = if (b.dependencyLazy("datapad", .{ .target = target, .optimize = optimize })) |package| package.module("datapad") else |_| null;
+    // `aperture` makes the files and palettes picture protocols take, for
+    // `visor.pictures`, and is lazy the same way.
+    const aperture: ?*std.Build.Module = if (b.dependencyLazy("aperture", .{ .target = target, .optimize = optimize })) |package| package.module("aperture") else |_| null;
 
     //=====================================================================
     // The modules.
@@ -46,6 +49,9 @@ pub fn build(b: *std.Build) void {
     // it brings a dependency: it imports `visor` and datapad, and `visor`
     // never imports it, so a program on `visor` alone has nothing of
     // datapad in it (`bay check-markdown-consumer`).
+    //
+    // `visor.pictures` is the same for aperture: a sixel's palette and an
+    // iTerm2 file made from an image (`bay check-pictures-consumer`).
     //=====================================================================
 
     const module = b.addModule("visor", .{
@@ -64,6 +70,16 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "visor", .module = module }},
     });
     if (datapad) |m| markdown.addImport("datapad", m);
+    const pictures = b.addModule("visor.pictures", .{
+        .root_source_file = b.path("src/pictures/pictures.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "visor", .module = module },
+            .{ .name = "aegis", .module = aegis.module("aegis") },
+        },
+    });
+    if (aperture) |m| pictures.addImport("aperture", m);
 
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
@@ -94,9 +110,14 @@ pub fn dev(b: *std.Build, tools: type) void {
     const reactor = p.dependency("reactor", .{ .target = target, .optimize = optimize });
     const warp = p.dependency("warp", .{ .target = target, .optimize = optimize });
     const imports = dependencies(morse, conduit, xenoglyph, aegis, reactor, warp);
-    // datapad is lazy: not fetched yet, it ends this configure pass (`fetched`).
-    const datapad = fetched(p, "datapad", .{ .target = target, .optimize = optimize }) orelse return;
+    // datapad and aperture are lazy: one not fetched yet ends this configure
+    // pass (`fetched`), each asked for before either is used.
+    const datapad_package = fetched(p, "datapad", .{ .target = target, .optimize = optimize });
+    const aperture_package = fetched(p, "aperture", .{ .target = target, .optimize = optimize });
+    const datapad = datapad_package orelse return;
+    const aperture = aperture_package orelse return;
     const markdown = package.module("visor.markdown");
+    const pictures = package.module("visor.pictures");
 
     // What the round-trip properties count of their draws. Its own module
     // because the suite inside the package and the conformance build outside
@@ -146,6 +167,23 @@ pub fn dev(b: *std.Build, tools: type) void {
     });
     test_step.dependOn(&b.addRunArtifact(markdown_tests).step);
 
+    // `visor.pictures`'s tests, the same way.
+    const pictures_tests = b.addTest(.{
+        .name = "visor-pictures-tests",
+        .filters = filters,
+        .root_module = b.createModule(.{
+            .root_source_file = p.path("src/pictures/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "visor", .module = module },
+                .{ .name = "aegis", .module = aegis.module("aegis") },
+                .{ .name = "aperture", .module = aperture.module("aperture") },
+            },
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(pictures_tests).step);
+
     // Compiling without running is what a target this host cannot execute can
     // still be held to, and it is also the default step, so a bare
     // `bay install -Dtarget=...` is the same check under another name. Both
@@ -155,6 +193,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
     check_step.dependOn(&markdown_tests.step);
+    check_step.dependOn(&pictures_tests.step);
     // A consumer's build links libc or does not, and the package's code
     // branches on it (shared memory through `shm_open`, or the system's own
     // calls, or not at all): the check compiles the suite both ways, so every
@@ -298,6 +337,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     tests.root_module.addImport("shakedown", shakedown);
     libc_tests.root_module.addImport("shakedown", shakedown);
     markdown_tests.root_module.addImport("shakedown", shakedown);
+    pictures_tests.root_module.addImport("shakedown", shakedown);
     preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,
@@ -324,24 +364,26 @@ pub fn dev(b: *std.Build, tools: type) void {
     preflight.addConsumerCheck(b, p, .{
         .package = "visor",
         .program = p.path("ci/consumer.zig"),
-        .modules = &.{ "visor", "visor.markdown" },
+        .modules = &.{ "visor", "visor.markdown", "visor.pictures" },
         // conduit waits through reactor, and visor listens for a resize through it.
-        .packages = &.{ morse, conduit, reactor, warp, xenoglyph, aegis, datapad },
+        .packages = &.{ morse, conduit, reactor, warp, xenoglyph, aegis, datapad, aperture },
     });
-    addMarkdownConsumerCheck(b, p, module, markdown, datapad);
+    addLeanConsumerCheck(b, p, "markdown", module, markdown, datapad);
+    addLeanConsumerCheck(b, p, "pictures", module, pictures, aperture);
 }
 
-/// `check-markdown-consumer`: a program on `visor` alone has nothing of
-/// datapad in it. No module datapad's build made is in `visor`'s module
-/// graph, which the same walk finds in `visor.markdown`'s, and a program
-/// that imports `visor` and nothing else builds.
-fn addMarkdownConsumerCheck(b: *std.Build, p: *std.Build, visor: *std.Build.Module, markdown: *std.Build.Module, datapad: *std.Build.Dependency) void {
-    const step = b.step("check-markdown-consumer", "Hold datapad outside a program that imports visor alone");
-    if (reaches(b, visor, datapad.builder)) step.dependOn(&b.addFail("visor's module graph reaches datapad: a program on visor alone would compile it").step);
-    if (!reaches(b, markdown, datapad.builder)) step.dependOn(&b.addFail("visor.markdown's module graph does not reach datapad: the walk cannot see it").step);
+/// `check-<name>-consumer`: a program on `visor` alone has nothing of the
+/// lazy package `visor.<name>` brings. No module that package's build made
+/// is in `visor`'s module graph, which the same walk finds in
+/// `visor.<name>`'s, and a program that imports `visor` and nothing else
+/// builds.
+fn addLeanConsumerCheck(b: *std.Build, p: *std.Build, comptime name: []const u8, visor: *std.Build.Module, brings: *std.Build.Module, package: *std.Build.Dependency) void {
+    const step = b.step("check-" ++ name ++ "-consumer", "Hold visor." ++ name ++ "'s package outside a program that imports visor alone");
+    if (reaches(b, visor, package.builder)) step.dependOn(&b.addFail("visor's module graph reaches visor." ++ name ++ "'s package: a program on visor alone would compile it").step);
+    if (!reaches(b, brings, package.builder)) step.dependOn(&b.addFail("visor." ++ name ++ "'s module graph does not reach its package: the walk cannot see it").step);
     const root = b.createModule(.{ .root_source_file = p.path("ci/visor_program.zig"), .target = b.graph.host, .optimize = .debug });
     root.addImport("visor", visor);
-    step.dependOn(&b.addObject(.{ .name = "visor_program", .root_module = root }).step);
+    step.dependOn(&b.addObject(.{ .name = "visor_program_" ++ name, .root_module = root }).step);
 }
 
 /// Whether a module `owner`'s build made is in `root`'s module graph.

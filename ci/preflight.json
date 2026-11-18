@@ -5,7 +5,8 @@
   "test_roots": [
     "src/tests.zig",
     "src/testing/spread.zig",
-    "src/markdown/tests.zig"
+    "src/markdown/tests.zig",
+    "src/pictures/tests.zig"
   ],
   "test_support": [
     "src/testing/**",
@@ -36,6 +37,11 @@
       "zig",
       "build",
       "check-markdown-consumer"
+    ],
+    [
+      "zig",
+      "build",
+      "check-pictures-consumer"
     ]
   ],
   "shipped": {
