@@ -31,6 +31,11 @@
             .url = "git+https://github.com/pedronaugusto/xenoglyph#ab4d38189cb723e4f102b611ed818380da56c750",
             .hash = "xenoglyph-0.5.1-YKXZlcMCVABOnefwWET72nJLsmnBsMepiQwrB2Ll5HI9",
         },
+        .datapad = .{
+            .url = "git+https://github.com/pedronaugusto/datapad#fef78ef0c8bf5ed4bfbfb9f4f75de27f0d6e15a5",
+            .hash = "datapad-0.0.0-vurZe9vdBwB5KVRmLPlQgwZPqCGU1TgGbQcIB5MHDbEQ",
+            .lazy = true,
+        },
     },
     .minimum_zig_version = "0.17.0",
     .fingerprint = 0xfc47eb8a53109791,

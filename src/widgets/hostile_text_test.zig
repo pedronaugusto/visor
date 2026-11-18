@@ -48,12 +48,6 @@ test "text widgets draw any text under every width method" {
             _ = try h.frame();
 
             h.screen.clear();
-            var doc = try widgets.Markdown.Document.init(t.allocator, text);
-            defer doc.deinit();
-            try (widgets.Markdown{ .document = &doc, .theme = .{} }).draw(h.window());
-            _ = try h.frame();
-
-            h.screen.clear();
             var list_state: widgets.List.State = .{ .selected = 0 };
             try (widgets.List{ .items = &.{ .{ .text = text }, .{ .text = "x" } } }).draw(h.window(), &list_state);
             _ = try h.frame();
@@ -70,20 +64,4 @@ test "text widgets draw any text under every width method" {
             _ = try h.frame();
         }
     }
-}
-
-test "a markdown link too long for the link table stays text" {
-    const gpa = t.allocator;
-    var source: std.ArrayList(u8) = .empty;
-    defer source.deinit(gpa);
-    try source.appendSlice(gpa, "[ab](h");
-    try source.appendNTimes(gpa, 'x', 70_000);
-    try source.appendSlice(gpa, ")");
-    var doc = try widgets.Markdown.Document.init(gpa, source.items);
-    defer doc.deinit();
-    var h = try Harness.init(gpa, 4, 1);
-    defer h.deinit();
-    try (widgets.Markdown{ .document = &doc, .theme = .{} }).draw(h.window());
-    try h.expectFrame("ab\n");
-    try t.expectEqual(visor.Link.none, h.screen.readCell(0, 0).?.link);
 }

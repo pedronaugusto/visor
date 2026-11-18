@@ -65,8 +65,6 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/widgets/gauge.zig",
         "src/widgets/keys.zig",
         "src/widgets/list.zig",
-        "src/widgets/markdown.zig",
-        "src/widgets/markdown/reader.zig",
         "src/widgets/paragraph.zig",
         "src/widgets/rule.zig",
         "src/widgets/scroll.zig",
@@ -84,6 +82,14 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "public", .patterns = &.{
         "src/visor.zig",
     } },
+    // `visor.markdown`, a module of its own on `visor` and datapad: it reaches
+    // visor by the module's name, never by a path into its files.
+    .{ .name = "markdown reader", .patterns = &.{
+        "src/markdown/reader.zig",
+    } },
+    .{ .name = "markdown widget", .patterns = &.{
+        "src/markdown/markdown.zig",
+    } },
 };
 
 pub const entries: []const []const u8 = &.{};
@@ -97,11 +103,13 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "builtin",
         "conduit",
         "conduit.tty",
+        "datapad",
         "morse",
         "reactor",
         "warp",
         "shakedown",
         "std",
+        "visor",
         "xenoglyph",
     } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },
@@ -110,6 +118,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "conduit.tty owner", .target = "conduit.tty", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "morse owner", .target = "morse", .except_from = &.{"src/dependencies.zig"} },
     .{ .name = "xenoglyph owner", .target = "xenoglyph", .except_from = &.{"src/dependencies.zig"} },
+    .{ .name = "datapad owner", .target = "datapad", .except_from = &.{"src/markdown/reader.zig"} },
 };
 
 /// The roots the builds compile, the conformance build's included, and the
@@ -119,6 +128,8 @@ pub const required = [_][]const u8{
     "src/dependencies.zig",
     "src/tests.zig",
     "src/testing/spread.zig",
+    "src/markdown/markdown.zig",
+    "src/markdown/tests.zig",
 };
 
 /// Tokens only their owners may spell. The console and the terminal's

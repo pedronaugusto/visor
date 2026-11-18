@@ -1,15 +1,15 @@
 //! Markdown rendered to width, with a theme supplied by the caller.
 //! A Document owns parsing; rowCount and draw share the same row iterator.
 const std = @import("std");
-const visor = @import("base.zig");
-const reader = @import("markdown/reader.zig");
-const Paragraph = @import("paragraph.zig").Paragraph;
-const layout = @import("layout.zig");
+const visor = @import("visor");
+const reader = @import("reader.zig");
+const Paragraph = visor.widgets.Paragraph;
+const layout = visor.widgets;
 
 pub const Markdown = struct {
     pub const Document = reader.Document;
-    /// A source's lines one at a time, quotation off and fence known, by the
-    /// reader's own rules.
+    /// A source's lines one at a time, quotation off and fence known, by
+    /// quote and fence rules of its own.
     pub const Quoted = reader.Quoted;
     /// Allocation-free visual rows shared by rowCount and draw.
     pub const Rows = RowIterator;
@@ -28,6 +28,8 @@ pub const Markdown = struct {
         strong: visor.Style = .{},
         emphasis: visor.Style = .{},
         inline_code: visor.Style = .{},
+        /// Struck-through text, `~~so~~`: `.{ .strikethrough = true }` draws the line.
+        strikethrough: visor.Style = .{},
         link: visor.Style = .{},
         list: visor.Style = .{},
         rule: visor.Style = .{},
@@ -177,6 +179,7 @@ pub const Markdown = struct {
                 if (span.flags.strong) ink = overlay(ink, m.theme.strong);
                 if (span.flags.emphasis) ink = overlay(ink, m.theme.emphasis);
                 if (span.flags.code) ink = overlay(ink, m.theme.inline_code);
+                if (span.flags.strikethrough) ink = overlay(ink, m.theme.strikethrough);
                 if (span.uri.len > 0) {
                     ink = overlay(ink, m.theme.link);
                     if (linked != span_index) {

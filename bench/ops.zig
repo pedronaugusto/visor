@@ -6,6 +6,7 @@
 const std = @import("std");
 const v = @import("visor");
 const w = v.widgets;
+const Markdown = @import("visor.markdown").Markdown;
 const harness = @import("harness.zig");
 const Ctx = harness.Ctx;
 const emit = harness.emit;
@@ -670,7 +671,7 @@ const State = struct {
     var wave: [][2]f64 = &.{};
     var scatter: [][2]f64 = &.{};
     var pixels: []u8 = &.{};
-    var document: w.Markdown.Document = undefined;
+    var document: Markdown.Document = undefined;
     var tree_nodes: []w.Tree.Node = undefined;
     var tree_state: w.Tree.State = undefined;
 };
@@ -696,7 +697,7 @@ fn tree(_: *Ctx, win: v.Window, _: usize) void {
 }
 
 fn markdownTableDraw(_: *Ctx, win: v.Window, _: usize) void {
-    must((w.Markdown{ .document = &State.document, .theme = .{
+    must((Markdown{ .document = &State.document, .theme = .{
         .strong = .{ .bold = true },
         .inline_code = .{ .reverse = true },
         .table_header = .{ .bold = true },
@@ -718,7 +719,7 @@ fn paragraph(_: *Ctx, win: v.Window, _: usize) void {
 }
 
 fn markdownDraw(_: *Ctx, win: v.Window, _: usize) void {
-    must((w.Markdown{ .document = &State.document, .theme = .{
+    must((Markdown{ .document = &State.document, .theme = .{
         .heading = @splat(.{ .bold = true }),
         .strong = .{ .bold = true },
         .emphasis = .{ .italic = true },
@@ -904,8 +905,8 @@ fn prepareWidgets(c: *Ctx, task: []const u8) void {
         };
     }
     {
-        if (std.mem.eql(u8, task, "markdown_draw")) State.document = must(w.Markdown.Document.init(gpa, c.file("doc.md")));
-        if (std.mem.eql(u8, task, "markdown_table_draw")) State.document = must(w.Markdown.Document.init(gpa, c.file("tables.md")));
+        if (std.mem.eql(u8, task, "markdown_draw")) State.document = must(Markdown.Document.init(gpa, c.file("doc.md")));
+        if (std.mem.eql(u8, task, "markdown_table_draw")) State.document = must(Markdown.Document.init(gpa, c.file("tables.md")));
         if (std.mem.eql(u8, task, "tree")) {
             State.tree_nodes = gpa.alloc(w.Tree.Node, n_items) catch @panic("oom");
             for (State.tree_nodes, 0..) |*node, i| node.* = .{
@@ -933,7 +934,7 @@ const MarkdownParse = struct {
     pub fn deinit(_: *MarkdownParse, _: *Ctx) void {}
 
     pub fn frame(f: *MarkdownParse, c: *Ctx, _: usize) !void {
-        var doc = must(w.Markdown.Document.init(c.gpa, f.source));
+        var doc = must(Markdown.Document.init(c.gpa, f.source));
         f.blocks_n = doc.blocks().len;
         c.count += doc.spans().len;
         doc.deinit();
@@ -957,7 +958,7 @@ const MarkdownTableParse = struct {
     pub fn deinit(_: *MarkdownTableParse, _: *Ctx) void {}
 
     pub fn frame(f: *MarkdownTableParse, c: *Ctx, _: usize) !void {
-        var doc = must(w.Markdown.Document.init(c.gpa, f.source));
+        var doc = must(Markdown.Document.init(c.gpa, f.source));
         f.tables = 0;
         f.cells = 0;
         f.tasks = 0;

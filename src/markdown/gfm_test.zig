@@ -11,8 +11,8 @@
 
 const std = @import("std");
 const NoResize = @import("shakedown").alloc.NoResize;
-const widgets = @import("../../widgets.zig");
-const Harness = @import("../../testing/widget_harness.zig").Harness;
+const widgets = @import("markdown.zig");
+const Harness = @import("harness.zig").Harness;
 const shakedown = @import("shakedown");
 const gen = shakedown.gen;
 const Source = shakedown.Source;

@@ -4,10 +4,12 @@
   ],
   "test_roots": [
     "src/tests.zig",
-    "src/testing/spread.zig"
+    "src/testing/spread.zig",
+    "src/markdown/tests.zig"
   ],
   "test_support": [
-    "src/testing/**"
+    "src/testing/**",
+    "src/markdown/harness.zig"
   ],
   "test_dependencies": [
     "shakedown"
@@ -29,6 +31,11 @@
       "zig",
       "build",
       "check-consumer"
+    ],
+    [
+      "zig",
+      "build",
+      "check-markdown-consumer"
     ]
   ],
   "shipped": {

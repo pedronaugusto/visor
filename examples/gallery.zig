@@ -1,4 +1,4 @@
-//! Every widget in the module, drawn once, with no terminal involved.
+//! Every widget, drawn once, with no terminal involved.
 //!
 //! The viewer example is a program; this one is a page of samples, and it
 //! exists so that each widget is drawn by something `zig build examples`
@@ -8,6 +8,7 @@
 const std = @import("std");
 const visor = @import("visor");
 const widgets = visor.widgets;
+const Markdown = @import("visor.markdown").Markdown;
 
 pub fn main(init: std.process.Init) !void {
     var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
@@ -25,14 +26,14 @@ pub fn main(init: std.process.Init) !void {
     defer renderer.deinit();
 
     try draw(screen.window());
-    var document = try widgets.Markdown.Document.init(
+    var document = try Markdown.Document.init(
         gpa,
-        "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n" ++
+        "# Notes\n> A **strong** point, a ~~struck~~ one and [a link](https://ziglang.org).\n" ++
             "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```" ++
             "\n\n- [x] parse\n- [ ] draw\n\n| op | ms |\n|:--|--:|\n| draw | 0.4 |",
     );
     defer document.deinit();
-    const markdown: widgets.Markdown = .{
+    const markdown: Markdown = .{
         .document = &document,
         .theme = .{
             .heading = @splat(.{ .bold = true }),
@@ -40,6 +41,7 @@ pub fn main(init: std.process.Init) !void {
             .emphasis = .{ .italic = true },
             .code = .{ .dim = true },
             .inline_code = .{ .reverse = true },
+            .strikethrough = .{ .strikethrough = true },
             .link = .{ .underline = .single },
             .quote = .{ .dim = true },
             .task_done = .{ .dim = true },

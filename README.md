@@ -19,15 +19,20 @@ zig fetch --save git+https://github.com/pedronaugusto/visor
 ```zig
 const visor_dep = b.dependency("visor", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("visor", visor_dep.module("visor"));
+// For the Markdown widget:
+exe.root_module.addImport("visor.markdown", visor_dep.module("visor.markdown"));
 ```
 
-One fetch, one module. `visor` is the grid and the renderer, and
-`visor.widgets` inside it is the layout solver and the widgets. A second
-module would buy nothing here: the widgets bring no dependency and link
-nothing the base does not, and Zig compiles only what a program names, so a
-program that draws no widget builds none. `morse` comes with it, re-exported
-as `visor.morse`, and is also available as `visor_dep.module("morse")` for a
-program that wants the writers on their own.
+One fetch, two modules. `visor` is the grid and the renderer, and
+`visor.widgets` inside it is the layout solver and the widgets. Those widgets
+bring no dependency and link nothing the base does not, and Zig compiles only
+what a program names, so a program that draws no widget builds none.
+`visor.markdown` is the Markdown widget, a module of its own because it brings
+a dependency, [datapad](https://github.com/pedronaugusto/datapad), which reads
+the Markdown: `visor` never imports it, so a program on `visor` alone compiles
+nothing of datapad. `morse` comes with it, re-exported as `visor.morse`, and
+is also available as `visor_dep.module("morse")` for a program that wants the
+writers on their own.
 
 Its dependencies: [`morse`](https://github.com/pedronaugusto/morse) for
 every escape sequence written and every reply parsed,
@@ -36,10 +41,13 @@ calls — raw mode and the way back, the size, the device's name — of which on
 its `conduit.tty` module is imported, which on Linux links no C library,
 [`xenoglyph`](https://github.com/pedronaugusto/xenoglyph) for grapheme
 segmentation and widths, whose Unicode 18 tables are source in its package, so
-nothing is generated at build time, and
+nothing is generated at build time,
 [`aegis`](https://github.com/pedronaugusto/aegis) for distinct pool identities,
-byte addresses, table positions and checked byte counts. All are pinned by
-release.
+byte addresses, table positions and checked byte counts, and
+[`datapad`](https://github.com/pedronaugusto/datapad), for `visor.markdown`
+alone, a lazy dependency: fetched with visor, compiled only in a program that
+imports that module. All are pinned by release but datapad,
+which has none yet and is pinned by commit.
 
 **Allocation.** One allocator, taken at `Screen.init` and `Renderer.init`.
 `draw` allocates nothing. With `commit = false`, `print` only measures and
@@ -667,9 +675,15 @@ legend: one through 62 styles, two through 3,844, and more for larger legends.
 | | |
 |---|---|
 | Layout | `Layout` — `horizontal`, `vertical`, `split`, `splitFixed`, `repeat`, `fitCount`, and the fields `direction`, `constraints`, `spacing`, `margin`. `Constraint` — `fixed`, `percent`, `min`, `max`, `fill`. `Direction`, `Padding`, `Align`, `place`, `offset`. |
-| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Markdown` (owned `Document` with its `cells` and `alignments`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GFM tables and task lists), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
+| The widgets | `Block` (borders, corners, titles, padding, and the window inside), `Paragraph` (wrap, alignment, scroll, `Rows` iterator), `Edges` (styled items at both edges of a row), `List` — `draw`, `visible` — with `List.State`, `List.Segment` and `List.Visible`, `Table` — `draw`, `visible` — with `Table.State`, `Table.Row` and `Table.Visible`, `Tree` — `draw`, `visible`, `rowCount`, `rowOf`, `nodeAt`, `parentOf`, `hasChildren`, `isShown`, `shownAncestor`, `firstShown`, `lastShown`, `nextShown`, `previousShown` — with `Tree.Node` (depth, and open as the program keeps it), `Tree.State` (`next`, `previous`, `first`, `last`, `parent`, `child`), `Tree.Guides`, `Tree.Symbols` and `Tree.Visible`, `Tabs`, `Gauge`, `LineGauge`, `Sparkline`, `BarChart`, `Chart`, `Scrollbar` and `Scrollbar.State`, `Canvas`, `Calendar`, `TextInput` (layout, selection drawn in its own style) and `TextInput.State`, `TextInput.Buffer` — `init`, `initText`, `deinit`, `text`, `cursor`, `selection`, `selectedText`, `input`, `target`, `move`, `moveRows`, `moveTo`, `selectAll`, `selectNone`, `insert`, `delete`, `replaceAll`, `reset`, `undo`, `redo`, `canUndo`, `canRedo`, `seal`, `clearHistory`, and the field `history_limit` — with `TextInput.Buffer.Motion` and `TextInput.Range`, `Keys`, `Rule`, `Sextants`. Beside them: `Item`, `Line`, `Bar`, `Dataset`, `Axis`, `Marker`, `Date`, `sextant`. |
 | Scrolling | `Scroll` and `Scroll.State`: which rows of something longer a view shows, held still while it grows. |
 | What every draw fails with | `DrawError`. |
+
+### `visor.markdown`
+
+| | |
+|---|---|
+| The widget | `Markdown` (owned `Document` with its `cells` and `alignments`, and `Document.InitError`, caller `Theme`, `Rows` iterator with `columns`, `TableLine`, `Quoted` line iterator, wrap, scroll, code scrolling, GitHub Flavored Markdown read by datapad). |
 
 ### Canvas
 
@@ -724,6 +738,8 @@ and rasterizes pixels with these primitives.
 
 ### Markdown
 
+`visor.markdown` is the widget, `Markdown`, on `visor` and datapad.
+
 `Markdown.Rows.init(&document, cols, method)` iterates the exact rows used
 by drawing and `rowCount`. Each row carries `start`/`end` ranges into
 `document.text()`, borrowed `text` and overlapping `spans`, `block_index`,
@@ -734,29 +750,34 @@ iteration allocates nothing. Code rows remain verbatim and unwrapped.
 
 `Markdown.Document` reads text once and owns its source and runs. Its
 `source()`, `text()`, `spans()` and `blocks()` return const slices borrowed
-until `deinit`; span and block ranges index `text()`. A widget
-borrows it, takes a `Theme`, and draws to the window's width. `rowCount(cols,
-method)` uses the same rows as `draw`, without allocation. Keep the document
-until its widgets are finished, then call `deinit`. Drawing can allocate for
-screen links and long graphemes, but never for parsing or layout.
+until `deinit`; span and block ranges index `text()`. `init` fails with
+`Document.InitError`: memory, or one of datapad's limits on what a document
+may hold, each named. A widget borrows the document, takes a `Theme`, and
+draws to the window's width. `rowCount(cols, method)` uses the same rows as
+`draw`, without allocation. Keep the document until its widgets are finished,
+then call `deinit`. Drawing can allocate for screen links and long graphemes,
+but never for parsing or layout.
 
-`Markdown.Quoted.init(source)` reads a source line by line by the same quote
-and fence rules, for a program that shows it line by line: `next()` gives each
-line's `text`, its `body` with the quote markers off, its quote `depth`, and
-whether it is `code` in a fenced block (with the `fence`, and whether the line
-`opens` or `closes` it). It borrows the source and allocates nothing.
+`Markdown.Quoted.init(source)` reads a source line by line by quote and fence
+rules of its own, for a program that shows it line by line: `next()` gives
+each line's `text`, its `body` with the quote markers off, its quote `depth`,
+and whether it is `code` in a fenced block (with the `fence`, and whether the
+line `opens` or `closes` it). It borrows the source and allocates nothing.
 
 ```zig
-var document = try widgets.Markdown.Document.init(gpa,
-    "# Notes\n> A **strong** point and [a link](https://ziglang.org).\n"
+const Markdown = @import("visor.markdown").Markdown;
+
+var document = try Markdown.Document.init(gpa,
+    "# Notes\n> A **strong** point, a ~~struck~~ one and [a link](https://ziglang.org).\n"
     ++ "\n- first item\n- second item\n\n```zig\nconst x = 1;\n```",
 );
 defer document.deinit();
-const markdown: widgets.Markdown = .{
+const markdown: Markdown = .{
     .document = &document,
     .theme = .{
         .heading = @splat(.{ .bold = true }),
         .strong = .{ .bold = true }, .emphasis = .{ .italic = true },
+        .strikethrough = .{ .strikethrough = true },
         .code = .{ .dim = true }, .inline_code = .{ .reverse = true },
         .link = .{ .underline = .single }, .quote = .{ .dim = true },
     },
@@ -766,49 +787,40 @@ try markdown.draw(window);
 const rows = markdown.rowCount(window.cols(), screen.method);
 ```
 
-The reader accepts the following subset; it is not CommonMark:
+The document is GitHub Flavored Markdown as datapad reads it: CommonMark,
+with GitHub's tables, task lists, strikethrough and autolinks. The widget
+shows it this way:
 
-- Paragraphs join adjacent source lines with a space and wrap at words,
-  splitting long words only between grapheme clusters. Blank lines keep a
-  blank row. Inline markup is read within each source line.
-- One to six leading `#` characters followed by a space or end of line make
-  a heading.
-- Repeated `>` prefixes, after at most three spaces, make nested quotes.
-  Each level draws a bar and a space, including on wrapped rows. At narrow
+- A paragraph's lines join with a space and wrap at words, splitting long
+  words only between grapheme clusters. A hard line break starts a row of its
+  own under the text it breaks. A blank line of the source keeps a blank row.
+- ATX and setext headings draw in the style of their level.
+- Each block quote draws a bar and a space, on wrapped rows too. At narrow
   widths bars clip and leave no room for text.
-- `-`, `+`, `*`, or up to nine digits followed by `.` or `)`, then a space,
-  make list items. Space indentation nests them; wrapped and indented
-  continuation lines use the marker's hanging indent. Markers keep their
-  spelling. Four spaces or a leading tab otherwise start indented code.
-- Three or more backticks or tildes open fenced code. A closing fence uses
-  the same character, at least the opening length, and only spaces after
-  it. Fence lines and language labels are hidden; unfinished fences keep
-  reading code. In a quoted fence only its container prefixes are removed.
-- Code is verbatim and clipped, never wrapped or parsed as prose. Tabs draw
-  to four-column stops. `scroll_columns` scrolls code between whole clusters.
-- Paired `*` or `_` give emphasis; doubled markers give strong emphasis.
-  These may nest, up to 32 levels. Underscores inside words stay literal.
-  Backtick spans use matching run lengths and keep their content literal.
-  Backslash escapes ASCII punctuation. Unmatched markers remain text.
-- `[label](target)` links accept balanced target parentheses and no whitespace
-  or title; labels can carry inline styles. `<http://…>` and `<https://…>`
-  are autolinks. They become OSC 8 links through `Screen.link`. Targets with
-  terminal control bytes remain unlinked text.
-- Three or more matching `-`, `*` or `_` characters, with optional spaces
-  between them, draw a horizontal rule.
-- A list item whose text begins `[ ]`, `[x]` or `[X]` and a space is a task;
-  the block's `task` says whether it is done, and the mark draws as `[ ]` or
-  `[x]` in the `task` or `task_done` style, wrapped text hanging under the
-  item's text.
-- A row with a pipe in it and under it a delimiter row of as many cells (at
-  least one hyphen each, a colon at either end for the alignment) begin a GFM
-  table. Every line after them is a row up to a blank line or the start of a
-  heading, rule, list item, quote level or fence; a row with fewer cells gets
-  empty ones and one with more loses the extra. `\|` is a pipe in a cell,
-  inside a code span too. The reader keeps the cells in `Document.cells()`
-  and the alignments in `Document.alignments()`; a `table` block says where
-  its own begin. The spec's table and task list examples (GFM 0.29,
-  198–205 and 279–280) are part of the suite.
+- A list item's marker keeps its spelling (`-`, `+`, `*`, or the number and
+  its `.` or `)`), and its text and the blocks after it in the item hang under
+  the text. A nested item is indented by the markers of the items it is in.
+- Fenced and indented code, HTML blocks among them, is verbatim and clipped,
+  never wrapped. Fence lines and info strings are hidden; the block's `fence`
+  keeps them. Tabs draw to four-column stops. `scroll_columns` scrolls code
+  between whole clusters.
+- Emphasis, strong emphasis, strikethrough and code spans take the
+  `emphasis`, `strong`, `strikethrough` and `inline_code` roles, nested as
+  the source nests them. Escapes and character references show the character
+  they mean; inline HTML shows as written.
+- Links, reference links, autolinks and GitHub's bare `www.` and `http://`
+  addresses become OSC 8 links through `Screen.link`, to the URL the
+  destination means. An image shows its description, linked to the image.
+  Targets with terminal control bytes remain unlinked text.
+- A thematic break draws a horizontal rule.
+- A task item's mark draws as `[ ]` or `[x]` in the `task` or `task_done`
+  style, the block's `task` saying whether it is done, wrapped text hanging
+  under the item's text.
+- A table keeps its cells in `Document.cells()` and its alignments in
+  `Document.alignments()`; a `table` block says where its own begin, and every
+  row has as many cells as the header. `\|` is a pipe in a cell, in a code
+  span too. The spec's table and task list examples (GFM 0.29, 198–205 and
+  279–280) are part of the suite.
 - A table draws its columns side by side, `│` between them and a `─┼─` rule
   under the header, in the `table_header` and `table_border` styles. Each
   column is as wide as its widest cell when they all fit; otherwise columns
@@ -818,13 +830,11 @@ The reader accepts the following subset; it is not CommonMark:
   they are, and `Rows.columns()` the widths. The first `table_columns` (64)
   columns are drawn.
 
-There are no images, HTML, reference links, setext headings, footnotes,
-strikethrough, autolinks without angle brackets, syntax highlighting or
-filesystem link resolution.
-Unsupported syntax stays text. The caller supplies every style; the default
-roles are neutral. Inline roles add enabled attributes to their block's
-style and replace colours they set. Quote, marker and rule roles style their
-own structural marks. `examples/gallery.zig` includes a themed document.
+There is no syntax highlighting, no picture for an image, and no filesystem
+link resolution. The caller supplies every style; the default roles are
+neutral. Inline roles add enabled attributes to their block's style and
+replace colours they set. Quote, marker and rule roles style their own
+structural marks. `examples/gallery.zig` includes a themed document.
 
 ## Scope
 
@@ -864,7 +874,8 @@ compiled and not run.
 - [morse](https://github.com/pedronaugusto/morse) writes every escape sequence and
   parses every reply; [conduit](https://github.com/pedronaugusto/conduit)'s
   `conduit.tty` makes the terminal's own calls;
-  [xenoglyph](https://github.com/pedronaugusto/xenoglyph) segments and measures clusters.
+  [xenoglyph](https://github.com/pedronaugusto/xenoglyph) segments and measures clusters;
+  [datapad](https://github.com/pedronaugusto/datapad) reads Markdown for `visor.markdown`.
 - [preflight](https://github.com/pedronaugusto/preflight) runs the source checks,
   the tests and CI, and [shakedown](https://github.com/pedronaugusto/shakedown) holds the
   tests' clocks and fault plans. Both are dev dependencies, which
@@ -880,6 +891,9 @@ Development runs through bay.
 `bay check-consumer`, part of the lint `bay ci` runs first,
 builds a project that depends on visor with only visor's own dependencies
 present, so nothing visor fetches for its CI is needed to build on it.
+`bay check-markdown-consumer` holds datapad outside a program on `visor`
+alone: no module datapad's build made is in `visor`'s module graph, and a
+program that imports `visor` and nothing else builds.
 
 `bay test` runs both suites and the examples under
 `std.testing.allocator`, so a leak or an invalid free fails the test rather

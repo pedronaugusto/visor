@@ -52,8 +52,6 @@ pub const offset = layout_mod.offset;
 
 /// A frame, a title and padding around a window.
 pub const Block = @import("widgets/block.zig").Block;
-/// Markdown rendered to width in the caller's theme.
-pub const Markdown = @import("widgets/markdown.zig").Markdown;
 /// Lines of text, wrapped, aligned and scrolled.
 pub const Paragraph = @import("widgets/paragraph.zig").Paragraph;
 /// Styled items at the left and right edges of one row.

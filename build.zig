@@ -27,28 +27,55 @@ pub fn build(b: *std.Build) void {
     const reactor = b.dependency("reactor", .{ .target = target, .optimize = optimize });
     const warp = b.dependency("warp", .{ .target = target, .optimize = optimize });
     const imports = dependencies(morse, conduit, xenoglyph, aegis, reactor, warp);
+    // `datapad` reads Markdown for the Markdown widget. It is lazy: fetched
+    // with visor, and compiled only in a program that imports
+    // `visor.markdown`.
+    const datapad: ?*std.Build.Module = if (b.dependencyLazy("datapad", .{ .target = target, .optimize = optimize })) |package| package.module("datapad") else |_| null;
 
     //=====================================================================
-    // The module.
+    // The modules.
     //
-    // One: `visor`, with the widgets as `visor.widgets` inside it. A widget
-    // brings no dependency and links nothing the base does not, so a second
-    // module would buy a consumer nothing that Zig's lazy analysis does not
-    // already give: a program that never names a widget compiles none. The
-    // base never imports the widgets, which gantry's layer check enforces
-    // on the files (ci/layers.zig).
+    // `visor`, with the widgets as `visor.widgets` inside it. Those widgets
+    // bring no dependency and link nothing the base does not, so a module of
+    // their own would buy a consumer nothing that Zig's lazy analysis does
+    // not already give: a program that never names a widget compiles none.
+    // The base never imports the widgets, which gantry's layer check
+    // enforces on the files (ci/layers.zig).
+    //
+    // `visor.markdown`, the Markdown widget, is a module of its own because
+    // it brings a dependency: it imports `visor` and datapad, and `visor`
+    // never imports it, so a program on `visor` alone has nothing of
+    // datapad in it (`bay check-markdown-consumer`).
     //=====================================================================
 
-    _ = b.addModule("visor", .{
+    const module = b.addModule("visor", .{
         .root_source_file = b.path("src/visor.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &imports,
     });
+    // Declared before datapad is fetched: a consumer's first pass must find
+    // the module it asks for, and only learns here what to fetch. datapad is
+    // imported once it is there.
+    const markdown = b.addModule("visor.markdown", .{
+        .root_source_file = b.path("src/markdown/markdown.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "visor", .module = module }},
+    });
+    if (datapad) |m| markdown.addImport("datapad", m);
 
     // A consumer who wants the writers separately gets them from here
     // rather than fetching morse a second time.
     b.modules.put(b.allocator, b.graph.dupeString("morse"), morse.module("morse")) catch @panic("OOM");
+}
+
+/// The lazy dependency `name` of `p`, or null where it is not fetched yet: std has marked it
+/// needed, and the build fetches it and configures again, so this pass makes nothing of it.
+fn fetched(p: *std.Build, name: []const u8, args: anytype) ?*std.Build.Dependency {
+    return p.dependencyLazy(name, args) catch |err| switch (err) {
+        error.LazyDependencyNeeded => null,
+    };
 }
 
 /// visor's development: its tests, examples, conformance run and benchmarks,
@@ -67,6 +94,9 @@ pub fn dev(b: *std.Build, tools: type) void {
     const reactor = p.dependency("reactor", .{ .target = target, .optimize = optimize });
     const warp = p.dependency("warp", .{ .target = target, .optimize = optimize });
     const imports = dependencies(morse, conduit, xenoglyph, aegis, reactor, warp);
+    // datapad is lazy: not fetched yet, it ends this configure pass (`fetched`).
+    const datapad = fetched(p, "datapad", .{ .target = target, .optimize = optimize }) orelse return;
+    const markdown = package.module("visor.markdown");
 
     // What the round-trip properties count of their draws. Its own module
     // because the suite inside the package and the conformance build outside
@@ -99,6 +129,23 @@ pub fn dev(b: *std.Build, tools: type) void {
     const test_step = b.step("test", "Run the visor tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    // `visor.markdown`'s tests, built from its own root: its files reach
+    // visor by the module's name, as a program does.
+    const markdown_tests = b.addTest(.{
+        .name = "visor-markdown-tests",
+        .filters = filters,
+        .root_module = b.createModule(.{
+            .root_source_file = p.path("src/markdown/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "visor", .module = module },
+                .{ .name = "datapad", .module = datapad.module("datapad") },
+            },
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(markdown_tests).step);
+
     // Compiling without running is what a target this host cannot execute can
     // still be held to, and it is also the default step, so a bare
     // `bay install -Dtarget=...` is the same check under another name. Both
@@ -107,6 +154,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     // fetch.
     const check_step = b.step("check", "Compile the tests and the examples without running them");
     check_step.dependOn(&tests.step);
+    check_step.dependOn(&markdown_tests.step);
     // A consumer's build links libc or does not, and the package's code
     // branches on it (shared memory through `shm_open`, or the system's own
     // calls, or not at all): the check compiles the suite both ways, so every
@@ -183,7 +231,10 @@ pub fn dev(b: *std.Build, tools: type) void {
                 .root_source_file = p.path(source),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{.{ .name = "visor", .module = module }},
+                .imports = &.{
+                    .{ .name = "visor", .module = module },
+                    .{ .name = "visor.markdown", .module = markdown },
+                },
             }),
         });
         const run_example = b.addRunArtifact(example);
@@ -246,6 +297,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize }).module("shakedown");
     tests.root_module.addImport("shakedown", shakedown);
     libc_tests.root_module.addImport("shakedown", shakedown);
+    markdown_tests.root_module.addImport("shakedown", shakedown);
     preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,
@@ -266,16 +318,43 @@ pub fn dev(b: *std.Build, tools: type) void {
         },
     });
     // A project that depends on visor by path, built with fetching off
-    // and only morse, conduit and xenoglyph beside it, so nothing visor
+    // and only visor's own dependencies beside it, so nothing visor
     // fetches for its own CI can be reached. It is the build a consumer
     // gets.
     preflight.addConsumerCheck(b, p, .{
         .package = "visor",
         .program = p.path("ci/consumer.zig"),
-        .modules = &.{"visor"},
+        .modules = &.{ "visor", "visor.markdown" },
         // conduit waits through reactor, and visor listens for a resize through it.
-        .packages = &.{ morse, conduit, reactor, warp, xenoglyph, aegis },
+        .packages = &.{ morse, conduit, reactor, warp, xenoglyph, aegis, datapad },
     });
+    addMarkdownConsumerCheck(b, p, module, markdown, datapad);
+}
+
+/// `check-markdown-consumer`: a program on `visor` alone has nothing of
+/// datapad in it. No module datapad's build made is in `visor`'s module
+/// graph, which the same walk finds in `visor.markdown`'s, and a program
+/// that imports `visor` and nothing else builds.
+fn addMarkdownConsumerCheck(b: *std.Build, p: *std.Build, visor: *std.Build.Module, markdown: *std.Build.Module, datapad: *std.Build.Dependency) void {
+    const step = b.step("check-markdown-consumer", "Hold datapad outside a program that imports visor alone");
+    if (reaches(b, visor, datapad.builder)) step.dependOn(&b.addFail("visor's module graph reaches datapad: a program on visor alone would compile it").step);
+    if (!reaches(b, markdown, datapad.builder)) step.dependOn(&b.addFail("visor.markdown's module graph does not reach datapad: the walk cannot see it").step);
+    const root = b.createModule(.{ .root_source_file = p.path("ci/visor_program.zig"), .target = b.graph.host, .optimize = .debug });
+    root.addImport("visor", visor);
+    step.dependOn(&b.addObject(.{ .name = "visor_program", .root_module = root }).step);
+}
+
+/// Whether a module `owner`'s build made is in `root`'s module graph.
+fn reaches(b: *std.Build, root: *std.Build.Module, owner: *std.Build) bool {
+    var seen: std.array_hash_map.Auto(*std.Build.Module, void) = .empty;
+    seen.put(b.graph.arena, root, {}) catch @panic("OOM");
+    var next: usize = 0;
+    while (next < seen.count()) : (next += 1) {
+        const m = seen.keys()[next];
+        if (m.owner == owner) return true;
+        for (m.import_table.values()) |imported| seen.put(b.graph.arena, imported, {}) catch @panic("OOM");
+    }
+    return false;
 }
 
 /// The modules visor imports.
@@ -290,7 +369,7 @@ fn dependencies(morse: *std.Build.Dependency, conduit: *std.Build.Dependency, xe
     };
 }
 
-/// visor (widgets included) and the Unicode properties the checks read, in the
+/// visor (widgets included), its Markdown widget, and the Unicode properties the checks read, in the
 /// mode a benchmark builds in: an imported module keeps its own mode, so a
 /// ReleaseFast benchmark over the Debug module would time the Debug module.
 /// The checks read the Unicode properties visor measures by (East Asian
@@ -307,8 +386,18 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .optimize = optimize,
         .imports = &dependencies(morse, conduit, xenoglyph, p.dependency("aegis", .{ .target = target, .optimize = optimize }), p.dependency("reactor", .{ .target = target, .optimize = optimize }), p.dependency("warp", .{ .target = target, .optimize = optimize })),
     });
+    const markdown = b.createModule(.{
+        .root_source_file = p.path("src/markdown/markdown.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "visor", .module = visor },
+            .{ .name = "datapad", .module = p.dependency("datapad", .{ .target = target, .optimize = optimize }).module("datapad") },
+        },
+    });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "visor", .module = visor },
+        .{ .name = "visor.markdown", .module = markdown },
         .{ .name = "aegis", .module = p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis") },
         .{ .name = "xenoglyph", .module = xenoglyph.module("xenoglyph") },
     }) catch @panic("OOM");

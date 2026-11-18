@@ -1,8 +1,8 @@
 const std = @import("std");
 const NoResize = @import("shakedown").alloc.NoResize;
-const widgets = @import("../widgets.zig");
-const visor = @import("base.zig");
-const Harness = @import("../testing/widget_harness.zig").Harness;
+const widgets = @import("markdown.zig");
+const visor = @import("visor");
+const Harness = @import("harness.zig").Harness;
 const t = std.testing;
 
 test "markdown wrapping keeps nested quote bars and list hanging indents" {
@@ -35,7 +35,8 @@ test "markdown fences and indented code stay verbatim and never wrap" {
 
 test "markdown inline styles and links survive wide character wrapping" {
     if (comptime !@hasDecl(widgets, "Markdown")) return t.expect(false);
-    var doc = try widgets.Markdown.Document.init(t.allocator, "# Title\n**bold** *slant* `x * y` [中中 ok](https://example.org/a)\n---");
+    // `***`, as `---` under a paragraph's line would make it a heading.
+    var doc = try widgets.Markdown.Document.init(t.allocator, "# Title\n**bold** *slant* `x * y` [中中 ok](https://example.org/a)\n***");
     defer doc.deinit();
     var h = try Harness.init(t.allocator, 10, 6);
     defer h.deinit();
@@ -258,4 +259,32 @@ test "a document's fenced blocks are the ones quoted lines find" {
     }
     try t.expectEqual(@as(usize, 3), matched);
     for (doc.blocks()[at..]) |block| try t.expect(block.fence == null);
+}
+
+test "markdown reads GitHub Flavored Markdown: strikethrough struck, breaks, setext headings, references and bare addresses" {
+    var doc = try widgets.Markdown.Document.init(t.allocator, "Head\n====\n~~gone~~ a\\\nb &amp; [r][1] www.x.org ![pic](p.png)\n\n[1]: https://e.org/r\n");
+    defer doc.deinit();
+    var h = try Harness.init(t.allocator, 30, 4);
+    defer h.deinit();
+    const md: widgets.Markdown = .{ .document = &doc, .theme = .{ .heading = @splat(.{ .bold = true }), .strikethrough = .{ .strikethrough = true } } };
+    try md.draw(h.window());
+    // The definition shows nothing; the hard break starts a row of its own.
+    try h.expectFrame("Head\ngone a\nb & r www.x.org pic\n\n");
+    try t.expect(h.styleAt(0, 0).bold);
+    try t.expect(h.styleAt(0, 1).strikethrough);
+    try t.expect(!h.styleAt(5, 1).strikethrough);
+    const screen = h.term.screen();
+    try t.expectEqualStrings("https://e.org/r", screen.target(screen.readCell(4, 2).?.link).?.uri);
+    try t.expectEqualStrings("http://www.x.org", screen.target(screen.readCell(6, 2).?.link).?.uri);
+    try t.expectEqualStrings("p.png", screen.target(screen.readCell(16, 2).?.link).?.uri);
+    try t.expectEqual(@as(u3, 1), doc.blocks()[0].heading);
+}
+
+test "markdown items nest by their parents' markers and an empty item is its marker" {
+    var doc = try widgets.Markdown.Document.init(t.allocator, "1. one\n\n   more\n   - two\n-\n");
+    defer doc.deinit();
+    var h = try Harness.init(t.allocator, 12, 6);
+    defer h.deinit();
+    try (widgets.Markdown{ .document = &doc, .theme = .{} }).draw(h.window());
+    try h.expectFrame("1. one\n\n   more\n   - two\n-\n\n");
 }
