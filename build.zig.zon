@@ -23,8 +23,8 @@
         },
 
         .warp = .{
-            .url = "git+https://github.com/pedronaugusto/warp#46a58d2114119dcc7fd11909f0ec0132ab3452c8",
-            .hash = "warp-0.4.5-JASxFRUkMQB8ykX0LPgn4v7CQjDdgZu6XC2uB79kyTR7",
+            .url = "git+https://github.com/pedronaugusto/warp#2c401753e929e2ac5683aa2ba66b656169be6d9c",
+            .hash = "warp-0.4.5-JASxFdVOMQBoopMC8U6O0ZwY8hQJW6r7Iu1WGQkAlnDU",
         },
 
         .xenoglyph = .{
@@ -37,8 +37,8 @@
             .lazy = true,
         },
         .aperture = .{
-            .url = "git+https://github.com/pedronaugusto/aperture#437817b6ad08b59d925d42cae47259d4977aeeb0",
-            .hash = "aperture-0.0.0-a2Jfsi7-BwBQbTeOIpgrm0E_njjORBIyvd1O3EImCSaT",
+            .url = "git+https://github.com/pedronaugusto/aperture#6c1b2d5996d2af3cca063b64e04621b5214ee2a1",
+            .hash = "aperture-0.0.0-a2Jfsg0uCABFsjryrjTDQ39Bod1TjAFT4BGh9f7Fgnpd",
             .lazy = true,
         },
     },

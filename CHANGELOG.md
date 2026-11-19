@@ -29,6 +29,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Pins warp 2c40175 and aperture 6c1b2d5, where it pinned warp 46a58d2 and aperture 437817b: warp main with `Inflate.Contiguous`, through which aperture's PNG inflates at every size, so a program on visor and aperture links one warp. Nothing visor calls changed.
 - Pins warp 46a58d2, where it pinned 0e8a04d: warp main, the one warp a program on visor and aperture links (aegis f52eabe for all). Nothing visor calls changed.
 - The development build adds `check-pictures-consumer`: no module aperture's build made is in the module graph of a program on `visor` alone.
 - `Markdown.Document` reads GitHub Flavored Markdown as datapad reads it (datapad fef78ef, a lazy dependency, fetched with visor and compiled only in a program that imports `visor.markdown`), where it read a subset by rules of its own: CommonMark's blocks and inlines, with GitHub's tables, task lists, strikethrough and autolinks. Setext headings, link reference definitions, character references, images (their text, linked to the image), inline HTML as written, and a hard line break as a row of its own under the text it breaks. A list's continuation paragraphs hang under the item's text. `Markdown.Quoted` keeps its own rules.
