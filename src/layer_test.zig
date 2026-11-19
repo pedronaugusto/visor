@@ -548,9 +548,8 @@ test "a picture through shared memory: the name goes, the terminal's word settle
     try testing.expect(l.ready(.fromRaw(5), ms(0), .fromMilliseconds(1000)));
     try testing.expect(l.shared_memory.?.state == .yes);
     try testing.expect(l.image(.fromRaw(5)).?.shm == null);
-    // the object was unlinked: its name can be put again
-    try shm.put(name, &pixels);
-    shm.unlink(name);
+    // the object was released: its name can be put again
+    shm.release(name, try shm.put(name, &pixels));
 }
 
 test "a terminal that cannot read shared memory gets the picture again in the escape code" {
@@ -608,8 +607,7 @@ test "a picture written where it is sent from: shared memory's own bytes, nothin
     // the terminal's word settles it, as for a picture copied in
     l.ack(.{ .id = .fromRaw(5), .message = "OK" });
     try testing.expect(l.shared_memory.?.state == .yes);
-    try shm.put(name, "gone");
-    shm.unlink(name);
+    shm.release(name, try shm.put(name, "gone"));
 }
 
 test "a picture written where it is sent from goes in the escape code as transmit sends it" {
@@ -649,10 +647,9 @@ test "a prepared picture holds its id, and taken back leaves nothing" {
     try testing.expect(l.prepared == null);
     try testing.expect(l.image(.fromRaw(1)) == null);
     try testing.expectEqual(@as(usize, 0), l.shared_objects.items.len);
-    // its object was unlinked: the name can be put again
+    // its object was released: the name can be put again
     if (name) |n| {
-        try shm.put(n, "gone");
-        shm.unlink(n);
+        shm.release(n, try shm.put(n, "gone"));
     }
     l.discardPrepared();
     // and a prepared picture that is never sent is unlinked by deinit
@@ -674,8 +671,7 @@ test "a medium turned off while a picture was prepared sends it in the escape co
     try testing.expect(std.mem.find(u8, out.written(), "t=s") == null);
     try testing.expect(std.mem.find(u8, out.written(), "YWJjZA==") != null);
     try testing.expect(l.image(.fromRaw(4)).?.shm == null);
-    try shm.put(name, "gone");
-    shm.unlink(name);
+    shm.release(name, try shm.put(name, "gone"));
 }
 
 test "a replacement written where it is sent from: one in flight, a failed write asks again" {
@@ -859,11 +855,10 @@ test "shared memory keeps its cleanup owner when configuration is cleared" {
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, .fromRaw(19), "data", .{ .width = .fromRaw(1), .height = .fromRaw(1) });
     const name = l.image(.fromRaw(19)).?.shm.?;
-    defer shm.unlink(name);
     l.configureSharedMemory(false);
     l.deinit();
     // Cleanup must have removed the object, regardless of current policy.
-    try shm.put(name, "data");
+    shm.release(name, try shm.put(name, "data"));
 }
 
 test "shared memory names belong to the process rather than each Layers" {
@@ -892,24 +887,20 @@ test "shared memory reconfiguration cannot lose owners or accept an old policy r
     var sink: Writer.Discarding = .init(&.{});
     _ = try l.transmit(&sink.writer, .fromRaw(1), "old!", .{ .width = .fromRaw(1), .height = .fromRaw(1) });
     const first = l.image(.fromRaw(1)).?.shm.?;
-    defer shm.unlink(first);
     l.configureSharedMemory(false);
     l.configureSharedMemory(true);
     const generation = l.shared_memory.?.generation;
     _ = try l.transmit(&sink.writer, .fromRaw(2), "new!", .{ .width = .fromRaw(1), .height = .fromRaw(1) });
     const second = l.image(.fromRaw(2)).?.shm.?;
-    defer shm.unlink(second);
     l.ack(.{ .id = .fromRaw(1), .message = "EBADF:old configuration" });
     try testing.expect(l.shared_memory.?.state == .trying);
-    try shm.put(first, "gone");
-    shm.unlink(first);
+    shm.release(first, try shm.put(first, "gone"));
     l.ack(.{ .id = .fromRaw(2), .message = "OK" });
     try testing.expect(l.shared_memory.?.state == .yes);
     l.configureSharedMemory(true);
     try testing.expectEqual(generation, l.shared_memory.?.generation);
     try testing.expect(l.shared_memory.?.state == .yes);
-    try shm.put(second, "gone");
-    shm.unlink(second);
+    shm.release(second, try shm.put(second, "gone"));
 }
 
 test "shared memory keeps ownership through every allocation and partial output failure" {
@@ -928,14 +919,13 @@ test "shared memory keeps ownership through every allocation and partial output 
                 else => return err,
             }
             const name = l.image(.fromRaw(7)).?.shm.?;
-            defer shm.unlink(name);
             try testing.expectEqual(@as(usize, 1), l.shared_objects.items.len);
             try testing.expect(l.image(.fromRaw(7)).?.state() == .failed);
             try testing.expect(!l.ready(.fromRaw(7), ms(1000), .fromMilliseconds(10)));
             l.configureSharedMemory(false);
             l.deinit();
             owned = false;
-            try shm.put(name, "gone");
+            shm.release(name, try shm.put(name, "gone"));
         }
     }.run, .{});
 }
@@ -951,12 +941,11 @@ test "direct transmission silence cannot make an unread shared picture ready" {
     l.configureSharedMemory(true);
     _ = try l.transmit(&sink.writer, .fromRaw(2), "data", .{ .width = .fromRaw(1), .height = .fromRaw(1), .now = ms(10) });
     const name = l.image(.fromRaw(2)).?.shm.?;
-    defer shm.unlink(name);
     try testing.expect(!l.ready(.fromRaw(2), ms(10), .fromMilliseconds(10)));
     try testing.expect(!l.ready(.fromRaw(2), ms(20), .fromMilliseconds(10)));
     try testing.expectEqual(Image.State.failed, l.image(.fromRaw(2)).?.state());
     try testing.expect(l.image(.fromRaw(2)).?.shm == null);
-    try shm.put(name, "gone");
+    shm.release(name, try shm.put(name, "gone"));
 }
 
 test "a picture placement spells the one-based u16 coordinate edge without overflow" {

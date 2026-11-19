@@ -19,7 +19,7 @@
       "rules": [
         "P007"
       ],
-      "reason": "POSIX shared memory for pictures, the kitty protocol's t=s: shm_open, ftruncate, mmap and unlink, or the file under /dev/shm without libc"
+      "reason": "shared memory for pictures, the kitty protocol's t=s: POSIX shm_open, ftruncate, mmap and unlink, or the file under /dev/shm without libc; on Windows a named file mapping through kernel32 (CreateFileMappingW, MapViewOfFile, UnmapViewOfFile), closed once read"
     }
   ]
 }

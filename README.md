@@ -464,7 +464,11 @@ from about 15 ms to under 3). The first one asks for an answer; an error, or no
 answer within the grace period, turns the medium off for this configuration, and that picture
 is refused so the program sends it again in the escape code, which is what a
 terminal on another machine, over ssh, gets from then on. An object the
-terminal did not read is unlinked, never left behind.
+terminal did not read is unlinked, never left behind. On Windows the object
+is a named file mapping, as the kitty protocol names it there: the terminal
+opens, reads and closes it, and `Layers` keeps the handle that made it until
+the terminal has answered, or the picture is replaced or deleted, then closes
+it, which takes the mapping away.
 
 **A picture can be written where it is sent from.** `Layers.prepare(id, len,
 how)` hands back `len` bytes to fill and `transmitPrepared(w)` sends them, as
@@ -473,7 +477,7 @@ object's, mapped, so a frame a GPU downloads there reaches the terminal with
 no copy of the program's; in the escape code they are a buffer `Layers` keeps
 and reuses. `Replacement.prepare` and `sendPrepared` do the same for a
 replacement. One picture is prepared at a time; `discardPrepared` takes it
-back unsent and unlinks its object. If the medium is turned off or refused
+back unsent and releases its object. If the medium is turned off or refused
 before the picture goes, its bytes go in the escape code from where they were
 written.
 
@@ -484,10 +488,11 @@ accessors return borrowed, read-only slices; fields prefixed `_` are internal.
 
 `Layers.configureSharedMemory(true)` allows pictures through shared memory;
 `false` disables it. Allowing it again while allowed keeps the terminal's
-learned answer. Each outstanding object is unlinked when it is done with,
+learned answer. Each outstanding object is released when it is done with,
 whatever the configuration is by then, and an older object's reply cannot
 settle a new configuration. No `std.Io` is kept or needed: an object is
-memory, made and unlinked as `shm_open` and `shm_unlink` do. Names come from
+memory, made and released as `shm_open` and `shm_unlink` do, or on Windows
+`CreateFileMappingW` and closing its handle. Names come from
 one atomic process-wide namespace and are never reused.
 
 ### The grid

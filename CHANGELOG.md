@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Markdown.Theme.strikethrough`, the style struck-through text (`~~so~~`) takes: `.{ .strikethrough = true }` draws the line (SGR 9).
 - `Markdown.Document.InitError`, what `Markdown.Document.init` fails with.
 - `visor.pictures`, on `visor` and aperture (437817b, a lazy dependency like datapad): `pictures.storeSixel` quantizes an `aperture.View` into a sixel's palette and registers, a pixel whose register is less than half opaque left undrawn, and `pictures.storeIterm` encodes it as a PNG, each stored through `Layers`.
+- Pictures through shared memory on Windows (the kitty protocol's `t=s`): the object is a named file mapping in the session's namespace, as the protocol names it there, made with `CreateFileMappingW`, filled where it is mapped (`Layers.prepare`) or copied in (`transmit`), and its name sent. The terminal opens, reads and closes it; `Layers` keeps the handle that made it until the terminal has answered, or the picture is replaced or deleted, and closing it then takes the mapping away. The terminal's answer decides the medium as on POSIX: an error or no answer sends that picture again in the escape code. `SharedObject.held` is that handle (nothing on POSIX).
 
 ### Breaking
 

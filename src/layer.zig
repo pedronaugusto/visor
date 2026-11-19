@@ -209,11 +209,13 @@ pub const SharedMemory = struct {
 /// A shared memory object a picture was sent through, kept only by `Layers`:
 /// its fields are internal. This is the owner, not the image snapshot or the
 /// current policy. Once created it carries everything cleanup needs, even
-/// after reconfiguration: its name, which is all an unlink takes.
+/// after reconfiguration: its name, and on Windows the handle that keeps the
+/// mapping until the terminal has read it (`shm.release`).
 pub const SharedObject = struct {
     id: ImageId,
     name: shm.Name,
     generation: shm.Namespace,
+    held: shm.Held,
 
     /// An object and its memory, mapped for the picture to be written in.
     pub const Created = struct { object: SharedObject, mapping: shm.Mapping };
@@ -221,11 +223,11 @@ pub const SharedObject = struct {
     fn create(policy: SharedMemory, id: ImageId, len: usize) shm.PutError!Created {
         const name = shm.nextName();
         const mapping = try shm.create(name, len);
-        return .{ .object = .{ .id = id, .name = name, .generation = policy.generation }, .mapping = mapping };
+        return .{ .object = .{ .id = id, .name = name, .generation = policy.generation, .held = mapping.held }, .mapping = mapping };
     }
 
     fn deinit(object: SharedObject) void {
-        shm.unlink(object.name);
+        shm.release(object.name, object.held);
     }
 };
 
@@ -523,7 +525,7 @@ pub const Layers = struct {
     /// terminal is on this machine, or may be): null sends every picture
     /// in the escape code.
     shared_memory: ?SharedMemory = null,
-    /// Private: the shared memory objects still to unlink, one per picture sent that way.
+    /// Private: the shared memory objects still to release, one per picture sent that way.
     shared_objects: std.ArrayList(SharedObject) = .empty,
     /// Private: the picture `prepare` gave out to be written, until it is
     /// sent or taken back.
@@ -639,13 +641,13 @@ pub const Layers = struct {
     }
 
     /// Allows shared memory, or disables it. A build that cannot put a
-    /// picture there (`supported` in `layer/shm.zig`: Windows, Android, a
-    /// BSD or macOS without libc) never offers the medium, and its pictures
+    /// picture there (`supported` in `layer/shm.zig`: Android, a BSD or
+    /// macOS without libc) never offers the medium, and its pictures
     /// go in the escape code. This changes future
-    /// transmissions; live objects are still unlinked when they are done
+    /// transmissions; live objects are still released when they are done
     /// with. Allowing it again while allowed keeps the terminal's learned
     /// answer; disable and allow again to retry a refused medium. Nothing
-    /// is kept but the choice: an object is memory, put and unlinked
+    /// is kept but the choice: an object is memory, put and released
     /// without a `std.Io`.
     pub fn configureSharedMemory(l: *Layers, allowed: bool) void {
         if (!allowed or !shm.supported) {
@@ -655,7 +657,7 @@ pub const Layers = struct {
         if (l.shared_memory == null) l.shared_memory = .{ .generation = shm.nextNamespace() };
     }
 
-    /// Gives the lists and the window back, and unlinks any picture still
+    /// Gives the lists and the window back, and releases any picture still
     /// in shared memory, a prepared one too.
     pub fn deinit(l: *Layers) void {
         const gpa = l.gpa;
@@ -763,7 +765,7 @@ pub const Layers = struct {
     /// returns the same count. A picture written into shared memory goes
     /// as its name unless the medium was turned off or refused since it was
     /// prepared; then its bytes go in the escape code from where they were
-    /// written, and the object is unlinked. Either way nothing is prepared
+    /// written, and the object is released. Either way nothing is prepared
     /// after. Asserts a picture is prepared.
     pub fn transmitPrepared(l: *Layers, w: *Writer) TransmitError!usize {
         // unreachable: a picture is prepared, as asserted above
@@ -780,7 +782,7 @@ pub const Layers = struct {
         return l.transmitEscape(w, p.id, created.mapping.bytes(), p.how);
     }
 
-    /// Takes back the picture `prepare` gave out, unsent, and unlinks its
+    /// Takes back the picture `prepare` gave out, unsent, and releases its
     /// object. Nothing reached the terminal. Without one prepared, nothing.
     pub fn discardPrepared(l: *Layers) void {
         const p = l.prepared orelse return;
@@ -871,8 +873,8 @@ pub const Layers = struct {
     }
 
     /// The name of an object holding the picture, sent, and the object
-    /// recorded as the image's to unlink. Owns `object` from the call: a
-    /// reservation that fails unlinks it.
+    /// recorded as the image's to release. Owns `object` from the call: a
+    /// reservation that fails releases it.
     fn sendShared(l: *Layers, w: *Writer, sm: *SharedMemory, object: SharedObject, size: u32, how: Transmit) TransmitError!usize {
         const id = object.id;
         l.reserveShared(id) catch |err| {
@@ -902,9 +904,11 @@ pub const Layers = struct {
         return object.name.len;
     }
 
-    /// An image's shared memory object, unlinked if it is still there:
-    /// the terminal unlinks what it reads, and what it could not read is
-    /// this program's to take away.
+    /// An image's shared memory object, until it is released: on POSIX the
+    /// terminal unlinks what it reads, and what it could not read is this
+    /// program's to take away; on Windows the program closes its handle
+    /// once the terminal has answered, or when the image is replaced or
+    /// deleted, and the mapping goes with the terminal's own.
     fn sharedObject(l: *const Layers, id: ImageId) ?SharedObject {
         for (l.shared_objects.items) |object| {
             if (object.id == id) return object;

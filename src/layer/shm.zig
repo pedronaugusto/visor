@@ -1,21 +1,33 @@
 //! Shared memory for pictures: the pixels put where the terminal reads
 //! them, so what goes through the terminal's input is a name, not the
-//! picture. POSIX shared memory objects, named the way the kitty graphics
-//! protocol takes them (`t=s`): a slash and no other. The terminal opens
-//! the object, reads it and unlinks it; a program that learns the terminal
-//! could not (an error, no answer) unlinks it itself. A picture is written
-//! into the object where it is mapped (`create`), or copied there (`put`).
+//! picture. The objects the kitty graphics protocol takes (`t=s`), named
+//! with a slash and no other: on POSIX a shared memory object, which the
+//! terminal opens, reads and unlinks; on Windows a named file mapping, which
+//! the terminal opens, reads and closes. A picture is written into the
+//! object where it is mapped (`create`), or copied there (`put`).
+//!
+//! What a program keeps of an object until the terminal has read it is its
+//! `Held`, given back with `release`. On POSIX that is nothing: the name is
+//! all an unlink takes, and a terminal that read the object has unlinked it
+//! already. On Windows it is the handle that made the mapping: a named
+//! mapping has no unlink and lives until its last handle closes, so the
+//! program keeps its handle until the terminal has read the picture, and
+//! closing it then is the unlink.
 //!
 //! With libc, `shm_open`; on Linux without it, the file under `/dev/shm`
-//! that `shm_open` names there. Elsewhere, nothing: `put` says so, and the
+//! that `shm_open` names there; on Windows, `CreateFileMappingW` with a name
+//! in the session's namespace. Elsewhere, nothing: `put` says so, and the
 //! picture goes in the escape code instead.
 const std = @import("std");
 const builtin = @import("builtin");
 const intake = @import("../intake.zig");
 const aegis = @import("../dependencies.zig").aegis;
+const windows = std.os.windows;
+const is_windows = builtin.target.os.tag == .windows;
 
 /// The longest name, the slash included: macOS takes 31 bytes
-/// (`PSHMNAMLEN`), the least of the systems that have these.
+/// (`PSHMNAMLEN`), the least of the systems that have these. Windows takes
+/// the same names.
 pub const max_name = 31;
 
 /// A name, held by value so a record can keep it without an allocation.
@@ -32,10 +44,15 @@ pub const Name = struct {
 pub const supported = switch (builtin.target.os.tag) {
     .macos, .ios, .freebsd, .netbsd, .openbsd, .dragonfly => builtin.link_libc,
     .linux => !builtin.target.abi.isAndroid(),
+    .windows => true,
     else => false,
 };
 
 pub const PutError = error{ Unsupported, SharedMemory };
+
+/// What the program keeps of an object until the terminal has read it, for
+/// `release`: on Windows the handle that made the mapping, elsewhere nothing.
+pub const Held = if (is_windows) windows.HANDLE else void;
 
 // The process owns this namespace; neither configuration nor a Layers
 // lifetime can reset it. Refuse exhaustion rather than ever reusing a name.
@@ -68,7 +85,7 @@ pub fn nextSequence() Namespace {
 /// process in them.
 fn nameOf(seq: Namespace) Name {
     var n: Name = .{};
-    const pid: u32 = if (!supported) 0 else if (builtin.link_libc) @intCast(std.c.getpid()) else @intCast(std.os.linux.getpid()); // safe: a POSIX pid is positive and fits 32 bits
+    const pid: u32 = if (!supported) 0 else if (is_windows) windows.GetCurrentProcessId() else if (builtin.link_libc) @intCast(std.c.getpid()) else @intCast(std.os.linux.getpid()); // safe: a POSIX pid is positive and fits 32 bits
     comptime std.debug.assert("/v-ffffffff-ffffffffffffffff".len <= max_name);
     const s = std.mem.print(&n.buf, "/v-{x}-{x}", .{ pid, seq.raw() }) catch aegis.assert.never("the longest name, a u32 and a u64 in hex, fits, as asserted above");
     n.len = @intCast(s.len);
@@ -80,6 +97,8 @@ fn nameOf(seq: Namespace) Name {
 pub const Mapping = struct {
     memory: []align(std.heap.page_size_min) u8,
     len: usize,
+    /// What `release` takes when the object is done with.
+    held: Held,
 
     /// The object's bytes, as long as it was made.
     pub fn bytes(m: Mapping) []u8 {
@@ -87,10 +106,16 @@ pub const Mapping = struct {
     }
 
     /// Gives the address space back. The object stays, named, for the
-    /// terminal to read.
+    /// terminal to read, until it is released.
     pub fn unmap(m: Mapping) void {
         // unreachable: a build without shared memory makes no mapping (`create`)
-        if (supported) std.posix.munmap(m.memory) else unreachable;
+        if (!supported) unreachable;
+        if (is_windows) {
+            // a view this process mapped is always one it can unmap
+            _ = win32.UnmapViewOfFile(m.memory.ptr);
+            return;
+        }
+        std.posix.munmap(m.memory);
     }
 };
 
@@ -100,10 +125,12 @@ pub const Mapping = struct {
 /// terminal has not read).
 ///
 /// The object is memory, as `shm_open` makes it, so it takes no
-/// `std.Io`: with libc through `shm_open`, and on Linux without it through
-/// the same calls, on the file under `/dev/shm`.
+/// `std.Io`: with libc through `shm_open`, on Linux without it through
+/// the same calls, on the file under `/dev/shm`, and on Windows through a
+/// file mapping backed by the paging file.
 pub fn create(name: Name, len: usize) PutError!Mapping {
     if (!supported) return error.Unsupported;
+    if (is_windows) return createWindows(name, len);
     var z: [path_max]u8 = undefined;
     const fd = try open(&z, name);
     defer closeFd(fd);
@@ -112,22 +139,56 @@ pub fn create(name: Name, len: usize) PutError!Mapping {
     const size = @max(len, 1);
     try truncate(fd, size);
     const map = std.posix.mmap(null, size, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, 0) catch return error.SharedMemory;
-    return .{ .memory = map, .len = len };
+    return .{ .memory = map, .len = len, .held = {} };
 }
 
-/// A new object named `name`, holding a copy of `bytes`; `create`'s
-/// refusals.
-pub fn put(name: Name, bytes: []const u8) PutError!void {
+/// A named mapping of `len` bytes in the session's namespace, refusing a
+/// name that exists. Its security is the default, this user's alone.
+fn createWindows(name: Name, len: usize) PutError!Mapping {
+    const size: u64 = @max(len, 1);
+    var w: [max_name + 1]u16 = undefined;
+    const handle = win32.CreateFileMappingW(
+        windows.INVALID_HANDLE_VALUE,
+        null,
+        win32.page_readwrite,
+        @truncate(size >> 32),
+        @truncate(size),
+        wideOf(&w, name),
+    ) orelse return error.SharedMemory;
+    // never another's mapping, which a terminal may not have read
+    if (windows.GetLastError() == .ALREADY_EXISTS) {
+        windows.CloseHandle(handle);
+        return error.SharedMemory;
+    }
+    errdefer windows.CloseHandle(handle);
+    const view = win32.MapViewOfFile(handle, win32.file_map_write, 0, 0, @intCast(size)) orelse return error.SharedMemory;
+    const base: [*]align(std.heap.page_size_min) u8 = @ptrCast(@alignCast(view));
+    return .{ .memory = base[0..@intCast(size)], .len = len, .held = handle };
+}
+
+/// A new object named `name`, holding a copy of `bytes`, and what to
+/// release it with; `create`'s refusals.
+pub fn put(name: Name, bytes: []const u8) PutError!Held {
     const map = try create(name, bytes.len);
     defer map.unmap();
     @memcpy(map.bytes(), bytes);
+    return map.held;
 }
 
-/// Removes the object, if it is still there. What a program does with a
-/// picture the terminal did not read. Allocates nothing, takes no `std.Io`
-/// and cannot fail, so a value's `deinit` can do it on any way out.
-pub fn unlink(name: Name) void {
-    if (!supported) return;
+/// Lets the object go: what a program does once the terminal has read the
+/// picture, or once it learns the terminal could not. On POSIX the object
+/// is unlinked, if it is still there; on Windows the handle that made it is
+/// closed, which takes the object away once the terminal has closed its
+/// own. Allocates nothing, takes no `std.Io` and cannot fail, so a value's
+/// `deinit` can do it on any way out.
+pub fn release(name: Name, held: Held) void {
+    if (is_windows) return windows.CloseHandle(held);
+    unlink(name);
+}
+
+/// Removes a POSIX object, if it is still there.
+fn unlink(name: Name) void {
+    if (!supported or is_windows) return;
     var z: [path_max]u8 = undefined;
     if (builtin.link_libc) {
         _ = std.c.shm_unlink(zOf(&z, name));
@@ -135,6 +196,24 @@ pub fn unlink(name: Name) void {
     }
     // an object already gone is what is wanted
     _ = std.os.linux.unlink(devShmPath(&z, name));
+}
+
+/// The kernel32 calls a named mapping takes, which std does not bind.
+const win32 = struct {
+    extern "kernel32" fn CreateFileMappingW(file: windows.HANDLE, attributes: ?*anyopaque, protect: windows.DWORD, size_high: windows.DWORD, size_low: windows.DWORD, name: [*:0]const u16) callconv(.winapi) ?windows.HANDLE;
+    extern "kernel32" fn OpenFileMappingW(access: windows.DWORD, inherit: windows.BOOL, name: [*:0]const u16) callconv(.winapi) ?windows.HANDLE;
+    extern "kernel32" fn MapViewOfFile(mapping: windows.HANDLE, access: windows.DWORD, offset_high: windows.DWORD, offset_low: windows.DWORD, len: usize) callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn UnmapViewOfFile(base: *const anyopaque) callconv(.winapi) windows.BOOL;
+    const page_readwrite: windows.DWORD = 0x04;
+    const file_map_write: windows.DWORD = 0x0002;
+    const file_map_read: windows.DWORD = 0x0004;
+};
+
+/// The name in UTF-16, as Windows takes it: every byte of a name is ASCII.
+fn wideOf(w: *[max_name + 1]u16, name: Name) [*:0]const u16 {
+    for (name.slice(), 0..) |b, i| w[i] = b;
+    w[name.len] = 0;
+    return w[0..name.len :0];
 }
 
 /// Room for `/dev/shm`, the longest name and its terminator.
@@ -182,17 +261,19 @@ fn closeFd(fd: std.posix.fd_t) void {
     if (builtin.link_libc) _ = std.c.close(fd) else _ = std.os.linux.close(fd);
 }
 
-test "a picture put in shared memory reads back whole, and is gone once unlinked" {
+test "a picture put in shared memory reads back whole, and is gone once released" {
     if (!supported) return error.SkipZigTest;
     const name = nextName();
     const pixels = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    try put(name, &pixels);
-    defer unlink(name);
+    const held = try put(name, &pixels);
+    var released = false;
+    defer if (!released) release(name, held);
     // a second put under the same name is refused, never an overwrite
     try std.testing.expectError(error.SharedMemory, put(name, &pixels));
     var back: [64]u8 = @splat(0);
     try std.testing.expectEqualSlices(u8, &pixels, try readBack(&back, name, pixels.len));
-    unlink(name);
+    release(name, held);
+    released = true;
     try std.testing.expectError(error.SharedMemory, readBack(&back, name, pixels.len));
 }
 
@@ -200,7 +281,7 @@ test "a picture written where an object is mapped is the object's" {
     if (!supported) return error.SkipZigTest;
     const name = nextName();
     const map = try create(name, 6);
-    defer unlink(name);
+    defer release(name, map.held);
     @memcpy(map.bytes(), "pixels");
     map.unmap();
     var back: [64]u8 = @splat(0);
@@ -217,6 +298,15 @@ test "a name is a slash and no other, and fits every system" {
 
 /// The object's first `len` bytes, read into `back`.
 fn readBack(back: *[64]u8, name: Name, len: usize) ![]const u8 {
+    if (is_windows) {
+        var w: [max_name + 1]u16 = undefined;
+        const handle = win32.OpenFileMappingW(win32.file_map_read, .FALSE, wideOf(&w, name)) orelse return error.SharedMemory;
+        defer windows.CloseHandle(handle);
+        const view = win32.MapViewOfFile(handle, win32.file_map_read, 0, 0, len) orelse return error.SharedMemory;
+        defer _ = win32.UnmapViewOfFile(view);
+        @memcpy(back[0..len], @as([*]const u8, @ptrCast(view))[0..len]);
+        return back[0..len];
+    }
     if (builtin.link_libc) {
         var z: [path_max]u8 = undefined;
         const fd = std.c.shm_open(zOf(&z, name), @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), @as(std.c.mode_t, 0));

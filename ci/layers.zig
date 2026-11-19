@@ -141,9 +141,12 @@ pub const required = [_][]const u8{
 };
 
 /// Tokens only their owners may spell. The console and the terminal's
-/// modes are conduit's: visor reaches them through `conduit.tty`.
+/// modes are conduit's: visor reaches them through `conduit.tty`. kernel32
+/// is named only by the shared memory seam, for the named file mapping a
+/// picture goes through on Windows; nothing of the console is in it.
 pub const owned: []const gantry.rules.TokenRule = &.{
     .{ .name = "console owner", .tokens = &.{ "CreateFileW", "ReadConsoleInputW", "GetConsoleMode", "SetConsoleMode" } },
-    .{ .name = "console owner", .kind = .string, .tokens = &.{ "CONIN$", "CONOUT$", "kernel32" } },
+    .{ .name = "console owner", .kind = .string, .tokens = &.{ "CONIN$", "CONOUT$" } },
+    .{ .name = "kernel32 owner", .kind = .string, .tokens = &.{"kernel32"}, .owners = &.{"src/layer/shm.zig"} },
     .{ .name = "terminal mode owner", .tokens = &.{ "tcsetattr", "ioctl" } },
 };
