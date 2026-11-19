@@ -288,3 +288,7 @@ test "markdown items nest by their parents' markers and an empty item is its mar
     try (widgets.Markdown{ .document = &doc, .theme = .{} }).draw(h.window());
     try h.expectFrame("1. one\n\n   more\n   - two\n-\n\n");
 }
+
+test "the type a row iterator's public field holds is named from visor.markdown" {
+    try t.expect(?widgets.RowIterator.TableState == @FieldType(widgets.RowIterator, "table"));
+}

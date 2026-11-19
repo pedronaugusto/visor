@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Tty.inputFile` takes `*Tty`, where it took `*const Tty`: a terminal `open` made borrows its files from the console's owner at each use, which needs the owner mutable. A caller holding `*Tty` changes nothing.
 - `ProbeWait.end` and `ProbeWait.quiet` are aegis spans (`aegis.units.Duration(.nanosecond, i96)`), where they were an `Io.Timestamp` and an `Io.Duration`: `init` still takes std's, and `remaining` answers in std's.
 - `Tty.saved`, private as its doc says, spells its Windows handles `system.Handle`, the same `HANDLE`, where it named `windows.HANDLE`.
+- The type each public field holds is public, where it was private and a caller could not name what the field holds (glint Z012): `Renderer.style_sequences` holds `visor.StyleSequenceCache` (its `Entry` public), `Renderer.colors` `visor.ColorFit`, `Renderer.cleanup` `visor.ModeCleanup`, `Renderer.own_written` `visor.ModeWrites`, `Layers.shared_memory` `visor.SharedMemory`, `Layers.prepared` `visor.Prepared` (its `shared` a `visor.SharedObject.Created`), `Layers.shared_objects` a list of `visor.SharedObject`, and `markdown.RowIterator.table` `markdown.RowIterator.TableState`. Each field stays private as its doc says; no field or behaviour changed.
 
 ### Changed
 
@@ -44,6 +45,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An `Image`'s state is read with `Image.state()`; the field it was is private, an aegis `state.Machine` from loading to ready or failed, so nothing outside `Layers` can move a refused picture back to ready. A refused picture still stays refused until it is sent again.
 
 ### Fixed
+
+- `Input.next` and `Input.nextWithin` return `error.Unexpected` from a wait for input that failed, where they fell back to a read that blocks, dropping the timeout and the resize wake (POSIX: the terminal and resize wait; Windows: the console wait and the look at its queued records). A system that cannot have the wait (`Unsupported`) still reads.
 
 - visor builds on warp main 79a4611, the zstd decoder's out-of-bounds read fix (GHSA-9r52-p7vw-225m). visor uses warp's zlib compressor alone, so no visor path reached the read.
 - A terminal `Tty.open` made, moved before its first use and closed, stopped the program in aegis's owner check (Windows, where the runner has a console): `open` borrowed the console's output into the `Tty` it then returned by value. It borrows nothing now; the files are borrowed at each use, so the `Tty` binds where the caller keeps it.

@@ -208,20 +208,17 @@ pub const Input = struct {
         while (true) {
             const lim = in.limit(io, until);
             if (lim.timeout == .none) return in.readBlocking(io, file);
-            const woke = console.waitInput(io, file.handle, lim.timeout) catch |err| switch (err) {
-                error.Canceled => return error.Canceled,
-                error.Unexpected => return in.readBlocking(io, file),
-            };
+            const woke = try console.waitInput(io, file.handle, lim.timeout);
             switch (woke) {
                 .ready => {},
                 .timed_out => return if (lim.expires) .expired else .quiet,
             }
             var records: [16]console.InputRecord = undefined;
-            const n = console.peekInput(file.handle, &records) catch return in.readBlocking(io, file);
+            const n = try console.peekInput(file.handle, &records);
             if (keyWaiting(records[0..n])) return in.readBlocking(io, file);
             // Nothing a read would return: take those records off and wait
-            // again. A queue that cannot be drained is left to the read.
-            _ = console.readInput(file.handle, records[0..n]) catch return in.readBlocking(io, file);
+            // again.
+            _ = try console.readInput(file.handle, records[0..n]);
         }
     }
 
@@ -240,8 +237,10 @@ pub const Input = struct {
         const ready = reactor.waitAny(io, set[0..if (resize == null) 1 else 2], timeout) catch |err| switch (err) {
             error.Timeout => return if (lim.expires) .expired else .quiet,
             error.Canceled => return error.Canceled,
-            // A wait that cannot be had still reads.
-            error.Unsupported, error.Unexpected => return in.readBlocking(io, tty_file),
+            error.Unsupported, error.Unexpected => |e| {
+                try readsAfter(e);
+                return in.readBlocking(io, tty_file);
+            },
         };
         if (ready == 0) return in.readBlocking(io, tty_file);
         // Whatever was delivered is taken here, so the next wait does not
@@ -260,6 +259,22 @@ pub const Input = struct {
         return if (n == 0) .ended else .{ .bytes = n };
     }
 };
+
+/// What a failed wait leaves to the read. A wait this system cannot have
+/// leaves the read alone to wait, which is all it can do; any other failure
+/// is the caller's, never a read that would drop the timeout and the resize
+/// wake.
+fn readsAfter(err: error{ Unsupported, Unexpected }) error{Unexpected}!void {
+    return switch (err) {
+        error.Unsupported => {},
+        error.Unexpected => error.Unexpected,
+    };
+}
+
+test "a wait that fails reads only when it cannot be had" {
+    try readsAfter(error.Unsupported);
+    try testing.expectError(error.Unexpected, readsAfter(error.Unexpected));
+}
 
 /// Whether a console's queued input holds a key going down, which is what a
 /// read in terminal input mode returns bytes for.

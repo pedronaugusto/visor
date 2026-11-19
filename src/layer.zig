@@ -200,21 +200,23 @@ pub const Layer = struct {
 /// them is found by trying: the first picture asks for an answer, and an
 /// error or a grace period with no answer turns the medium off for good,
 /// that picture refused so the caller sends it again, in the escape code.
-const SharedMemory = struct {
+/// Kept only by `Layers`: its fields are internal.
+pub const SharedMemory = struct {
     state: enum { trying, yes, no } = .trying,
     generation: shm.Namespace,
 };
 
-// This is the owner, not the image snapshot or the current policy. Once
-// created it carries everything cleanup needs, even after reconfiguration:
-// its name, which is all an unlink takes.
-const SharedObject = struct {
+/// A shared memory object a picture was sent through, kept only by `Layers`:
+/// its fields are internal. This is the owner, not the image snapshot or the
+/// current policy. Once created it carries everything cleanup needs, even
+/// after reconfiguration: its name, which is all an unlink takes.
+pub const SharedObject = struct {
     id: ImageId,
     name: shm.Name,
     generation: shm.Namespace,
 
     /// An object and its memory, mapped for the picture to be written in.
-    const Created = struct { object: SharedObject, mapping: shm.Mapping };
+    pub const Created = struct { object: SharedObject, mapping: shm.Mapping };
 
     fn create(policy: SharedMemory, id: ImageId, len: usize) shm.PutError!Created {
         const name = shm.nextName();
@@ -227,8 +229,9 @@ const SharedObject = struct {
     }
 };
 
-/// A picture being written where it is sent from (`Layers.prepare`).
-const Prepared = struct {
+/// A picture being written where it is sent from (`Layers.prepare`), kept
+/// only by `Layers`: its fields are internal.
+pub const Prepared = struct {
     id: ImageId,
     how: Transmit,
     len: usize,

@@ -109,11 +109,12 @@ fn mouseOff(w: *Writer, m: morse.Mouse) Writer.Error!void {
     try morse.setMode(w, m.encoding.number(), false);
 }
 
-// Cleanup tracks commands that may have enabled a mode, separately from
-// the requested configuration. An off command clears its obligation only
-// after the writer accepts it. Keyboard pops must never be repeated after
-// success; DEC mode resets are idempotent.
-const ModeCleanup = struct {
+/// The modes a command may have turned on, which the way out turns off, kept
+/// apart from the configuration requested and only by `Renderer`: its fields
+/// are internal. An off command clears its obligation only after the writer
+/// accepts it. Keyboard pops must never be repeated after success; DEC mode
+/// resets are idempotent.
+pub const ModeCleanup = struct {
     keyboard: bool = false,
     motion: std.enums.EnumSet(morse.Mouse.Motion) = .{},
     encoding: std.enums.EnumSet(morse.Mouse.Encoding) = .{},
@@ -187,11 +188,12 @@ const ModeCleanup = struct {
     }
 };
 
-// Requested configuration lives in Entered; this records only accepted
-// commands. Uncertain commands are retried even if the next request returns
-// to the old value. Mouse and DEC resets can repeat; keyboard stack commands
-// advance their accepted state before later commands are attempted.
-const ModeWrites = struct {
+/// The mode commands the writer accepted, kept only by `Renderer`: its fields
+/// are internal. The configuration requested lives in `Entered`. Uncertain
+/// commands are retried even if the next request returns to the old value.
+/// Mouse and DEC resets can repeat; keyboard stack commands advance their
+/// accepted state before later commands are attempted.
+pub const ModeWrites = struct {
     modes: Modes = .{},
     in_band_resize: bool = false,
     unicode_core: bool = false,
@@ -1993,11 +1995,13 @@ const CostState = struct {
 /// work than copying the result, and real interfaces draw from a small style
 /// vocabulary even when adjacent pairs are varied. Several transitions share
 /// each bucket so recurring RGB pairs do not evict one another on a collision.
-const StyleSequenceCache = struct {
+/// Kept only by `Renderer`: its fields are internal.
+pub const StyleSequenceCache = struct {
     const count = 1024;
     const ways = 16;
     const max_len = 128;
-    const Entry = struct {
+    /// One constructed transition, from one style to another.
+    pub const Entry = struct {
         from: Style = .{},
         to: Style = .{},
         bytes: [max_len]u8 = undefined,
@@ -2218,7 +2222,8 @@ pub fn heldAs(comptime fit: Profile, caps: Caps) bool {
 
 /// What a frame's colours are fitted to: the profile, and the slots only
 /// where the profile matches against them.
-const ColorFit = struct {
+/// Kept only by `Renderer`: its fields are internal.
+pub const ColorFit = struct {
     profile: morse.Color.Profile,
     slots: ?morse.Color.Slots,
 

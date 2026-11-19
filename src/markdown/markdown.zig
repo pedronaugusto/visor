@@ -266,7 +266,9 @@ pub const RowIterator = struct {
     /// Private: the table being laid out, its column widths and where it is.
     table: ?TableState = null,
 
-    const TableState = struct {
+    /// The table being laid out, kept only by `RowIterator`: its fields are
+    /// internal.
+    pub const TableState = struct {
         block: usize,
         widths: [Markdown.table_columns]u16,
         shown: u16,

@@ -125,6 +125,17 @@ pub const Mode = render_mod.Mode;
 /// The input a program asks the terminal for: keyboard flags, mouse, focus,
 /// paste and colour-scheme reports.
 pub const Modes = render_mod.Modes;
+/// A renderer's cache of SGR spellings, its own: the type of a field.
+pub const StyleSequenceCache = render_mod.StyleSequenceCache;
+/// What a renderer's last frame's colours were fitted to, its own: the type
+/// of a field.
+pub const ColorFit = render_mod.ColorFit;
+/// The modes a renderer's commands may have turned on, its own: the type of a
+/// field.
+pub const ModeCleanup = render_mod.ModeCleanup;
+/// The mode commands a renderer's writer accepted, its own: the type of a
+/// field.
+pub const ModeWrites = render_mod.ModeWrites;
 /// What this terminal can do. Every field is safe at its default.
 pub const Caps = caps_mod.Caps;
 
@@ -174,6 +185,13 @@ pub const Image = layer_mod.Image;
 pub const Layer = layer_mod.Layer;
 /// What this frame shows.
 pub const Layers = layer_mod.Layers;
+/// Layers' pictures through shared memory, its own: the type of a field.
+pub const SharedMemory = layer_mod.SharedMemory;
+/// The picture Layers gave out to be written, its own: the type of a field.
+pub const Prepared = layer_mod.Prepared;
+/// A shared memory object Layers sent a picture through, its own: the type
+/// of a field.
+pub const SharedObject = layer_mod.SharedObject;
 /// Options for sending pixels through Layers or Replacement.
 pub const Transmit = layer_mod.Transmit;
 /// One picture replaced without a gap, on caller-supplied time.
@@ -271,6 +289,17 @@ test "transmission options have one public name" {
     defer out.deinit();
     _ = try layers.transmit(&out.writer, .fromRaw(1), &.{ 0, 0, 0, 255 }, how);
     try std.testing.expectEqual(@as(usize, 1), layers.images().len);
+}
+
+test "each type a public field holds is named from visor's root" {
+    try std.testing.expect(?*StyleSequenceCache == @FieldType(Renderer, "style_sequences"));
+    try std.testing.expect(?ColorFit == @FieldType(Renderer, "colors"));
+    try std.testing.expect(ModeCleanup == @FieldType(Renderer, "cleanup"));
+    try std.testing.expect(ModeWrites == @FieldType(Renderer, "own_written"));
+    try std.testing.expect(?SharedMemory == @FieldType(Layers, "shared_memory"));
+    try std.testing.expect(?Prepared == @FieldType(Layers, "prepared"));
+    try std.testing.expect(?SharedObject.Created == @FieldType(Prepared, "shared"));
+    try std.testing.expect([1024]StyleSequenceCache.Entry == @FieldType(StyleSequenceCache, "entries"));
 }
 
 /// Whether a value of `T` holds a `std.Io`, looking `depth` levels into its
