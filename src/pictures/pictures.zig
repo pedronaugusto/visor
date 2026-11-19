@@ -20,10 +20,11 @@ pub fn storeSixel(gpa: Allocator, layers: *visor.Layers, id: visor.ImageId, imag
     var indexed = try aperture.quantize(gpa, image, options);
     defer indexed.deinit();
     const entries = indexed.palette orelse aegis.assert.never("a quantized image has its palette");
-    const width: usize = indexed.width.raw();
-    const height: usize = indexed.height.raw();
-    // The pixels quantize allocated, so the product fits.
-    const registers = try gpa.alloc(u8, width * height);
+    // A register a pixel, a row of them `rowBytes` long: counted in bytes, by aegis's checked
+    // multiplication. quantize allocated as many for its pixels, so the count fits.
+    const row_bytes = indexed.format.rowBytes(indexed.width.raw());
+    const count = row_bytes.mul(indexed.height.raw()) catch aegis.assert.never("the registers fit, as the quantized pixels did");
+    const registers = try gpa.alloc(u8, count.raw());
     defer gpa.free(registers);
     const transparent = drawn(indexed.view(), entries, registers);
     const palette = try gpa.alloc(visor.morse.Rgb, entries.len);
@@ -67,9 +68,10 @@ fn drawn(indexed: aperture.View, entries: []const [4]u8, registers: []u8) ?u8 {
         transparent = @intCast(i);
         break;
     };
-    const width = indexed.width.raw();
+    const row_bytes = indexed.format.rowBytes(indexed.width.raw());
     for (0..indexed.height.raw()) |y| {
-        for (indexed.row(y), registers[y * width ..][0..width]) |register, *out| {
+        const start = row_bytes.mul(y) catch aegis.assert.never("a row of the registers starts within them");
+        for (indexed.row(y), registers[start.raw()..][0..row_bytes.raw()]) |register, *out| {
             out.* = if (transparent != null and entries[register][3] < 128) transparent.? else register;
         }
     }
