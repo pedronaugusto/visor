@@ -71,7 +71,7 @@ pub const Tty = struct {
     /// `close` closes once; null when `open` made it, whose files are borrowed from
     /// `controlling` at each use (`outputFile`, `inputFile`). So a `Tty` is a value that moves
     /// until its first use, as an aegis owner is.
-    adopted: ?aegis.own.OwnedIo(Io.File, closeFile) = null,
+    adopted: ?aegis.own.File = null,
     /// Private: what the terminal was before `raw`, or null when it has not been
     /// changed.
     saved: ?Saved = null,
@@ -404,10 +404,6 @@ pub const Panic = std.debug.FullPanic(struct {
         std.debug.defaultPanic(message, first_trace_address);
     }
 }.call);
-
-fn closeFile(file: *Io.File, io: Io) void {
-    file.close(io);
-}
 
 /// The way back, from whatever remembered it: the modes a renderer entered,
 /// undone through a buffer on the stack and output that may fail. On POSIX,
